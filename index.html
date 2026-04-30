@@ -448,7 +448,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.4.9</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.5.0</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -3413,12 +3413,10 @@ function extractStickerAI(dataUrl) {
       sel.appendChild(opt);
     }
 
-    if (bar) { bar.textContent = ''; bar.className = 'ocr-bar'; }
-    showToast('✓ Photo extracted — confirm details below');
+    if (bar) { bar.className = 'ocr-bar ocr-ok'; bar.textContent = '✓ Extracted: ' + (p.last||'?') + ', ' + (p.first||'?') + (p.phn ? ' · ' + p.phn : ''); }
   })
   .catch(function(e) {
-    if (bar) { bar.textContent = ''; bar.className = 'ocr-bar'; }
-    showToast('OCR: ' + e.toString().slice(0, 80));
+    if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'OCR: ' + e.toString().slice(0, 120); }
   });
 }
 
