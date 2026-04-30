@@ -448,7 +448,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.4.4</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.4.6</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -3343,7 +3343,9 @@ function handleStickerPhoto(inp) {
   var file = inp.files[0]; if (!file) return;
   var reader = new FileReader();
   reader.onload = function(e) {
-    document.getElementById('photo-zone').innerHTML = '<img src="' + e.target.result + '">';
+    var pz = document.getElementById('photo-zone');
+    pz.innerHTML = '<img src="' + e.target.result + '" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;display:block">';
+    pz.style.padding = '0';
     var bar = document.getElementById('ocr-bar');
     bar.className = 'ocr-bar ocr-ok';
     bar.style.display = 'block';
@@ -3357,7 +3359,6 @@ function extractStickerAI(dataUrl) {
   var b64 = dataUrl.split(',')[1];
   var mt  = dataUrl.split(';')[0].split(':')[1];
   var bar = document.getElementById('ocr-bar');
-  if (bar) bar.textContent = '';
 
   if (!SHEETS_URL) return; // no server, silently skip
 
@@ -3386,11 +3387,11 @@ function extractStickerAI(dataUrl) {
   .then(function(resp) { return resp.json(); })
   .then(function(data) {
     if (!data) throw new Error('No response from server');
-    if (data.error) throw new Error(data.error);
-    // Proxy returns { text: "..." }
+    if (data.error) throw new Error('Server: ' + data.error);
     var text = (typeof data.text === 'string') ? data.text : JSON.stringify(data);
+    if (!text || text.length < 5) throw new Error('Empty response from server');
     var match = text.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error('No JSON in: ' + text.slice(0,80));
+    if (!match) throw new Error('No JSON. Got: ' + text.slice(0,100));
     var p = JSON.parse(match[0]);
 
     if (p.last)  document.getElementById('f-last').value  = p.last;
