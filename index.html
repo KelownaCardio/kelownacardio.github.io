@@ -448,7 +448,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.4</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -505,6 +505,7 @@ input[type=file] { display:none; }
     </div>
     <input type="file" id="f-photo" accept="image/*" capture="environment" onchange="handleStickerPhoto(this)">
     <div class="ocr-bar" id="ocr-bar"></div>
+    <button onclick="testApiKey()" style="margin-top:6px;font-size:10px;color:var(--text3);background:none;border:none;cursor:pointer;text-decoration:underline">Test API connection</button>
   </div>
 
   <!-- Patient demographics -->
@@ -3437,6 +3438,37 @@ async function extractStickerAI(dataUrl) {
     bar.className = 'ocr-bar ocr-warn';
     bar.innerHTML = '<span style="color:var(--red-t);font-weight:700">OCR error: ' + e.toString().slice(0, 150) + '</span>';
     console.error('OCR error:', e);
+  }
+}
+
+// Test API key connectivity
+async function testApiKey() {
+  var bar = document.getElementById('ocr-bar');
+  bar.textContent = 'Testing API connection...';
+  try {
+    var resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_KEY,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 20,
+        messages: [{ role: 'user', content: 'Reply with just: OK' }]
+      })
+    });
+    var data = await resp.json();
+    if (data.error) {
+      bar.innerHTML = '<span style="color:var(--red-t);font-weight:700">API error: ' + data.error.message + '</span>';
+    } else {
+      var reply = (data.content || []).map(function(b) { return b.text; }).join('');
+      bar.innerHTML = '<span style="color:var(--green-t);font-weight:700">✓ API connected — ' + reply + '</span>';
+    }
+  } catch(e) {
+    bar.innerHTML = '<span style="color:var(--red-t);font-weight:700">Connection failed: ' + e.toString() + '</span>';
   }
 }
 
