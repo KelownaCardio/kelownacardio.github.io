@@ -448,7 +448,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.5.5</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.5.6</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -3344,42 +3344,21 @@ function handleStickerPhoto(inp) {
   var bar = document.getElementById('ocr-bar');
   var pz  = document.getElementById('photo-zone');
 
-  // Show thumbnail immediately
-  var thumbUrl = URL.createObjectURL(file);
-  pz.innerHTML = '<img src="' + thumbUrl + '" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;display:block">';
-  pz.style.padding = '0';
   if (bar) { bar.className = 'ocr-bar ocr-ok'; bar.textContent = 'Extracting…'; }
 
-  if (!SHEETS_URL) return;
+  // Read file as base64 — thumbnail + OCR from same read
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var dataUrl = e.target.result;
 
-  // Compress using canvas — read file into Image via object URL
-  var img = new Image();
-  img.onload = function() {
-    var maxW = 1024;
-    var scale = Math.min(1, maxW / img.naturalWidth);
-    var canvas = document.createElement('canvas');
-    canvas.width  = Math.round(img.naturalWidth  * scale);
-    canvas.height = Math.round(img.naturalHeight * scale);
-    var ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    var compressed = canvas.toDataURL('image/jpeg', 0.75);
-    var b64 = compressed.split(',')[1];
-    if (!b64 || b64.length < 100) {
-      // Canvas failed — read file as base64 directly
-      var reader = new FileReader();
-      reader.onload = function(e) { doOCR(e.target.result, bar); };
-      reader.readAsDataURL(file);
-    } else {
-      doOCR(compressed, bar);
-    }
-    URL.revokeObjectURL(thumbUrl);
+    // Show thumbnail
+    pz.innerHTML = '<img src="' + dataUrl + '" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;display:block">';
+    pz.style.padding = '0';
+
+    if (!SHEETS_URL) return;
+    doOCR(dataUrl, bar);
   };
-  img.onerror = function() {
-    var reader = new FileReader();
-    reader.onload = function(e) { doOCR(e.target.result, bar); };
-    reader.readAsDataURL(file);
-  };
-  img.src = thumbUrl;
+  reader.readAsDataURL(file);
 }
 
 function extractStickerAI(dataUrl) {
