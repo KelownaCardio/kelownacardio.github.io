@@ -448,7 +448,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.4.6</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.4.7</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -3356,49 +3356,52 @@ function handleStickerPhoto(inp) {
 }
 
 function extractStickerAI(dataUrl) {
-  var b64 = dataUrl.split(',')[1];
-  var mt  = dataUrl.split(';')[0].split(':')[1];
-  var bar = document.getElementById('ocr-bar');
+  var b64  = dataUrl.split(',')[1];
+  var mt   = dataUrl.split(';')[0].split(':')[1] || 'image/jpeg';
+  var bar  = document.getElementById('ocr-bar');
 
-  if (!SHEETS_URL) return; // no server, silently skip
+  if (!SHEETS_URL) return;
 
-  var ocrFd = new FormData();
-  ocrFd.append('action', 'ocrImage');
-  ocrFd.append('key', 'kgh2026');
-  ocrFd.append('image', b64);
-  ocrFd.append('mediaType', mt);
-  ocrFd.append('prompt',
+  var prompt =
     'This image shows a Meditech patient chart header or a BC patient sticker/wristband.\n\n' +
-    'MEDITECH HEADER — extract these fields:\n' +
-    '- NAME: Bold text at top, format "Last,First Middle" e.g. "Warner,Arthur Leonard"\n' +
-    '- AGE/SEX/DOB: line like "83, M · 28/03/1943"\n' +
-    '- PHN: labelled HCN# followed by 10 digits e.g. "HCN# 9057056379"\n' +
-    '- LOCATION (inpatient only): line like "ADM ACIN, KELKGHS2S KGHSH2S-B"\n\n' +
-    'STICKER/WRISTBAND: look for name, PHN/HCN barcode, DOB.\n\n' +
-    'Return ONLY this JSON, no markdown:\n' +
+    'MEDITECH HEADER fields:\n' +
+    '- NAME: Bold text e.g. "Warner,Arthur Leonard" or "Mahler,Ryan Thomas"\n' +
+    '- AGE/SEX/DOB: e.g. "83, M · 28/03/1943"\n' +
+    '- PHN: after HCN# e.g. "HCN# 9057056379"\n' +
+    '- LOCATION (inpatient): e.g. "ADM ACIN, KELKGHS2S KGHSH2S-B"\n\n' +
+    'Return ONLY this JSON, no markdown, no explanation:\n' +
     '{"last":"","first":"","phn":"","dob":"","sex":"","ward":"","room":""}\n\n' +
-    'Rules: split name on comma; phn=10 digits from HCN#; dob=DD/MM/YYYY; ' +
-    'KELKGHS2S=2S KELKGHS2W=2W KELKGHSCCU=CCU; room from KGHSH2S-B=2S-B or KGHS0224-A=224A; ' +
-    'ward/room empty for outpatient.');
-  fetch(SHEETS_URL, {
+    'Rules:\n' +
+    '- Split name on comma: Warner,Arthur Leonard → last=Warner first=Arthur Leonard\n' +
+    '- phn: 10 digits from HCN# field only\n' +
+    '- dob: DD/MM/YYYY format\n' +
+    '- sex: M or F\n' +
+    '- ward: KELKGHS2S=2S, KELKGHS2W=2W, KELKGHSCCU=CCU, else empty\n' +
+    '- room: number only e.g. KGHSH2S-B=2S-B, KGHS0224-A=224A, else empty\n' +
+    '- ward/room empty for outpatient — that is fine';
+
+  var payload = JSON.stringify({ image: b64, mediaType: mt, prompt: prompt });
+
+  fetch(SHEETS_URL + '?action=ocrImage&key=kgh2026', {
     method: 'POST',
-    body: ocrFd
+    headers: { 'Content-Type': 'text/plain' },
+    body: payload
   })
-  .then(function(resp) { return resp.json(); })
+  .then(function(r) { return r.json(); })
   .then(function(data) {
-    if (!data) throw new Error('No response from server');
+    if (!data) throw new Error('No response');
     if (data.error) throw new Error('Server: ' + data.error);
     var text = (typeof data.text === 'string') ? data.text : JSON.stringify(data);
-    if (!text || text.length < 5) throw new Error('Empty response from server');
+    if (!text || text.length < 5) throw new Error('Empty response');
     var match = text.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error('No JSON. Got: ' + text.slice(0,100));
+    if (!match) throw new Error('No JSON. Got: ' + text.slice(0, 80));
     var p = JSON.parse(match[0]);
 
     if (p.last)  document.getElementById('f-last').value  = p.last;
     if (p.first) document.getElementById('f-first').value = p.first;
     if (p.phn)   document.getElementById('f-phn').value   = p.phn.replace(/\D/g,'').slice(0,10);
     if (p.dob)   document.getElementById('f-dob').value   = p.dob;
-    if (p.sex) { var s = document.getElementById('f-sex'); if (s) s.value = p.sex; }
+    if (p.sex)   { var s = document.getElementById('f-sex'); if (s) s.value = p.sex; }
     if (p.ward && WARDS[p.ward]) {
       document.getElementById('f-ward').value = p.ward;
       wardChange();
@@ -3409,31 +3412,14 @@ function extractStickerAI(dataUrl) {
       opt.value = p.room; opt.text = p.room; opt.selected = true;
       sel.appendChild(opt);
     }
+
+    if (bar) { bar.textContent = ''; bar.className = 'ocr-bar'; }
     showToast('✓ Photo extracted — confirm details below');
   })
   .catch(function(e) {
-    showToast('OCR failed — enter manually');
+    if (bar) { bar.textContent = ''; bar.className = 'ocr-bar'; }
+    showToast('OCR: ' + e.toString().slice(0, 80));
   });
-}
-
-// Test API key connectivity — non-async for iOS compatibility
-function testApiKey() {
-  var bar = document.getElementById('ocr-bar');
-  if (!SHEETS_URL) {
-    if (bar) bar.innerHTML = '<span style="color:var(--red-t);font-weight:700">No server URL configured</span>';
-    return;
-  }
-  if (bar) bar.textContent = 'Testing...';
-  // Simple GET request — no CORS preflight
-  fetch(SHEETS_URL + '?action=getAll&key=kgh2026')
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      var msg = d.error ? 'Error: ' + d.error : '✓ Connected — ' + (d.patients ? d.patients.length + ' patients' : 'OK');
-      if (bar) bar.innerHTML = '<span style="color:' + (d.error ? 'var(--red-t)' : 'var(--green-t)') + ';font-weight:700">' + msg + '</span>';
-    })
-    .catch(function(e) {
-      if (bar) bar.innerHTML = '<span style="color:var(--red-t);font-weight:700">Failed: ' + e.toString() + '</span>';
-    });
 }
 
 // ── 10_location.js ──
