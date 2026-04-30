@@ -448,7 +448,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.4.3</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.4.4</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -3359,13 +3359,6 @@ function extractStickerAI(dataUrl) {
   var bar = document.getElementById('ocr-bar');
   if (bar) bar.textContent = '';
 
-  // Reset photo zone to camera button (ready for next photo)
-  var zone = document.getElementById('photo-zone');
-  if (zone) zone.innerHTML =
-    '<svg style="width:26px;height:26px;stroke:var(--text3);fill:none;stroke-width:1.5" viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>' +
-    '<span style="font-size:12px;color:var(--text2)">Tap to photograph sticker or chart header</span>' +
-    '<span style="font-size:10px;color:var(--text3)">Auto-fills name, PHN, DOB, ward, room</span>';
-
   if (!SHEETS_URL) return; // no server, silently skip
 
   var ocrFd = new FormData();
@@ -3425,6 +3418,10 @@ function extractStickerAI(dataUrl) {
 // Test API key connectivity — non-async for iOS compatibility
 function testApiKey() {
   var bar = document.getElementById('ocr-bar');
+  if (!SHEETS_URL) {
+    if (bar) bar.innerHTML = '<span style="color:var(--red-t);font-weight:700">No server URL configured</span>';
+    return;
+  }
   if (bar) bar.textContent = 'Testing...';
   // Simple GET request — no CORS preflight
   fetch(SHEETS_URL + '?action=getAll&key=kgh2026')
@@ -4458,7 +4455,7 @@ async function init() {
   }
 
   // ── Test patients (remove before live deployment) ─────
-  if (!st.patients.length && !st.doc) {
+  if (!st.patients.length) {
     // Sign in as KBrown for testing
     var kb = st.doctors.find(function(d) { return d.alias === 'KBrown'; });
     if (kb) { st.doc = kb; sv('doc', st.doc); }
