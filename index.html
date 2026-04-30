@@ -3368,27 +3368,27 @@ function extractStickerAI(dataUrl) {
 
   if (!SHEETS_URL) return; // no server, silently skip
 
-  fetch(SHEETS_URL + '?action=ocrImage&key=kgh2026', {
+  var ocrFd = new FormData();
+  ocrFd.append('action', 'ocrImage');
+  ocrFd.append('key', 'kgh2026');
+  ocrFd.append('image', b64);
+  ocrFd.append('mediaType', mt);
+  ocrFd.append('prompt',
+    'This image shows a Meditech patient chart header or a BC patient sticker/wristband.\n\n' +
+    'MEDITECH HEADER — extract these fields:\n' +
+    '- NAME: Bold text at top, format "Last,First Middle" e.g. "Warner,Arthur Leonard"\n' +
+    '- AGE/SEX/DOB: line like "83, M · 28/03/1943"\n' +
+    '- PHN: labelled HCN# followed by 10 digits e.g. "HCN# 9057056379"\n' +
+    '- LOCATION (inpatient only): line like "ADM ACIN, KELKGHS2S KGHSH2S-B"\n\n' +
+    'STICKER/WRISTBAND: look for name, PHN/HCN barcode, DOB.\n\n' +
+    'Return ONLY this JSON, no markdown:\n' +
+    '{"last":"","first":"","phn":"","dob":"","sex":"","ward":"","room":""}\n\n' +
+    'Rules: split name on comma; phn=10 digits from HCN#; dob=DD/MM/YYYY; ' +
+    'KELKGHS2S=2S KELKGHS2W=2W KELKGHSCCU=CCU; room from KGHSH2S-B=2S-B or KGHS0224-A=224A; ' +
+    'ward/room empty for outpatient.');
+  fetch(SHEETS_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ image: b64, mediaType: mt, prompt: 'This image shows a Meditech patient chart header or a BC patient sticker/wristband.\n\n' +
-            'MEDITECH HEADER — extract these fields:\n' +
-            '- NAME: Bold text at top, format "Last,First Middle" e.g. "Mahler,Ryan Thomas"\n' +
-            '- AGE/SEX/DOB: line like "35, M · 14/03/1991" or "35, M 14/03/1991"\n' +
-            '- PHN: labelled HCN# followed by 10 digits e.g. "HCN# 9130978165"\n' +
-            '- LOCATION (inpatient only, may be absent for outpatient/clinic): line like "ADM ACIN, KELKGHS2S KGHS0222-A"\n\n' +
-            'STICKER/WRISTBAND: look for name, PHN/HCN barcode number, DOB.\n\n' +
-            'Return ONLY this JSON object, no markdown, no explanation:\n' +
-            '{"last":"","first":"","phn":"","dob":"","sex":"","ward":"","room":""}\n\n' +
-            'Field rules:\n' +
-            '- last/first: split on comma e.g. "Mahler,Ryan Thomas" → last=Mahler, first=Ryan Thomas\n' +
-            '- phn: exactly 10 digits from HCN# field, no spaces\n' +
-            '- dob: DD/MM/YYYY. The Meditech format is already DD/MM/YYYY.\n' +
-            '- sex: M or F\n' +
-            '- ward: only if location visible — KELKGHS2S=2S KELKGHS2W=2W KELKGHSCCU=CCU KELKGHSED=ED, else empty\n' +
-            '- room: room number from location e.g. KGHS0222-A=222A, KGHS0205=205, else empty\n' +
-            '- ward and room are empty string for outpatient/clinic visits — that is fine\n' +
-            'Return only the JSON.' })
+    body: ocrFd
   })
   .then(function(resp) { return resp.json(); })
   .then(function(data) {
@@ -3427,10 +3427,15 @@ function testApiKey() {
   var bar = document.getElementById('ocr-bar');
   if (bar) bar.textContent = 'Testing via proxy...';
   if (!SHEETS_URL) { if (bar) bar.textContent = 'No SHEETS_URL set'; return; }
-  fetch(SHEETS_URL + '?action=ocrImage&key=kgh2026', {
+  var fd = new FormData();
+  fd.append('action', 'ocrImage');
+  fd.append('key', 'kgh2026');
+  fd.append('image', 'dGVzdA==');
+  fd.append('mediaType', 'image/jpeg');
+  fd.append('prompt', 'Reply with just the word: OK');
+  fetch(SHEETS_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ image: 'dGVzdA==', mediaType: 'image/jpeg', prompt: 'Reply with just the word: OK' })
+    body: fd
   })
   .then(function(resp) { return resp.json(); })
   .then(function(data) {
