@@ -448,7 +448,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.4</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.4.1</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -785,7 +785,7 @@ var BC_PHYSICIANS_LOCAL = [["Aartsma","Durk","59243","Psychiatry","Vernon"],["Ab
 // 01_config.js — URLs, ward definitions, alias map
 // ═══════════════════════════════════════════════════════
 
-var ANTHROPIC_KEY = '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'; // Add your key here: sk-ant-api03-...
+var ANTHROPIC_KEY = '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'; // Add your key here: sk-ant-api03-...
 var SHEETS_URL = 'https://script.google.com/macros/s/AKfycbzQOQa6dZCCyXu15jvkyUTFghtnhGzZFj4NZ4uyczxLov72zj8qNZIgk9pzL4i8Dfuy5Q/exec';
 var SHARED_KEY = 'kgh2026';
 
@@ -3353,21 +3353,25 @@ function handleStickerPhoto(inp) {
   reader.readAsDataURL(file);
 }
 
-async function extractStickerAI(dataUrl) {
+function extractStickerAI(dataUrl) {
+  var b64 = dataUrl.split(',')[1];
+  var mt  = dataUrl.split(';')[0].split(':')[1];
   var bar = document.getElementById('ocr-bar');
-  try {
-    var b64 = dataUrl.split(',')[1];
-    var mt  = dataUrl.split(';')[0].split(':')[1];
-    var resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 600,
-        messages: [{ role:'user', content: [
-          { type:'image', source:{ type:'base64', media_type:mt, data:b64 } },
-          { type:'text', text:
-            'This image shows a Meditech patient chart header or a BC patient sticker/wristband.\n\n' +
+  if (bar) bar.textContent = '';
+
+  // Reset photo zone to camera button (ready for next photo)
+  var zone = document.getElementById('photo-zone');
+  if (zone) zone.innerHTML =
+    '<svg style="width:26px;height:26px;stroke:var(--text3);fill:none;stroke-width:1.5" viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>' +
+    '<span style="font-size:12px;color:var(--text2)">Tap to photograph sticker or chart header</span>' +
+    '<span style="font-size:10px;color:var(--text3)">Auto-fills name, PHN, DOB, ward, room</span>';
+
+  if (!SHEETS_URL) return; // no server, silently skip
+
+  fetch(SHEETS_URL + '?action=ocrImage&key=kgh2026', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image: b64, mediaType: mt, prompt: 'This image shows a Meditech patient chart header or a BC patient sticker/wristband.\n\n' +
             'MEDITECH HEADER — extract these fields:\n' +
             '- NAME: Bold text at top, format "Last,First Middle" e.g. "Mahler,Ryan Thomas"\n' +
             '- AGE/SEX/DOB: line like "35, M · 14/03/1991" or "35, M 14/03/1991"\n' +
@@ -3384,92 +3388,60 @@ async function extractStickerAI(dataUrl) {
             '- ward: only if location visible — KELKGHS2S=2S KELKGHS2W=2W KELKGHSCCU=CCU KELKGHSED=ED, else empty\n' +
             '- room: room number from location e.g. KGHS0222-A=222A, KGHS0205=205, else empty\n' +
             '- ward and room are empty string for outpatient/clinic visits — that is fine\n' +
-            'Return only the JSON.'
-          }
-        ]}]
-      })
-    });
-    var data = await resp.json();
-    var text = data.content.filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
-    var cleaned = text.replace(/```json|```/g, '').trim();
-    // Find JSON object in response
-    var jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('No JSON in response: ' + cleaned.slice(0, 100));
-    var p = JSON.parse(jsonMatch[0]);
+            'Return only the JSON.' })
+  })
+  .then(function(resp) { return resp.json(); })
+  .then(function(data) {
+    if (!data) throw new Error('No response from server');
+    if (data.error) throw new Error(data.error);
+    // Proxy returns { text: "..." }
+    var text = (typeof data.text === 'string') ? data.text : JSON.stringify(data);
+    var match = text.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('No JSON in: ' + text.slice(0,80));
+    var p = JSON.parse(match[0]);
 
-    // Fill form fields
     if (p.last)  document.getElementById('f-last').value  = p.last;
     if (p.first) document.getElementById('f-first').value = p.first;
-    if (p.phn)   document.getElementById('f-phn').value   = p.phn;
+    if (p.phn)   document.getElementById('f-phn').value   = p.phn.replace(/\D/g,'').slice(0,10);
     if (p.dob)   document.getElementById('f-dob').value   = p.dob;
-    if (p.sex)   document.getElementById('f-sex').value   = p.sex;
-
-    // Ward + room
+    if (p.sex) { var s = document.getElementById('f-sex'); if (s) s.value = p.sex; }
     if (p.ward && WARDS[p.ward]) {
       document.getElementById('f-ward').value = p.ward;
       wardChange();
     }
     if (p.room) {
       var sel = document.getElementById('f-bed');
-      var found = false;
-      for (var i = 0; i < sel.options.length; i++) {
-        if (sel.options[i].value === p.room) { sel.value = p.room; found = true; break; }
-      }
-      if (!found) {
-        var opt = document.createElement('option');
-        opt.value = p.room; opt.text = p.room; opt.selected = true;
-        sel.appendChild(opt);
-      }
+      var opt = document.createElement('option');
+      opt.value = p.room; opt.text = p.room; opt.selected = true;
+      sel.appendChild(opt);
     }
-
-    var msg = 'Extracted: ' + (p.last || '?') + ', ' + (p.first || '?');
-    if (p.phn)  msg += ' · PHN ' + p.phn;
-    if (p.ward) msg += ' · ' + wardLabel(p.ward) + (p.room ? ' Rm ' + p.room : '');
-    // Update diagnosis search display if icd was set
-    var icdVal = document.getElementById('f-icd').value;
-    if (icdVal) {
-      var dx = DIAGNOSES.find(function(d) { return d.code === icdVal; });
-      var srch = document.getElementById('f-icd-search');
-      if (dx && srch) srch.value = dx.label;
-    }
-    bar.className = 'ocr-bar ocr-ok';
-    bar.textContent = msg + '. Confirm below.';
-  } catch(e) {
-    bar.className = 'ocr-bar ocr-warn';
-    bar.innerHTML = '<span style="color:var(--red-t);font-weight:700">OCR error: ' + e.toString().slice(0, 150) + '</span>';
-    console.error('OCR error:', e);
-  }
+    showToast('✓ Photo extracted — confirm details below');
+  })
+  .catch(function(e) {
+    showToast('OCR failed — enter manually');
+  });
 }
 
-// Test API key connectivity
-async function testApiKey() {
+// Test API key connectivity — non-async for iOS compatibility
+function testApiKey() {
   var bar = document.getElementById('ocr-bar');
-  bar.textContent = 'Testing API connection...';
-  try {
-    var resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_KEY,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 20,
-        messages: [{ role: 'user', content: 'Reply with just: OK' }]
-      })
-    });
-    var data = await resp.json();
-    if (data.error) {
-      bar.innerHTML = '<span style="color:var(--red-t);font-weight:700">API error: ' + data.error.message + '</span>';
-    } else {
-      var reply = (data.content || []).map(function(b) { return b.text; }).join('');
-      bar.innerHTML = '<span style="color:var(--green-t);font-weight:700">✓ API connected — ' + reply + '</span>';
-    }
-  } catch(e) {
-    bar.innerHTML = '<span style="color:var(--red-t);font-weight:700">Connection failed: ' + e.toString() + '</span>';
-  }
+  if (bar) bar.textContent = 'Testing via proxy...';
+  if (!SHEETS_URL) { if (bar) bar.textContent = 'No SHEETS_URL set'; return; }
+  fetch(SHEETS_URL + '?action=ocrImage&key=kgh2026', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image: 'dGVzdA==', mediaType: 'image/jpeg', prompt: 'Reply with just the word: OK' })
+  })
+  .then(function(resp) { return resp.json(); })
+  .then(function(data) {
+    if (!data) { if(bar) bar.textContent = 'No response'; return; }
+    if (bar) bar.innerHTML = data.error
+      ? '<span style="color:var(--red-t);font-weight:700">Error: ' + data.error + '</span>'
+      : '<span style="color:var(--green-t);font-weight:700">✓ Proxy connected! ' + (data.text||JSON.stringify(data)).slice(0,50) + '</span>';
+  })
+  .catch(function(e) {
+    if (bar) bar.innerHTML = '<span style="color:var(--red-t);font-weight:700">Failed: ' + e.toString() + '</span>';
+  });
 }
 
 // ── 10_location.js ──
