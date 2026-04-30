@@ -448,7 +448,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.5.6</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.5.7</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -503,7 +503,7 @@ input[type=file] { display:none; }
       <span style="font-size:12px;color:var(--text2)">Tap to photograph sticker or chart header</span>
       <span style="font-size:10px;color:var(--text3)">Auto-fills name, PHN, DOB, ward, room</span>
     </div>
-    <input type="file" id="f-photo" accept="image/*" capture="environment" onchange="handleStickerPhoto(this)">
+    <input type="file" id="f-photo" accept="image/*" onchange="handleStickerPhoto(this)">
     <div class="ocr-bar" id="ocr-bar"></div>
     <button onclick="testApiKey()" class="btn btn-s" style="margin-top:8px;width:100%">Test API connection</button>
   </div>
@@ -3340,22 +3340,34 @@ function resetPhotoZone() {
 
 // ── Sticker / Meditech chart header photo ──────────────
 function handleStickerPhoto(inp) {
-  var file = inp.files[0]; if (!file) return;
+  var files = inp.files;
+  if (!files || !files.length) { 
+    if (window.ocrBar) window.ocrBar.textContent = 'No file selected';
+    return; 
+  }
+  var file = files[0];
   var bar = document.getElementById('ocr-bar');
   var pz  = document.getElementById('photo-zone');
+  window.ocrBar = bar; // keep reference
 
-  if (bar) { bar.className = 'ocr-bar ocr-ok'; bar.textContent = 'Extracting…'; }
+  if (bar) { bar.className = 'ocr-bar ocr-ok'; bar.textContent = 'Reading photo (' + Math.round(file.size/1024) + 'KB)…'; }
 
-  // Read file as base64 — thumbnail + OCR from same read
   var reader = new FileReader();
+  reader.onerror = function(err) {
+    if (bar) bar.textContent = 'File read error: ' + err;
+  };
   reader.onload = function(e) {
     var dataUrl = e.target.result;
+    if (!dataUrl) { if (bar) bar.textContent = 'Empty file read'; return; }
+    if (bar) bar.textContent = 'Sending to OCR…';
 
     // Show thumbnail
-    pz.innerHTML = '<img src="' + dataUrl + '" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;display:block">';
-    pz.style.padding = '0';
+    if (pz) { 
+      pz.innerHTML = '<img src="' + dataUrl + '" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;display:block">';
+      pz.style.padding = '0';
+    }
 
-    if (!SHEETS_URL) return;
+    if (!SHEETS_URL) { if (bar) bar.textContent = 'No server configured'; return; }
     doOCR(dataUrl, bar);
   };
   reader.readAsDataURL(file);
