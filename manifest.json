@@ -1,8 +1,9 @@
 {
-  "name": "KGH Cardiology",
-  "short_name": "KGH Cards",
+  "name": "KGH Cardiology Billing",
+  "short_name": "KGH Billing",
   "description": "KGH Cardiology inpatient billing",
-  "start_url": "/",
+  "start_url": "/Billing/",
+  "scope": "/Billing/",
   "display": "standalone",
   "background_color": "#f5f4f0",
   "theme_color": "#1a5fa8",
@@ -19,12 +20,6 @@
       "sizes": "512x512",
       "type": "image/svg+xml",
       "purpose": "any maskable"
-    },
-    {
-      "src": "icon-192.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "maskable"
     }
   ]
 }
