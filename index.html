@@ -448,7 +448,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.5.0</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.5.3</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -3356,11 +3356,27 @@ function handleStickerPhoto(inp) {
 }
 
 function extractStickerAI(dataUrl) {
-  var b64  = dataUrl.split(',')[1];
-  var mt   = dataUrl.split(';')[0].split(':')[1] || 'image/jpeg';
-  var bar  = document.getElementById('ocr-bar');
-
+  var bar = document.getElementById('ocr-bar');
   if (!SHEETS_URL) return;
+
+  // Compress image to max 800px wide before sending to reduce payload size
+  var canvas = document.createElement('canvas');
+  var img = new Image();
+  img.onload = function() {
+    var maxW = 800;
+    var scale = Math.min(1, maxW / img.width);
+    canvas.width  = Math.round(img.width  * scale);
+    canvas.height = Math.round(img.height * scale);
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    var compressed = canvas.toDataURL('image/jpeg', 0.7);
+    doOCR(compressed, bar);
+  };
+  img.src = dataUrl;
+}
+
+function doOCR(dataUrl, bar) {
+  var b64  = dataUrl.split(',')[1];
+  var mt   = 'image/jpeg';
 
   var prompt =
     'This image shows a Meditech patient chart header or a BC patient sticker/wristband.\n\n' +
@@ -3418,6 +3434,26 @@ function extractStickerAI(dataUrl) {
   .catch(function(e) {
     if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'OCR: ' + e.toString().slice(0, 120); }
   });
+}
+
+function testApiKey() {
+  var bar = document.getElementById('ocr-bar');
+  if (!SHEETS_URL) {
+    alert('No SHEETS_URL configured');
+    return;
+  }
+  if (bar) bar.textContent = 'Testing connection...';
+  fetch(SHEETS_URL + '?action=getAll&key=kgh2026')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      var msg = d.error
+        ? 'Error: ' + d.error
+        : '✓ Connected — ' + (d.patients ? d.patients.length + ' patients' : 'OK');
+      if (bar) bar.innerHTML = '<span style="color:' + (d.error ? 'var(--red-t)' : 'var(--green-t)') + ';font-weight:700">' + msg + '</span>';
+    })
+    .catch(function(e) {
+      if (bar) bar.innerHTML = '<span style="color:var(--red-t);font-weight:700">Failed: ' + e.toString() + '</span>';
+    });
 }
 
 // ── 10_location.js ──
