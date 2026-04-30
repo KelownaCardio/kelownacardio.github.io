@@ -448,7 +448,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.4.1</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.4.2</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -3425,28 +3425,17 @@ function extractStickerAI(dataUrl) {
 // Test API key connectivity — non-async for iOS compatibility
 function testApiKey() {
   var bar = document.getElementById('ocr-bar');
-  if (bar) bar.textContent = 'Testing via proxy...';
-  if (!SHEETS_URL) { if (bar) bar.textContent = 'No SHEETS_URL set'; return; }
-  var fd = new FormData();
-  fd.append('action', 'ocrImage');
-  fd.append('key', 'kgh2026');
-  fd.append('image', 'dGVzdA==');
-  fd.append('mediaType', 'image/jpeg');
-  fd.append('prompt', 'Reply with just the word: OK');
-  fetch(SHEETS_URL, {
-    method: 'POST',
-    body: fd
-  })
-  .then(function(resp) { return resp.json(); })
-  .then(function(data) {
-    if (!data) { if(bar) bar.textContent = 'No response'; return; }
-    if (bar) bar.innerHTML = data.error
-      ? '<span style="color:var(--red-t);font-weight:700">Error: ' + data.error + '</span>'
-      : '<span style="color:var(--green-t);font-weight:700">✓ Proxy connected! ' + (data.text||JSON.stringify(data)).slice(0,50) + '</span>';
-  })
-  .catch(function(e) {
-    if (bar) bar.innerHTML = '<span style="color:var(--red-t);font-weight:700">Failed: ' + e.toString() + '</span>';
-  });
+  if (bar) bar.textContent = 'Testing...';
+  // Simple GET request — no CORS preflight
+  fetch(SHEETS_URL + '?action=getAll&key=kgh2026')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      var msg = d.error ? 'Error: ' + d.error : '✓ Connected — ' + (d.patients ? d.patients.length + ' patients' : 'OK');
+      if (bar) bar.innerHTML = '<span style="color:' + (d.error ? 'var(--red-t)' : 'var(--green-t)') + ';font-weight:700">' + msg + '</span>';
+    })
+    .catch(function(e) {
+      if (bar) bar.innerHTML = '<span style="color:var(--red-t);font-weight:700">Failed: ' + e.toString() + '</span>';
+    });
 }
 
 // ── 10_location.js ──
