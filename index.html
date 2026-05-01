@@ -448,7 +448,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.5.7</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.5.8</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -3359,7 +3359,8 @@ function handleStickerPhoto(inp) {
   reader.onload = function(e) {
     var dataUrl = e.target.result;
     if (!dataUrl) { if (bar) bar.textContent = 'Empty file read'; return; }
-    if (bar) bar.textContent = 'Sending to OCR…';
+    if (bar) bar.textContent = 'Sending to OCR (' + Math.round(dataUrl.length/1024) + 'KB)…';
+    alert('FileReader fired! Size: ' + Math.round(dataUrl.length/1024) + 'KB');
 
     // Show thumbnail
     if (pz) { 
