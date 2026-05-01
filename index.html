@@ -448,7 +448,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.7.0</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.7.2</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -3381,25 +3381,16 @@ function extractStickerAI(dataUrl) {
 }
 
 function doOCRb64(b64, bar) {
-  if (bar) bar.textContent = 'Calling OCR…';
+  if (bar) bar.textContent = 'Step 3: fetching key…';
 
-  var prompt =
-    'This image shows a Meditech patient chart header or a BC patient sticker/wristband.\n' +
-    'Extract: NAME (Last,First format), DOB (DD/MM/YYYY), PHN (10 digits after HCN#), sex (M/F), ward and room if inpatient.\n' +
-    'Return ONLY JSON: {"last":"","first":"","phn":"","dob":"","sex":"","ward":"","room":""}\n' +
-    'Ward codes: KELKGHS2S=2S, KELKGHS2W=2W, KELKGHSCCU=CCU. Leave ward/room empty for outpatient.';
-
-  // Get API key from Apps Script, then call Anthropic directly from browser
-  if (bar) bar.textContent = 'Fetching key…';
   fetch(SHEETS_URL + '?action=getApiKey&key=kgh2026')
-    .then(function(r) {
-      alert('getApiKey HTTP status: ' + r.status);
-      return r.json();
-    })
+    .then(function(r) { return r.json(); })
     .then(function(d) {
-      alert('Key: ' + (d.apiKey ? d.apiKey.slice(0,15) + '...' : 'MISSING') + ' error: ' + (d.error || 'none'));
-      if (!d.apiKey) throw new Error('No API key: ' + JSON.stringify(d));
-      return fetch('https://api.anthropic.com/v1/messages', {
+      if (!d.apiKey) { alert('No key: ' + JSON.stringify(d)); return; }
+      alert('Got key. Now calling Anthropic…');
+      if (bar) bar.textContent = 'Step 4: calling Anthropic…';
+
+      fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -3409,23 +3400,15 @@ function doOCRb64(b64, bar) {
         },
         body: JSON.stringify({
           model: 'claude-sonnet-4-20250514',
-          max_tokens: 300,
-          messages: [{ role: 'user', content: [
-            { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
-            { type: 'text', text: prompt }
-          ]}]
+          max_tokens: 50,
+          messages: [{ role: 'user', content: 'Reply with just: OK' }]
         })
-      });
+      })
+      .then(function(r) { alert('Anthropic status: ' + r.status); return r.json(); })
+      .then(function(d) { alert('Anthropic response: ' + JSON.stringify(d).slice(0,100)); })
+      .catch(function(e) { alert('Anthropic FAILED: ' + e.toString()); });
     })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (data.error) throw new Error(data.error.message);
-      var text = (data.content || []).map(function(b) { return b.text || ''; }).join('');
-      handleOCRResult({ text: text }, bar);
-    })
-    .catch(function(e) {
-      if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'OCR: ' + e.toString().slice(0,100); }
-    });
+    .catch(function(e) { alert('getApiKey FAILED: ' + e.toString()); });
 }
 
 function getDriveToken() {
