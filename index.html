@@ -448,7 +448,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.6.2</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.6.3</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -3376,13 +3376,12 @@ function handleStickerPhoto(inp) {
 function extractStickerAI(dataUrl) {
   var bar = document.getElementById('ocr-bar');
   if (!SHEETS_URL) return;
-  doOCR(dataUrl, bar);
+  var b64 = dataUrl.indexOf(',') > -1 ? dataUrl.split(',')[1] : dataUrl;
+  doOCRb64(b64, bar);
 }
 
-function doOCR(dataUrl, bar) {
-  alert('doOCR called, size: ' + Math.round(dataUrl.length/1024) + 'KB');
-  var b64  = dataUrl.split(',')[1];
-  var mt   = 'image/jpeg';
+function doOCRb64(b64, bar) {
+  var mt = 'image/jpeg';
 
   var prompt =
     'This image shows a Meditech patient chart header or a BC patient sticker/wristband.\n\n' +
