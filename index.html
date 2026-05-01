@@ -448,7 +448,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.6.4</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.6.8</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -3381,69 +3381,105 @@ function extractStickerAI(dataUrl) {
 }
 
 function doOCRb64(b64, bar) {
-  var mt = 'image/jpeg';
+  if (bar) bar.textContent = 'Calling OCR…';
 
   var prompt =
-    'This image shows a Meditech patient chart header or a BC patient sticker/wristband.\n\n' +
-    'MEDITECH HEADER fields:\n' +
-    '- NAME: Bold text e.g. "Warner,Arthur Leonard" or "Mahler,Ryan Thomas"\n' +
-    '- AGE/SEX/DOB: e.g. "83, M · 28/03/1943"\n' +
-    '- PHN: after HCN# e.g. "HCN# 9057056379"\n' +
-    '- LOCATION (inpatient): e.g. "ADM ACIN, KELKGHS2S KGHSH2S-B"\n\n' +
-    'Return ONLY this JSON, no markdown, no explanation:\n' +
-    '{"last":"","first":"","phn":"","dob":"","sex":"","ward":"","room":""}\n\n' +
-    'Rules:\n' +
-    '- Split name on comma: Warner,Arthur Leonard → last=Warner first=Arthur Leonard\n' +
-    '- phn: 10 digits from HCN# field only\n' +
-    '- dob: DD/MM/YYYY format\n' +
-    '- sex: M or F\n' +
-    '- ward: KELKGHS2S=2S, KELKGHS2W=2W, KELKGHSCCU=CCU, else empty\n' +
-    '- room: number only e.g. KGHSH2S-B=2S-B, KGHS0224-A=224A, else empty\n' +
-    '- ward/room empty for outpatient — that is fine';
+    'This image shows a Meditech patient chart header or a BC patient sticker/wristband.\n' +
+    'Extract: NAME (Last,First format), DOB (DD/MM/YYYY), PHN (10 digits after HCN#), sex (M/F), ward and room if inpatient.\n' +
+    'Return ONLY JSON: {"last":"","first":"","phn":"","dob":"","sex":"","ward":"","room":""}\n' +
+    'Ward codes: KELKGHS2S=2S, KELKGHS2W=2W, KELKGHSCCU=CCU. Leave ward/room empty for outpatient.';
 
-  var payload = JSON.stringify({ image: b64, mediaType: mt, prompt: prompt });
+  // Get API key from Apps Script, then call Anthropic directly from browser
+  fetch(SHEETS_URL + '?action=getApiKey&key=kgh2026')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (!d.apiKey) throw new Error('No API key from server');
+      return fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': d.apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 300,
+          messages: [{ role: 'user', content: [
+            { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
+            { type: 'text', text: prompt }
+          ]}]
+        })
+      });
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) throw new Error(data.error.message);
+      var text = (data.content || []).map(function(b) { return b.text || ''; }).join('');
+      handleOCRResult({ text: text }, bar);
+    })
+    .catch(function(e) {
+      if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'OCR: ' + e.toString().slice(0,100); }
+    });
+}
 
-  fetch(SHEETS_URL + '?action=ocrImage&key=kgh2026', {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain' },
-    body: payload
-  })
-  .then(function(r) {
-    alert('HTTP status: ' + r.status);
-    return r.text();
-  })
-  .then(function(raw) {
-    alert('Raw response: ' + raw.slice(0, 200));
-    var data = JSON.parse(raw);
-    if (!data) throw new Error('No response');
-    if (data.error) throw new Error('Server: ' + data.error);
-    var text = (typeof data.text === 'string') ? data.text : JSON.stringify(data);
-    if (!text || text.length < 5) throw new Error('Empty response');
-    var match = text.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error('No JSON. Got: ' + text.slice(0, 80));
-    var p = JSON.parse(match[0]);
+function getDriveToken() {
+  // Apps Script provides an OAuth token via a GET endpoint
+  // We need to get this from the server
+  return window._driveToken || '';
+}
 
-    if (p.last)  document.getElementById('f-last').value  = p.last;
-    if (p.first) document.getElementById('f-first').value = p.first;
-    if (p.phn)   document.getElementById('f-phn').value   = p.phn.replace(/\D/g,'').slice(0,10);
-    if (p.dob)   document.getElementById('f-dob').value   = p.dob;
-    if (p.sex)   { var s = document.getElementById('f-sex'); if (s) s.value = p.sex; }
-    if (p.ward && WARDS[p.ward]) {
-      document.getElementById('f-ward').value = p.ward;
-      wardChange();
-    }
-    if (p.room) {
-      var sel = document.getElementById('f-bed');
-      var opt = document.createElement('option');
-      opt.value = p.room; opt.text = p.room; opt.selected = true;
-      sel.appendChild(opt);
-    }
+function uploadChunks(uploadId, chunks, idx, mt, prompt, bar) {
+  if (idx >= chunks.length) {
+    // All chunks sent — trigger OCR
+    if (bar) bar.textContent = 'Running OCR…';
+    fetch(SHEETS_URL + '?action=ocrAssemble&key=kgh2026&uploadId=' + uploadId + '&chunks=' + chunks.length + '&mt=' + encodeURIComponent(mt) + '&prompt=' + encodeURIComponent(prompt))
+      .then(function(r) { return r.json(); })
+      .then(function(data) { handleOCRResult(data, bar); })
+      .catch(function(e) {
+        if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'OCR failed: ' + e.toString().slice(0,80); }
+      });
+    return;
+  }
 
-    if (bar) { bar.className = 'ocr-bar ocr-ok'; bar.textContent = '✓ Extracted: ' + (p.last||'?') + ', ' + (p.first||'?') + (p.phn ? ' · ' + p.phn : ''); }
-  })
-  .catch(function(e) {
-    if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'OCR: ' + e.toString().slice(0, 120); }
-  });
+  var url = SHEETS_URL + '?action=uploadChunk&key=kgh2026&uploadId=' + uploadId +
+            '&idx=' + idx + '&total=' + chunks.length +
+            '&chunk=' + encodeURIComponent(chunks[idx]);
+
+  if (bar) bar.textContent = 'Uploading ' + (idx+1) + '/' + chunks.length + '…';
+
+  fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) throw new Error(data.error);
+      uploadChunks(uploadId, chunks, idx + 1, mt, prompt, bar);
+    })
+    .catch(function(e) {
+      if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'Upload failed: ' + e.toString().slice(0,80); }
+    });
+}
+
+function handleOCRResult(data, bar) {
+  if (!data) throw new Error('No response');
+  if (data.error) { if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'OCR: ' + data.error; } return; }
+  var text  = (typeof data.text === 'string') ? data.text : JSON.stringify(data);
+  var match = text.match(/\{[\s\S]*\}/);
+  if (!match) { if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'No data in response'; } return; }
+  var p = JSON.parse(match[0]);
+
+  if (p.last)  document.getElementById('f-last').value  = p.last;
+  if (p.first) document.getElementById('f-first').value = p.first;
+  if (p.phn)   document.getElementById('f-phn').value   = p.phn.replace(/\D/g,'').slice(0,10);
+  if (p.dob)   document.getElementById('f-dob').value   = p.dob;
+  if (p.sex)   { var s = document.getElementById('f-sex'); if (s) s.value = p.sex; }
+  if (p.ward && WARDS[p.ward]) { document.getElementById('f-ward').value = p.ward; wardChange(); }
+  if (p.room) {
+    var sel = document.getElementById('f-bed');
+    var opt = document.createElement('option');
+    opt.value = p.room; opt.text = p.room; opt.selected = true;
+    sel.appendChild(opt);
+  }
+  if (bar) { bar.className = 'ocr-bar ocr-ok'; bar.textContent = '✓ Extracted: ' + (p.last||'?') + ', ' + (p.first||'?') + (p.phn ? ' · ' + p.phn : ''); }
 }
 
 function testApiKey() {
