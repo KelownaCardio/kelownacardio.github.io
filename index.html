@@ -829,6 +829,8 @@ var WARDS = {
   OTHER:{ label:'Other',    list:'off', care:'directive', role:'consultant', rooms:[] }
 };
 
+var OCR_WORKER_URL = 'https://kgh-ocr.kathrynb77.workers.dev';
+
 // ── 02_constants.js ──
 // ═══════════════════════════════════════════════════════
 // 02_constants.js — Fee codes and comprehensive diagnosis list
@@ -3381,45 +3383,27 @@ function extractStickerAI(dataUrl) {
 }
 
 function doOCRb64(b64, bar) {
-  if (bar) bar.textContent = 'Getting upload token…';
+  if (bar) bar.textContent = 'Extracting…';
 
-  var prompt =
-    'This image shows a Meditech patient chart header or a BC patient sticker/wristband.\n' +
-    'Extract: NAME (Last,First format), DOB (DD/MM/YYYY), PHN (10 digits after HCN#), sex (M/F), ward and room if inpatient.\n' +
-    'Return ONLY JSON: {"last":"","first":"","phn":"","dob":"","sex":"","ward":"","room":""}\n' +
-    'Ward codes: KELKGHS2S=2S, KELKGHS2W=2W, KELKGHSCCU=CCU. Leave ward/room empty for outpatient.';
-
-  // Step 1: get an upload token + OAuth token from Apps Script
-  fetch(SHEETS_URL + '?action=getUploadToken&key=kgh2026')
+  // Get API key from Apps Script, then call Anthropic via Cloudflare Worker
+  fetch(SHEETS_URL + '?action=getApiKey&key=kgh2026')
     .then(function(r) { return r.json(); })
     .then(function(d) {
-      if (d.error) throw new Error(d.error);
-      if (bar) bar.textContent = 'Uploading image to Drive…';
-
-      // Step 2: upload image directly to Drive using the OAuth token
-      var binary = atob(b64);
-      var bytes = new Uint8Array(binary.length);
-      for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      var blob = new Blob([bytes], {type: 'image/jpeg'});
-
-      return fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+      if (!d.apiKey) throw new Error('No API key');
+      return fetch(OCR_WORKER_URL, {
         method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + d.token },
-        body: (function() {
-          var meta = JSON.stringify({name: 'kgh_ocr_' + Date.now() + '.jpg', mimeType: 'image/jpeg'});
-          var form = new FormData();
-          form.append('metadata', new Blob([meta], {type: 'application/json'}));
-          form.append('file', blob);
-          return form;
-        })()
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: b64,
+          mediaType: 'image/jpeg',
+          apiKey: d.apiKey,
+          prompt:
+            'This image shows a Meditech patient chart header or a BC patient sticker/wristband.\n' +
+            'Extract: NAME (Last,First format), DOB (DD/MM/YYYY), PHN (10 digits after HCN#), sex (M/F), ward and room if inpatient.\n' +
+            'Return ONLY JSON: {"last":"","first":"","phn":"","dob":"","sex":"","ward":"","room":""}\n' +
+            'Ward codes: KELKGHS2S=2S, KELKGHS2W=2W, KELKGHSCCU=CCU. Leave ward/room empty for outpatient.'
+        })
       });
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(file) {
-      if (file.error) throw new Error('Drive: ' + file.error.message);
-      if (bar) bar.textContent = 'Running OCR…';
-      // Step 3: tell Apps Script to OCR the file by ID
-      return fetch(SHEETS_URL + '?action=ocrFromDrive&key=kgh2026&fileId=' + file.id + '&prompt=' + encodeURIComponent(prompt));
     })
     .then(function(r) { return r.json(); })
     .then(function(data) { handleOCRResult(data, bar); })
