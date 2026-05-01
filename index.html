@@ -448,7 +448,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.6.8</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.7.0</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -3390,10 +3390,15 @@ function doOCRb64(b64, bar) {
     'Ward codes: KELKGHS2S=2S, KELKGHS2W=2W, KELKGHSCCU=CCU. Leave ward/room empty for outpatient.';
 
   // Get API key from Apps Script, then call Anthropic directly from browser
+  if (bar) bar.textContent = 'Fetching key…';
   fetch(SHEETS_URL + '?action=getApiKey&key=kgh2026')
-    .then(function(r) { return r.json(); })
+    .then(function(r) {
+      alert('getApiKey HTTP status: ' + r.status);
+      return r.json();
+    })
     .then(function(d) {
-      if (!d.apiKey) throw new Error('No API key from server');
+      alert('Key: ' + (d.apiKey ? d.apiKey.slice(0,15) + '...' : 'MISSING') + ' error: ' + (d.error || 'none'));
+      if (!d.apiKey) throw new Error('No API key: ' + JSON.stringify(d));
       return fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
