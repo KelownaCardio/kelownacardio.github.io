@@ -170,7 +170,7 @@ input[type=file] { display:none; }
 /* PHOTO */
 .photo-zone { border:1.5px dashed var(--border2); border-radius:var(--r); min-height:85px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; cursor:pointer; overflow:hidden; background:var(--surface2); margin-bottom:8px; }
 .photo-zone img { width:100%; object-fit:cover; border-radius:9px; }
-.ocr-bar { font-size:11px; padding:6px 10px; border-radius:var(--rsm); margin-bottom:8px; display:none; }
+.ocr-bar { font-size:11px; padding:6px 10px; border-radius:var(--rsm); margin-bottom:8px; min-height:28px; }
 .ocr-ok   { background:var(--green-bg); color:var(--green-t); }
 .ocr-warn { background:var(--amber-bg); color:var(--amber-t); }
 
@@ -448,7 +448,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.6.0</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.6.1</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -3392,6 +3392,7 @@ function extractStickerAI(dataUrl) {
 }
 
 function doOCR(dataUrl, bar) {
+  alert('doOCR called, size: ' + Math.round(dataUrl.length/1024) + 'KB');
   var b64  = dataUrl.split(',')[1];
   var mt   = 'image/jpeg';
 
