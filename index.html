@@ -448,7 +448,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.6.1</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.6.2</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -3340,25 +3340,13 @@ function resetPhotoZone() {
 
 // ── Sticker / Meditech chart header photo ──────────────
 function handleStickerPhoto(inp) {
-  var files = inp.files;
-  if (!files || !files.length) { 
-    if (window.ocrBar) window.ocrBar.textContent = 'No file selected';
-    return; 
-  }
-  var file = files[0];
+  var file = inp.files[0]; if (!file) return;
   var bar = document.getElementById('ocr-bar');
   var pz  = document.getElementById('photo-zone');
-  window.ocrBar = bar; // keep reference
-
-  if (bar) { bar.className = 'ocr-bar ocr-ok'; bar.textContent = 'Reading photo (' + Math.round(file.size/1024) + 'KB)…'; }
 
   var reader = new FileReader();
-  reader.onerror = function(err) {
-    if (bar) bar.textContent = 'File read error: ' + err;
-  };
   reader.onload = function(e) {
     var dataUrl = e.target.result;
-    if (!dataUrl) { if (bar) bar.textContent = 'Empty file read'; return; }
 
     // Show thumbnail
     if (pz) {
@@ -3366,21 +3354,21 @@ function handleStickerPhoto(inp) {
       pz.style.padding = '0';
     }
 
-    if (!SHEETS_URL) { if (bar) bar.textContent = 'No server configured'; return; }
+    alert('Step 1 OK — size: ' + Math.round(dataUrl.length/1024) + 'KB. SHEETS_URL: ' + (SHEETS_URL ? 'set' : 'MISSING'));
 
-    // Truncate base64 to max 1MB decoded (~1.33MB base64 chars)
-    // This is enough for OCR — text is readable even in a cropped JPEG
+    if (!SHEETS_URL) return;
+
+    // Truncate to 1MB
     var header = dataUrl.split(',')[0];
-    var b64    = dataUrl.split(',')[1] || '';
-    var MAX    = 1400000; // ~1MB decoded
+    var b64 = dataUrl.split(',')[1] || '';
+    var MAX = 1400000;
     if (b64.length > MAX) {
       b64 = b64.slice(0, MAX);
-      // Pad to valid base64 length
       while (b64.length % 4 !== 0) b64 += '=';
     }
-    var finalUrl = header + ',' + b64;
-    if (bar) bar.textContent = 'Sending to OCR (' + Math.round(b64.length/1024) + 'KB)…';
-    doOCR(finalUrl, bar);
+
+    alert('Step 2 — sending ' + Math.round(b64.length/1024) + 'KB to server');
+    doOCR(header + ',' + b64, bar);
   };
   reader.readAsDataURL(file);
 }
