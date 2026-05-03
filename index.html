@@ -448,7 +448,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.7.3</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.8.0</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -3340,135 +3340,116 @@ function resetPhotoZone() {
     '<span style="font-size:10px;color:var(--text3)">Auto-fills name, PHN, DOB, ward, room</span>';
 }
 
-// ── Sticker / Meditech chart header photo ──────────────
+// ── Sticker / Meditech chart header photo (XHR — iOS Safari friendly) ──
 function handleStickerPhoto(inp) {
-  var file = inp.files[0]; if (!file) return;
-  var bar = document.getElementById('ocr-bar');
+  var file = inp && inp.files && inp.files[0];
+  if (!file) return;
+
   var pz  = document.getElementById('photo-zone');
+  var bar = document.getElementById('ocr-bar');
+
+  if (bar) {
+    bar.style.display = 'block';
+    bar.className = 'ocr-bar ocr-ok';
+    bar.textContent = 'Reading photo…';
+  }
 
   var reader = new FileReader();
+  reader.onerror = function() {
+    if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'Could not read photo file'; }
+  };
   reader.onload = function(e) {
-    var dataUrl = e.target.result;
-
-    // Show thumbnail
+    var dataUrl = e.target.result || '';
     if (pz) {
       pz.innerHTML = '<img src="' + dataUrl + '" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;display:block">';
       pz.style.padding = '0';
     }
+    var comma = dataUrl.indexOf(',');
+    if (comma < 0) {
+      if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'Bad image data'; }
+      return;
+    }
+    var b64 = dataUrl.slice(comma + 1);
+    var mt  = (dataUrl.slice(5, comma).split(';')[0]) || 'image/jpeg';
 
-    alert('Step 1 OK — size: ' + Math.round(dataUrl.length/1024) + 'KB. SHEETS_URL: ' + (SHEETS_URL ? 'set' : 'MISSING'));
-
-    if (!SHEETS_URL) return;
-
-    // Truncate to 1MB
-    var header = dataUrl.split(',')[0];
-    var b64 = dataUrl.split(',')[1] || '';
+    // Truncate enormous images so we never blow the worker payload limit
     var MAX = 1400000;
     if (b64.length > MAX) {
       b64 = b64.slice(0, MAX);
       while (b64.length % 4 !== 0) b64 += '=';
     }
 
-    alert('Step 2 — sending ' + Math.round(b64.length/1024) + 'KB to server');
-    doOCR(header + ',' + b64, bar);
+    // Defer the network call out of the FileReader callback to its own task —
+    // sidesteps any iOS Safari microtask quirk in the FileReader continuation.
+    setTimeout(function() { sendToOCR(b64, mt, bar); }, 0);
   };
   reader.readAsDataURL(file);
 }
 
-function extractStickerAI(dataUrl) {
-  var bar = document.getElementById('ocr-bar');
-  if (!SHEETS_URL) return;
-  var b64 = dataUrl.indexOf(',') > -1 ? dataUrl.split(',')[1] : dataUrl;
-  doOCRb64(b64, bar);
+// XHR — not fetch — error/timeout fires reliably on iOS Safari even when
+// called from inside a FileReader callback's continuation.
+function sendToOCR(b64, mediaType, bar) {
+  if (bar) bar.textContent = 'Extracting (' + Math.round(b64.length / 1024) + ' KB)…';
+
+  var xhr = new XMLHttpRequest();
+  xhr.open('POST', OCR_WORKER_URL, true);
+  xhr.setRequestHeader('Content-Type', 'application/json');
+  xhr.timeout = 60000;
+
+  xhr.onload = function() {
+    var data;
+    try { data = JSON.parse(xhr.responseText); }
+    catch (err) {
+      if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'Bad response: ' + (xhr.responseText || '').slice(0, 80); }
+      return;
+    }
+    handleOCRResult(data, bar);
+  };
+  xhr.onerror = function() {
+    if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'Network error reaching OCR (status ' + xhr.status + ')'; }
+  };
+  xhr.ontimeout = function() {
+    if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'OCR timed out after 60s'; }
+  };
+
+  xhr.send(JSON.stringify({ image: b64, mediaType: mediaType }));
 }
 
-function doOCRb64(b64, bar) {
-  if (bar) bar.textContent = 'Extracting…';
-
-  // Get API key from Apps Script, then call Anthropic via Cloudflare Worker
-  fetch(SHEETS_URL + '?action=getApiKey&key=kgh2026')
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      if (!d.apiKey) throw new Error('No API key');
-      return fetch(OCR_WORKER_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image: b64,
-          mediaType: 'image/jpeg',
-          apiKey: d.apiKey,
-          prompt:
-            'This image shows a Meditech patient chart header or a BC patient sticker/wristband.\n' +
-            'Extract: NAME (Last,First format), DOB (DD/MM/YYYY), PHN (10 digits after HCN#), sex (M/F), ward and room if inpatient.\n' +
-            'Return ONLY JSON: {"last":"","first":"","phn":"","dob":"","sex":"","ward":"","room":""}\n' +
-            'Ward codes: KELKGHS2S=2S, KELKGHS2W=2W, KELKGHSCCU=CCU. Leave ward/room empty for outpatient.'
-        })
-      });
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(data) { handleOCRResult(data, bar); })
-    .catch(function(e) {
-      if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'OCR: ' + e.toString().slice(0,100); }
-    });
-}
-
-function getDriveToken() {
-  // Apps Script provides an OAuth token via a GET endpoint
-  // We need to get this from the server
-  return window._driveToken || '';
-}
-
-function uploadChunks(uploadId, chunks, idx, mt, prompt, bar) {
-  if (idx >= chunks.length) {
-    // All chunks sent — trigger OCR
-    if (bar) bar.textContent = 'Running OCR…';
-    fetch(SHEETS_URL + '?action=ocrAssemble&key=kgh2026&uploadId=' + uploadId + '&chunks=' + chunks.length + '&mt=' + encodeURIComponent(mt) + '&prompt=' + encodeURIComponent(prompt))
-      .then(function(r) { return r.json(); })
-      .then(function(data) { handleOCRResult(data, bar); })
-      .catch(function(e) {
-        if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'OCR failed: ' + e.toString().slice(0,80); }
-      });
+// Worker returns the parsed patient JSON directly — no Apps Script roundtrip.
+function handleOCRResult(data, bar) {
+  if (!data || data.error) {
+    if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'OCR: ' + ((data && data.error) || 'unknown error'); }
     return;
   }
 
-  var url = SHEETS_URL + '?action=uploadChunk&key=kgh2026&uploadId=' + uploadId +
-            '&idx=' + idx + '&total=' + chunks.length +
-            '&chunk=' + encodeURIComponent(chunks[idx]);
-
-  if (bar) bar.textContent = 'Uploading ' + (idx+1) + '/' + chunks.length + '…';
-
-  fetch(url)
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (data.error) throw new Error(data.error);
-      uploadChunks(uploadId, chunks, idx + 1, mt, prompt, bar);
-    })
-    .catch(function(e) {
-      if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'Upload failed: ' + e.toString().slice(0,80); }
-    });
-}
-
-function handleOCRResult(data, bar) {
-  if (!data) throw new Error('No response');
-  if (data.error) { if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'OCR: ' + data.error; } return; }
-  var text  = (typeof data.text === 'string') ? data.text : JSON.stringify(data);
-  var match = text.match(/\{[\s\S]*\}/);
-  if (!match) { if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'No data in response'; } return; }
-  var p = JSON.parse(match[0]);
+  // Worker returns the patient object directly. Older worker code may wrap it
+  // as { text: "..." } — handle both shapes.
+  var p = data;
+  if (typeof data.text === 'string') {
+    var match = data.text.match(/\{[\s\S]*\}/);
+    if (!match) { if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'No data in response'; } return; }
+    try { p = JSON.parse(match[0]); }
+    catch (e) { if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'Bad JSON in response'; } return; }
+  }
 
   if (p.last)  document.getElementById('f-last').value  = p.last;
   if (p.first) document.getElementById('f-first').value = p.first;
-  if (p.phn)   document.getElementById('f-phn').value   = p.phn.replace(/\D/g,'').slice(0,10);
+  if (p.phn)   document.getElementById('f-phn').value   = (p.phn + '').replace(/\D/g,'').slice(0,10);
   if (p.dob)   document.getElementById('f-dob').value   = p.dob;
   if (p.sex)   { var s = document.getElementById('f-sex'); if (s) s.value = p.sex; }
   if (p.ward && WARDS[p.ward]) { document.getElementById('f-ward').value = p.ward; wardChange(); }
   if (p.room) {
     var sel = document.getElementById('f-bed');
-    var opt = document.createElement('option');
-    opt.value = p.room; opt.text = p.room; opt.selected = true;
-    sel.appendChild(opt);
+    if (sel) {
+      var opt = document.createElement('option');
+      opt.value = p.room; opt.text = p.room; opt.selected = true;
+      sel.appendChild(opt);
+    }
   }
-  if (bar) { bar.className = 'ocr-bar ocr-ok'; bar.textContent = '✓ Extracted: ' + (p.last||'?') + ', ' + (p.first||'?') + (p.phn ? ' · ' + p.phn : ''); }
+  if (bar) {
+    bar.className = 'ocr-bar ocr-ok';
+    bar.textContent = '✓ Extracted: ' + (p.last||'?') + ', ' + (p.first||'?') + (p.phn ? ' · ' + p.phn : '');
+  }
 }
 
 function testApiKey() {
