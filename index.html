@@ -1979,7 +1979,7 @@ function batchRound(ward) {
   var pts = st.patients.filter(function(p) {
     return p.ward === ward && p.list === 'on' && p.roundedToday !== TODAY;
   });
-  if (!pts.length) { showToast('All ' + ward + ' patients already rounded'); return; }
+  if (!pts.length) { showToast('All ' + wardLabel(ward) + ' patients already rounded'); return; }
   pts.forEach(function(p) {
     var fee = ward === 'CCU' ? 'CCU_DAILY' : '33008';
     addClaim(p, fee, fee, 1, TODAY, 'I');
@@ -2823,19 +2823,9 @@ function openPatientEdit(pid) {
   // Populate bed options after render
   setTimeout(function() {
     peWardChange();
-    // Re-select current bed after populating
-    var bedSel = document.getElementById('pe-bed');
-    if (bedSel && p.bed) {
-      for (var i = 0; i < bedSel.options.length; i++) {
-        if (bedSel.options[i].value === String(p.bed)) { bedSel.value = p.bed; break; }
-      }
-      // If not in list, add it
-      if (bedSel.value !== String(p.bed)) {
-        var opt = document.createElement('option');
-        opt.value = p.bed; opt.text = p.bed; opt.selected = true;
-        bedSel.appendChild(opt);
-      }
-    }
+    // Restore current bed value into the input
+    var bedInp = document.getElementById('pe-bed');
+    if (bedInp && p.bed) bedInp.value = p.bed;
     // Reflect MRP role in fields
     peRoleChange();
     // But restore the actual saved mrp value
@@ -3828,13 +3818,27 @@ function handleOCRResult(data, bar) {
   if (p.dob)   document.getElementById('f-dob').value   = p.dob;
   if (p.sex)   { var s = document.getElementById('f-sex'); if (s) s.value = p.sex; }
   if (p.ward && WARDS[p.ward]) { document.getElementById('f-ward').value = p.ward; wardChange(); }
-  if (p.room) {
-    var sel = document.getElementById('f-bed');
-    if (sel) {
-      var opt = document.createElement('option');
-      opt.value = p.room; opt.text = p.room; opt.selected = true;
-      sel.appendChild(opt);
+  if (p.mrp) {
+    var mrpSel = document.getElementById('f-mrp');
+    if (mrpSel) {
+      var mrpMap = [
+        ['cardiology','Cardiology'],['hospitalist','Hospitalist'],['ctu','CTU'],
+        ['icu','ICU'],['csicu','CSICU'],['cardiac surg','Cardiac Surgery'],
+        ['general surg','General Surgery'],['orthop','Orthopedics'],
+        ['neurol','Neurology'],['nephr','Nephrology']
+      ];
+      var mrpLower = p.mrp.toLowerCase();
+      var mrpVal = '';
+      for (var mi = 0; mi < mrpMap.length; mi++) {
+        if (mrpLower.indexOf(mrpMap[mi][0]) !== -1) { mrpVal = mrpMap[mi][1]; break; }
+      }
+      if (mrpVal) { mrpSel.value = mrpVal; mrpChange(); }
     }
+  }
+  if (p.room) {
+    var bedInp = document.getElementById('f-bed');
+    if (bedInp) bedInp.value = p.room;
+    saveCustomRoom(gv('f-ward'), p.room);
   }
   if (bar) {
     bar.className = 'ocr-bar ocr-ok';
