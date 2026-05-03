@@ -520,7 +520,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.0</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.1</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -599,14 +599,14 @@ input[type=file] { display:none; }
     </div>
   </div>
 
-  <!-- Location & service -->
+ <!-- Location & service -->
   <div class="card">
     <div class="card-title">Location &amp; service</div>
 
-    <!-- Row 1: Location + Bed -->
+    <!-- Row 1: Ward + Bed -->
     <div class="fl">
       <div class="f1"><label>Ward</label>
-<select id="f-ward" onchange="wardChange()">
+        <select id="f-ward" onchange="wardChange()">
           <option value="CCU">CICU</option>
           <option value="2S">2S</option>
           <option value="2W">2W</option>
@@ -626,11 +626,17 @@ input[type=file] { display:none; }
         </select>
         <div id="f-ward-other-wrap" style="display:none;margin-top:-3px">
           <input id="f-ward-other" placeholder="Enter ward name…" autocorrect="off" autocapitalize="words"
-            style="margin-bottom:4px" oninput="wardOtherInput(this)">
-          <button type="button" onclick="saveCustomWard()" style="padding:5px 12px;font-size:11px;font-weight:700;border:.5px solid var(--border2);border-radius:var(--rpill);background:var(--blue-bg);color:var(--blue-t);cursor:pointer;font-family:inherit">Save to list</button>
+            style="margin-bottom:4px">
+          <button type="button" onclick="saveCustomWard()"
+            style="padding:5px 12px;font-size:11px;font-weight:700;border:.5px solid var(--border2);border-radius:var(--rpill);background:var(--blue-bg);color:var(--blue-t);cursor:pointer;font-family:inherit">Save to list</button>
         </div>
       </div>
-      <div class="f1"><label id="bed-lbl">Bed / room</label><select id="f-bed"></select></div>
+      <div class="f1">
+        <label id="bed-lbl">Bed / room</label>
+        <input id="f-bed" list="f-bed-list" autocorrect="off" autocomplete="off"
+          placeholder="Select or type…" style="margin-bottom:7px">
+        <datalist id="f-bed-list"></datalist>
+      </div>
     </div>
 
     <!-- Row 2: Cardiology role + MRP service -->
@@ -2754,7 +2760,9 @@ function openPatientEdit(pid) {
     html += '<option value="' + k + '"' + (p.ward === k ? ' selected' : '') + '>' + WARDS[k].label + '</option>';
   });
   html += '</select></div>';
-  html += '<div class="f1"><label id="pe-bed-lbl">Bed / room</label><select id="pe-bed"></select></div>';
+  html += '<div class="f1"><label id="pe-bed-lbl">Bed / room</label>' +
+          '<input id="pe-bed" list="pe-bed-list" autocorrect="off" autocomplete="off" placeholder="Select or type…" style="margin-bottom:7px">' +
+          '<datalist id="pe-bed-list"></datalist></div>';
   html += '</div>';
 
   // Row 2: Cardiology role + MRP service
@@ -2845,8 +2853,7 @@ function peWardChange() {
   var rooms = (wdef.rooms || []).slice();
   var bedSel = document.getElementById('pe-bed');
   if (!bedSel) return;
-  bedSel.innerHTML = '<option value="">— select —</option>' +
-    rooms.map(function(r) { return '<option value="' + r + '">' + r + '</option>'; }).join('');
+  populateBedDatalist('pe-bed-list', ward);
   // Re-apply role rules so MRP daily/CCU care type tracks the new ward
   var roleSel = document.getElementById('pe-role');
   if (roleSel && roleSel.value === 'mrp') {
@@ -2925,6 +2932,7 @@ function savePatientEdit(pid) {
   var icdHid = document.getElementById('pe-icd');
   if (icdHid && icdHid.value) p.icd = icdHid.value;
 
+  saveCustomRoom(p.ward, p.bed);
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
   logChange(p, 'Demographics edited', '');
@@ -3331,6 +3339,7 @@ function addPatient() {
     needsSticker: !phn
   };
 
+  saveCustomRoom(ward, p.bed);
   st.patients.push(p);
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
@@ -3397,28 +3406,56 @@ function roleChange() {
   }
 }
 
+// ── Custom room persistence ────────────────────────────
+function getSavedRooms(ward) {
+  try {
+    var raw = localStorage.getItem('kgh5:rooms:' + ward);
+    return raw ? JSON.parse(raw) : [];
+  } catch(e) { return []; }
+}
+
+function saveCustomRoom(ward, room) {
+  if (!ward || !room) return;
+  room = String(room).trim();
+  if (!room) return;
+  var wdef = WARDS[ward] || {};
+  var preset = wdef.rooms || [];
+  if (preset.indexOf(room) !== -1) return; // already a preset, don't need to save
+  var saved = getSavedRooms(ward);
+  if (saved.indexOf(room) !== -1) return; // already saved
+  saved.push(room);
+  try { localStorage.setItem('kgh5:rooms:' + ward, JSON.stringify(saved)); } catch(e) {}
+}
+
+function populateBedDatalist(listId, ward) {
+  var dl = document.getElementById(listId);
+  if (!dl) return;
+  var wdef = WARDS[ward] || {};
+  var preset = (wdef.rooms || []).slice();
+  var saved = getSavedRooms(ward);
+  var all = preset.slice();
+  saved.forEach(function(r) { if (all.indexOf(r) === -1) all.push(r); });
+  dl.innerHTML = all.map(function(r) { return '<option value="' + esc(r) + '">'; }).join('');
+}
+
 function wardChange() {
   var w    = gv('f-ward');
   var wdef = WARDS[w] || {};
   var bedLbl = document.getElementById('bed-lbl');
   if (bedLbl) bedLbl.textContent = w === 'CCU' ? 'Bed #' : 'Room';
 
-  // Show/hide Other text field
+  // Show/hide Other ward text field
   var otherWrap = document.getElementById('f-ward-other-wrap');
   if (otherWrap) otherWrap.style.display = w === 'OTHER' ? 'block' : 'none';
 
-  // Build room options — filter occupied CCU beds
-  var rooms = (wdef.rooms || []).slice();
-  if (w === 'CCU') {
-    var occ = st.patients.filter(function(p) { return p.ward === 'CCU' && !p.discharged; }).map(function(p) { return String(p.bed); });
-    rooms = rooms.filter(function(r) { return occ.indexOf(String(r)) === -1; });
-  }
-  var bedSel = document.getElementById('f-bed');
-  if (bedSel) {
-    bedSel.innerHTML = '<option value="">— select —</option>' +
-      rooms.map(function(r) { return '<option value="' + r + '">' + r + '</option>'; }).join('');
-  }
-  // Re-apply role rules (CCU vs daily care depends on ward)
+  // Populate bed datalist with preset + saved custom rooms
+  populateBedDatalist('f-bed-list', w);
+
+  // Clear bed input when ward changes
+  var bedInp = document.getElementById('f-bed');
+  if (bedInp) bedInp.value = '';
+
+  // Re-apply role rules
   var roleSel = document.getElementById('f-role');
   if (roleSel && roleSel.value === 'mrp') {
     var careFld  = document.getElementById('f-care');
@@ -3427,25 +3464,24 @@ function wardChange() {
   }
 }
 
-function wardOtherInput(inp) {
-  // Just keep the text field visible; saving happens on button click
-}
-
 function saveCustomWard() {
   var name = (document.getElementById('f-ward-other') || {}).value || '';
   name = name.trim();
   if (!name) { showToast('Enter a ward name'); return; }
-  // Generate a key: uppercase, no spaces, max 8 chars
   var key = name.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8) || 'CUSTOM';
-  // Avoid collisions
   if (WARDS[key]) key = key + '2';
   if (!WARDS[key]) {
     WARDS[key] = { label:name, list:'off', care:'directive', role:'consultant', rooms:[] };
+    // Persist custom ward name to localStorage
+    try {
+      var cw = JSON.parse(localStorage.getItem('kgh5:customWards') || '[]');
+      cw.push({ key:key, name:name });
+      localStorage.setItem('kgh5:customWards', JSON.stringify(cw));
+    } catch(e) {}
     // Add to all ward selects on the page
     ['f-ward','pe-ward'].forEach(function(selId) {
       var sel = document.getElementById(selId);
       if (!sel) return;
-      // Insert before the existing OTHER option
       var otherOpt = sel.querySelector('option[value="OTHER"]');
       var newOpt = document.createElement('option');
       newOpt.value = key; newOpt.text = name;
@@ -3454,7 +3490,6 @@ function saveCustomWard() {
     });
     showToast(name + ' added to ward list');
   }
-  // Select the new ward
   var fWard = document.getElementById('f-ward');
   if (fWard) { fWard.value = key; wardChange(); }
   var otherWrap = document.getElementById('f-ward-other-wrap');
@@ -4562,11 +4597,17 @@ function addRef() {
 
 // Close dropdowns on outside click
 document.addEventListener('click', function(e) {
-  if (!e.target.closest('.ref-dd') && !e.target.hasAttribute('data-dd') &&
-      !e.target.hasAttribute('data-hidden') && e.target.id !== 'f-ref-search' &&
-      e.target.id !== 'cb-ref-search') {
+  try {
+    var t = e.target;
+    if (!t || t.nodeType !== 1) return;
+    if (t.closest('.ref-dd')) return;
+    if (t.hasAttribute('data-dd') || t.hasAttribute('data-hidden')) return;
+    if (t.id === 'f-ref-search' || t.id === 'cb-ref-search' ||
+        t.id === 'pe-ref-search' || t.id === 'f-icd-search' ||
+        t.id === 'cb-icd-search' || t.id === 'pe-icd-search' ||
+        t.id === 'ce-icd-search') return;
     document.querySelectorAll('.ref-dd').forEach(function(dd) { dd.style.display = 'none'; });
-  }
+  } catch(e2) {}
 });
 
 // ── 13_meditech.js ──
@@ -4866,6 +4907,24 @@ async function init() {
     ];
     sv('patients', st.patients);
   }
+    // Restore any custom wards saved from previous sessions
+  try {
+    var savedWards = JSON.parse(localStorage.getItem('kgh5:customWards') || '[]');
+    savedWards.forEach(function(w) {
+      if (!WARDS[w.key]) {
+        WARDS[w.key] = { label:w.name, list:'off', care:'directive', role:'consultant', rooms:[] };
+        ['f-ward','pe-ward'].forEach(function(selId) {
+          var sel = document.getElementById(selId);
+          if (!sel) return;
+          var otherOpt = sel.querySelector('option[value="OTHER"]');
+          var newOpt = document.createElement('option');
+          newOpt.value = w.key; newOpt.text = w.name;
+          if (otherOpt) sel.insertBefore(newOpt, otherOpt);
+          else sel.appendChild(newOpt);
+        });
+      }
+    });
+  } catch(e) {}
   wardChange();
   renderRefs('');
   render();
