@@ -520,7 +520,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.1</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.2</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1410,11 +1410,55 @@ async function syncFromSheets() {
     var r = await fetch(SHEETS_URL + '?action=getAll&key=' + SHARED_KEY);
     var d = await r.json();
     if (d.error) { setSyncState('error'); return; }
-    if (d.patients)  st.patients  = d.patients;
+
+    // ── Merge patients rather than overwrite ──────────────
+    // Protects locally-added patients that haven't pushed yet,
+    // while pulling in changes made on other devices.
+    if (d.patients && Array.isArray(d.patients)) {
+      var remoteById = {};
+      d.patients.forEach(function(p) { remoteById[p.id] = p; });
+
+      var localById = {};
+      st.patients.forEach(function(p) { localById[p.id] = p; });
+
+      var merged = [];
+
+      // 1. All remote patients — use remote as source of truth
+      d.patients.forEach(function(rp) {
+        var lp = localById[rp.id];
+        if (!lp) {
+          // New patient added by another device — take it
+          merged.push(rp);
+        } else {
+          // Patient exists locally — keep remote version (another device may have
+          // updated demographics/ward) but preserve today's roundedToday if set locally
+          // since rounds state is per-device and may be ahead of the last push
+          var merged_p = Object.assign({}, rp);
+          if (lp.roundedToday === TODAY && rp.roundedToday !== TODAY) {
+            merged_p.roundedToday = TODAY;
+            merged_p.lastBilled   = lp.lastBilled || rp.lastBilled;
+          }
+          merged.push(merged_p);
+        }
+      });
+
+      // 2. Local-only patients not yet on remote — keep them
+      // (added on this device but push may still be in flight or Sheets lagging)
+      st.patients.forEach(function(lp) {
+        if (!remoteById[lp.id]) {
+          merged.push(lp);
+        }
+      });
+
+      st.patients = merged;
+    }
+
+    // Claims, refs, doctors, changelog: remote is authoritative (append-only)
     if (d.claims)    st.claims    = d.claims;
     if (d.refs)      st.refs      = d.refs;
     if (d.doctors)   st.doctors   = d.doctors;
     if (d.changelog) st.changelog = d.changelog;
+
     ['patients','claims','refs','doctors','changelog'].forEach(function(k) { sv(k, st[k]); });
     setSyncState('synced');
     render();
@@ -4862,43 +4906,7 @@ async function init() {
     sv('doctors', st.doctors);
   }
 
-  // ── Test patients (remove before live deployment) ─────
-  if (!st.patients.length) {
-    // Sign in as KBrown for testing
-    var kb = st.doctors.find(function(d) { return d.alias === 'KBrown'; });
-    if (kb) { st.doc = kb; sv('doc', st.doc); }
-
-    var now = new Date();
-    var dob1 = '15/03/1948'; // 77
-    var dob2 = '22/09/1955'; // 69
-    var dob3 = '08/06/1962'; // 62
-    var dob4 = '14/11/1970'; // 54
-    var dob5 = '30/01/1940'; // 85
-
-    st.patients = [
-      // CCU
-      { id:'t1', last:'Morrison',  first:'James',   phn:'9051234560', dob:dob1, sex:'M', ward:'CCU', bed:'1', fac:'OA040', role:'mrp', mrp:'Cardiology', care:'ccu',       list:'on',  icd:'410',    refby:'', refbyName:'', roundedToday:null, discharged:false },
-      { id:'t2', last:'Henderson', first:'Patricia',phn:'9051234561', dob:dob2, sex:'F', ward:'CCU', bed:'3', fac:'OA040', role:'mrp', mrp:'Cardiology', care:'ccu',       list:'on',  icd:'427.31', refby:'', refbyName:'', roundedToday:null, discharged:false },
-      { id:'t3', last:'Kowalski',  first:'Stefan',  phn:'9051234562', dob:dob3, sex:'M', ward:'CCU', bed:'5', fac:'OA040', role:'mrp', mrp:'Cardiology', care:'ccu',       list:'on',  icd:'428',    refby:'', refbyName:'', roundedToday:null, discharged:false },
-      // Ward 2S
-      { id:'t4', last:'Nakamura',  first:'Yuki',    phn:'9051234563', dob:dob4, sex:'F', ward:'2S',  bed:'218', fac:'OA040', role:'mrp', mrp:'Cardiology', care:'daily',   list:'on',  icd:'414.01', refby:'', refbyName:'', roundedToday:null, discharged:false },
-      { id:'t5', last:'Okafor',    first:'Emeka',   phn:'9051234564', dob:dob5, sex:'M', ward:'2S',  bed:'221', fac:'OA040', role:'mrp', mrp:'Cardiology', care:'daily',   list:'on',  icd:'424.1',  refby:'', refbyName:'', roundedToday:null, discharged:false },
-      { id:'t6', last:'Leblanc',   first:'Sophie',  phn:'9051234565', dob:dob2, sex:'F', ward:'2S',  bed:'225A',fac:'OA040', role:'mrp', mrp:'Cardiology', care:'daily',   list:'on',  icd:'410.9',  refby:'', refbyName:'', roundedToday:null, discharged:false },
-      // Ward 2W
-      { id:'t7', last:'Tran',      first:'Minh',    phn:'9051234566', dob:dob3, sex:'M', ward:'2W',  bed:'202', fac:'OA040', role:'mrp', mrp:'Cardiology', care:'daily',   list:'on',  icd:'411.1',  refby:'', refbyName:'', roundedToday:null, discharged:false },
-      { id:'t8', last:'Rosenberg', first:'David',   phn:'9051234567', dob:dob1, sex:'M', ward:'2W',  bed:'207', fac:'OA040', role:'mrp', mrp:'Cardiology', care:'daily',   list:'on',  icd:'427.1',  refby:'', refbyName:'', roundedToday:null, discharged:false },
-      { id:'t9', last:'Fernandez', first:'Maria',   phn:'9051234568', dob:dob4, sex:'F', ward:'2W',  bed:'211', fac:'OA040', role:'mrp', mrp:'Cardiology', care:'directive',list:'on', icd:'428.3',  refby:'', refbyName:'', roundedToday:null, discharged:false },
-      // 3E — off service consultant
-      { id:'t10',last:'Williams',  first:'Robert',  phn:'9051234569', dob:dob2, sex:'M', ward:'3E',  bed:'',    fac:'OA040', role:'consultant', mrp:'Hospitalist', care:'directive', list:'off', icd:'786.50', refby:'68611', refbyName:'Dr. Abayomi, Michael', roundedToday:null, discharged:false },
-      { id:'t11',last:'MacLeod',   first:'Fiona',   phn:'9051234570', dob:dob5, sex:'F', ward:'3E',  bed:'',    fac:'OA040', role:'consultant', mrp:'CTU',        care:'directive', list:'off', icd:'427.31', refby:'68611', refbyName:'Dr. Abayomi, Michael', roundedToday:null, discharged:false },
-      { id:'t12',last:'Patel',     first:'Rajan',   phn:'9051234571', dob:dob3, sex:'M', ward:'3E',  bed:'',    fac:'OA040', role:'consultant', mrp:'Other',      care:'directive', list:'off', icd:'424.1',  refby:'', refbyName:'', roundedToday:null, discharged:false },
-      // 6W — off service consultant
-      { id:'t13',last:'Gustafsson',first:'Britta',  phn:'9051234572', dob:dob1, sex:'F', ward:'6W',  bed:'',    fac:'OA040', role:'consultant', mrp:'Hospitalist', care:'directive', list:'off', icd:'415.1',  refby:'', refbyName:'', roundedToday:null, discharged:false },
-      { id:'t14',last:'Nguyen',    first:'Linh',    phn:'9051234573', dob:dob4, sex:'F', ward:'6W',  bed:'',    fac:'OA040', role:'consultant', mrp:'Cardiac Surgery', care:'combined', list:'off', icd:'414.01', refby:'', refbyName:'', roundedToday:null, discharged:false },
-      { id:'t15',last:'Campbell',  first:'Angus',   phn:'9051234574', dob:dob2, sex:'M', ward:'6W',  bed:'',    fac:'OA040', role:'consultant', mrp:'ICU',        care:'directive', list:'off', icd:'785.51', refby:'', refbyName:'', roundedToday:null, discharged:false },
-    ];
-    sv('patients', st.patients);
-  }
+  // (test patients removed for live deployment)
     // Restore any custom wards saved from previous sessions
   try {
     var savedWards = JSON.parse(localStorage.getItem('kgh5:customWards') || '[]');
@@ -5127,6 +5135,13 @@ function showToast(msg) {
   document.body.appendChild(d);
   _toastTimer = setTimeout(function() { d.remove(); }, 2400);
 }
+
+// Re-sync whenever the user switches back to this tab/app
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState === 'visible' && st.loaded && SHEETS_URL) {
+    syncFromSheets();
+  }
+});
 
 // Boot the app
 init();
