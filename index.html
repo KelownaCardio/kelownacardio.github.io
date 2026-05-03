@@ -4319,46 +4319,32 @@ function searchPhysiciansRemote(query, dropdownId, hiddenId, nameId) {
   }, 400);
 }
 
-// ── Build a single physician dropdown row (DOM element) ──
-function buildRefRow(r, dropdownId, hiddenId, nameId, recentNums, forceBadge) {
+// ── Build a ref row HTML string (same pattern as icdSearch — reliable on iOS) ──
+function buildRefRowHtml(r, dropdownId, hiddenId, nameId, recentNums, forceBadge) {
   var display  = 'Dr. ' + r.last + (r.first ? ', ' + r.first : '');
-  var isRecent = recentNums.indexOf(r.num) !== -1;
   var badge    = '';
   if (forceBadge) {
-    badge = '<span style="font-size:9px;color:var(--teal-t);font-weight:700;margin-right:4px">' + forceBadge + '</span>';
-  } else if (isRecent) {
+    badge = '<span style="font-size:9px;color:var(--teal-t);font-weight:700;margin-right:4px">' + esc(forceBadge) + '</span>';
+  } else if (recentNums.indexOf(r.num) !== -1) {
     badge = '<span class="recent-badge">RECENT</span>';
   } else if (r.saved) {
     badge = '<span style="font-size:9px;color:var(--blue-t);font-weight:700;margin-right:4px">SAVED</span>';
   }
-  var sub = (r.spec||'') + (r.city ? (r.spec ? ' · ' : '') + r.city : '');
-
-  var el = document.createElement('div');
-  el.className = 'ref-dd-row';
-  el.setAttribute('data-num',    r.num);
-  el.setAttribute('data-name',   display);
-  el.setAttribute('data-dd',     dropdownId);
-  el.setAttribute('data-hidden', hiddenId);
-  el.setAttribute('data-nameid', nameId);
-  el.onclick = function() { selectRefRow(this); };
-  el.innerHTML = badge + esc(display) +
-    ' <span style="color:var(--text3)">#' + r.num + '</span>' +
-    (sub ? '<div style="font-size:10px;color:var(--text2);margin-top:1px">' + esc(sub) + '</div>' : '');
-  return el;
+  var sub = (r.spec||'') + (r.city ? (r.spec ? ' &bull; ' : '') + r.city : '');
+  return '<div class="ref-dd-row" data-num="' + esc(r.num) + '" data-name="' + esc(display) + '" ' +
+         'data-dd="' + esc(dropdownId) + '" data-hidden="' + esc(hiddenId) + '" data-nameid="' + esc(nameId) + '" ' +
+         'onclick="selectRefRow(this)">' +
+         badge + esc(display) + ' <span style="color:var(--text3)">#' + esc(r.num) + '</span>' +
+         (sub ? '<div style="font-size:10px;color:var(--text2);margin-top:1px">' + sub + '</div>' : '') +
+         '</div>';
 }
 
-// ── Build "Add new physician" row ──────────────────────
-function buildAddNewRow(query, dropdownId, hiddenId, nameId) {
-  var el = document.createElement('div');
-  el.className = 'ref-dd-row ref-dd-add';
-  el.style.cssText = 'color:var(--blue-t);font-style:italic';
-  el.setAttribute('data-query',  query);
-  el.setAttribute('data-dd',     dropdownId);
-  el.setAttribute('data-hidden', hiddenId);
-  el.setAttribute('data-nameid', nameId);
-  el.onclick = function() { openAddPhysicianForm(this); };
-  el.textContent = '+ Add "' + query + '" as new physician';
-  return el;
+// ── Build "Add new physician" row HTML string ──────────
+function buildAddNewRowHtml(query, dropdownId, hiddenId, nameId) {
+  return '<div class="ref-dd-row ref-dd-add" style="color:var(--blue-t);font-style:italic" ' +
+         'data-query="' + esc(query) + '" data-dd="' + esc(dropdownId) + '" ' +
+         'data-hidden="' + esc(hiddenId) + '" data-nameid="' + esc(nameId) + '" ' +
+         'onclick="openAddPhysicianForm(this)">+ Add &ldquo;' + esc(query) + '&rdquo; as new physician</div>';
 }
 
 // ── Main search function (called on input/focus) ───────
@@ -4381,51 +4367,39 @@ function refSearch(query, dropdownId, hiddenId, nameId) {
       dd.style.display = 'block';
       return;
     }
-    dd.innerHTML = '';
-    all.forEach(function(r) {
-      dd.appendChild(buildRefRow(
+    dd.innerHTML = all.map(function(r) {
+      return buildRefRowHtml(
         { last:r.last, first:r.first||'', num:r.num, spec:r.spec||'', city:'', saved:true },
         dropdownId, hiddenId, nameId, recentNums, null
-      ));
-    });
+      );
+    }).join('');
     dd.style.display = 'block';
     return;
   }
 
   // Local search (tiers 1+2)
   var local = searchPhysiciansLocal(query);
-  dd.innerHTML = '';
 
   if (!local.length) {
-    // Nothing local — show searching placeholder + Add New
-    var ph = document.createElement('div');
-    ph.className = 'bc-searching';
-    ph.style.cssText = 'padding:8px 10px;font-size:11px;color:var(--text2)';
-    ph.textContent = SHEETS_URL ? 'Searching all BC...' : 'Not found in Interior BC directory';
-    dd.appendChild(ph);
-    dd.appendChild(buildAddNewRow(query, dropdownId, hiddenId, nameId));
+    dd.innerHTML = '<div class="bc-searching" style="padding:8px 10px;font-size:11px;color:var(--text2)">' +
+      (typeof SHEETS_URL !== 'undefined' && SHEETS_URL ? 'Searching all BC...' : 'Not found in Interior BC directory') +
+      '</div>' + buildAddNewRowHtml(query, dropdownId, hiddenId, nameId);
     dd.style.display = 'block';
     searchPhysiciansRemote(query, dropdownId, hiddenId, nameId);
     return;
   }
 
-  // Render local results
-  local.forEach(function(r) {
-    dd.appendChild(buildRefRow(r, dropdownId, hiddenId, nameId, recentNums, null));
-  });
+  var html = local.map(function(r) {
+    return buildRefRowHtml(r, dropdownId, hiddenId, nameId, recentNums, null);
+  }).join('');
 
-  // If few local results, also search remotely and append
-  if (local.length < 5 && SHEETS_URL) {
-    var ph2 = document.createElement('div');
-    ph2.className = 'bc-searching';
-    ph2.style.cssText = 'padding:6px 10px;font-size:10px;color:var(--text3)';
-    ph2.textContent = 'Also searching all BC...';
-    dd.appendChild(ph2);
+  if (local.length < 5 && typeof SHEETS_URL !== 'undefined' && SHEETS_URL) {
+    html += '<div class="bc-searching" style="padding:6px 10px;font-size:10px;color:var(--text3)">Also searching all BC...</div>';
     searchPhysiciansRemote(query, dropdownId, hiddenId, nameId);
   }
 
-  // Add New always at the bottom
-  dd.appendChild(buildAddNewRow(query, dropdownId, hiddenId, nameId));
+  html += buildAddNewRowHtml(query, dropdownId, hiddenId, nameId);
+  dd.innerHTML = html;
   dd.style.display = 'block';
 }
 
