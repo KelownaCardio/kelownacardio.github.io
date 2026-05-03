@@ -1338,16 +1338,7 @@ function selectIcd(code, label, dropdownId, hiddenId, inputId) {
   recordIcdUsage(code);
 }
 
-// Close all dropdowns when clicking outside
-document.addEventListener('click', function(e) {
-  if (!e.target.classList.contains('ref-dd-row') &&
-      !e.target.hasAttribute('data-dd') &&
-      !e.target.hasAttribute('data-hidden')) {
-    document.querySelectorAll('.ref-dd').forEach(function(dd) {
-      dd.style.display = 'none';
-    });
-  }
-});
+// (duplicate close-dropdown listener removed — safe version retained in 12_referrers.js)
 
 // ── 03_state.js ──
 // ═══════════════════════════════════════════════════════
@@ -3898,8 +3889,18 @@ function selectLocWard(ward) {
   if (opt) opt.classList.add('selected');
 
   var w = WARDS[ward] || {};
-  document.getElementById('loc-list').value = w.list || 'off';
-  document.getElementById('loc-care').value = w.care || 'directive';
+  var geoWards = ['CCU','2S','2W'];
+  var listSel = document.getElementById('loc-list');
+  var careSel = document.getElementById('loc-care');
+
+  if (geoWards.indexOf(ward) === -1) {
+    // Non-geographic ward — always snap to Off Service / directive for safety
+    if (listSel) listSel.value = 'off';
+    if (careSel) careSel.value = 'directive';
+  } else {
+    if (listSel) listSel.value = w.list || 'on';
+    if (careSel) careSel.value = w.care || 'daily';
+  }
 
   // Populate room selector
   var rooms = w.rooms || [];
@@ -3913,13 +3914,26 @@ function confirmLocChange() {
   var from = p.ward;
   p.ward   = _locWard;
   p.bed    = gv('loc-room');
-  p.list   = gv('loc-list');
   p.care   = gv('loc-care');
+
+  // Safety rule: any ward outside the geographic view (CCU/2S/2W)
+  // is forced to Off Service so the patient doesn't disappear from rounds.
+  var geoWards = ['CCU','2S','2W'];
+  var requestedList = gv('loc-list');
+  if (geoWards.indexOf(_locWard) === -1 && requestedList === 'on') {
+    p.list = 'off';
+    p.care = 'directive';
+  } else {
+    p.list = requestedList;
+  }
+
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
   logChange(p, 'Location changed', from + ' → ' + _locWard);
   closeLocScreen();
-  showToast(p.last + ' moved to ' + wardLabel(_locWard));
+  var suffix = (p.list === 'off' && requestedList === 'on')
+    ? ' → moved to Off Service (not on geo view)' : '';
+  showToast(p.last + ' moved to ' + wardLabel(_locWard) + suffix);
 }
 
 function closeLocScreen() {
