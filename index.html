@@ -520,7 +520,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.9.0</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.10.0</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -558,8 +558,9 @@ input[type=file] { display:none; }
     <div id="alpha-view" style="display:none"></div>
   </div>
   <div id="off-view" style="display:none"><div id="off-list"></div></div>
+  <!-- Meditech list import hidden in v1.10.0 - kept for future use, unhide by removing style="display:none" -->
   <input type="file" id="mit-photo" accept="image/*" onchange="handleMediteachPhoto(this)">
-  <button class="mit-btn" style="margin-top:16px" onclick="document.getElementById('mit-photo').click()">
+  <button class="mit-btn" style="margin-top:16px;display:none" onclick="document.getElementById('mit-photo').click()">
     <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Import from Meditech list
   </button>
 </div>
@@ -577,7 +578,7 @@ input[type=file] { display:none; }
     </div>
     <input type="file" id="f-photo" accept="image/*" onchange="handleStickerPhoto(this)">
     <div class="ocr-bar" id="ocr-bar"></div>
-    <button onclick="testApiKey()" class="btn btn-s" style="margin-top:8px;width:100%">Test API connection</button>
+    
   </div>
 
   <!-- Patient demographics -->
@@ -857,7 +858,6 @@ var BC_PHYSICIANS_LOCAL = [["Aartsma","Durk","59243","Psychiatry","Vernon"],["Ab
 // 01_config.js — URLs, ward definitions, alias map
 // ═══════════════════════════════════════════════════════
 
-var ANTHROPIC_KEY = ''; // Key held in Apps Script proxy — not needed here
 var SHEETS_URL = 'https://script.google.com/macros/s/AKfycbzQOQa6dZCCyXu15jvkyUTFghtnhGzZFj4NZ4uyczxLov72zj8qNZIgk9pzL4i8Dfuy5Q/exec';
 var SHARED_KEY = 'kgh2026';
 
@@ -2810,46 +2810,52 @@ function peWardChange() {
   if (!bedSel) return;
   bedSel.innerHTML = '<option value="">— select —</option>' +
     rooms.map(function(r) { return '<option value="' + r + '">' + r + '</option>'; }).join('');
-  // Also snap role/list defaults
-  var role = (document.getElementById('pe-role') || {}).value;
-  if (!role) peRoleChange();
+  // Re-apply role rules so MRP daily/CCU care type tracks the new ward
+  var roleSel = document.getElementById('pe-role');
+  if (roleSel && roleSel.value === 'mrp') {
+    var careFld  = document.getElementById('pe-care');
+    var icuWards = ['CCU','CSICU','ICUA','ICUB'];
+    if (careFld) careFld.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
+  }
 }
 
 // Dynamic role change in edit form
 function peRoleChange() {
-  var role   = (document.getElementById('pe-role')  || {}).value || 'consultant';
-  var ward   = (document.getElementById('pe-ward')  || {}).value || '';
-  var mrpSel = document.getElementById('pe-mrp');
-  var listSel= document.getElementById('pe-list');
-  var careFld= document.getElementById('pe-care');
+  var roleSel = document.getElementById('pe-role');
+  var mrpSel  = document.getElementById('pe-mrp');
+  var listSel = document.getElementById('pe-list');
+  var careFld = document.getElementById('pe-care');
+  var ward    = (document.getElementById('pe-ward') || {}).value || '';
+  if (!roleSel || !mrpSel) return;
   var icuWards = ['CCU','CSICU','ICUA','ICUB'];
-
-  if (role === 'mrp') {
-    if (mrpSel)  mrpSel.value  = 'Cardiology';
+  if (roleSel.value === 'mrp') {
+    mrpSel.value = 'Cardiology';
     if (listSel) listSel.value = 'on';
     if (careFld) careFld.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
   } else {
-    if (mrpSel && mrpSel.value === 'Cardiology') mrpSel.value = 'Other';
-    var wdef = WARDS[ward] || {};
-    if (listSel && wdef.list) listSel.value = wdef.list;
-    if (careFld && wdef.care) careFld.value = wdef.care;
+    if (mrpSel.value === 'Cardiology') mrpSel.value = 'Other';
+    if (listSel) listSel.value = 'off';
+    if (careFld) careFld.value = 'directive';
   }
 }
 
-// Save edits back to patient record
 function peMrpChange() {
-  var mrp     = (document.getElementById('pe-mrp')  || {}).value || '';
-  var roleSel  = document.getElementById('pe-role');
-  if (!roleSel) return;
-  if (mrp === 'Cardiology') {
+  var mrpSel  = document.getElementById('pe-mrp');
+  var roleSel = document.getElementById('pe-role');
+  var listSel = document.getElementById('pe-list');
+  var careFld = document.getElementById('pe-care');
+  var ward    = (document.getElementById('pe-ward') || {}).value || '';
+  if (!mrpSel || !roleSel) return;
+  var icuWards = ['CCU','CSICU','ICUA','ICUB'];
+  if (mrpSel.value === 'Cardiology') {
     roleSel.value = 'mrp';
+    if (listSel) listSel.value = 'on';
+    if (careFld) careFld.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
   } else {
     roleSel.value = 'consultant';
+    if (listSel) listSel.value = 'off';
+    if (careFld) careFld.value = 'directive';
   }
-  peRoleChange();
-  // Restore the mrp value since peRoleChange may have changed it
-  var mrpSel = document.getElementById('pe-mrp');
-  if (mrpSel) mrpSel.value = mrp;
 }
 
 function savePatientEdit(pid) {
@@ -3268,24 +3274,22 @@ function addPatient() {
   }
 
   var p = {
-    id:        'p' + Date.now(),
-    last:      last,
-    first:     gv('f-first'),
-    phn:       phn,
-    dob:       gv('f-dob'),
-    sex:       gv('f-sex'),
-    ward:      ward,
-    bed:       gv('f-bed'),
-    fac:       'OA040',
-    refby:     gv('f-refby-num') || gv('f-refby'),  // f-refby = doctor # from search
-    refbyName: gv('f-refby-name'),
-    care:      gv('f-care') || (gv('f-role')==='mrp' ? 'daily' : 'directive'),
-    list:      gv('f-list'),
-    role:       gv('f-role') || 'consultant',
-    mrpService: gv('f-mrp-service') || '',
-    icd:       icd,
-    role:      gv('f-role'),
-    mrp:       gv('f-mrp'),
+    id:           'p' + Date.now(),
+    last:         last,
+    first:        gv('f-first'),
+    phn:          phn,
+    dob:          gv('f-dob'),
+    sex:          gv('f-sex'),
+    ward:         ward,
+    bed:          gv('f-bed'),
+    fac:          'OA040',
+    refby:        gv('f-refby-num') || gv('f-refby'),
+    refbyName:    gv('f-refby-name'),
+    role:         gv('f-role')   || 'consultant',
+    mrp:          gv('f-mrp')    || 'Cardiology',
+    list:         gv('f-list')   || 'on',
+    care:         gv('f-care')   || (gv('f-role') === 'mrp' ? 'daily' : 'directive'),
+    icd:          icd,
     roundedToday: null,
     needsSticker: !phn
   };
@@ -3311,72 +3315,73 @@ function openAdd(ward, bed) {
   nav(1, document.querySelectorAll('.nb')[1]);
 }
 
+// ── Role/MRP/List linking rules (v1.10.0) ─────────────
+// Role and MRP service are bidirectionally locked:
+//   Role=MRP  ⇔ MRPservice=Cardiology
+//   Role=Consulting ⇔ MRPservice=anything except Cardiology
+// On/Off service auto-snaps when role/MRP changes, but is independent
+// once the user manually toggles it.
+
 function mrpChange() {
-  // If doctor selects Cardiology → snap role to MRP
-  // If doctor selects anything else → snap role to Consulting
-  var mrp    = (document.getElementById('f-mrp') || {}).value || '';
+  var mrpSel  = document.getElementById('f-mrp');
   var roleSel = document.getElementById('f-role');
-  if (!roleSel) return;
-  if (mrp === 'Cardiology') {
+  var listSel = document.getElementById('f-list');
+  var careFld = document.getElementById('f-care');
+  var ward    = gv('f-ward');
+  if (!mrpSel || !roleSel) return;
+  var icuWards = ['CCU','CSICU','ICUA','ICUB'];
+  if (mrpSel.value === 'Cardiology') {
     roleSel.value = 'mrp';
+    if (listSel) listSel.value = 'on';
+    if (careFld) careFld.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
   } else {
     roleSel.value = 'consultant';
+    if (listSel) listSel.value = 'off';
+    if (careFld) careFld.value = 'directive';
   }
-  roleChange(); // snap list/care accordingly
 }
 
 function roleChange() {
-  var role   = gv('f-role');
-  var ward   = gv('f-ward');
-  var wdef   = WARDS[ward] || {};
-  var mrpSel = document.getElementById('f-mrp');
-
-  if (role === 'mrp') {
-    // Cardiology IS the MRP — auto-fill "Cardiology", On Service, CCU/daily care
-    if (mrpSel) mrpSel.value = 'Cardiology';
-    document.getElementById('f-list').value = 'on';
-    var icuWards = ['CCU','CSICU','ICUA','ICUB'];
-    document.getElementById('f-care').value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
+  var roleSel = document.getElementById('f-role');
+  var mrpSel  = document.getElementById('f-mrp');
+  var listSel = document.getElementById('f-list');
+  var careFld = document.getElementById('f-care');
+  var ward    = gv('f-ward');
+  if (!roleSel || !mrpSel) return;
+  var icuWards = ['CCU','CSICU','ICUA','ICUB'];
+  if (roleSel.value === 'mrp') {
+    mrpSel.value = 'Cardiology';
+    if (listSel) listSel.value = 'on';
+    if (careFld) careFld.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
   } else {
-    // Consulting — MRP is another service, default to "Other"
-    if (mrpSel && mrpSel.value === 'Cardiology') mrpSel.value = 'Other';
-    if (wdef.list) document.getElementById('f-list').value = wdef.list;
-    if (wdef.care) document.getElementById('f-care').value = wdef.care;
+    if (mrpSel.value === 'Cardiology') mrpSel.value = 'Other';
+    if (listSel) listSel.value = 'off';
+    if (careFld) careFld.value = 'directive';
   }
 }
 
 function wardChange() {
   var w    = gv('f-ward');
   var wdef = WARDS[w] || {};
-  document.getElementById('bed-lbl').textContent = w === 'CCU' ? 'Bed #' : 'Room';
-
+  var bedLbl = document.getElementById('bed-lbl');
+  if (bedLbl) bedLbl.textContent = w === 'CCU' ? 'Bed #' : 'Room';
   // Build room options — filter occupied CCU beds
   var rooms = (wdef.rooms || []).slice();
   if (w === 'CCU') {
-    var occ = st.patients.filter(function(p) { return p.ward === 'CCU'; }).map(function(p) { return String(p.bed); });
-    rooms = rooms.filter(function(r) { return !occ.includes(String(r)); });
+    var occ = st.patients.filter(function(p) { return p.ward === 'CCU' && !p.discharged; }).map(function(p) { return String(p.bed); });
+    rooms = rooms.filter(function(r) { return occ.indexOf(String(r)) === -1; });
   }
-
-  var sel = document.getElementById('f-bed');
-  sel.innerHTML = '<option value="">— select —</option>' +
-    rooms.map(function(r) { return '<option value="' + r + '">' + r + '</option>'; }).join('');
-
-  // Set default list and care type — role overrides ward defaults
-  var role = gv('f-role');
-  if (role === 'mrp') {
+  var bedSel = document.getElementById('f-bed');
+  if (bedSel) {
+    bedSel.innerHTML = '<option value="">— select —</option>' +
+      rooms.map(function(r) { return '<option value="' + r + '">' + r + '</option>'; }).join('');
+  }
+  // Re-apply role rules (CCU vs daily care depends on ward)
+  var roleSel = document.getElementById('f-role');
+  if (roleSel && roleSel.value === 'mrp') {
+    var careFld  = document.getElementById('f-care');
     var icuWards = ['CCU','CSICU','ICUA','ICUB'];
-    document.getElementById('f-care').value = icuWards.indexOf(w) !== -1 ? 'ccu' : 'daily';
-    document.getElementById('f-list').value = 'on';
-    var mrpS = document.getElementById('f-mrp'); if(mrpS) mrpS.value = 'Cardiology';
-  } else {
-    if (wdef.list) document.getElementById('f-list').value = wdef.list;
-    if (wdef.care) document.getElementById('f-care').value = wdef.care;
-    var mrpS2 = document.getElementById('f-mrp'); if(mrpS2 && mrpS2.value === 'Cardiology') mrpS2.value = 'Other';
-  }
-  if (wdef.role) {
-    var roleEl = document.getElementById('f-role');
-    if (roleEl) roleEl.value = wdef.role;
-  var roleEl = document.getElementById('f-role'); if(roleEl && wdef.role) roleEl.value = wdef.role;
+    if (careFld) careFld.value = icuWards.indexOf(w) !== -1 ? 'ccu' : 'daily';
   }
 }
 
@@ -3385,18 +3390,16 @@ function clearAddForm() {
   ['f-last','f-first','f-phn','f-dob','f-ref-search','f-icd-search'].forEach(function(id) {
     var el = document.getElementById(id); if (el) el.value = '';
   });
-  document.getElementById('f-refby').value      = '';
+  document.getElementById('f-refby').value       = '';
   document.getElementById('f-refby-name').value  = '';
   document.getElementById('f-refby-num').value   = '';
   document.getElementById('f-icd').value         = '';
   document.getElementById('f-sex').value         = '';
-  var el = document.getElementById('f-icd-search'); if(el) el.value = '';
-  var mrpEl = document.getElementById('f-mrp'); if(mrpEl) mrpEl.value = '';
-  var roleEl = document.getElementById('f-role'); if(roleEl) roleEl.value = 'consultant';
-  var mrpSel = document.getElementById('f-mrp'); if(mrpSel) mrpSel.value = 'Other';
-  document.getElementById('f-icd').value = '';
-  var roleEl = document.getElementById('f-role'); if(roleEl) roleEl.value = 'consultant';
-  var svcEl = document.getElementById('f-mrp-service'); if(svcEl) svcEl.value = '';
+  // New patient defaults: Cardiology MRP, On Service
+  var roleEl = document.getElementById('f-role'); if (roleEl) roleEl.value = 'mrp';
+  var mrpEl  = document.getElementById('f-mrp');  if (mrpEl)  mrpEl.value  = 'Cardiology';
+  var listEl = document.getElementById('f-list'); if (listEl) listEl.value = 'on';
+  var careEl = document.getElementById('f-care'); if (careEl) careEl.value = 'daily';
   document.getElementById('f-ref-dd').style.display = 'none';
   document.getElementById('ocr-bar').style.display  = 'none';
   resetPhotoZone();
@@ -3728,25 +3731,6 @@ function handleOCRResult(data, bar) {
   }
 }
 
-function testApiKey() {
-  var bar = document.getElementById('ocr-bar');
-  if (!SHEETS_URL) {
-    alert('No SHEETS_URL configured');
-    return;
-  }
-  if (bar) bar.textContent = 'Testing connection...';
-  fetch(SHEETS_URL + '?action=getAll&key=kgh2026')
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      var msg = d.error
-        ? 'Error: ' + d.error
-        : '✓ Connected — ' + (d.patients ? d.patients.length + ' patients' : 'OK');
-      if (bar) bar.innerHTML = '<span style="color:' + (d.error ? 'var(--red-t)' : 'var(--green-t)') + ';font-weight:700">' + msg + '</span>';
-    })
-    .catch(function(e) {
-      if (bar) bar.innerHTML = '<span style="color:var(--red-t);font-weight:700">Failed: ' + e.toString() + '</span>';
-    });
-}
 
 // ── 10_location.js ──
 // ═══════════════════════════════════════════════════════
