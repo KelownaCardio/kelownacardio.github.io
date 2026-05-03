@@ -1958,7 +1958,7 @@ function wardActBtns(p) {
 
 function showsCCUDaily(p) {
   // CCU daily shows when cardiology is MRP (role=mrp) on CCU/ICU wards
-  var icuWards = ['CCU','CSICU','ICUA','ICUB'];
+  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
   if (icuWards.indexOf(p.ward) === -1) return false;
   return p.role === 'mrp' || p.care === 'ccu'; // support both old and new field
 }
@@ -3385,7 +3385,7 @@ function roleChange() {
   var careFld = document.getElementById('f-care');
   var ward    = gv('f-ward');
   if (!roleSel || !mrpSel) return;
-  var icuWards = ['CCU','CSICU','ICUA','ICUB'];
+  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
   if (roleSel.value === 'mrp') {
     mrpSel.value = 'Cardiology';
     if (listSel) listSel.value = 'on';
