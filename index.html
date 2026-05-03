@@ -520,7 +520,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v1.10.0</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.0</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -606,13 +606,14 @@ input[type=file] { display:none; }
     <!-- Row 1: Location + Bed -->
     <div class="fl">
       <div class="f1"><label>Ward</label>
-        <select id="f-ward" onchange="wardChange()">
-          <option value="CCU">CCU</option>
-          <option value="2S">Ward 2S</option>
-          <option value="2W">Ward 2W</option>
+<select id="f-ward" onchange="wardChange()">
+          <option value="CCU">CICU</option>
+          <option value="2S">2S</option>
+          <option value="2W">2W</option>
           <option value="CSICU">CSICU</option>
           <option value="ICUA">ICU A</option>
           <option value="ICUB">ICU B</option>
+          <option value="ICUD">ICU D</option>
           <option value="ED">ED</option>
           <option value="3E">3E</option>
           <option value="3W">3W</option>
@@ -623,6 +624,11 @@ input[type=file] { display:none; }
           <option value="5B">5B</option>
           <option value="OTHER">Other</option>
         </select>
+        <div id="f-ward-other-wrap" style="display:none;margin-top:-3px">
+          <input id="f-ward-other" placeholder="Enter ward name…" autocorrect="off" autocapitalize="words"
+            style="margin-bottom:4px" oninput="wardOtherInput(this)">
+          <button type="button" onclick="saveCustomWard()" style="padding:5px 12px;font-size:11px;font-weight:700;border:.5px solid var(--border2);border-radius:var(--rpill);background:var(--blue-bg);color:var(--blue-t);cursor:pointer;font-family:inherit">Save to list</button>
+        </div>
       </div>
       <div class="f1"><label id="bed-lbl">Bed / room</label><select id="f-bed"></select></div>
     </div>
@@ -884,12 +890,14 @@ var DOCTORS_SEED = [
 
 // Ward definitions: label, default list, default care type, preset rooms
 var WARDS = {
-  CCU:  { label:'CCU',      list:'on',  care:'ccu',      role:'mrp',       rooms:['1','2','3','4','5','6','7','8'] },
-  '2S': { label:'Ward 2S',  list:'on',  care:'daily',    role:'mrp',     rooms:['217A','218','219','220','221','222A','223','224','225A','225B','226A','226B','227','228','229','230','231','232','233','234','Hallway 1','Hallway 2'] },
-  '2W': { label:'Ward 2W',  list:'on',  care:'daily',    role:'mrp',     rooms:['201','202','203','204','205','206','207','208','209','210','211','212','213'] },
+  var WARDS = {
+  CCU:  { label:'CICU',     list:'on',  care:'ccu',      role:'mrp',       rooms:['1','2','3','4','5','6','7','8'] },
+  '2S': { label:'2S',       list:'on',  care:'daily',    role:'mrp',     rooms:['217A','218','219','220','221','222A','223','224','225A','225B','226A','226B','227','228','229','230','231','232','233','234','Hallway 1','Hallway 2'] },
+  '2W': { label:'2W',       list:'on',  care:'daily',    role:'mrp',     rooms:['201','202','203','204','205','206','207','208','209','210','211','212','213'] },
   CSICU:{ label:'CSICU',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
   ICUA: { label:'ICU A',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
   ICUB: { label:'ICU B',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
+  ICUD: { label:'ICU D',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
   ED:   { label:'ED',       list:'off', care:'directive', role:'consultant', rooms:['Resus 1','Resus 2','Bay 1','Bay 2','Bay 3','Bay 4','Other'] },
   '3E': { label:'3E',       list:'off', care:'directive', role:'consultant', rooms:[] },
   '3W': { label:'3W',       list:'off', care:'directive', role:'consultant', rooms:[] },
@@ -2157,7 +2165,7 @@ function _openClaimScreen(pid) {
           wardLabel(p.ward) + (p.bed ? ' Rm ' + p.bed : '') +
           ' &bull; ' + mrpLabel(p) +
           (!p.phn ? ' &bull; <span style="color:var(--amber-t);font-weight:700">⚠ no PHN</span>' : '') +
-          ' &bull; ICD-9 ' + esc(p.icd || '—') +
+         ' &bull; ' + icdShortLabel(p.icd) +
         '</div>' +
       '</div>' +
       '<button class="ctx-edit-btn" data-pid="' + p.id + '" onclick="ctxEditBtn(this)" title="Edit patient">' +
@@ -2505,7 +2513,7 @@ function openPatientSummary(pid) {
         html +=     '<span style="font-size:11px;font-weight:700;font-family:monospace;' +
                     'background:' + (isCCU ? 'var(--red-bg)' : 'var(--blue-bg)') + ';' +
                     'color:' + (isCCU ? 'var(--red-t)' : 'var(--blue-t)') + ';' +
-                    'padding:2px 6px;border-radius:4px">' + esc(c.fee === 'CCU_DAILY' ? 'CCU tap' : c.fee) + '</span>';
+                    'padding:2px 6px;border-radius:4px">' + esc(c.fee === 'CCU_DAILY' ? '1411/21/31' : c.fee) + '</span>';
         if (c.units && c.units > 1) html += '<div style="font-size:9px;color:var(--text3);margin-top:2px">×' + c.units + '</div>';
         html +=   '</div>';
 
@@ -2537,6 +2545,15 @@ function openPatientSummary(pid) {
 
   document.getElementById('pt-summary-content').innerHTML = html;
   showModal('pt-summary-modal');
+}
+
+// Get short ICD-9 label: "Description (code)"
+function icdShortLabel(code) {
+  if (!code) return '—';
+  var dx = DIAGNOSES.find(function(d) { return d.code === code; });
+  if (!dx) return 'ICD-9 ' + code;
+  // label is already "Description (code)" format e.g. "NSTEMI (410)"
+  return dx.label;
 }
 
 // Get short human label for a fee code
@@ -2605,10 +2622,19 @@ function openClaimEdit(btn) {
 
   var curDx = DIAGNOSES.find(function(d) { return d.code === c.icd; });
 
+  // Build doctor options for performing physician selector
+  var docOptions = st.doctors.map(function(d) {
+    return '<option value="' + esc(d.alias) + '"' + (c.alias === d.alias ? ' selected' : '') + '>' +
+           esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
+  }).join('');
+
   var html =
     '<div style="font-size:14px;font-weight:800;margin-bottom:12px">Edit claim — ' + esc(p.last) + ', ' + esc(p.first) + '</div>' +
-    '<div style="font-size:11px;color:var(--text3);margin-bottom:14px">Date: ' + esc(c.date) + ' &bull; Dr. ' + esc(c.alias || '') + '</div>' +
     '<div class="card" style="padding:12px">' +
+      '<label>Date</label>' +
+      '<input id="ce-date" value="' + esc(c.date || '') + '" placeholder="DD/MM/YYYY" autocorrect="off" style="margin-bottom:7px">' +
+      '<label>Performing physician</label>' +
+      '<select id="ce-alias" style="margin-bottom:7px">' + docOptions + '</select>' +
       '<label>Fee code</label>' + feeSelect +
       '<label style="margin-top:10px">Diagnosis</label>' +
       '<input id="ce-icd-search" value="' + esc(curDx ? curDx.label : (c.icd || '')) + '" ' +
@@ -2616,6 +2642,8 @@ function openClaimEdit(btn) {
       'data-dd="ce-icd-dd" data-hidden="ce-icd" oninput="icdSearchEl(this)" onfocus="icdSearchEl(this)">' +
       '<input id="ce-icd" type="hidden" value="' + esc(c.icd || '') + '">' +
       '<div class="ref-dd" id="ce-icd-dd"></div>' +
+      '<label style="margin-top:10px">Notes</label>' +
+      '<input id="ce-notes" value="' + esc(c.notes || '') + '" placeholder="Optional notes…" autocorrect="off">' +
     '</div>' +
     '<div style="display:flex;gap:8px;margin-top:12px">' +
       '<button class="btn btn-p" style="margin:0;flex:1" data-cid="' + cid + '" data-pid="' + pid + '" onclick="saveClaimEdit(this)">Save</button>' +
@@ -2633,12 +2661,22 @@ function saveClaimEdit(btn) {
   var p   = getP(pid);
   if (!c) return;
 
-  var newFee = document.getElementById('ce-fee').value;
-  var newIcd = document.getElementById('ce-icd').value || c.icd;
+var newFee   = document.getElementById('ce-fee').value;
+  var newIcd   = document.getElementById('ce-icd').value || c.icd;
+  var newAlias = document.getElementById('ce-alias').value;
+  var newDate  = (document.getElementById('ce-date') || {}).value || c.date;
+  var newNotes = (document.getElementById('ce-notes') || {}).value || '';
 
   c.fee     = newFee;
   c.feeCode = newFee;
   c.icd     = newIcd;
+  c.date    = newDate;
+  c.notes   = newNotes;
+  if (newAlias) {
+    var doc = st.doctors.find(function(d) { return d.alias === newAlias; });
+    c.alias  = newAlias;
+    c.docnum = doc ? (doc.num || c.docnum) : c.docnum;
+  }
 
   sv('claims', st.claims);
   if (SHEETS_URL) push('saveClaim', c);
@@ -2814,7 +2852,7 @@ function peWardChange() {
   var roleSel = document.getElementById('pe-role');
   if (roleSel && roleSel.value === 'mrp') {
     var careFld  = document.getElementById('pe-care');
-    var icuWards = ['CCU','CSICU','ICUA','ICUB'];
+    var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
     if (careFld) careFld.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
   }
 }
@@ -2827,7 +2865,7 @@ function peRoleChange() {
   var careFld = document.getElementById('pe-care');
   var ward    = (document.getElementById('pe-ward') || {}).value || '';
   if (!roleSel || !mrpSel) return;
-  var icuWards = ['CCU','CSICU','ICUA','ICUB'];
+  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
   if (roleSel.value === 'mrp') {
     mrpSel.value = 'Cardiology';
     if (listSel) listSel.value = 'on';
@@ -2846,7 +2884,7 @@ function peMrpChange() {
   var careFld = document.getElementById('pe-care');
   var ward    = (document.getElementById('pe-ward') || {}).value || '';
   if (!mrpSel || !roleSel) return;
-  var icuWards = ['CCU','CSICU','ICUA','ICUB'];
+  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
   if (mrpSel.value === 'Cardiology') {
     roleSel.value = 'mrp';
     if (listSel) listSel.value = 'on';
@@ -3329,7 +3367,7 @@ function mrpChange() {
   var careFld = document.getElementById('f-care');
   var ward    = gv('f-ward');
   if (!mrpSel || !roleSel) return;
-  var icuWards = ['CCU','CSICU','ICUA','ICUB'];
+  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
   if (mrpSel.value === 'Cardiology') {
     roleSel.value = 'mrp';
     if (listSel) listSel.value = 'on';
@@ -3365,6 +3403,11 @@ function wardChange() {
   var wdef = WARDS[w] || {};
   var bedLbl = document.getElementById('bed-lbl');
   if (bedLbl) bedLbl.textContent = w === 'CCU' ? 'Bed #' : 'Room';
+
+  // Show/hide Other text field
+  var otherWrap = document.getElementById('f-ward-other-wrap');
+  if (otherWrap) otherWrap.style.display = w === 'OTHER' ? 'block' : 'none';
+
   // Build room options — filter occupied CCU beds
   var rooms = (wdef.rooms || []).slice();
   if (w === 'CCU') {
@@ -3380,9 +3423,43 @@ function wardChange() {
   var roleSel = document.getElementById('f-role');
   if (roleSel && roleSel.value === 'mrp') {
     var careFld  = document.getElementById('f-care');
-    var icuWards = ['CCU','CSICU','ICUA','ICUB'];
+    var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
     if (careFld) careFld.value = icuWards.indexOf(w) !== -1 ? 'ccu' : 'daily';
   }
+}
+
+function wardOtherInput(inp) {
+  // Just keep the text field visible; saving happens on button click
+}
+
+function saveCustomWard() {
+  var name = (document.getElementById('f-ward-other') || {}).value || '';
+  name = name.trim();
+  if (!name) { showToast('Enter a ward name'); return; }
+  // Generate a key: uppercase, no spaces, max 8 chars
+  var key = name.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8) || 'CUSTOM';
+  // Avoid collisions
+  if (WARDS[key]) key = key + '2';
+  if (!WARDS[key]) {
+    WARDS[key] = { label:name, list:'off', care:'directive', role:'consultant', rooms:[] };
+    // Add to all ward selects on the page
+    ['f-ward','pe-ward'].forEach(function(selId) {
+      var sel = document.getElementById(selId);
+      if (!sel) return;
+      // Insert before the existing OTHER option
+      var otherOpt = sel.querySelector('option[value="OTHER"]');
+      var newOpt = document.createElement('option');
+      newOpt.value = key; newOpt.text = name;
+      if (otherOpt) sel.insertBefore(newOpt, otherOpt);
+      else sel.appendChild(newOpt);
+    });
+    showToast(name + ' added to ward list');
+  }
+  // Select the new ward
+  var fWard = document.getElementById('f-ward');
+  if (fWard) { fWard.value = key; wardChange(); }
+  var otherWrap = document.getElementById('f-ward-other-wrap');
+  if (otherWrap) otherWrap.style.display = 'none';
 }
 
 
