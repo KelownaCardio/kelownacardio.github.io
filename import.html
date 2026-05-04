@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KGH Cardio · Meditech Bulk Import</title>
+<style>
+  :root {
+    --bg: #f4f4f1;
+    --panel: #ffffff;
+    --ink: #15171a;
+    --ink-soft: #5b6068;
+    --line: #d8d6cf;
+    --line-soft: #e8e6df;
+    --accent: #1f4d3f;
+    --accent-soft: #e3ede9;
+    --warn: #8a5a00;
+    --warn-soft: #fbf0d6;
+    --new: #1f4d3f;
+    --new-soft: #e3ede9;
+    --update: #2a4a7f;
+    --update-soft: #e1e8f4;
+    --error: #9c2424;
+    --error-soft: #f8e3e3;
+    --on: #1a5fa8;
+    --on-soft: #d9e7f5;
+    --mono: ui-monospace, 'SF Mono', 'Menlo', 'Consolas', monospace;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 1320px; margin: 0 auto; padding: 32px 24px 80px; }
+  header {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 16px; margin-bottom: 24px;
+  }
+  h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+  h1 .sub { color: var(--ink-soft); font-weight: 400; margin-left: 8px; }
+  .meta {
+    font-family: var(--mono); font-size: 11px; color: var(--ink-soft);
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 4px; padding: 20px; margin-bottom: 16px;
+  }
+  .step-label {
+    font-family: var(--mono); font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--ink-soft); margin-bottom: 12px;
+  }
+  .step-label .num {
+    display: inline-block; width: 18px; height: 18px; line-height: 18px;
+    text-align: center; background: var(--ink); color: var(--bg);
+    border-radius: 50%; margin-right: 6px;
+  }
+  .drop {
+    border: 2px dashed var(--line); border-radius: 4px;
+    padding: 40px 20px; text-align: center; cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    display: block;
+  }
+  .drop:hover, .drop.drag {
+    border-color: var(--accent); background: var(--accent-soft);
+  }
+  .drop input { display: none; }
+  .drop .big { font-size: 16px; margin-bottom: 4px; }
+  .drop .small { color: var(--ink-soft); font-size: 13px; }
+  .file-info {
+    display: none; align-items: center; justify-content: space-between;
+    padding: 12px 16px; background: var(--accent-soft);
+    border: 1px solid var(--accent); border-radius: 4px;
+    font-family: var(--mono); font-size: 13px; margin-top: 12px;
+  }
+  .file-info.shown { display: flex; }
+  .file-info .clear {
+    background: none; border: none; color: var(--accent); cursor: pointer;
+    font-family: var(--mono); font-size: 12px; text-decoration: underline;
+  }
+  .actions { display: flex; gap: 8px; margin-top: 16px; }
+  button.primary, button.secondary {
+    font-family: var(--sans); font-size: 14px; font-weight: 500;
+    padding: 10px 18px; border-radius: 4px; cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  button.primary {
+    background: var(--accent); color: white; border: 1px solid var(--accent);
+  }
+  button.primary:hover:not(:disabled) { background: #163a30; }
+  button.primary:disabled {
+    background: var(--line); color: var(--ink-soft);
+    border-color: var(--line); cursor: not-allowed;
+  }
+  button.secondary {
+    background: white; color: var(--ink); border: 1px solid var(--line);
+  }
+  button.secondary:hover { background: var(--bg); }
+  .status {
+    display: none; padding: 12px 16px; border-radius: 4px;
+    margin-top: 12px; font-size: 13px; font-family: var(--mono);
+  }
+  .status.shown { display: block; }
+  .status.info { background: var(--update-soft); color: var(--update); border: 1px solid var(--update); }
+  .status.error { background: var(--error-soft); color: var(--error); border: 1px solid var(--error); }
+  .status.success { background: var(--new-soft); color: var(--new); border: 1px solid var(--new); }
+  .table-wrap { overflow-x: auto; margin-top: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line);
+    font-weight: 600; font-family: var(--mono); font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-soft);
+    background: var(--bg); position: sticky; top: 0;
+  }
+  td {
+    padding: 8px 10px; border-bottom: 1px solid var(--line-soft);
+    vertical-align: middle;
+  }
+  tr.skipped td { opacity: 0.4; }
+  tr:hover td { background: var(--bg); }
+  td input[type="checkbox"] { cursor: pointer; transform: scale(1.1); }
+  td.name { font-weight: 500; }
+  td.mono { font-family: var(--mono); font-size: 12px; }
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 3px;
+    font-family: var(--mono); font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.05em; font-weight: 600; white-space: nowrap;
+  }
+  .badge.new { background: var(--new-soft); color: var(--new); }
+  .badge.update { background: var(--update-soft); color: var(--update); }
+  .badge.on { background: var(--on-soft); color: var(--on); }
+  .badge.off { background: var(--bg); color: var(--ink-soft); border: 1px solid var(--line); }
+  .badge.warn { background: var(--warn-soft); color: var(--warn); }
+  .summary {
+    display: flex; gap: 24px; padding: 16px 20px;
+    background: var(--bg); border-radius: 4px; margin-bottom: 16px;
+    font-family: var(--mono); font-size: 12px;
+  }
+  .summary .stat { display: flex; flex-direction: column; gap: 2px; }
+  .summary .stat .n { font-size: 22px; font-weight: 600; color: var(--ink); }
+  .summary .stat .l {
+    color: var(--ink-soft); text-transform: uppercase;
+    letter-spacing: 0.05em; font-size: 10px;
+  }
+  .preview-section { display: none; }
+  .preview-section.shown { display: block; }
+  .log {
+    font-family: var(--mono); font-size: 11px;
+    background: var(--ink); color: #c4d4cc;
+    padding: 14px 16px; border-radius: 4px; margin-top: 12px;
+    max-height: 200px; overflow-y: auto;
+    white-space: pre-wrap; line-height: 1.6;
+  }
+  .log .ok { color: #7fc69e; }
+  .log .err { color: #ff8888; }
+  .log .info { color: #88aacc; }
+  .hint { color: var(--ink-soft); font-size: 12px; margin-top: 8px; }
+  .spinner {
+    display: inline-block; width: 12px; height: 12px;
+    border: 2px solid currentColor; border-top-color: transparent;
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+    margin-right: 6px; vertical-align: -1px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Meditech Bulk Import <span class="sub">/ SB Rounds List</span></h1>
+    <div class="meta">KGH CARDIO · v1</div>
+  </header>
+
+  <div class="panel">
+    <div class="step-label"><span class="num">1</span>Upload SB Rounds List PDF</div>
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept="application/pdf,image/png,image/jpeg">
+      <div class="big">Drop PDF here or click to browse</div>
+      <div class="small">Meditech &rarr; SB Rounds List &rarr; Print to PDF &rarr; upload here.</div>
+    </label>
+    <div class="file-info" id="fileInfo">
+      <span id="fileName"></span>
+      <button class="clear" id="clearFile">Remove</button>
+    </div>
+    <div class="actions">
+      <button class="primary" id="parseBtn" disabled>Parse with AI</button>
+    </div>
+    <div class="status" id="parseStatus"></div>
+  </div>
+
+  <div class="panel preview-section" id="previewPanel">
+    <div class="step-label"><span class="num">2</span>Review parsed patients</div>
+    <div class="summary" id="summary"></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 30px;"><input type="checkbox" id="selectAll" checked></th>
+            <th>Action</th>
+            <th>Name</th>
+            <th>PHN</th>
+            <th>DOB</th>
+            <th>Sex</th>
+            <th>Ward</th>
+            <th>Bed</th>
+            <th>Admitted</th>
+            <th>Role</th>
+            <th>List</th>
+            <th>MRP</th>
+            <th>Meditech MRP (refbyName)</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="actions">
+      <button class="primary" id="commitBtn">Commit to Google Sheet</button>
+      <button class="secondary" id="cancelBtn">Cancel</button>
+    </div>
+    <div class="hint">
+      Selected rows are added (new) or have <strong>ward/bed updated only</strong> (existing PHN match).
+      Existing patients keep their current role, MRP, list, ICD, and referrer.
+    </div>
+    <div class="status" id="commitStatus"></div>
+    <div class="log" id="log" style="display:none;"></div>
+  </div>
+</div>
+
+<script>
+// ───────── CONFIG ─────────
+const WORKER_URL       = 'https://kgh-ocr.kathrynb77.workers.dev';
+const APPS_SCRIPT_URL  = 'https://script.google.com/macros/s/AKfycbzQOQa6dZCCyXu15jvkyUTFghtnhGzZFj4NZ4uyczxLov72zj8qNZIgk9pzL4i8Dfuy5Q/exec';
+const SHARED_KEY       = 'kgh2026';
+const DEFAULT_DOCTOR   = 'KBrown';
+
+// ───────── STATE ─────────
+let selectedFile = null;
+let parsedPatients = [];
+
+// ───────── DOM ─────────
+const dropEl         = document.getElementById('drop');
+const fileInput      = document.getElementById('file');
+const fileInfoEl     = document.getElementById('fileInfo');
+const fileNameEl     = document.getElementById('fileName');
+const clearFileBtn   = document.getElementById('clearFile');
+const parseBtn       = document.getElementById('parseBtn');
+const parseStatusEl  = document.getElementById('parseStatus');
+const previewPanel   = document.getElementById('previewPanel');
+const summaryEl      = document.getElementById('summary');
+const rowsEl         = document.getElementById('rows');
+const selectAllEl    = document.getElementById('selectAll');
+const commitBtn      = document.getElementById('commitBtn');
+const cancelBtn      = document.getElementById('cancelBtn');
+const commitStatusEl = document.getElementById('commitStatus');
+const logEl          = document.getElementById('log');
+
+// ───────── FILE HANDLING ─────────
+function setFile(file) {
+  if (!file) return;
+  selectedFile = file;
+  fileNameEl.textContent =
+    `${file.name}  ·  ${(file.size/1024).toFixed(0)} KB  ·  ${file.type || 'unknown'}`;
+  fileInfoEl.classList.add('shown');
+  parseBtn.disabled = false;
+  hideStatus(parseStatusEl);
+}
+fileInput.addEventListener('change', e => setFile(e.target.files[0]));
+dropEl.addEventListener('dragover', e => { e.preventDefault(); dropEl.classList.add('drag'); });
+dropEl.addEventListener('dragleave', () => dropEl.classList.remove('drag'));
+dropEl.addEventListener('drop', e => {
+  e.preventDefault();
+  dropEl.classList.remove('drag');
+  setFile(e.dataTransfer.files[0]);
+});
+clearFileBtn.addEventListener('click', e => {
+  e.preventDefault();
+  selectedFile = null;
+  fileInput.value = '';
+  fileInfoEl.classList.remove('shown');
+  parseBtn.disabled = true;
+});
+
+// ───────── PARSE ─────────
+parseBtn.addEventListener('click', async () => {
+  if (!selectedFile) return;
+  parseBtn.disabled = true;
+  showStatus(parseStatusEl, 'info', '<span class="spinner"></span>Reading file…');
+
+  try {
+    const base64 = await fileToBase64(selectedFile);
+    const mediaType = selectedFile.type || 'application/pdf';
+
+    showStatus(parseStatusEl, 'info', '<span class="spinner"></span>AI parsing patient list (~15–30 seconds)…');
+
+    const resp = await fetch(WORKER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: base64, mediaType, mode: 'sbrounds' })
+    });
+
+    if (!resp.ok) {
+      const txt = await resp.text();
+      throw new Error(`Worker error ${resp.status}: ${txt.slice(0, 200)}`);
+    }
+    const data = await resp.json();
+    if (!data.patients || !Array.isArray(data.patients)) {
+      throw new Error('Unexpected response: ' + JSON.stringify(data).slice(0, 200));
+    }
+
+    parsedPatients = data.patients;
+    showStatus(parseStatusEl, 'success',
+      `Parsed ${parsedPatients.length} patients. Review below before committing.`);
+    parseBtn.disabled = false;
+    await renderPreview();
+  } catch (err) {
+    console.error(err);
+    showStatus(parseStatusEl, 'error', 'Parse failed: ' + err.message);
+    parseBtn.disabled = false;
+  }
+});
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result.split(',')[1]);
+    r.onerror = () => reject(new Error('Could not read file'));
+    r.readAsDataURL(file);
+  });
+}
+
+// ───────── PREVIEW ─────────
+async function renderPreview() {
+  // Fetch existing patients for client-side new/update preview
+  let existing = [];
+  try {
+    const r = await fetch(`${APPS_SCRIPT_URL}?key=${SHARED_KEY}&action=listPatients`);
+    if (r.ok) {
+      const j = await r.json();
+      existing = j.patients || [];
+    }
+  } catch (e) {
+    console.warn('Could not fetch existing patients for dedup:', e);
+  }
+
+  // Match by PHN
+  const phnMap = new Map();
+  existing.forEach(p => {
+    const phn = String(p.phn || '').trim();
+    if (phn) phnMap.set(phn, p);
+  });
+
+  let newCount = 0, updateCount = 0;
+  rowsEl.innerHTML = '';
+
+  parsedPatients.forEach((p, i) => {
+    const phn = String(p.phn || '').trim();
+    const match = phn ? phnMap.get(phn) : null;
+    p._action = match ? 'update' : 'new';
+    p._selected = true;
+    if (match) updateCount++; else newCount++;
+
+    const tr = document.createElement('tr');
+    tr.dataset.idx = i;
+    tr.innerHTML = `
+      <td><input type="checkbox" class="row-cb" data-idx="${i}" checked></td>
+      <td><span class="badge ${p._action}">${p._action === 'new' ? '+ New' : '↻ Loc'}</span></td>
+      <td class="name">${escapeHTML(p.last || '?')}, ${escapeHTML(p.first || '?')}</td>
+      <td class="mono">${escapeHTML(phn || '—')}</td>
+      <td class="mono">${escapeHTML(p.dob || '—')}</td>
+      <td>${escapeHTML(p.sex || '—')}</td>
+      <td class="mono">${escapeHTML(p.ward || '?')}</td>
+      <td class="mono">${escapeHTML(p.bed || '?')}</td>
+      <td class="mono">${escapeHTML(p.admitDate || '—')}</td>
+      <td>${escapeHTML(p.role || '?')}</td>
+      <td><span class="badge ${p.list === 'on' ? 'on' : 'off'}">${escapeHTML(p.list || '?')}</span></td>
+      <td>${escapeHTML(p.mrp || 'Other')}</td>
+      <td class="mono">${escapeHTML(p.refbyName || '—')}</td>
+    `;
+    rowsEl.appendChild(tr);
+  });
+
+  rowsEl.querySelectorAll('.row-cb').forEach(cb => {
+    cb.addEventListener('change', e => {
+      const idx = parseInt(e.target.dataset.idx, 10);
+      parsedPatients[idx]._selected = e.target.checked;
+      e.target.closest('tr').classList.toggle('skipped', !e.target.checked);
+    });
+  });
+
+  summaryEl.innerHTML = `
+    <div class="stat"><span class="n">${parsedPatients.length}</span><span class="l">Parsed</span></div>
+    <div class="stat"><span class="n">${newCount}</span><span class="l">New</span></div>
+    <div class="stat"><span class="n">${updateCount}</span><span class="l">Update location</span></div>
+    <div class="stat"><span class="n">${existing.length}</span><span class="l">In sheet</span></div>
+  `;
+  previewPanel.classList.add('shown');
+  previewPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+selectAllEl.addEventListener('change', e => {
+  const checked = e.target.checked;
+  rowsEl.querySelectorAll('.row-cb').forEach(cb => {
+    cb.checked = checked;
+    cb.dispatchEvent(new Event('change'));
+  });
+});
+
+cancelBtn.addEventListener('click', () => {
+  previewPanel.classList.remove('shown');
+  parsedPatients = [];
+  hideStatus(commitStatusEl);
+  logEl.style.display = 'none';
+  logEl.innerHTML = '';
+});
+
+// ───────── COMMIT ─────────
+commitBtn.addEventListener('click', async () => {
+  const selected = parsedPatients
+    .filter(p => p._selected)
+    .map(p => buildSheetPayload(p));
+
+  if (!selected.length) {
+    showStatus(commitStatusEl, 'error', 'Nothing selected.');
+    return;
+  }
+
+  commitBtn.disabled = true;
+  cancelBtn.disabled = true;
+  logEl.style.display = 'block';
+  logEl.innerHTML = '';
+  showStatus(commitStatusEl, 'info',
+    `<span class="spinner"></span>Writing ${selected.length} patients to Google Sheet…`);
+
+  log(`Sending ${selected.length} patients to Apps Script…`, 'info');
+
+  try {
+    // Apps Script doPost reads e.postData.contents, but Google's redirect
+    // path strips Content-Type for cross-origin POSTs; use text/plain to
+    // preserve the body (App Script will JSON.parse it).
+    const resp = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        key: SHARED_KEY,
+        action: 'bulkUpsertPatients',
+        patients: selected
+      })
+    });
+
+    if (!resp.ok) {
+      const txt = await resp.text();
+      throw new Error(`Apps Script ${resp.status}: ${txt.slice(0, 300)}`);
+    }
+    const result = await resp.json();
+    if (!result.ok) throw new Error(result.error || 'Unknown error');
+
+    log(`✓ Inserted: ${result.inserted}`, 'ok');
+    log(`✓ Updated:  ${result.updated}`, 'ok');
+    if (result.skipped) log(`· Skipped:  ${result.skipped}`, 'info');
+    if (result.errors && result.errors.length) {
+      result.errors.forEach(e => log(`✗ ${e}`, 'err'));
+    }
+
+    showStatus(commitStatusEl, 'success',
+      `Done. ${result.inserted} inserted, ${result.updated} updated. The mobile app will pick these up on next sync.`);
+    commitBtn.disabled = false;
+    cancelBtn.disabled = false;
+  } catch (err) {
+    console.error(err);
+    log(`✗ ${err.message}`, 'err');
+    showStatus(commitStatusEl, 'error', 'Commit failed: ' + err.message);
+    commitBtn.disabled = false;
+    cancelBtn.disabled = false;
+  }
+});
+
+// Build the patient object that goes into the sheet, matching the
+// exact shape the mobile app's addPatient() produces.
+function buildSheetPayload(p) {
+  return {
+    id:        'p' + Date.now() + Math.floor(Math.random() * 1000),
+    last:      p.last      || '',
+    first:     p.first     || '',
+    phn:       String(p.phn || '').trim(),
+    dob:       p.dob       || '',
+    sex:       p.sex       || '',
+    ward:      p.ward      || 'OTHER',
+    bed:       p.bed       || '',
+    fac:       'OA040',
+    refby:     '',                                 // numeric MSC blank — to be filled later
+    refbyName: p.refbyName || '',                  // raw Meditech MRP string
+    role:      p.role      || 'consultant',
+    mrp:       p.mrp       || 'Other',
+    list:      p.list      || 'off',
+    care:      '',                                 // app infers from role+ward
+    icd:       '',                                 // doctor sets when seen
+    admitDate: p.admitDate || '',
+    updatedBy: DEFAULT_DOCTOR
+  };
+}
+
+// ───────── HELPERS ─────────
+function showStatus(el, kind, html) {
+  el.className = `status shown ${kind}`;
+  el.innerHTML = html;
+}
+function hideStatus(el) { el.className = 'status'; }
+function escapeHTML(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function log(msg, kind) {
+  const span = document.createElement('div');
+  if (kind) span.className = kind;
+  span.textContent = msg;
+  logEl.appendChild(span);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+</script>
+</body>
+</html>
