@@ -520,7 +520,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.23</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.24</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -801,20 +801,10 @@ input[type=file] { display:none; }
     <div class="modal-title">Who are you?</div>
     <div style="font-size:12px;color:var(--text2);margin-top:-8px;margin-bottom:10px">Tap your name to sign in</div>
     <div id="doc-opts"></div>
-    <div class="divider"></div>
-    <div class="divider"></div>
-    <div class="card-title" style="margin-bottom:4px">Add or update MSP number</div>
-    <div style="font-size:11px;color:var(--text2);margin-bottom:8px">Enter your alias and MSP billing # to update your profile</div>
-    <div class="fl" style="gap:6px;margin-bottom:6px">
-      <input id="new-alias" placeholder="Alias (SB)" style="margin:0" maxlength="8" autocorrect="off" autocapitalize="characters">
-      <input id="new-num" placeholder="Doctor #" style="margin:0" inputmode="numeric" autocorrect="off">
-    </div>
-    <input id="new-name" placeholder="Dr. Full Name" style="margin-bottom:8px" autocorrect="off" autocapitalize="words">
-    <button class="btn btn-p" onclick="addDoctor()">Add and sign in</button>
-    <button class="btn btn-s" onclick="hideModal('doc-modal')">Cancel</button>
     <div class="divider" style="margin-top:14px"></div>
     <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Clear all local data and re-sync from Sheets. Use if your device is showing stale or test patients.</div>
     <button class="btn" style="background:var(--red-bg);color:var(--red-t);border:.5px solid var(--red-t);width:100%;margin:0" onclick="resetLocalData()">⚠ Reset local data &amp; re-sync</button>
+    <button class="btn btn-s" style="margin-top:8px" onclick="hideModal('doc-modal')">Cancel</button>
   </div>
 </div>
 
@@ -906,6 +896,29 @@ var DOCTORS_SEED = [
   { alias:'EMMassie',name:'Dr. Emma Massie'     },
   { alias:'SB',      name:'Dr. Sandy Baker'     },
 ];
+
+// mergeDoctors — returns the union of DOCTORS_SEED and a remote list,
+// keyed by alias. Remote values win for any field present (so an MSP
+// number set via saveDoctor is preserved), but every seeded alias is
+// guaranteed to appear in the result. This makes the doctor list
+// self-healing: even if Sheets only has 1 row written, we still show
+// all 11 entries.
+function mergeDoctors(remote) {
+  var byAlias = {};
+  // Start with the seed (gives every alias a guaranteed entry)
+  DOCTORS_SEED.forEach(function(d) {
+    byAlias[d.alias] = { id:'d'+d.alias, alias:d.alias, num:'', name:d.name };
+  });
+  // Overlay anything from the remote list (so MSP numbers etc. win)
+  if (Array.isArray(remote)) {
+    remote.forEach(function(rd) {
+      if (!rd || !rd.alias) return;
+      byAlias[rd.alias] = Object.assign(byAlias[rd.alias] || {}, rd);
+    });
+  }
+  // Return in seed order (so the sign-in modal shows them consistently)
+  return DOCTORS_SEED.map(function(d) { return byAlias[d.alias]; });
+}
 
 // Ward definitions: label, default list, default care type, preset rooms
 var WARDS = {
@@ -1610,12 +1623,9 @@ async function syncFromSheets() {
       st.claims = mergedClaims;
     }
 
-    // Doctors: only overwrite local if remote actually has entries.
-    // Without this guard, an empty Doctors tab on the sheet would wipe
-    // out the DOCTORS_SEED on first sync after a reset.
-    if (d.doctors && Array.isArray(d.doctors) && d.doctors.length > 0) {
-      st.doctors = d.doctors;
-    }
+    // Doctors: always merge with DOCTORS_SEED so all 11 are guaranteed
+    // present even if Sheets only has a partial list.
+    st.doctors = mergeDoctors(d.doctors);
     if (d.changelog) st.changelog = d.changelog;
 
     ['patients','claims','doctors','changelog'].forEach(function(k) { sv(k, st[k]); });
@@ -5653,18 +5663,11 @@ async function init() {
     document.getElementById('doc-label').textContent = st.doc.alias;
     document.getElementById('doc-dot').classList.add('on');
   }
-  // Seed doctor profiles on first launch.
-  // Push each up to Sheets too so the canonical list lives on the server
-  // and other devices pick them up via syncFromSheets without needing the seed.
-  if (!st.doctors.length) {
-    st.doctors = DOCTORS_SEED.map(function(d) {
-      return { id:'d'+d.alias, alias:d.alias, num:'', name:d.name };
-    });
-    sv('doctors', st.doctors);
-    if (SHEETS_URL) {
-      st.doctors.forEach(function(d) { push('saveDoctor', d); });
-    }
-  }
+  // Always merge local doctors with DOCTORS_SEED so all 11 app users
+  // are guaranteed to appear in the sign-in modal. mergeDoctors keeps
+  // any MSP numbers / customised fields from the remote/local lists.
+  st.doctors = mergeDoctors(st.doctors);
+  sv('doctors', st.doctors);
 
   // (test patients removed for live deployment)
     // Restore any custom wards saved from previous sessions
@@ -5718,18 +5721,10 @@ async function resetLocalData() {
       if (!d.error) {
         if (d.patients)  { st.patients  = d.patients;  sv('patients',  st.patients);  }
         if (d.claims)    { st.claims    = d.claims;    sv('claims',    st.claims);    }
-        // Doctors: only adopt remote if non-empty; otherwise re-seed from DOCTORS_SEED
-        if (d.doctors && d.doctors.length > 0) {
-          st.doctors = d.doctors;
-          sv('doctors', st.doctors);
-        } else {
-          st.doctors = DOCTORS_SEED.map(function(dd) {
-            return { id:'d'+dd.alias, alias:dd.alias, num:'', name:dd.name };
-          });
-          sv('doctors', st.doctors);
-          // Push the seed back up so the sheet has it for next time
-          st.doctors.forEach(function(dd) { push('saveDoctor', dd); });
-        }
+        // Doctors: always merge with seed so all 11 appear regardless of
+        // what's in the Sheets Doctors tab (might be 1 row, might be empty).
+        st.doctors = mergeDoctors(d.doctors);
+        sv('doctors', st.doctors);
         if (d.changelog) { st.changelog = d.changelog; sv('changelog', st.changelog); }
         setSyncState('synced');
         showToast('Sync complete — ' + st.patients.filter(function(p){return !p.discharged;}).length + ' active patients loaded');
@@ -5835,35 +5830,6 @@ function selectDoc(alias, num, name) {
   document.getElementById('doc-dot').classList.add('on');
   hideModal('doc-modal');
   showToast('Signed in as ' + name);
-}
-
-function addDoctor() {
-  var alias = gv('new-alias');
-  var num   = gv('new-num');
-  var name  = gv('new-name');
-  if (!alias) { showToast('Need alias'); return; }
-  var mapped = ALIAS_MAP[alias] || alias;
-  // Update existing doctor if alias matches (e.g. adding MSP number)
-  var existing = st.doctors.find(function(d) { return d.alias === mapped; });
-  if (existing) {
-    if (num)  existing.num  = num;
-    if (name) existing.name = name;
-    sv('doctors', st.doctors);
-    if (SHEETS_URL) push('saveDoctor', existing);
-    document.getElementById('new-alias').value = '';
-    document.getElementById('new-num').value   = '';
-    document.getElementById('new-name').value  = '';
-    selectDoc(existing.alias, existing.num, existing.name);
-    return;
-  }
-  var d = { alias:mapped, num:num || '', name:name || 'Dr. ' + alias };
-  st.doctors.push(d);
-  sv('doctors', st.doctors);
-  if (SHEETS_URL) push('saveDoctor', d);
-  document.getElementById('new-alias').value = '';
-  document.getElementById('new-num').value   = '';
-  document.getElementById('new-name').value  = '';
-  selectDoc(mapped, num, name || 'Dr. ' + alias);
 }
 
 // ── Utility functions ──────────────────────────────────
