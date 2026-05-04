@@ -4295,7 +4295,14 @@ function cropUse() {
 // Worker returns the parsed patient JSON directly — no Apps Script roundtrip.
 function handleOCRResult(data, bar) {
   if (!data || data.error) {
-    if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'OCR: ' + ((data && data.error) || 'unknown error'); }
+    var errMsg = (data && data.error) || 'unknown error';
+    var rawMsg = (data && data.raw) ? '\n\nRAW: ' + data.raw : '';
+    if (bar) {
+      bar.className = 'ocr-bar ocr-warn';
+      bar.style.cursor = 'pointer';
+      bar.textContent = 'OCR: ' + errMsg + '  [tap for raw]';
+      bar.onclick = function() { alert('OCR error:\n' + errMsg + rawMsg); };
+    }
     return;
   }
 
@@ -4375,9 +4382,45 @@ function handleOCRResult(data, bar) {
     if (bedInp) bedInp.value = roomClean;
     ensureRoomKnown(gv('f-ward'), roomClean, st.currentDoctor);
   }
+  // ── OCR debug panel (beta) ────────────────────────────
+  // Shows raw worker output + what each field decoded to.
+  // Tap the bar to expand/collapse. Remove once OCR is stable.
+  var wardDecoded  = p.ward || '(none)';
+  var wardAccepted = p.ward && WARDS[p.ward] ? p.ward : (p.ward ? p.ward + ' ⚠ not in WARDS' : '(none)');
+  var roomRawDebug = p.room || '(none)';
+  var roomFinal    = (document.getElementById('f-bed') || {}).value || '(none)';
+  var debugLines = [
+    'RAW WORKER JSON:',
+    JSON.stringify(p, null, 2),
+    '',
+    'DECODED:',
+    '  last  → ' + (p.last  || '(empty)'),
+    '  first → ' + (p.first || '(empty)'),
+    '  phn   → ' + (p.phn   || '(empty)'),
+    '  dob   → ' + (p.dob   || '(empty)'),
+    '  sex   → ' + (p.sex   || '(empty)'),
+    '  ward  → raw:"' + wardDecoded + '"  used:"' + wardAccepted + '"',
+    '  room  → raw:"' + roomRawDebug + '"  decoded:"' + roomFinal + '"',
+    '  mrp   → ' + (p.mrp   || '(empty)')
+  ].join('\n');
+
   if (bar) {
     bar.className = 'ocr-bar ocr-ok';
-    bar.textContent = '✓ Extracted: ' + (p.last||'?') + ', ' + (p.first||'?') + (p.phn ? ' · ' + p.phn : '');
+    bar.style.cursor = 'pointer';
+    bar.title = 'Tap to see OCR debug report';
+    bar.textContent = '✓ Extracted: ' + (p.last||'?') + ', ' + (p.first||'?') + (p.phn ? ' · ' + p.phn : '') + '  [tap for details]';
+    bar.onclick = function() {
+      var existing = document.getElementById('ocr-debug-panel');
+      if (existing) { existing.remove(); bar.onclick = null; return; }
+      var panel = document.createElement('pre');
+      panel.id = 'ocr-debug-panel';
+      panel.style.cssText = 'background:var(--surface2);border:.5px solid var(--border2);border-radius:var(--rsm);' +
+        'font-size:11px;font-family:monospace;padding:10px 12px;margin-top:6px;white-space:pre-wrap;' +
+        'word-break:break-all;color:var(--text);max-height:320px;overflow-y:auto;';
+      panel.textContent = debugLines;
+      // Insert right after the bar
+      bar.parentNode.insertBefore(panel, bar.nextSibling);
+    };
   }
 }
 
