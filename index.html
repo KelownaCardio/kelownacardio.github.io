@@ -520,7 +520,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.18</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.19</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -4944,7 +4944,7 @@ function searchPhysiciansLocal(query) {
   // Saved referrers first
   st.refs.forEach(function(r) {
     var name = (r.last + ' ' + (r.first||'')).toLowerCase();
-    if (name.indexOf(q) !== -1 || (r.num||'').indexOf(q) !== -1) {
+    if (name.indexOf(q) !== -1 || String(r.num||'').indexOf(q) !== -1) {
       if (!seen[r.num]) {
         seen[r.num] = true;
         results.push({ last:r.last, first:r.first||'', num:r.num, spec:r.spec||'', city:'', saved:true });
