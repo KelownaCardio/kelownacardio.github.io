@@ -614,14 +614,19 @@ input[type=file] { display:none; }
           <option value="ICUA">ICU A</option>
           <option value="ICUB">ICU B</option>
           <option value="ICUD">ICU D</option>
-          <option value="ED">ED</option>
           <option value="3E">3E</option>
-          <option value="3W">3W</option>
           <option value="3MU">3MU</option>
-          <option value="4AB">4A/B</option>
-          <option value="REHAB">Rehab</option>
-          <option value="6W">6W</option>
+          <option value="3W">3W</option>
+          <option value="4E">4E</option>
+          <option value="4W">4W</option>
+          <option value="4A">4A</option>
+          <option value="4B">4B</option>
           <option value="5B">5B</option>
+          <option value="6W">6W</option>
+          <option value="C1C">C1C (ED)</option>
+          <option value="ED">ED</option>
+          <option value="REH">Rehab</option>
+          <option value="HAH">Hosp at Home</option>
           <option value="OTHER">Other</option>
         </select>
         <div id="f-ward-other-wrap" style="display:none;margin-top:-3px">
@@ -767,7 +772,11 @@ input[type=file] { display:none; }
   <div class="loc-grid" id="loc-grid"></div>
   <div id="loc-room-wrap">
     <label>Room / bed</label>
-    <select id="loc-room" style="margin-bottom:9px"></select>
+    <select id="loc-room" style="margin-bottom:5px"></select>
+    <div id="loc-room-other-wrap" style="display:none;margin-bottom:9px">
+      <input id="loc-room-other" placeholder="Type room / bed…" autocorrect="off" autocomplete="off"
+        style="margin-bottom:0">
+    </div>
   </div>
   <div class="fl" style="margin-bottom:9px">
     <div class="f1"><label>On / Off service</label>
@@ -900,22 +909,34 @@ var DOCTORS_SEED = [
 
 // Ward definitions: label, default list, default care type, preset rooms
 var WARDS = {
-  CCU:  { label:'CICU',     list:'on',  care:'ccu',      role:'mrp',       rooms:['1','2','3','4','5','6','7','8'] },
-  '2S': { label:'2S',       list:'on',  care:'daily',    role:'mrp',     rooms:['217A','218','219','220','221','222A','223','224','225A','225B','226A','226B','227','228','229','230','231','232','233','234','Hallway 1','Hallway 2'] },
-  '2W': { label:'2W',       list:'on',  care:'daily',    role:'mrp',     rooms:['201','202','203','204','205','206','207','208','209','210','211','212','213'] },
-  CSICU:{ label:'CSICU',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
-  ICUA: { label:'ICU A',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
-  ICUB: { label:'ICU B',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
-  ICUD: { label:'ICU D',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
-  ED:   { label:'ED',       list:'off', care:'directive', role:'consultant', rooms:['Resus 1','Resus 2','Bay 1','Bay 2','Bay 3','Bay 4','Other'] },
-  '3E': { label:'3E',       list:'off', care:'directive', role:'consultant', rooms:[] },
-  '3W': { label:'3W',       list:'off', care:'directive', role:'consultant', rooms:[] },
-  '3MU':{ label:'3MU',      list:'off', care:'directive', role:'consultant', rooms:[] },
-  '4AB':{ label:'4A/B',     list:'off', care:'directive', role:'consultant', rooms:[] },
-  REHAB:{ label:'Rehab',    list:'off', care:'directive', role:'consultant', rooms:[] },
-  '6W': { label:'6W',       list:'off', care:'directive', role:'consultant', rooms:[] },
-  '5B': { label:'5B',       list:'off', care:'directive', role:'consultant', rooms:[] },
-  OTHER:{ label:'Other',    list:'off', care:'directive', role:'consultant', rooms:[] }
+  // ── Strathcona: Cardiology on-service ──────────────────
+  CCU:   { label:'CICU',          list:'on',  care:'ccu',       role:'mrp',        rooms:['1','2','3','4','5','6','7','8'] },
+  '2S':  { label:'2S',            list:'on',  care:'daily',     role:'mrp',        rooms:['217A','218A','219A','220A','221A','222A','223A','224A','225A','225B','226A','226B','227A','228A','229A','230A','231A','232A','233A','234A','Hallway 1','Hallway 2'] },
+  '2W':  { label:'2W',            list:'on',  care:'daily',     role:'mrp',        rooms:['201A','202A','203A','204A','205A','206A','207A','208A','209A','210A','211A','212A','213A','214A','Hallway'] },
+  // ── Strathcona: ICU / critical care ────────────────────
+  CSICU: { label:'CSICU',         list:'off', care:'ccu',       role:'consultant', rooms:['2601A','2602A','2603A','2604A','2605A','2606A','2607A','2608A'] },
+  ICUA:  { label:'ICU A',         list:'off', care:'ccu',       role:'consultant', rooms:['2001A','2002A','2003A','2004A','2005A','2006A','2007A','2008A'] },
+  ICUB:  { label:'ICU B',         list:'off', care:'ccu',       role:'consultant', rooms:['2101A','2102A','2103A','2104A','2105A','2106A','2107A','2108A','2109A','2110A','2111A','2112A','2113A','2114A','2115A','2116A','2117A','2118A','2119A','2120A'] },
+  ICUD:  { label:'ICU D',         list:'off', care:'ccu',       role:'consultant', rooms:[] },
+  // ── Strathcona: Medical / surgical ─────────────────────
+  '3E':  { label:'3E',            list:'off', care:'directive', role:'consultant', rooms:['311A','312A','313A','314A','315A','316A','317A','318A','319A','319B','320A'] },
+  '3MU': { label:'3MU',           list:'off', care:'directive', role:'consultant', rooms:['3MU 01','3MU 02','3MU 03','3MU 04','3MU 05'] },
+  '3W':  { label:'3W',            list:'off', care:'directive', role:'consultant', rooms:['301A','302A','303A','304A','305A','306A','307A','308A','309A','310A','310B','Hallway'] },
+  '4E':  { label:'4E',            list:'off', care:'directive', role:'consultant', rooms:['411A','412A','413A','414A','415A','416A','417A','418A','419A','420A'] },
+  '4W':  { label:'4W',            list:'off', care:'directive', role:'consultant', rooms:['401A','402A','403A','404A','404B','404C','405A','406A','407A','407B','408A','409A','410A'] },
+  // ── Royal Building ─────────────────────────────────────
+  '4A':  { label:'4A',            list:'off', care:'directive', role:'consultant', rooms:['4001A','4002A','4003A','4004A','4005A','4006A','4007A','4008A','4009A','4010A','4011A','4012A','4012B','4013A','4014A','4014B','Hallway'] },
+  '4B':  { label:'4B',            list:'off', care:'directive', role:'consultant', rooms:['4101A','4102A','4103A','4104A','4105A','4106A','4107A','4108A','4109A','4110A','4111A','4112A','4113A','4114A','4115A','4116A','4116B','4117A','4118A','4119A','4120A','4121A','4122A','4123A','4124A','4125A','4125B','Hallway'] },
+  '5B':  { label:'5B',            list:'off', care:'directive', role:'consultant', rooms:['5101A','5102A','5103A','5104A','5105A','5106A','5107A','5108A','5109A','5110A','5111A','5112A','5113A','5114A','5115A','5116A','5117A','5118A','5119A','5120A','5121A','5122A','5123A','5124A','5125A','5125B','5126A','5127A','5128A','5128B','5128C','Hallway'] },
+  // ── Centennial Building ────────────────────────────────
+  '6W':  { label:'6W',            list:'off', care:'directive', role:'consultant', rooms:['611A','612A','613A','614A','615A','616A','617A','618A','619A','620A','621A','622A','623A','624A','625A','626A','Hallway'] },
+  C1C:   { label:'C1C (ED)',       list:'off', care:'directive', role:'consultant', rooms:['1C01','1C02','1C03','1C04','1C05','1C06','1C07','1C08','1C09','1C10','1C11','1C12','1C13','1C14','1C15','1C16','1C17A','1C18'] },
+  ED:    { label:'ED',             list:'off', care:'directive', role:'consultant', rooms:['Main','C1','Streaming','Minor Treatment 1','Minor Treatment 2','Minor Treatment 3','Minor Treatment 4','Minor Treatment 5','EDOF 1','EDOF 2','EDOF 3','BCAS 1','BCAS 2','BCAS 3','Resus 1','Resus 2'] },
+  // ── Annexed Rehab ──────────────────────────────────────
+  REH:   { label:'Rehab',          list:'off', care:'directive', role:'consultant', rooms:['117A','117B','117C','128A','128B','128C','130A','130B','130C'] },
+  // ── Virtual / other ───────────────────────────────────
+  HAH:   { label:'Hosp at Home',   list:'off', care:'directive', role:'consultant', rooms:['01','02','03','04','05','06','07','08','09','10'] },
+  OTHER: { label:'Other',          list:'off', care:'directive', role:'consultant', rooms:[] }
 };
 
 var OCR_WORKER_URL = 'https://kgh-ocr.kathrynb77.workers.dev';
@@ -3318,7 +3339,7 @@ function savePatientEdit(pid) {
   var icdHid = document.getElementById('pe-icd');
   if (icdHid && icdHid.value) p.icd = icdHid.value;
 
-  saveCustomRoom(p.ward, p.bed);
+  ensureRoomKnown(p.ward, p.bed, st.currentDoctor);
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
   logChange(p, 'Demographics edited', '');
@@ -3779,7 +3800,7 @@ function addPatient() {
     needsSticker: !phn
   };
 
-  saveCustomRoom(ward, p.bed);
+  ensureRoomKnown(ward, p.bed, st.currentDoctor);
   st.patients.push(p);
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
@@ -3865,6 +3886,32 @@ function saveCustomRoom(ward, room) {
   if (saved.indexOf(room) !== -1) return; // already saved
   saved.push(room);
   try { localStorage.setItem('kgh5:rooms:' + ward, JSON.stringify(saved)); } catch(e) {}
+}
+
+// ensureRoomKnown — adds unknown rooms to WARDS in memory, persists to localStorage,
+// and logs silently to the ChangeLog sheet so the list can be improved over time.
+function ensureRoomKnown(ward, room, doctorAlias) {
+  if (!ward || !room) return;
+  room = String(room).trim();
+  if (!room || room.indexOf('Hallway') === 0) return; // hallway beds are ephemeral
+  var wdef = WARDS[ward];
+  if (!wdef) return;
+  var isKnown = (wdef.rooms || []).indexOf(room) !== -1 ||
+                getSavedRooms(ward).indexOf(room) !== -1;
+  if (isKnown) return;
+  // Add to localStorage so it persists across sessions
+  saveCustomRoom(ward, room);
+  // Refresh datalist if it's currently showing this ward
+  if (gv('f-ward') === ward) populateBedDatalist('f-bed-list', ward);
+  if (gv('pe-ward') === ward) populateBedDatalist('pe-bed-list', ward);
+  // Log to sheet — fire and forget, silent fail
+  if (SHEETS_URL) {
+    fetch(SHEETS_URL + '?action=logNewRoom&key=' + SHARED_KEY +
+      '&ward=' + encodeURIComponent(ward) +
+      '&room=' + encodeURIComponent(room) +
+      '&doctor=' + encodeURIComponent(doctorAlias || ''))
+      .catch(function() {});
+  }
 }
 
 function populateBedDatalist(listId, ward) {
@@ -4286,13 +4333,47 @@ function handleOCRResult(data, bar) {
     }
   }
   if (p.room) {
-    // Strip Meditech prefix and leading zeros: KGHS0226-A → 226A
-    var roomRaw = String(p.room).toUpperCase().replace(/^KGHS/,'').replace(/-/g,'');
-    var roomMatch = roomRaw.match(/^0*([1-9]\d{0,3})([A-Z]?)$/);
-    var roomClean = roomMatch ? (roomMatch[1] + roomMatch[2]) : roomRaw;
+    // Decode Meditech room codes to human-readable format
+    // Examples: KGHS0226-A→226A, KGHI2604-A→2604A, KGHR4001-A→4001A,
+    //           KGHC0617-A→617A, KGHAC0117-C→117C, KGHCH6W-B→Hallway B,
+    //           KGHS3MU 03→3MU 03, KGHCEDOF 18→EDOF 18
+    var roomRaw = String(p.room).trim();
+    var roomClean = roomRaw;
+
+    // Hallway beds: code contains 'H' before unit name (e.g. KGHCH6W-B, KGHRH4A-F)
+    var hallwayMatch = roomRaw.match(/KGH[CSRA]*H[A-Z0-9]+[-\s]([A-Z0-9]+)/i);
+    if (hallwayMatch) {
+      roomClean = 'Hallway ' + hallwayMatch[1];
+    }
+    // 3MU format: KGHS3MU 03 → 3MU 03
+    else if (/3MU/i.test(roomRaw)) {
+      var muMatch = roomRaw.match(/3MU\s*(\d+)/i);
+      roomClean = muMatch ? '3MU ' + muMatch[1].padStart(2,'0') : roomRaw;
+    }
+    // ED overflow: KGHCEDOF 18 → EDOF 18
+    else if (/EDOF/i.test(roomRaw)) {
+      var edofMatch = roomRaw.match(/EDOF\s*(\d+)/i);
+      roomClean = edofMatch ? 'EDOF ' + edofMatch[1] : 'EDOF';
+    }
+    // Standard numeric room: strip KGH prefix, building letter(s), leading zeros
+    // KGHS0226-A→226A  KGHI2604-A→2604A  KGHR4001-A→4001A  KGHC0617-A→617A  KGHAC0117-C→117C
+    else {
+      var stdMatch = roomRaw.match(/[0-9]{2,4}[-\s]?([A-Z]?)$/i);
+      if (stdMatch) {
+        var numPart = roomRaw.match(/(\d{2,4})[-\s]?[A-Z]?$/i);
+        var bedLetter = roomRaw.match(/[-\s]([A-Z])$/i);
+        if (numPart) {
+          // Strip leading zeros only when result > 3 digits would be confusing
+          // 4-digit rooms (4001, 2604) keep all digits; 3-digit rooms strip one leading 0 (0617→617)
+          var digits = numPart[1].replace(/^0+([1-9])/, '$1');
+          roomClean = digits + (bedLetter ? bedLetter[1].toUpperCase() : '');
+        }
+      }
+    }
+
     var bedInp = document.getElementById('f-bed');
     if (bedInp) bedInp.value = roomClean;
-    saveCustomRoom(gv('f-ward'), roomClean);
+    ensureRoomKnown(gv('f-ward'), roomClean, st.currentDoctor);
   }
   if (bar) {
     bar.className = 'ocr-bar ocr-ok';
@@ -4365,19 +4446,36 @@ function selectLocWard(ward) {
     if (careSel) careSel.value = w.care || 'daily';
   }
 
-  // Populate room selector
-  var rooms = w.rooms || [];
-  document.getElementById('loc-room').innerHTML =
+  // Populate room selector — preset + saved custom rooms + free-text fallback
+  var rooms = (w.rooms || []).slice();
+  var saved = getSavedRooms(ward);
+  saved.forEach(function(r) { if (rooms.indexOf(r) === -1) rooms.push(r); });
+  var roomSel = document.getElementById('loc-room');
+  roomSel.innerHTML =
     '<option value="">— select —</option>' +
-    rooms.map(function(r) { return '<option value="' + r + '">' + r + '</option>'; }).join('');
+    rooms.map(function(r) { return '<option value="' + r + '">' + r + '</option>'; }).join('') +
+    '<option value="__other__">Other (type below)…</option>';
+  // Show/hide free-text input
+  var otherWrap = document.getElementById('loc-room-other-wrap');
+  if (otherWrap) otherWrap.style.display = 'none';
+  roomSel.onchange = function() {
+    if (otherWrap) otherWrap.style.display = roomSel.value === '__other__' ? 'block' : 'none';
+  };
 }
 
 function confirmLocChange() {
   var p    = getP(_locPid);
   var from = p.ward;
+  var roomVal = gv('loc-room');
+  // If doctor chose "Other (type below)…", use the free-text input
+  if (roomVal === '__other__') {
+    roomVal = ((document.getElementById('loc-room-other') || {}).value || '').trim();
+    if (!roomVal) { showToast('Enter a room or bed number'); return; }
+  }
   p.ward   = _locWard;
-  p.bed    = gv('loc-room');
+  p.bed    = roomVal;
   p.care   = gv('loc-care');
+  ensureRoomKnown(p.ward, p.bed, st.currentDoctor);
 
   // Safety rule: any ward outside the geographic view (CCU/2S/2W)
   // is forced to Off Service so the patient doesn't disappear from rounds.
