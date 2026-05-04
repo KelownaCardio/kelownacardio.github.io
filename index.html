@@ -520,7 +520,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.20</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.22</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -979,7 +979,7 @@ function calcDailyTotal() {
   var count = 0;
   st.claims.forEach(function(c) {
     if (c.alias !== st.doc.alias) return;
-    if (c.date !== TODAY) return;
+    if (toDMY(c.date) !== TODAY) return;
     if (c.fee === 'CCU_DAILY') return; // excluded — shown consolidated at export
     var rate = FEE_RATES[c.fee] || 0;
     total += rate * (c.units || 1);
@@ -1494,6 +1494,21 @@ async function loadLocal() {
       }
     } catch(e) {}
   }
+  // Repair any ISO/Date values that may have been cached locally before
+  // the toDMY normalizer was added. One-shot heal — once cleaned and
+  // re-saved, future sessions skip the work.
+  if (Array.isArray(st.patients)) {
+    st.patients.forEach(function(p) {
+      if (p.dob)       p.dob       = toDMY(p.dob);
+      if (p.admitDate) p.admitDate = toDMY(p.admitDate);
+    });
+  }
+  if (Array.isArray(st.claims)) {
+    st.claims.forEach(function(c) {
+      if (c.dob)  c.dob  = toDMY(c.dob);
+      if (c.date) c.date = toDMY(c.date);
+    });
+  }
 }
 
 async function sv(key, val) {
@@ -1513,6 +1528,24 @@ async function syncFromSheets() {
     var d = await r.json();
     if (d.error) { setSyncState('error'); return; }
 
+    // ── Normalize dates from Sheets ────────────────────────
+    // Google Sheets auto-detects date cells and getValues() returns JS
+    // Date objects which serialize to ISO strings on the wire. Convert
+    // any DOB/date fields back to the app's DD/MM/YYYY convention so
+    // comparisons (c.date === TODAY) and display work correctly.
+    if (d.patients && Array.isArray(d.patients)) {
+      d.patients.forEach(function(p) {
+        if (p.dob)       p.dob       = toDMY(p.dob);
+        if (p.admitDate) p.admitDate = toDMY(p.admitDate);
+      });
+    }
+    if (d.claims && Array.isArray(d.claims)) {
+      d.claims.forEach(function(c) {
+        if (c.dob)  c.dob  = toDMY(c.dob);
+        if (c.date) c.date = toDMY(c.date);
+      });
+    }
+
     var NOW_MS      = Date.now();
     var GRACE_MS    = 2 * 60 * 1000; // 2 min — anything older than this is not "in flight"
 
@@ -1527,10 +1560,18 @@ async function syncFromSheets() {
       var merged = d.patients.map(function(rp) {
         var lp = st.patients.find(function(p) { return p.id === rp.id; });
         if (!lp) return rp;
-        // Remote wins for all fields; preserve local roundedToday only if it's today
+        // Remote wins for all fields; preserve a few local-only signals:
         var out = Object.assign({}, rp);
+        // 1. Today's rounds tap is per-device — local wins if newer
         if (lp.roundedToday === TODAY && rp.roundedToday !== TODAY) {
           out.roundedToday = TODAY;
+        }
+        // 2. Discharge flags — if local has them and remote doesn't, keep local
+        // (defensive: covers transitional case where Apps Script schema was
+        //  updated but old rows on the sheet don't have these columns yet)
+        if (lp.discharged && !rp.discharged) {
+          out.discharged   = true;
+          out.dischargedAt = lp.dischargedAt;
         }
         return out;
       });
@@ -4737,23 +4778,36 @@ function removeOnly() {
 function removePatient(pid) {
   var p = st.patients.find(function(p) { return p.id === pid; });
   if (!p) return;
-  // Soft delete — keep for 21 days for "Recent patients" claims, then purge
+  // Soft delete locally — keep for 21 days for "Recent patients" claims, then purge
+  // (purgeOldPatients on next launch sends the actual deletePatient to the sheet)
   p.dischargedAt = Date.now();
   p.discharged   = true;
   sv('patients', st.patients);
-  if (SHEETS_URL) push('savePatient', p); // update on sheets too
+  // Persist discharge flags to the sheet so other devices see this patient as removed
+  if (SHEETS_URL) push('savePatient', p);
   render();
+}
+
+// Hard-delete a patient from local cache and the sheet right now.
+// Used by purgeOldPatients for patients discharged > 21 days ago.
+function hardDeletePatient(p) {
+  if (!p || !p.id) return;
+  if (SHEETS_URL) push('deletePatient', { id: p.id });
 }
 
 function purgeOldPatients() {
   var cutoff = Date.now() - (21 * 24 * 60 * 60 * 1000); // 21 days
-  var before = st.patients.length;
-  st.patients = st.patients.filter(function(p) {
-    return !p.discharged || p.dischargedAt > cutoff;
+  var toPurge = st.patients.filter(function(p) {
+    return p.discharged && p.dischargedAt && p.dischargedAt <= cutoff;
   });
-  if (st.patients.length < before) {
-    sv('patients', st.patients);
-  }
+  if (!toPurge.length) return;
+  // Hard-delete each from the sheet so the row goes away
+  toPurge.forEach(hardDeletePatient);
+  // Drop from local cache too
+  st.patients = st.patients.filter(function(p) {
+    return !p.discharged || !p.dischargedAt || p.dischargedAt > cutoff;
+  });
+  sv('patients', st.patients);
 }
 
 // ── 11_export.js ──
@@ -5827,6 +5881,27 @@ function fmtD(d) {
 function parseDMY(s) {
   var p = s.split('/');
   return new Date(parseInt(p[2]), parseInt(p[1])-1, parseInt(p[0]));
+}
+
+// Normalize any date-ish value to DD/MM/YYYY string.
+// Handles: ISO strings ("1942-10-03T07:00:00.000Z"), Date objects,
+// already-formatted DD/MM/YYYY strings, empty/null. Returns '' on failure.
+// Used to clean up data coming back from Google Sheets, where date-typed
+// cells get auto-converted to JS Date objects on getValues() and serialise
+// as ISO strings on the wire.
+function toDMY(v) {
+  if (!v) return '';
+  // Already DD/MM/YYYY?
+  if (typeof v === 'string' && /^\d{2}\/\d{2}\/\d{4}$/.test(v)) return v;
+  // ISO date string?
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) {
+    var ymd = v.slice(0, 10).split('-');
+    return ymd[2] + '/' + ymd[1] + '/' + ymd[0];
+  }
+  // Date object or anything else parseable
+  var d = (v instanceof Date) ? v : new Date(v);
+  if (isNaN(d.getTime())) return typeof v === 'string' ? v : '';
+  return pad(d.getDate()) + '/' + pad(d.getMonth()+1) + '/' + d.getFullYear();
 }
 
 function pad(n) { return String(n).padStart(2, '0'); }
