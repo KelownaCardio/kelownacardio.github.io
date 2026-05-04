@@ -520,7 +520,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.19</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.20</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -3339,7 +3339,7 @@ function savePatientEdit(pid) {
   var icdHid = document.getElementById('pe-icd');
   if (icdHid && icdHid.value) p.icd = icdHid.value;
 
-  ensureRoomKnown(p.ward, p.bed, st.currentDoctor);
+  ensureRoomKnown(p.ward, p.bed, st.doc && st.doc.alias);
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
   logChange(p, 'Demographics edited', '');
@@ -3800,7 +3800,7 @@ function addPatient() {
     needsSticker: !phn
   };
 
-  ensureRoomKnown(ward, p.bed, st.currentDoctor);
+  ensureRoomKnown(ward, p.bed, st.doc && st.doc.alias);
   st.patients.push(p);
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
@@ -4321,17 +4321,16 @@ function handleOCRResult(data, bar) {
   if (p.phn)   document.getElementById('f-phn').value   = (p.phn + '').replace(/\D/g,'').slice(0,10);
   if (p.dob)   document.getElementById('f-dob').value   = p.dob;
   if (p.sex)   { var s = document.getElementById('f-sex'); if (s) s.value = p.sex; }
-  // Ward: use worker value if it's a valid WARDS key; otherwise run parseLocCode
-  // as a fallback so raw Meditech codes (KELKGHC6W etc.) still decode correctly.
-  var ocrWard = p.ward || '';
-  var ocrRoom = p.room || '';
-  if (!WARDS[ocrWard] && ocrWard) {
-    var decoded = parseLocCode(ocrWard, ocrRoom);
-    if (decoded.ward && WARDS[decoded.ward]) {
-      ocrWard = decoded.ward;
-      if (!ocrRoom) ocrRoom = decoded.room;
-    }
-  }
+
+  // ── Decode location via parseLocCode (single source of truth) ─────
+  // Worker may return ward/room as either:
+  //   • clean WARDS keys + room strings  (e.g. ward='2S', room='226A')
+  //   • raw Meditech codes               (e.g. ward='KELKGHS2S', room='KGHS0226-A')
+  // parseLocCode handles both cases — passing already-clean values through unchanged.
+  var decodedLoc = parseLocCode(p.ward || '', p.room || '');
+  var ocrWard = decodedLoc.ward;
+  var ocrRoom = decodedLoc.room;
+
   if (ocrWard && WARDS[ocrWard]) {
     document.getElementById('f-ward').value = ocrWard;
     wardChange();
@@ -4353,48 +4352,10 @@ function handleOCRResult(data, bar) {
       if (mrpVal) { mrpSel.value = mrpVal; mrpChange(); }
     }
   }
-  if (p.room) {
-    // Decode Meditech room codes to human-readable format
-    // Examples: KGHS0226-A→226A, KGHI2604-A→2604A, KGHR4001-A→4001A,
-    //           KGHC0617-A→617A, KGHAC0117-C→117C, KGHCH6W-B→Hallway B,
-    //           KGHS3MU 03→3MU 03, KGHCEDOF 18→EDOF 18
-    var roomRaw = String(p.room).trim();
-    var roomClean = roomRaw;
-
-    // Hallway beds: code contains 'H' before unit name (e.g. KGHCH6W-B, KGHRH4A-F)
-    var hallwayMatch = roomRaw.match(/KGH[CSRA]*H[A-Z0-9]+[-\s]([A-Z0-9]+)/i);
-    if (hallwayMatch) {
-      roomClean = 'Hallway ' + hallwayMatch[1];
-    }
-    // 3MU format: KGHS3MU 03 → 3MU 03
-    else if (/3MU/i.test(roomRaw)) {
-      var muMatch = roomRaw.match(/3MU\s*(\d+)/i);
-      roomClean = muMatch ? '3MU ' + muMatch[1].padStart(2,'0') : roomRaw;
-    }
-    // ED overflow: KGHCEDOF 18 → EDOF 18
-    else if (/EDOF/i.test(roomRaw)) {
-      var edofMatch = roomRaw.match(/EDOF\s*(\d+)/i);
-      roomClean = edofMatch ? 'EDOF ' + edofMatch[1] : 'EDOF';
-    }
-    // Standard numeric room: strip KGH prefix, building letter(s), leading zeros
-    // KGHS0226-A→226A  KGHI2604-A→2604A  KGHR4001-A→4001A  KGHC0617-A→617A  KGHAC0117-C→117C
-    else {
-      var stdMatch = roomRaw.match(/[0-9]{2,4}[-\s]?([A-Z]?)$/i);
-      if (stdMatch) {
-        var numPart = roomRaw.match(/(\d{2,4})[-\s]?[A-Z]?$/i);
-        var bedLetter = roomRaw.match(/[-\s]([A-Z])$/i);
-        if (numPart) {
-          // Strip leading zeros only when result > 3 digits would be confusing
-          // 4-digit rooms (4001, 2604) keep all digits; 3-digit rooms strip one leading 0 (0617→617)
-          var digits = numPart[1].replace(/^0+([1-9])/, '$1');
-          roomClean = digits + (bedLetter ? bedLetter[1].toUpperCase() : '');
-        }
-      }
-    }
-
+  if (ocrRoom) {
     var bedInp = document.getElementById('f-bed');
-    if (bedInp) bedInp.value = roomClean;
-    ensureRoomKnown(gv('f-ward'), roomClean, st.currentDoctor);
+    if (bedInp) bedInp.value = ocrRoom;
+    ensureRoomKnown(gv('f-ward'), ocrRoom, st.doc && st.doc.alias);
   }
   // ── OCR debug panel (beta) ────────────────────────────
   // Shows raw worker output + what each field decoded to.
@@ -4532,7 +4493,7 @@ function confirmLocChange() {
   p.ward   = _locWard;
   p.bed    = roomVal;
   p.care   = gv('loc-care');
-  ensureRoomKnown(p.ward, p.bed, st.currentDoctor);
+  ensureRoomKnown(p.ward, p.bed, st.doc && st.doc.alias);
 
   // Safety rule: any ward outside the geographic view (CCU/2S/2W)
   // is forced to Off Service so the patient doesn't disappear from rounds.
@@ -5280,59 +5241,148 @@ document.addEventListener('click', function(e) {
 // 13_meditech.js — Meditech rounds list bulk photo import
 // ═══════════════════════════════════════════════════════
 
-// Decode Meditech location code + room-bed string into ward and room
+// ─────────────────────────────────────────────────────────────────────
+// parseLocCode — single source of truth for decoding Meditech location
+// strings (header chart + sticker + bulk list) into {ward, room}.
+//
+// KGH location grammar:  KEL KGH [BLDG] [UNIT] [ROOM##] [-BED]
+//
+//   BLDG codes:
+//     C    = Centennial Building (ED, EDOF, C1C, 6W)
+//     R    = Royal Building      (4A, 4B, 5B)
+//     S    = Strathcona Building (CCU/CICU, CSICU, 2S, 2W, 3E, 3MU,
+//                                 3W, 4E, 4W)
+//     I    = Strathcona ICU rooms (KGHI2604-A used for CSICU)
+//     A    = Annexed (AREH = Annexed Rehab; AC = Annexed Centennial)
+//
+//   ROOM rules:
+//     • CCU/CICU      KGHS25NN-A  → Bed = (last 2 of NN) e.g. 2502→2, 2506→6
+//     • CSICU         KGHI26NN-A  → "26NN" + bed letter (4-digit kept whole)
+//     • Royal 4-digit KGHR40NN-A  → "40NN" + bed letter (4-digit kept whole)
+//     • Std 3-digit   KGHS0NNN-A  → strip leading 0(s) → "NNN" + bed letter
+//     • C1C rooms     KGHC1C17-A  → "1C17" + bed letter (preserve 1C prefix)
+//     • REH rooms     KGHAC0NNN-C → strip leading zero → "NNN" + bed letter
+//     • Hallway       KGH[BLDG]H[UNIT]-X → "Hallway X"
+//     • 3MU           KGHS3MU NN  → "3MU NN" (zero-pad to 2 digits)
+//     • EDOF          KGHCEDOF NN → "EDOF NN"
+//
+// Inputs may already be partially-decoded by the worker (e.g. ward='2S',
+// room='226A' arrive ready-to-use) — we detect and pass through cleanly.
+// ─────────────────────────────────────────────────────────────────────
 function parseLocCode(locCode, roomBed) {
-  var ward = 'OTHER';
+  var ward = '';
   var room = '';
-  var loc  = (locCode || '').toUpperCase();
+  var loc  = (locCode || '').toUpperCase().trim();
+  var rb   = (roomBed  || '').toUpperCase().trim();
 
-  // Order matters — most specific first
-  if      (loc.indexOf('SCCU')  !== -1 || loc === 'CCU' || loc === 'CICU') ward = 'CCU';
-  else if (loc.indexOf('ICSI')  !== -1 || loc.indexOf('CSICU') !== -1)     ward = 'CSICU';
-  else if (loc.indexOf('ICUA')  !== -1)                                     ward = 'ICUA';
-  else if (loc.indexOf('ICUB')  !== -1)                                     ward = 'ICUB';
-  else if (loc.indexOf('ICUD')  !== -1)                                     ward = 'ICUD';
-  else if (loc.indexOf('S2W')   !== -1)                                     ward = '2W';
-  else if (loc.indexOf('S2S')   !== -1)                                     ward = '2S';
-  else if (loc.indexOf('S3MU')  !== -1 || loc.indexOf('3MU')  !== -1)      ward = '3MU';
-  else if (loc.indexOf('S3E')   !== -1)                                     ward = '3E';
-  else if (loc.indexOf('S3W')   !== -1)                                     ward = '3W';
-  else if (loc.indexOf('S4E')   !== -1)                                     ward = '4E';
-  else if (loc.indexOf('S4W')   !== -1)                                     ward = '4W';
-  else if (loc.indexOf('R4A')   !== -1)                                     ward = '4A';
-  else if (loc.indexOf('R4B')   !== -1)                                     ward = '4B';
-  else if (loc.indexOf('R5B')   !== -1)                                     ward = '5B';
-  else if (loc.indexOf('C6W')   !== -1 || loc === '6W')                     ward = '6W';
-  else if (loc.indexOf('C1C')   !== -1)                                     ward = 'C1C';
-  else if (loc.indexOf('CEOF')  !== -1 || loc.indexOf('EDOF') !== -1)       ward = 'ED';
-  else if (loc.indexOf('ED')    !== -1 || loc.indexOf('EMERG') !== -1)      ward = 'ED';
-  else if (loc.indexOf('AREH')  !== -1 || loc.indexOf('REH')  !== -1)       ward = 'REH';
-  else if (loc.indexOf('SHAH')  !== -1 || loc.indexOf('HAH')  !== -1)       ward = 'HAH';
-  // Worker already decoded to a valid WARDS key
-  else if (WARDS[locCode])                                                   ward = locCode;
-
-  // Parse room from roomBed code
-  var rb = (roomBed || '').trim().toUpperCase();
-  // Hallway beds: KGHCH6W-B, KGHRH4A-F
-  var hallway = rb.match(/KGH[CSRA]*H[A-Z0-9]+[-\s]([A-Z0-9]+)/);
-  if (hallway) {
-    room = 'Hallway ' + hallway[1];
-  } else if (/3MU/i.test(rb)) {
-    var mu = rb.match(/3MU\s*(\d+)/i);
-    room = mu ? '3MU ' + String(parseInt(mu[1],10)).padStart(2,'0') : rb;
-  } else if (/EDOF/i.test(rb)) {
-    var ed = rb.match(/EDOF\s*(\d+)/i);
-    room = ed ? 'EDOF ' + ed[1] : 'EDOF';
-  } else if (ward === 'CCU') {
-    var cn = rb.match(/(\d{4})/);
-    if (cn) room = String(parseInt(cn[1], 10) % 100);
+  // ── Step 1: ward decode ───────────────────────────────────────────
+  // Most-specific patterns first. Worker may pass the raw KELKGH... code,
+  // a partially-decoded code (KGHS2W), or a clean WARDS key (2W).
+  if (WARDS[locCode]) {
+    ward = locCode;                       // already a clean WARDS key
+  } else if (loc.indexOf('SCCU')  !== -1 || loc === 'CCU' || loc === 'CICU') {
+    ward = 'CCU';
+  } else if (loc.indexOf('ICSI')  !== -1 || loc.indexOf('CSICU') !== -1) {
+    ward = 'CSICU';
+  } else if (loc.indexOf('ICUA')  !== -1) { ward = 'ICUA';
+  } else if (loc.indexOf('ICUB')  !== -1) { ward = 'ICUB';
+  } else if (loc.indexOf('ICUD')  !== -1) { ward = 'ICUD';
+  } else if (loc.indexOf('S2W')   !== -1) { ward = '2W';
+  } else if (loc.indexOf('S2S')   !== -1) { ward = '2S';
+  } else if (loc.indexOf('S3MU')  !== -1 || loc.indexOf('3MU') !== -1) { ward = '3MU';
+  } else if (loc.indexOf('S3E')   !== -1) { ward = '3E';
+  } else if (loc.indexOf('S3W')   !== -1) { ward = '3W';
+  } else if (loc.indexOf('S4E')   !== -1) { ward = '4E';
+  } else if (loc.indexOf('S4W')   !== -1) { ward = '4W';
+  } else if (loc.indexOf('R4A')   !== -1) { ward = '4A';
+  } else if (loc.indexOf('R4B')   !== -1) { ward = '4B';
+  } else if (loc.indexOf('R5B')   !== -1) { ward = '5B';
+  } else if (loc.indexOf('C6W')   !== -1 || loc === '6W')   { ward = '6W';
+  } else if (loc.indexOf('C1C')   !== -1)                    { ward = 'C1C';
+  } else if (loc.indexOf('AREH')  !== -1 || loc.indexOf('REH') !== -1) { ward = 'REH';
+  } else if (loc.indexOf('SHAH')  !== -1 || loc.indexOf('HAH') !== -1) { ward = 'HAH';
+  } else if (loc.indexOf('CEOF')  !== -1 || loc.indexOf('EDOF') !== -1 ||
+             loc.indexOf('CMT')   !== -1 || loc.indexOf('ED')   !== -1 ||
+             loc.indexOf('EMERG') !== -1) {
+    ward = 'ED';
   } else {
-    var clean = rb.replace(/^KGH[A-Z]*/,'').replace(/-/,' ').trim();
-    var nm = clean.match(/(\d{2,4})\s*([A-Z]?)$/);
-    if (nm) room = nm[1].replace(/^0+([1-9])/,'$1') + nm[2];
+    ward = 'OTHER';
   }
 
-  return { ward:ward, room:room };
+  // ── Step 2: room decode ───────────────────────────────────────────
+  if (!rb) return { ward: ward, room: '' };
+
+  // 2a. If room is already clean (matches a known WARDS room), keep as-is.
+  var wdef = WARDS[ward];
+  if (wdef && wdef.rooms && wdef.rooms.indexOf(roomBed) !== -1) {
+    return { ward: ward, room: roomBed };
+  }
+
+  // 2b. Hallway: KGHCH6W-B, KGHRH4A-F, KGHSH3W-D
+  var hallway = rb.match(/KGH[CSRA]+H[A-Z0-9]+[-\s]([A-Z0-9]+)/);
+  if (hallway) {
+    return { ward: ward, room: 'Hallway ' + hallway[1] };
+  }
+
+  // 2c. 3MU: KGHS3MU 03 → 3MU 03
+  if (/3MU/.test(rb)) {
+    var mu = rb.match(/3MU\s*(\d+)/);
+    return { ward: ward, room: mu ? '3MU ' + String(parseInt(mu[1],10)).padStart(2,'0') : '3MU' };
+  }
+
+  // 2d. EDOF: KGHCEDOF 18 → EDOF 18
+  if (/EDOF/.test(rb)) {
+    var ed = rb.match(/EDOF\s*(\d+)/);
+    return { ward: ward, room: ed ? 'EDOF ' + ed[1] : 'EDOF' };
+  }
+
+  // 2e. ED sub-locations (no standard room number): MT, ST, BCAS, C1, MAIN
+  if (ward === 'ED') {
+    if (/BCAS/.test(rb))                return { ward: ward, room: 'BCAS' };
+    if (/\bMT\b|MINOR/.test(rb))        return { ward: ward, room: 'Minor Treatment' };
+    if (/\bST\b|STREAM/.test(rb))       return { ward: ward, room: 'Streaming' };
+    if (/\bC1\b/.test(rb) && !/C1C/.test(rb)) return { ward: ward, room: 'C1' };
+    if (/MAIN/.test(rb))                return { ward: ward, room: 'Main' };
+  }
+
+  // 2f. CCU: bed number is the last 2 digits of the 4-digit room code
+  //         KGHS2502-A → "2"   KGHS2506-A → "6"   KGHS2508-A → "8"
+  if (ward === 'CCU') {
+    var cn = rb.match(/(\d{4})/);
+    if (cn) return { ward: ward, room: String(parseInt(cn[1], 10) % 100) };
+  }
+
+  // 2g. C1C: KGHC1C17-A → "1C17A"  (preserve the 1C unit prefix in the room)
+  if (ward === 'C1C') {
+    var c1c = rb.match(/1C\s*(\d+)\s*[-]?\s*([A-Z]?)/);
+    if (c1c) return { ward: ward, room: '1C' + c1c[1] + (c1c[2] || '') };
+  }
+
+  // 2g2. HAH: short zero-padded numeric codes ("01"-"10") — keep as-is
+  if (ward === 'HAH') {
+    var h = rb.match(/^(\d{1,2})$/);
+    if (h) return { ward: ward, room: h[1].padStart(2, '0') };
+  }
+
+  // 2h. Standard pattern: strip "KGH" + building letter(s), keep digits + bed
+  //     KGHS0226-A   → 226A  (3-digit + bed, strip leading zeros)
+  //     KGHI2604-A   → 2604A (4-digit + bed, keep all digits)
+  //     KGHR4001-A   → 4001A
+  //     KGHC0617-A   → 617A
+  //     KGHAC0117-C  → 117C  (annexed rehab)
+  var clean = rb.replace(/^KGH[A-Z]+/, '').replace(/[-\s]/g, ' ').trim();
+  // After stripping, expect "NNNN A" or "NNN" (bed letter optional)
+  var m = clean.match(/(\d{2,4})\s*([A-Z]?)$/);
+  if (m) {
+    var digits = m[1];
+    // Strip leading zeros, but only when the first non-zero digit is 1-9
+    // (i.e. "0226" → "226", "0017" → "17", but "2604" stays "2604")
+    digits = digits.replace(/^0+([1-9])/, '$1');
+    return { ward: ward, room: digits + (m[2] || '') };
+  }
+
+  // 2i. Fallback: pass roomBed through as-is, uppercased
+  return { ward: ward, room: rb };
 }
 
 // Infer On/Off service and care type from ward and attending provider string
@@ -5394,45 +5444,37 @@ function handleMediteachPhoto(inp) {
   reader.readAsDataURL(file);
 }
 
+// Route bulk Meditech list extraction through the same Cloudflare Worker
+// as single-sticker OCR. The worker holds the Anthropic API key server-side.
+// Worker is expected to handle mode:'meditech-list' and return a JSON array.
 async function extractMediteachAI(dataUrl) {
   var status = document.getElementById('mit-status');
   try {
     var b64 = dataUrl.split(',')[1];
     var mt  = dataUrl.split(';')[0].split(':')[1];
-    var resp = await fetch('https://api.anthropic.com/v1/messages', {
+    var resp = await fetch(OCR_WORKER_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-5-20250929',
-        max_tokens: 2000,
-        messages: [{ role:'user', content: [
-          { type:'image', source:{ type:'base64', media_type:mt, data:b64 } },
-          { type:'text', text:
-            'Meditech rounds list from Kelowna General Hospital (KGH). Extract EVERY patient row visible.\n\n' +
-            'Return a JSON array. Each object must have exactly these fields:\n' +
-            '  last, first, sex, age, locationCode, roomBed, reason, attending, los\n\n' +
-            'locationCode = top line of first column e.g. "KELKGHSCCU", "KELKGHS2W", "KELKGHS2S", "KELKGHS3E"\n' +
-            'roomBed      = second line of first column e.g. "KGHS2502-A", "KGHS0201-A", "KGHS0225-B"\n' +
-            'first        = use preferred name in brackets if shown e.g. "(Steve)" → "Steve"\n' +
-            'reason       = full text, do not truncate\n\n' +
-            'KGH reference:\n' +
-            '  CCU  = KELKGHSCCU, rooms KGHS2502-A (2502 = Bed 2, 2506 = Bed 6 etc.)\n' +
-            '  2W   = KELKGHS2W,  rooms KGHS0201-A to KGHS0213-A\n' +
-            '  2S   = KELKGHS2S,  rooms KGHS0217-A to KGHS0234-B (225 and 226 have A and B)\n' +
-            '  Other location codes = off-service ward\n\n' +
-            'Return ONLY a JSON array, no markdown, no explanation.'
-          }
-        ]}]
-      })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'meditech-list', image: b64, mediaType: mt })
     });
+    if (!resp.ok) throw new Error('Worker HTTP ' + resp.status);
     var data = await resp.json();
-    var text = data.content.filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
-    var parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
+    if (data.error) throw new Error(data.error);
+
+    // Worker may return either { patients: [...] } directly, or { text: "..." }
+    // containing a JSON array as a string. Handle both shapes.
+    var parsed = data.patients || data;
+    if (typeof data.text === 'string') {
+      var match = data.text.match(/\[[\s\S]*\]/);
+      if (!match) throw new Error('No JSON array in worker response');
+      parsed = JSON.parse(match[0]);
+    }
     if (!Array.isArray(parsed)) parsed = [parsed];
     renderMediteachPreview(parsed);
   } catch(e) {
-    status.className  = 'ocr-bar ocr-warn';
+    status.className   = 'ocr-bar ocr-warn';
     status.textContent = 'Could not read list — try a clearer photo, or add patients manually.';
+    status.title       = e && e.message ? e.message : '';
   }
 }
 
