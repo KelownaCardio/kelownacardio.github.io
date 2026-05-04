@@ -520,7 +520,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.8</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.9</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -4786,14 +4786,12 @@ function submitNewPhysician(dropdownId, hiddenId, nameId) {
   if (!num)   { showToast('MSP doctor # required'); return; }
   var existing = st.refs.find(function(r) { return r.num === num; });
   if (existing) { showToast('Doctor #' + num + ' already saved'); return; }
-  var r = { id:'r'+Date.now(), last:last, first:first.trim(), num:num, spec:spec.trim() };
-  st.refs.push(r);
-  sv('refs', st.refs);
-  if (SHEETS_URL) push('saveRef', r);
+  var r = { last:last, first:first.trim(), num:num, spec:spec.trim() };
+  // Save to Physicians tab so it's available to all doctors permanently
+  if (SHEETS_URL) push('addPhysician', r);
   var display = 'Dr. ' + last + (first ? ', ' + first : '');
   selectRef(num, display, dropdownId, hiddenId, nameId);
-  renderRefs('');
-  showToast('Dr. ' + last + ' saved to referrer directory');
+  showToast('Dr. ' + last + ' added to physician directory');
 }
 
 // ── selectRefRow / selectRef ───────────────────────────
@@ -4833,21 +4831,7 @@ function selectRef(num, displayName, dropdownId, hiddenId, nameId) {
   if (st.recentRefs.length > 5) st.recentRefs = st.recentRefs.slice(0, 5);
   sv('recentRefs', st.recentRefs);
 
-  // Auto-save to refs if not already there
-  var already = st.refs.find(function(r) { return r.num === num; });
-  if (!already) {
-    var namePart = displayName.replace('Dr. ', '');
-    var parts    = namePart.split(', ');
-    var newRef   = { id:'r'+Date.now(), last:(parts[0]||'').trim(), first:(parts[1]||'').trim(), num:num, spec:'' };
-    // Pull spec/city from embedded directory if available
-    if (typeof BC_PHYSICIANS_LOCAL !== 'undefined') {
-      var match = BC_PHYSICIANS_LOCAL.find(function(p) { return String(p[2]) === String(num); });
-      if (match) newRef.spec = match[3] || '';
-    }
-    st.refs.push(newRef);
-    sv('refs', st.refs);
-    if (SHEETS_URL) push('saveRef', newRef);
-  }
+  // No auto-save — physicians are found via search, only manually added ones go to the sheet
 }
 
 // ── Referrers pane ─────────────────────────────────────
