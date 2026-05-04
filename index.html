@@ -520,7 +520,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.22</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.23</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1610,7 +1610,12 @@ async function syncFromSheets() {
       st.claims = mergedClaims;
     }
 
-    if (d.doctors)   st.doctors   = d.doctors;
+    // Doctors: only overwrite local if remote actually has entries.
+    // Without this guard, an empty Doctors tab on the sheet would wipe
+    // out the DOCTORS_SEED on first sync after a reset.
+    if (d.doctors && Array.isArray(d.doctors) && d.doctors.length > 0) {
+      st.doctors = d.doctors;
+    }
     if (d.changelog) st.changelog = d.changelog;
 
     ['patients','claims','doctors','changelog'].forEach(function(k) { sv(k, st[k]); });
@@ -5648,12 +5653,17 @@ async function init() {
     document.getElementById('doc-label').textContent = st.doc.alias;
     document.getElementById('doc-dot').classList.add('on');
   }
-  // Seed doctor profiles on first launch
+  // Seed doctor profiles on first launch.
+  // Push each up to Sheets too so the canonical list lives on the server
+  // and other devices pick them up via syncFromSheets without needing the seed.
   if (!st.doctors.length) {
     st.doctors = DOCTORS_SEED.map(function(d) {
-      return { id:'d'+d.alias, alias:d.alias, name:d.name };
+      return { id:'d'+d.alias, alias:d.alias, num:'', name:d.name };
     });
     sv('doctors', st.doctors);
+    if (SHEETS_URL) {
+      st.doctors.forEach(function(d) { push('saveDoctor', d); });
+    }
   }
 
   // (test patients removed for live deployment)
@@ -5708,7 +5718,18 @@ async function resetLocalData() {
       if (!d.error) {
         if (d.patients)  { st.patients  = d.patients;  sv('patients',  st.patients);  }
         if (d.claims)    { st.claims    = d.claims;    sv('claims',    st.claims);    }
-        if (d.doctors)   { st.doctors   = d.doctors;   sv('doctors',   st.doctors);   }
+        // Doctors: only adopt remote if non-empty; otherwise re-seed from DOCTORS_SEED
+        if (d.doctors && d.doctors.length > 0) {
+          st.doctors = d.doctors;
+          sv('doctors', st.doctors);
+        } else {
+          st.doctors = DOCTORS_SEED.map(function(dd) {
+            return { id:'d'+dd.alias, alias:dd.alias, num:'', name:dd.name };
+          });
+          sv('doctors', st.doctors);
+          // Push the seed back up so the sheet has it for next time
+          st.doctors.forEach(function(dd) { push('saveDoctor', dd); });
+        }
         if (d.changelog) { st.changelog = d.changelog; sv('changelog', st.changelog); }
         setSyncState('synced');
         showToast('Sync complete — ' + st.patients.filter(function(p){return !p.discharged;}).length + ' active patients loaded');
