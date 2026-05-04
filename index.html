@@ -520,7 +520,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.25</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.27</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -739,9 +739,8 @@ input[type=file] { display:none; }
   <div class="stats" id="exp-stats" style="grid-template-columns:1fr 1fr 1fr"></div>
   <div class="sec-lbl">Pending claims</div>
   <div id="export-q"></div>
-  <button class="btn btn-g" onclick="exportCSV()" style="margin-top:8px">Export iClinic CSV</button>
-  <button class="btn btn-s" onclick="clearQueue()">Clear queue</button>
-  <div style="font-size:10px;color:var(--text3);text-align:center;padding:4px 0 0">OA040 · I/E location · iClinic format · CCU codes auto-consolidated</div>
+  <button class="btn btn-s" onclick="clearQueue()" style="margin-top:8px">Clear queue</button>
+  <div style="font-size:10px;color:var(--text3);text-align:center;padding:4px 0 0">Claims sync to Google Sheet → exported to iClinic from there</div>
   <div class="sec-lbl" style="margin-top:13px">Change log</div>
   <div id="change-log"></div>
 </div>
@@ -3504,12 +3503,50 @@ function buildConsultForm(p) {
   // ICD-9 and referring MD
   h += buildIcdRefCard(p);
 
+  // Notes field — visible to doctor, editable, populated with CCFPP if detected.
+  // These notes are submitted as ADDITIONAL_CLAIM_NOTES on both the base
+  // consult claim and the increment modifier claim. Inpatient billing
+  // only — keep clinical info OUT of this field.
+  h += '<div class="card">';
+  h += '<label>Notes <span style="font-size:10px;color:var(--text3)">(MSP claim notes — e.g. CCFPP, time documentation)</span></label>';
+  h += '<input id="cb-notes" placeholder="Optional — submitted to MSP" autocorrect="off" autocomplete="off" oninput="markNotesEdited()">';
+  h += '<input id="cb-notes-edited" type="hidden" value="0">';
+  h += '</div>';
+
   // Live claim preview
   h += '<div class="cp" id="cb-preview"><div class="cp-title">Claims preview</div></div>';
 
   // Submit button
   h += '<button class="btn btn-p" onclick="submitConsult()">Add consult claims</button>';
   return h;
+}
+
+// Mark the notes field as manually edited so auto-CCFPP doesn't overwrite.
+function markNotesEdited() {
+  var f = document.getElementById('cb-notes-edited');
+  if (f) f.value = '1';
+}
+
+// Detect CCFPP situation given current form state.
+// Returns the suggested CCFPP note string, or '' if none applies.
+function detectCCFPP() {
+  var start = gv('cb-start');
+  var dateFmt = gv('cb-date') ? fmtD(parseLocalDate(gv('cb-date'))) : '';
+  if (!start || !dateFmt || !st.doc) return '';
+  var thisStartM = t2m(start);
+  var found = '';
+  st.claims.forEach(function(c) {
+    if (c.alias !== st.doc.alias) return;
+    if (c.date  !== dateFmt)      return;
+    if (c.fee !== '33010' && c.fee !== '33012') return;
+    if (!c.startTime) return;
+    var prevStartM = t2m(c.startTime);
+    var diff = (thisStartM - prevStartM + 24 * 60) % (24 * 60);
+    if (diff > 0 && diff <= 75) {
+      found = 'CCFPP ' + c.last + ', ' + c.first;
+    }
+  });
+  return found;
 }
 
 function toggleConsultCode(code) {
@@ -3576,6 +3613,18 @@ function updateConsultUI() {
   }
 
   updateConsultPreview(modBase, modInc);
+
+  // Auto-suggest CCFPP into the notes field, unless doctor has manually
+  // edited the field (in which case respect their typed value).
+  var notesEl  = document.getElementById('cb-notes');
+  var editedEl = document.getElementById('cb-notes-edited');
+  if (notesEl && editedEl && editedEl.value !== '1') {
+    var suggested = detectCCFPP();
+    notesEl.value = suggested;
+    notesEl.placeholder = suggested
+      ? 'Auto-detected CCFPP — edit if needed'
+      : 'Optional — submitted to MSP';
+  }
 }
 
 function updateConsultPreview(modBase, modInc) {
@@ -3619,13 +3668,19 @@ function submitConsult() {
   var dateFmt = fmtD(parseLocalDate(dateISO));
   var loc     = p.ward === 'ED' ? 'E' : 'I';
 
+  // Read notes from the form. Whatever the doctor typed (or accepted from
+  // the auto-CCFPP suggestion) is attached to BOTH the base consult and
+  // the increment modifier claim per MSP CCFPP convention.
+  var notes = (document.getElementById('cb-notes') || {}).value || '';
+  notes = notes.trim();
+
   // Save any ICD-9/referrer changes back to patient record
   updatePatientFromClaimForm(p);
 
-  // Consult row — always include SERVICE_START_TIME
-  addClaim(p, code, code, 1, dateFmt, loc, start);
+  // Consult row — always include SERVICE_START_TIME, attach notes
+  addClaim(p, code, code, 1, dateFmt, loc, start, notes);
 
-  // MOST
+  // MOST — no notes (separate claim, not eligible for CCFPP)
   if (_mostOn) addClaim(p, '78720', '78720', 1, dateFmt, loc);
 
   var end      = gv('cb-end');
@@ -3635,38 +3690,13 @@ function submitConsult() {
   var modInc   = hasInc ? getModifierForIncrement(start, dateISO) : null;
 
   if (modBase) {
-    // Base claim: start time required by MSP
-    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start);
+    // Base modifier claim: start time required by MSP, attach notes
+    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start, notes);
 
     if (modInc) {
-      // Increment start time = consult start + 30 min
+      // Increment start time = consult start + 30 min, attach same notes
       var incStart = minsToTime((t2m(start) + 30) % (24 * 60));
-
-      // CCFPP detection — did this doctor start another consult today
-      // whose window overlaps with this one?
-      var ccfppNote = '';
-      if (start) {
-        var thisStartM = t2m(start);
-        st.claims.forEach(function(c) {
-          if (c.alias !== st.doc.alias) return;
-          if (c.date  !== dateFmt)      return;
-          if (c.phn   === p.phn)        return; // same patient
-          if (c.fee !== '33010' && c.fee !== '33012') return;
-          if (!c.startTime) return;
-          // Previous consult's window ends at its start + 45 min
-          var prevEndM = (t2m(c.startTime) + 45) % (24 * 60);
-          // Overlap if this consult starts before previous consult's window ends
-          var prevStartM = t2m(c.startTime);
-          var windowEnd  = (prevStartM + 75) % (24 * 60); // 75 min = max possible window
-          // Simple check: if previous consult started within last 75 min
-          var diff = (thisStartM - prevStartM + 24 * 60) % (24 * 60);
-          if (diff <= 75) {
-            ccfppNote = 'CCFPP ' + c.last + ', ' + c.first;
-          }
-        });
-      }
-
-      addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, ccfppNote);
+      addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, notes);
     }
   }
 
@@ -4932,79 +4962,10 @@ function clearQueue() {
   showToast('Queue cleared');
 }
 
-function exportCSV() {
-  if (!st.claims.length) { showToast('No claims to export'); return; }
-
-  // Non-CCU claims + consolidated CCU bands
-  var raw = st.claims.filter(function(c) { return c.fee !== 'CCU_DAILY'; });
-  var ccu = ccuConsolidate();
-  var all = raw.concat(ccu);
-
-  var header = [
-    'DOCTOR_NUMBER','PAYEE_ALIAS','PATIENT_FIRST_NAME','PATIENT_LAST_NAME','PATIENT_NAME',
-    'PHN','OTHER_INSURER_CODE','GENDER','DOB','',
-    'FEE_ITEM','FEE_ITEM_CODE','ICD9_CODE','AMOUNT_BILLED','SERVICE_UNITS',
-    'PERCENT_BILLED','FEE_SCHEDULE','SERVICE_DATE','SERVICE_START_TIME',
-    'ADDITIONAL_CLAIM_NOTES','REFERRED_BY_DOCTOR_NUMBER','REFERRED_TO_DOCTOR_NUMBER',
-    'REFERRED_BY_DOCTOR_NAME','SERVICE_LOCATION_CODE','FACILITY_NUMBER',
-    'SUB_FACILITY_NUMBER','SUBMISSION_CODE','CORRESPONDENCE_CODE',
-    'AFTER_HOURS_INDICATOR_CODE','SCC_CODE','CLAIM_TYPE',
-    'ICBC_CLAIM_NUMBER','WORK_SAFE_CLAIM_NUMBER','WORK_SAFE_INJURY_DATE',
-    'WORK_SAFE_INJURY_AREA_CODE','WORK_SAFE_INJURY_NATURE_CODE','WORK_SAFE_ANATOMICAL_POSITION'
-  ].join(',');
-
-  var rows = all.map(function(c) {
-    // PATIENT_NAME format: "Last,First" (with outer quotes)
-    var pname   = '"\"' + (c.last || '') + ',' + (c.first || '') + '\""';
-    var refName = c.refbyName ? '"\"' + c.refbyName + '\""' : '';
-    return [
-      c.docnum  || '',
-      c.alias   || '',
-      c.first   || '',
-      c.last    || '',
-      pname,
-      c.phn     || '',
-      '',
-      c.sex     || '',
-      c.dob     || '',
-      '',                     // blank column (per iClinic format)
-      c.fee,
-      c.feeCode || c.fee,
-      c.icd     || '3062',
-      '',                     // AMOUNT_BILLED (calculated by iClinic)
-      c.units   || 1,
-      '100',
-      'MSP',
-      c.date,
-      c.startTime || '',      // SERVICE_START_TIME — always populated for consults
-      c.notes   || '',
-      c.refby   || '',
-      '',                     // REFERRED_TO
-      refName,
-      c.loc     || 'I',       // I = inpatient, E = ED
-      'OA040',                // KGH facility number
-      '',                     // SUB_FACILITY_NUMBER
-      'P',                    // SUBMISSION_CODE
-      '',
-      '',
-      '',
-      'MSP',                  // CLAIM_TYPE
-      '','','','','',''       // ICBC / WCB fields
-    ].join(',');
-  });
-
-  var csv  = header + '\n' + rows.join('\n');
-  var blob = new Blob([csv], { type:'text/csv;charset=utf-8;' });
-  var url  = URL.createObjectURL(blob);
-  var a    = document.createElement('a');
-  a.href     = url;
-  a.download = 'iClinic_KGH_' + todayISO().replace(/-/g,'') + '.csv';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  showToast('Exported ' + all.length + ' claims');
-}
+// NOTE: iClinic CSV export was previously handled here in the mobile app
+// but is now done from Google Sheets via the Apps Script function
+// exportClaimsOnDemand(). The app's job ends at syncing claims to the
+// Google Sheet — claims sync via push() in saveClaim() and friends.
 
 // ── 12_referrers.js ──
 // ═══════════════════════════════════════════════════════
