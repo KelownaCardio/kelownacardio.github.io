@@ -520,7 +520,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.9</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.16</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -756,7 +756,8 @@ input[type=file] { display:none; }
   <div class="claim-ctx" id="claim-ctx"></div>
   <div class="claim-type-sel" id="claim-type-sel"></div>
   <div id="claim-body"></div>
-  <button class="btn btn-s" onclick="closeClaimScreen()">← Back to rounds</button>
+  <div id="claim-pt-actions" style="display:flex;gap:7px;margin-top:4px"></div>
+  <button class="btn btn-s" onclick="closeClaimScreen()" style="margin-top:7px">← Back to rounds</button>
 </div>
 
 <!-- ═══ LOCATION CHANGE SCREEN ═══ -->
@@ -802,6 +803,9 @@ input[type=file] { display:none; }
     <input id="new-name" placeholder="Dr. Full Name" style="margin-bottom:8px" autocorrect="off" autocapitalize="words">
     <button class="btn btn-p" onclick="addDoctor()">Add and sign in</button>
     <button class="btn btn-s" onclick="hideModal('doc-modal')">Cancel</button>
+    <div class="divider" style="margin-top:14px"></div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Clear all local data and re-sync from Sheets. Use if your device is showing stale or test patients.</div>
+    <button class="btn" style="background:var(--red-bg);color:var(--red-t);border:.5px solid var(--red-t);width:100%;margin:0" onclick="resetLocalData()">⚠ Reset local data &amp; re-sync</button>
   </div>
 </div>
 
@@ -979,21 +983,44 @@ function updateDailyTotal() {
 }
 
 var FEES = [
+  // ── Consultations ──────────────────────────────────
   { code:'33010', desc:'Cardiology consultation — full',              cat:'Consult',   clr:'chip-blue' },
   { code:'33012', desc:'Cardiology consultation — limited',           cat:'Consult',   clr:'chip-blue' },
+  { code:'33110', desc:'Subsequent cardiology consultation',          cat:'Consult',   clr:'chip-blue' },
+  { code:'33005', desc:'Emergency visit',                             cat:'Consult',   clr:'chip-red'  },
+  // ── Visits ─────────────────────────────────────────
   { code:'33008', desc:'Daily in-hospital care / combined daily',     cat:'Daily',     clr:'chip-blue' },
+  { code:'33007', desc:'Out-of-office visit',                         cat:'Daily',     clr:'chip-blue' },
   { code:'33006', desc:'Directive visit (consultant, max 2/week)',    cat:'Directive', clr:'chip-amber'},
+  // ── Procedures ─────────────────────────────────────
+  { code:'33047', desc:'Electrocardiogram — interpretation only',     cat:'Procedure', clr:'chip-teal' },
+  { code:'33016', desc:'Holter monitor — interpretation',             cat:'Procedure', clr:'chip-teal' },
+  { code:'33062', desc:'Echocardiogram — M-mode + 2D',               cat:'Procedure', clr:'chip-teal' },
+  { code:'33069', desc:'Echocardiogram — Doppler addition',           cat:'Procedure', clr:'chip-teal' },
+  { code:'33035', desc:'Exercise stress test — supervision + interpretation', cat:'Procedure', clr:'chip-teal' },
+  { code:'33028', desc:'Treadmill stress test — interpretation only', cat:'Procedure', clr:'chip-teal' },
+  { code:'33174', desc:'Ambulatory blood pressure monitoring — interpretation', cat:'Procedure', clr:'chip-teal' },
+  { code:'33176', desc:'Ambulatory BP monitoring — technical only',   cat:'Procedure', clr:'chip-teal' },
+  { code:'33107', desc:'Pacemaker check — single chamber',           cat:'Procedure', clr:'chip-teal' },
+  { code:'33018', desc:'Nuclear cardiology — interpretation',         cat:'Procedure', clr:'chip-teal' },
+  // ── Cardioversion / Arrhythmia ─────────────────────
+  { code:'14101', desc:'Cardioversion — elective DC',                 cat:'Procedure', clr:'chip-red'  },
+  { code:'14105', desc:'Cardioversion — emergency DC',                cat:'Procedure', clr:'chip-red'  },
+  { code:'14113', desc:'Pacemaker insertion — temporary transvenous', cat:'Procedure', clr:'chip-red'  },
+  // ── Discharge / Planning ───────────────────────────
   { code:'78717', desc:'Complex discharge — comprehensive planning',  cat:'Discharge', clr:'chip-green'},
   { code:'78720', desc:'MOST — advance care planning (new consult)',  cat:'Other',     clr:'chip-teal' },
+  // ── CCU ────────────────────────────────────────────
   { code:'1411',  desc:'CCU critical care — Day 1',                  cat:'CCU',       clr:'chip-red'  },
   { code:'1421',  desc:'CCU critical care — Days 2–7 (max 6 units)', cat:'CCU',       clr:'chip-red'  },
   { code:'1431',  desc:'CCU critical care — Days 8–30',              cat:'CCU',       clr:'chip-red'  },
+  // ── Call modifiers ─────────────────────────────────
   { code:'1200',  desc:'Evening call modifier — base 30 min',        cat:'Modifier',  clr:'chip-amber'},
-  { code:'1205',  desc:'Evening call — +15 min increment',           cat:'Modifier',  clr:'chip-amber'},
+  { code:'1205',  desc:'Evening call — increment per 30 min',        cat:'Modifier',  clr:'chip-amber'},
   { code:'1201',  desc:'Night call modifier — base 30 min',          cat:'Modifier',  clr:'chip-red'  },
-  { code:'1206',  desc:'Night call — +15 min increment',             cat:'Modifier',  clr:'chip-red'  },
+  { code:'1206',  desc:'Night call — increment per 30 min',          cat:'Modifier',  clr:'chip-red'  },
   { code:'1202',  desc:'Weekend/stat call modifier — base 30 min',   cat:'Modifier',  clr:'chip-teal' },
-  { code:'1207',  desc:'Weekend/stat call — +15 min increment',      cat:'Modifier',  clr:'chip-teal' },
+  { code:'1207',  desc:'Weekend/stat call — increment per 30 min',   cat:'Modifier',  clr:'chip-teal' },
 ];
 
 // ── Comprehensive ICD-9 diagnosis list ────────────────
@@ -1465,74 +1492,66 @@ async function syncFromSheets() {
     var d = await r.json();
     if (d.error) { setSyncState('error'); return; }
 
-    // ── Merge patients rather than overwrite ──────────────
-    // Protects locally-added patients that haven't pushed yet,
-    // while pulling in changes made on other devices.
+    var NOW_MS      = Date.now();
+    var GRACE_MS    = 2 * 60 * 1000; // 2 min — anything older than this is not "in flight"
+
+    // ── Merge patients ────────────────────────────────────
+    // Remote is authoritative. Local-only patients are kept only
+    // if they were created within the last 2 min (push still in flight).
+    // Anything older that isn't on Sheets was deliberately removed — drop it.
     if (d.patients && Array.isArray(d.patients)) {
       var remoteById = {};
-      d.patients.forEach(function(p) { remoteById[p.id] = p; });
+      d.patients.forEach(function(p) { remoteById[p.id] = true; });
 
-      var localById = {};
-      st.patients.forEach(function(p) { localById[p.id] = p; });
-
-      var merged = [];
-
-      // 1. All remote patients — use remote as source of truth
-      d.patients.forEach(function(rp) {
-        var lp = localById[rp.id];
-        if (!lp) {
-          // New patient added by another device — take it
-          merged.push(rp);
-        } else {
-          // Patient exists locally — keep remote version (another device may have
-          // updated demographics/ward) but preserve today's roundedToday if set locally
-          // since rounds state is per-device and may be ahead of the last push
-          var merged_p = Object.assign({}, rp);
-          if (lp.roundedToday === TODAY && rp.roundedToday !== TODAY) {
-            merged_p.roundedToday = TODAY;
-            merged_p.lastBilled   = lp.lastBilled || rp.lastBilled;
-          }
-          merged.push(merged_p);
+      var merged = d.patients.map(function(rp) {
+        var lp = st.patients.find(function(p) { return p.id === rp.id; });
+        if (!lp) return rp;
+        // Remote wins for all fields; preserve local roundedToday only if it's today
+        var out = Object.assign({}, rp);
+        if (lp.roundedToday === TODAY && rp.roundedToday !== TODAY) {
+          out.roundedToday = TODAY;
         }
+        return out;
       });
 
-      // 2. Local-only patients not yet on remote — keep them
-      // (added on this device but push may still be in flight or Sheets lagging)
+      // Keep local-only patients only within the grace window
       st.patients.forEach(function(lp) {
         if (!remoteById[lp.id]) {
-          merged.push(lp);
+          var age = NOW_MS - (parseInt(lp.id.replace('p','')) || 0);
+          if (age < GRACE_MS) merged.push(lp); // push still in flight — keep
+          // else: not on Sheets and too old — was deliberately removed, drop it
         }
       });
 
       st.patients = merged;
     }
 
-    // ── Merge claims rather than overwrite ──────────────
-    // Claims are append-only — union by ID so no doctor's claims
-    // are lost when another device syncs. Remote wins for edits
-    // (saveClaim push updates the record on Sheets). Local-only
-    // claims (push still in flight) are preserved.
+    // ── Merge claims ──────────────────────────────────────
+    // Remote is authoritative. Local-only claims kept only within
+    // the grace window (push in flight). Orphaned old local claims dropped.
     if (d.claims && Array.isArray(d.claims)) {
       var remoteClaimIds = {};
       d.claims.forEach(function(c) { remoteClaimIds[c.id] = true; });
 
-      // Start with all remote claims
       var mergedClaims = d.claims.slice();
 
-      // Add any local claims not yet on remote (push in flight / offline)
       st.claims.forEach(function(lc) {
         if (!remoteClaimIds[lc.id]) {
-          mergedClaims.push(lc);
+          // Claim ID format: 'c' + timestamp + random
+          var ts  = parseInt(lc.id.replace('c','').slice(0, 13)) || 0;
+          var age = NOW_MS - ts;
+          if (age < GRACE_MS) mergedClaims.push(lc); // in flight — keep
+          // else: old local-only claim not on Sheets — drop silently
         }
       });
 
       st.claims = mergedClaims;
     }
-    if (d.refs)      st.refs      = d.refs;
+
     if (d.doctors)   st.doctors   = d.doctors;
     if (d.changelog) st.changelog = d.changelog;
 
-    ['patients','claims','refs','doctors','changelog'].forEach(function(k) { sv(k, st[k]); });
+    ['patients','claims','doctors','changelog'].forEach(function(k) { sv(k, st[k]); });
     setSyncState('synced');
     render();
   } catch(e) { setSyncState('error'); }
@@ -1642,8 +1661,28 @@ function consultHasIncrement(startTimeStr, endTimeStr) {
   if (!startTimeStr || !endTimeStr) return false;
   var startM = t2m(startTimeStr);
   var endM   = t2m(endTimeStr);
-  if (endM < startM) endM += 24 * 60; // midnight wrap
-  return (endM - startM) > 45;
+  if (endM < startM) endM += 24 * 60;
+  return (endM - startM) >= 45;
+}
+
+// How many increment units? Each unit = one 30-min period (or major portion)
+// after the base 30 min. Billable after 15 min into each period.
+// e.g. duration 46-75 min = 1 unit, 76-105 min = 2 units, etc.
+function consultIncUnits(startTimeStr, endTimeStr) {
+  if (!startTimeStr || !endTimeStr) return 0;
+  var startM = t2m(startTimeStr);
+  var endM   = t2m(endTimeStr);
+  if (endM < startM) endM += 24 * 60;
+  var dur = endM - startM;
+  if (dur < 45) return 0;
+  // Period N is billable when duration >= 15 + N*30
+  // e.g. period 1: dur>=45, period 2: dur>=75, period 3: dur>=105
+  var units = 0;
+  for (var n = 1; n <= 10; n++) {
+    if (dur >= 15 + n * 30) units = n;
+    else break;
+  }
+  return units;
 }
 
 // ── Directive Weekly Limit (Sun–Sat) ───────────────────
@@ -2361,6 +2400,13 @@ function _openClaimScreen(pid) {
   // Claim type buttons
   document.getElementById('claim-type-sel').innerHTML = buildTypeButtons(p);
 
+  // Patient action buttons — Change location + Discharge, sit below claim form
+  document.getElementById('claim-pt-actions').innerHTML =
+    '<button class="btn" style="flex:1;margin:0;background:var(--teal-bg);color:var(--teal-t);' +
+    'border:.5px solid var(--teal-t)" onclick="openLocScreen(\'' + p.id + '\')">Change location</button>' +
+    '<button class="btn" style="flex:1;margin:0;background:var(--red-bg);color:var(--red-t);' +
+    'border:.5px solid var(--red-t)" onclick="openDischModal(\'' + p.id + '\')">Discharge / transfer</button>';
+
   // Show claim pane, hide all others
   showPane('p-claim');
 
@@ -2400,13 +2446,185 @@ function buildTypeButtons(p) {
     return '<button class="ct-btn" id="ctb-' + t.id + '" onclick="selCT(\'' + t.id + '\')">' + t.label + '</button>';
   }).join('');
 
-  // Location change and discharge span full width
-  h += '<button class="ct-btn" style="grid-column:1/-1;color:var(--teal-t);border-color:var(--teal-bg)" ' +
-       'onclick="openLocScreen(\'' + p.id + '\')">Change location</button>';
-  h += '<button class="ct-btn" style="grid-column:1/-1;color:var(--red-t);border-color:var(--red-bg)" ' +
-       'onclick="openDischModal(\'' + p.id + '\')">Discharge / transfer</button>';
+  // Other claim spans full width
+  h += '<button class="ct-btn" id="ctb-other" style="grid-column:1/-1;color:var(--blue-t);border-color:var(--blue-bg)" ' +
+       'onclick="selCT(\'other\')">+ Other claim type</button>';
 
   return h;
+}
+
+function feeSearch(query) {
+  var dd = document.getElementById('oc-fee-dd');
+  if (!dd) return;
+  var q = (query || '').toLowerCase().trim();
+
+  var matches = q.length === 0
+    ? FEES.filter(function(f) { return f.cat !== 'Modifier' && f.cat !== 'CCU'; }).slice(0, 20)
+    : FEES.filter(function(f) {
+        return f.code.toLowerCase().indexOf(q) !== -1 ||
+               f.desc.toLowerCase().indexOf(q) !== -1 ||
+               (f.cat  || '').toLowerCase().indexOf(q) !== -1;
+      }).slice(0, 15);
+
+  if (!matches.length) {
+    dd.innerHTML = '<div style="padding:8px 10px;font-size:12px;color:var(--text2)">No matching fee codes</div>';
+    dd.style.display = 'block';
+    return;
+  }
+
+  var catColors = {
+    'Consult':'var(--blue-t)', 'Daily':'var(--blue-t)', 'Directive':'var(--amber-t)',
+    'Procedure':'var(--teal-t)', 'Discharge':'var(--green-t)', 'CCU':'var(--red-t)',
+    'Modifier':'var(--text3)', 'Other':'var(--teal-t)'
+  };
+
+  dd.innerHTML = matches.map(function(f) {
+    var col = catColors[f.cat] || 'var(--text2)';
+    return '<div class="ref-dd-row" data-code="' + esc(f.code) + '" data-desc="' + esc(f.desc) + '" ' +
+      'onclick="selectFeeCode(this.getAttribute(\'data-code\'),this.getAttribute(\'data-desc\'))">' +
+      '<span style="font-weight:700;color:' + col + ';margin-right:6px">' + esc(f.code) + '</span>' +
+      esc(f.desc) +
+      '<span style="font-size:10px;color:var(--text3);margin-left:6px">' + esc(f.cat) + '</span>' +
+      '</div>';
+  }).join('');
+  dd.style.display = 'block';
+}
+
+function selectFeeCode(code, desc) {
+  var inp = document.getElementById('oc-fee');
+  if (inp) inp.value = code;
+  var search = document.getElementById('oc-fee-search');
+  if (search) search.value = desc + ' (' + code + ')';
+  var disp = document.getElementById('oc-fee-display');
+  if (disp) disp.textContent = '';
+  var dd = document.getElementById('oc-fee-dd');
+  if (dd) dd.style.display = 'none';
+  updateOtherPreview();
+}
+
+function buildOtherClaimForm(p) {
+  var now      = new Date();
+  var todayISO = now.toISOString().slice(0, 10);
+  var nowTime  = pad(now.getHours()) + ':' + pad(now.getMinutes());
+
+  // Pre-fill ICD and referring MD from patient record
+  var curDx  = DIAGNOSES.find(function(d) { return String(d.code) === String(p.icd || ''); });
+  var icdVal = curDx ? curDx.label : (p.icd || '');
+  var refVal = p.refbyName || '';
+  var refNum = p.refby     || '';
+
+  var h = '<div class="card">';
+  h += '<div class="card-title">Other claim</div>';
+
+  // Fee code search
+  h += '<label>Fee code</label>';
+  h += '<input id="oc-fee-search" placeholder="Search by description or code number..." ' +
+       'autocorrect="off" autocapitalize="none" ' +
+       'oninput="feeSearch(this.value)" onfocus="feeSearch(this.value)">';
+  h += '<div class="ref-dd" id="oc-fee-dd"></div>';
+  h += '<input id="oc-fee" type="hidden">';
+  h += '<div id="oc-fee-display" style="font-size:11px;color:var(--text2);margin-top:-4px;margin-bottom:6px"></div>';
+
+  h += '<div style="width:80px"><label>Units</label>' +
+       '<input id="oc-units" type="number" value="1" min="1" max="99" ' +
+       'oninput="updateOtherPreview()"></div>';
+
+  // Date + start time
+  h += '<div class="fl">';
+  h +=   '<div class="f1"><label>Date</label>' +
+         '<input type="date" id="oc-date" value="' + todayISO + '" oninput="updateOtherPreview()"></div>';
+  h +=   '<div class="f1"><label>Start time <span style="font-size:10px;color:var(--text3)">(if required)</span></label>' +
+         '<input type="time" id="oc-start" value="' + nowTime + '"></div>';
+  h += '</div>';
+
+  // Location
+  h += '<label>Service location</label>';
+  h += '<select id="oc-loc" style="margin-bottom:9px">' +
+       '<option value="I" selected>I — Inpatient</option>' +
+       '<option value="E">E — Emergency</option>' +
+       '<option value="O">O — Outpatient</option>' +
+       '</select>';
+
+  h += '</div>'; // end card
+
+  // ICD — pre-filled but editable
+  h += '<div class="card">';
+  h += '<label>Diagnosis (ICD-9)</label>';
+  h += '<input id="oc-icd-search" placeholder="Type diagnosis or code..." autocorrect="off" autocomplete="off" ' +
+       'value="' + esc(icdVal) + '" ' +
+       'data-dd="oc-icd-dd" data-hidden="oc-icd" ' +
+       'oninput="icdSearchEl(this)" onfocus="icdSearchEl(this)">';
+  h += '<div class="ref-dd" id="oc-icd-dd"></div>';
+  h += '<input id="oc-icd" type="hidden" value="' + esc(p.icd || '') + '">';
+
+  // Referring MD — pre-filled but editable
+  h += '<label style="margin-top:4px">Referring MD</label>';
+  h += '<input id="oc-ref-search" placeholder="Type name or doctor #..." autocorrect="off" ' +
+       'value="' + esc(refVal) + '" ' +
+       'data-dd="oc-ref-dd" data-hidden="oc-refby" data-name="oc-refby-name" ' +
+       'oninput="refSearchEl(this)" onfocus="refSearchEl(this)">';
+  h += '<div class="ref-dd" id="oc-ref-dd"></div>';
+  h += '<input id="oc-refby"      type="hidden" value="' + esc(refNum) + '">';
+  h += '<input id="oc-refby-name" type="hidden" value="' + esc(refVal) + '">';
+
+  // Notes
+  h += '<label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(CCFPP, etc.)</span></label>';
+  h += '<input id="oc-notes" placeholder="Optional" autocorrect="off">';
+  h += '</div>';
+
+  // Preview
+  h += '<div class="cp" id="oc-preview"><div class="cp-title">Claim preview</div></div>';
+
+  h += '<button class="btn btn-p" onclick="submitOtherClaim()">Add claim</button>';
+  return h;
+}
+
+function updateOtherPreview() {
+  var fee   = ((document.getElementById('oc-fee') || {}).value || '').trim();
+  var units = (document.getElementById('oc-units') || {}).value || '1';
+  var prev  = document.getElementById('oc-preview');
+  if (!prev) return;
+  if (!fee) {
+    prev.innerHTML = '<div class="cp-title">Search and select a fee code above</div>';
+    return;
+  }
+  var knownFee = FEES.find(function(f) { return f.code === fee; });
+  prev.innerHTML = '<div class="cp-title">Claim to add</div>' +
+    '<div class="cp-row">' +
+    '<span class="cp-code">' + esc(fee) + '</span>' +
+    '<span class="cp-desc">' + esc(knownFee ? knownFee.desc : 'Custom fee code') + '</span>' +
+    '<span class="cp-units">×' + units + '</span>' +
+    '</div>';
+}
+
+function submitOtherClaim() {
+  var p = getP(_claimPid);
+  if (!checkDoc()) return;
+
+  var fee   = ((document.getElementById('oc-fee')   || {}).value || '').trim();
+  var units = parseInt((document.getElementById('oc-units') || {}).value || '1') || 1;
+  var dateISO = (document.getElementById('oc-date')  || {}).value || '';
+  var start   = (document.getElementById('oc-start') || {}).value || '';
+  var loc     = (document.getElementById('oc-loc')   || {}).value || 'I';
+  var notes   = (document.getElementById('oc-notes') || {}).value || '';
+  var icd     = (document.getElementById('oc-icd')   || {}).value || p.icd || '3062';
+  var refby   = (document.getElementById('oc-refby') || {}).value || p.refby || '';
+  var refName = (document.getElementById('oc-refby-name') || {}).value || p.refbyName || '';
+
+  if (!fee)     { showToast('Enter a fee code'); return; }
+  if (!dateISO) { showToast('Enter a date');     return; }
+
+  var dateFmt = fmtD(new Date(dateISO));
+
+  // Override patient's ICD and refby with whatever was entered here
+  var pClone = Object.assign({}, p, { icd: icd, refby: refby, refbyName: refName });
+
+  var c = addClaim(pClone, fee, fee, units, dateFmt, loc, start, notes);
+  p.roundedToday = TODAY;
+  sv('patients', st.patients);
+  sv('claims',   st.claims);
+  showToast(fee + ' claim added for ' + p.last);
+  closeClaimScreen();
 }
 
 function selCT(type) {
@@ -2426,6 +2644,7 @@ function selCT(type) {
   else if (type === 'combined')  html = buildCombinedForm(p);
   else if (type === 'directive') html = buildDirectiveForm(p);
   else if (type === 'ccu')       html = buildCCUForm(p);
+  else if (type === 'other')     html = buildOtherClaimForm(p);
   document.getElementById('claim-body').innerHTML = html;
 
   // Post-render setup for consult form
@@ -2649,8 +2868,7 @@ function openPatientSummary(pid) {
     html += '<div style="font-size:11px;color:var(--blue-t);opacity:.8;margin-top:7px">Referred by ' + esc(p.refbyName || p.refby) + (p.refby ? ' #' + p.refby : '') + '</div>';
   }
   if (p.icd) {
-    var dx = DIAGNOSES.find(function(d) { return d.code === p.icd; });
-    html += '<div style="font-size:11px;color:var(--blue-t);opacity:.8;margin-top:2px">Dx: ' + esc(dx ? dx.label : p.icd) + '</div>';
+    html += '<div style="font-size:11px;color:var(--blue-t);opacity:.8;margin-top:2px">Dx: ' + esc(icdShortLabel(p.icd)) + '</div>';
   }
   html += '</div>'; // end demographics card
 
@@ -2684,8 +2902,7 @@ function openPatientSummary(pid) {
 
       dayClaims.forEach(function(c) {
         var feeLabel = getFeeLabel(c.fee);
-        var dx = DIAGNOSES.find(function(d) { return d.code === c.icd; });
-        var dxLabel = dx ? dx.label : (c.icd || '—');
+        var dxLabel = icdShortLabel(c.icd);
         // Truncate dx label if too long
         if (dxLabel.length > 45) dxLabel = dxLabel.slice(0, 42) + '…';
         var isCCU = c.fee === 'CCU_DAILY' || c.fee === '1411' || c.fee === '1421' || c.fee === '1431';
@@ -2734,10 +2951,10 @@ function openPatientSummary(pid) {
 // Get short ICD-9 label: "Description (code)"
 function icdShortLabel(code) {
   if (!code) return '—';
-  var dx = DIAGNOSES.find(function(d) { return d.code === code; });
-  if (!dx) return 'ICD-9 ' + code;
-  // label is already "Description (code)" format e.g. "NSTEMI (410)"
-  return dx.label;
+  var c = String(code).trim();
+  var dx = DIAGNOSES.find(function(d) { return String(d.code).trim() === c; });
+  if (dx) return dx.label; // already "Description (code)" format
+  return 'ICD-9 ' + c;    // fallback for custom/unknown codes
 }
 
 // Get short human label for a fee code
@@ -3199,22 +3416,32 @@ function updateConsultUI() {
   var hasInc  = consultHasIncrement(start, end);
   var modInc  = hasInc ? getModifierForIncrement(start, dateISO) : null;
 
-  // Modifier display
+  // Modifier banner
+  var incUnits = consultIncUnits(start, end);
   var modEl = document.getElementById('cb-mod');
   if (modEl) {
     if (modBase) {
-      var incLine = hasInc
-        ? '<div style="font-size:11px;margin-top:4px;color:var(--text2)">' +
-          '+ ' + modInc.inc + ' increment (end &gt; start+45 min)</div>'
-        : '<div style="font-size:11px;margin-top:4px;color:var(--text3)">' +
-          'No increment — end ≤ start+45 min</div>';
-      modEl.innerHTML =
-        '<div class="mod-box ' + modBase.cls + '">' +
-          '<span>' + modBase.label + '</span>' +
-          incLine +
+      // Line 1: base modifier from start time
+      var banner = '<div class="mod-box ' + modBase.cls + '" style="margin-bottom:0;border-radius:var(--rsm) var(--rsm) 0 0">' +
+        '<span style="font-weight:700">' + modBase.label + '</span>' +
+        '<span style="font-size:10px;opacity:.75;margin-left:6px">' + modBase.base + ' ×1</span>' +
         '</div>';
+      // Line 2: increment based on duration
+      if (incUnits > 0) {
+        var incMod = modInc || modBase;
+        banner += '<div class="mod-box ' + incMod.cls + '" style="margin-top:1px;border-radius:0 0 var(--rsm) var(--rsm);opacity:.85">' +
+          '<span>Consult time &gt; 45 min</span>' +
+          '<span style="font-size:10px;font-weight:700;margin-left:6px">' + incMod.inc + ' ×' + incUnits + '</span>' +
+          '</div>';
+      } else {
+        banner += '<div style="font-size:11px;padding:5px 10px;color:var(--text3);' +
+          'border:.5px solid var(--border);border-top:none;border-radius:0 0 var(--rsm) var(--rsm);' +
+          'background:var(--surface2)">' +
+          'Consult ≤ 45 min — no increment</div>';
+      }
+      modEl.innerHTML = banner;
     } else if (start) {
-      modEl.innerHTML = '<div class="mod-box mod-day">✓ Daytime weekday — no modifier</div>';
+      modEl.innerHTML = '<div class="mod-box mod-day">✓ Daytime weekday — no call-out modifier</div>';
     } else {
       modEl.innerHTML = '';
     }
@@ -3230,10 +3457,12 @@ function updateConsultPreview(modBase, modInc) {
   var icd  = getClaimIcd(p);
   var rows = [{ code:code, desc:'Cardiology consultation', u:1 }];
   if (_mostOn) rows.push({ code:'78720', desc:'MOST — advance care planning', u:1 });
+  var incUnits2 = consultIncUnits(gv('cb-start'), gv('cb-end'));
   if (modBase) {
     rows.push({ code:modBase.base, desc:modBase.label + ' — base (30 min)', u:1 });
-    if (modInc) {
-      rows.push({ code:modInc.inc, desc:'Increment — 15+ min past 30 min base', u:1 });
+    if (incUnits2 > 0) {
+      var incMod2 = modInc || modBase;
+      rows.push({ code:incMod2.inc, desc:'Consult time > 45 min', u:incUnits2 });
     }
   }
   var prev = document.getElementById('cb-preview');
@@ -3271,10 +3500,11 @@ function submitConsult() {
   // MOST
   if (_mostOn) addClaim(p, '78720', '78720', 1, dateFmt, loc);
 
-  var end     = gv('cb-end');
-  var modBase = getModifier(start, dateISO);
-  var hasInc  = consultHasIncrement(start, end);
-  var modInc  = hasInc ? getModifierForIncrement(start, dateISO) : null;
+  var end      = gv('cb-end');
+  var modBase  = getModifier(start, dateISO);
+  var incUnits = consultIncUnits(start, end);
+  var hasInc   = incUnits > 0;
+  var modInc   = hasInc ? getModifierForIncrement(start, dateISO) : null;
 
   if (modBase) {
     // Base claim: start time required by MSP
@@ -3308,7 +3538,7 @@ function submitConsult() {
         });
       }
 
-      addClaim(p, modInc.inc, modInc.inc, 1, dateFmt, loc, incStart, ccfppNote);
+      addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, ccfppNote);
     }
   }
 
@@ -4241,12 +4471,8 @@ function _dischStep1(pid) {
   var h = '<div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:8px">' +
     'Add visit for today?</div>' +
     '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:12px">' + btns + '</div>' +
-    '<div style="display:flex;gap:8px">' +
-    '<button class="btn btn-s" style="margin:0;flex:1;font-size:12px" data-pid="' + pid + '" ' +
-    'onclick="_dischStep2(this.getAttribute(\'data-pid\'))">Skip — no visit</button>' +
-    '<button class="btn btn-ghost" style="margin:0;color:var(--text2);font-size:12px" ' +
-    'onclick="hideModal(\'disch-modal\')">Cancel</button>' +
-    '</div>';
+    '<button class="btn btn-s" style="margin:0;width:100%" data-pid="' + pid + '" ' +
+    'onclick="_dischStep2(this.getAttribute(\'data-pid\'))">Skip — no visit</button>';
   document.getElementById('disch-body').innerHTML = h;
 }
 
@@ -4278,8 +4504,6 @@ function _dischStep2(pid) {
       'onclick="dischComplex(this)">Yes — add 78717</button>' +
       '<button class="btn btn-s" style="margin:0" data-pid="' + pid + '" ' +
       'onclick="dischConfirmRemove(this)">No — patient doesn\'t qualify</button>' +
-      '<button class="btn btn-ghost" style="margin:0;color:var(--text2)" ' +
-      'onclick="hideModal(\'disch-modal\')">Cancel</button>' +
       '</div>';
     document.getElementById('disch-body').innerHTML = h;
   } else {
@@ -4304,8 +4528,6 @@ function _dischStep3(pid) {
     'onclick="dischConfirmRemove(this)">Confirm discharge &amp; remove</button>' +
     '<button class="btn btn-r" style="margin:0" data-pid="' + pid + '" ' +
     'onclick="dischRemoveError(this)">Remove from list (added in error)</button>' +
-    '<button class="btn btn-ghost" style="margin:0;color:var(--text2)" ' +
-    'onclick="hideModal(\'disch-modal\')">Cancel</button>' +
     '</div>';
   document.getElementById('disch-body').innerHTML = h;
 }
@@ -4891,7 +5113,9 @@ document.addEventListener('click', function(e) {
     if (t.id === 'f-ref-search' || t.id === 'cb-ref-search' ||
         t.id === 'pe-ref-search' || t.id === 'f-icd-search' ||
         t.id === 'cb-icd-search' || t.id === 'pe-icd-search' ||
-        t.id === 'ce-icd-search') return;
+        t.id === 'ce-icd-search' || t.id === 'oc-icd-search' ||
+        t.id === 'oc-ref-search' ||
+        t.id === 'oc-fee-search') return;
     document.querySelectorAll('.ref-dd').forEach(function(dd) { dd.style.display = 'none'; });
   } catch(e2) {}
 });
@@ -5179,6 +5403,46 @@ async function init() {
   renderRefs('');
   render();
   if (SHEETS_URL) syncFromSheets();
+}
+
+async function resetLocalData() {
+  if (!confirm('This will clear all local data on this device and re-sync from Google Sheets. Any unsynced changes will be lost. Continue?')) return;
+  // Clear all local storage keys for this app
+  var keys = ['patients','claims','refs','doctors','doc','changelog','recentIcds','recentRefs'];
+  for (var i = 0; i < keys.length; i++) {
+    try { await LS.delete(STORAGE_PREFIX + keys[i]); } catch(e) {}
+  }
+  // Reset in-memory state
+  st.patients  = [];
+  st.claims    = [];
+  st.refs      = [];
+  st.doctors   = [];
+  st.changelog = [];
+  st.doc       = null;
+  document.getElementById('doc-label').textContent = 'Sign in';
+  document.getElementById('doc-dot').classList.remove('on');
+  hideModal('doc-modal');
+  showToast('Local data cleared — syncing from Sheets…');
+  // Re-sync from Sheets fresh
+  if (SHEETS_URL) {
+    setSyncState('syncing');
+    try {
+      var r = await fetch(SHEETS_URL + '?action=getAll&key=' + SHARED_KEY);
+      var d = await r.json();
+      if (!d.error) {
+        if (d.patients)  { st.patients  = d.patients;  sv('patients',  st.patients);  }
+        if (d.claims)    { st.claims    = d.claims;    sv('claims',    st.claims);    }
+        if (d.doctors)   { st.doctors   = d.doctors;   sv('doctors',   st.doctors);   }
+        if (d.changelog) { st.changelog = d.changelog; sv('changelog', st.changelog); }
+        setSyncState('synced');
+        showToast('Sync complete — ' + st.patients.filter(function(p){return !p.discharged;}).length + ' active patients loaded');
+      } else {
+        setSyncState('error');
+        showToast('Sync error — check connection');
+      }
+    } catch(e) { setSyncState('error'); showToast('Sync failed — check connection'); }
+  }
+  render();
 }
 
 // ── Navigation ─────────────────────────────────────────
