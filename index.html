@@ -520,7 +520,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.27</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.28</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -875,48 +875,57 @@ var BC_PHYSICIANS_LOCAL = [["Aartsma","Durk","59243","Psychiatry","Vernon"],["Ab
 var SHEETS_URL = 'https://script.google.com/macros/s/AKfycbzQOQa6dZCCyXu15jvkyUTFghtnhGzZFj4NZ4uyczxLov72zj8qNZIgk9pzL4i8Dfuy5Q/exec';
 var SHARED_KEY = 'kgh2026';
 
-var ALIAS_MAP = {
-  FH:'FH', LH:'LH', DP:'DPatton', KB:'KBrown', JKT:'KT',
-  JW:'JW', KH:'KHoskin', AS:'ASodhi', AK:'AKhosla', EM:'EMMassie', SB:'SB'
-};
+var ALIAS_MAP = {};  // (deprecated, was unused)
 
-// Pre-loaded doctor profiles — shown in sign-in screen on first launch
-// num = MSP billing number (fill in if not already in the app)
-var DOCTORS_SEED = [
-  { alias:'FH',      name:'Dr. Frank Halperin'  },
-  { alias:'LH',      name:'Dr. Laura Halperin'  },
-  { alias:'DPatton', name:'Dr. Daniel Patton'   },
-  { alias:'KBrown',  name:'Dr. Kathryn Brown'   },
-  { alias:'KT',      name:'Dr. Keith Todd'      },
-  { alias:'JW',      name:'Dr. Jordan Webber'   },
-  { alias:'KHoskin', name:'Dr. Kurt Hoskin'     },
-  { alias:'ASodhi',  name:'Dr. Amit Sodhi'      },
-  { alias:'AKhosla', name:'Dr. Amit Khosla'     },
-  { alias:'EMMassie',name:'Dr. Emma Massie'     },
-  { alias:'SB',      name:'Dr. Sandy Baker'     },
-];
+// Format a doctor's full name as "F. Last" for the user list display.
+// Doctors are managed in the Doctors tab of Google Sheets — the `name`
+// column is always populated (controlled by sheet admin), so no fallback
+// is needed beyond a sensible default for malformed input.
+function formatDocName(fullName) {
+  if (!fullName) return '?';
+  var s = String(fullName).replace(/^Dr\.?\s+/i, '').trim();
+  var parts = s.split(/\s+/);
+  if (parts.length === 1) return parts[0];           // single word → as-is
+  var first = parts[0] || '';
+  var last  = parts[parts.length - 1] || '';
+  if (!first) return last;
+  return first.charAt(0).toUpperCase() + '. ' + last;
+}
 
-// mergeDoctors — returns the union of DOCTORS_SEED and a remote list,
-// keyed by alias. Remote values win for any field present (so an MSP
-// number set via saveDoctor is preserved), but every seeded alias is
-// guaranteed to appear in the result. This makes the doctor list
-// self-healing: even if Sheets only has 1 row written, we still show
-// all 11 entries.
+// DOCTORS_SEED is intentionally empty — the Doctors tab in the
+// Google Sheet is the single source of truth. The first call to
+// syncFromSheets() loads the live list. mergeDoctors() is retained
+// in case future fallback rows are needed but currently passes
+// through whatever Sheets returns.
+var DOCTORS_SEED = [];
+
+// mergeDoctors — returns the remote doctors list, optionally unioned
+// with DOCTORS_SEED if any local fallback entries are defined. Sheets
+// is the single source of truth: whatever rows the Doctors tab has,
+// that's what shows up in the sign-in screen. mergeDoctors() preserves
+// the historical signature in case fallback seeds are needed later.
 function mergeDoctors(remote) {
   var byAlias = {};
-  // Start with the seed (gives every alias a guaranteed entry)
+  // Apply any (currently empty) fallback seed first
   DOCTORS_SEED.forEach(function(d) {
     byAlias[d.alias] = { id:'d'+d.alias, alias:d.alias, num:'', name:d.name };
   });
-  // Overlay anything from the remote list (so MSP numbers etc. win)
+  // Overlay remote rows from Sheets — these win on any conflict
   if (Array.isArray(remote)) {
     remote.forEach(function(rd) {
       if (!rd || !rd.alias) return;
       byAlias[rd.alias] = Object.assign(byAlias[rd.alias] || {}, rd);
     });
   }
-  // Return in seed order (so the sign-in modal shows them consistently)
-  return DOCTORS_SEED.map(function(d) { return byAlias[d.alias]; });
+  // Return all aliases (seed first in seed order, then any remote-only ones)
+  var seen = {}, out = [];
+  DOCTORS_SEED.forEach(function(d) {
+    if (byAlias[d.alias] && !seen[d.alias]) { out.push(byAlias[d.alias]); seen[d.alias] = 1; }
+  });
+  Object.keys(byAlias).forEach(function(a) {
+    if (!seen[a]) { out.push(byAlias[a]); seen[a] = 1; }
+  });
+  return out;
 }
 
 // Ward definitions: label, default list, default care type, preset rooms
@@ -1622,8 +1631,8 @@ async function syncFromSheets() {
       st.claims = mergedClaims;
     }
 
-    // Doctors: always merge with DOCTORS_SEED so all 11 are guaranteed
-    // present even if Sheets only has a partial list.
+    // Doctors come from the Sheets Doctors tab (source of truth).
+    // mergeDoctors passes them through; DOCTORS_SEED is empty.
     st.doctors = mergeDoctors(d.doctors);
     if (d.changelog) st.changelog = d.changelog;
 
@@ -3149,8 +3158,9 @@ function openClaimEdit(btn) {
 
   // Build doctor options for performing physician selector
   var docOptions = st.doctors.map(function(d) {
+    var disp = formatDocName(d.name) || d.alias;
     return '<option value="' + esc(d.alias) + '"' + (c.alias === d.alias ? ' selected' : '') + '>' +
-           esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
+           esc(disp) + ' (' + esc(d.alias) + ')</option>';
   }).join('');
 
   var html =
@@ -5675,9 +5685,8 @@ async function init() {
     document.getElementById('doc-label').textContent = st.doc.alias;
     document.getElementById('doc-dot').classList.add('on');
   }
-  // Always merge local doctors with DOCTORS_SEED so all 11 app users
-  // are guaranteed to appear in the sign-in modal. mergeDoctors keeps
-  // any MSP numbers / customised fields from the remote/local lists.
+  // Pass local doctors through mergeDoctors. DOCTORS_SEED is empty —
+  // doctors live in the Sheets Doctors tab. The next sync will refresh.
   st.doctors = mergeDoctors(st.doctors);
   sv('doctors', st.doctors);
 
@@ -5816,15 +5825,15 @@ function hideModal(id) {
 function renderDocOpts() {
   document.getElementById('doc-opts').innerHTML = st.doctors.length
     ? st.doctors.map(function(d) {
-        var ini = d.name.replace('Dr. ','').split(' ').map(function(w){return w[0]||''}).join('').slice(0,2).toUpperCase();
-        var numLine = d.alias;
-        return '<div class="doc-opt" data-alias="' + d.alias + '" data-num="' + d.num + '" data-name="' + esc(d.name) + '" onclick="selectDocEl(this)">' +
+        var displayName = formatDocName(d.name);
+        var ini = (d.name || '').replace(/^Dr\.?\s+/i, '').split(' ').map(function(w){return w[0]||''}).join('').slice(0,2).toUpperCase();
+        return '<div class="doc-opt" data-alias="' + d.alias + '" data-num="' + (d.num || '') + '" data-name="' + esc(d.name) + '" onclick="selectDocEl(this)">' +
           '<div class="doc-av">' + ini + '</div>' +
-          '<div style="flex:1"><div style="font-size:14px;font-weight:700">' + esc(d.name) + '</div>' +
-          '<div style="font-size:11px;color:var(--text2);margin-top:1px">' + numLine + '</div></div>' +
+          '<div style="flex:1"><div style="font-size:14px;font-weight:700">' + esc(displayName) + '</div>' +
+          '<div style="font-size:11px;color:var(--text2);margin-top:1px">' + esc(d.alias) + '</div></div>' +
           '</div>';
       }).join('')
-    : '<div class="empty" style="padding:10px 0">No profiles found.</div>';
+    : '<div class="empty" style="padding:10px 0">No profiles found. Add doctors to the Google Sheet \u2192 Doctors tab.</div>';
 }
 
 function selectDocEl(el) {
