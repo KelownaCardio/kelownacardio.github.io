@@ -5240,7 +5240,7 @@ function refSearch(query, dropdownId, hiddenId, nameId) {
   if (!dd) return;
   var recentNums = (st.recentRefs || []).map(function(r) { return r.num; });
 
-  // Empty query: show recent + saved on focus
+  // Empty query: show recent/saved refs, then fall through to local BC directory
   if (!query || !query.trim()) {
     var recentRefs = recentNums.map(function(num) {
       return st.refs.find(function(r) { return r.num === num; });
@@ -5248,18 +5248,40 @@ function refSearch(query, dropdownId, hiddenId, nameId) {
     var otherSaved = st.refs
       .filter(function(r) { return recentNums.indexOf(r.num) === -1; })
       .slice(0, 8);
-    var all = recentRefs.concat(otherSaved);
-    if (!all.length) {
-      dd.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--text2)">Start typing a name or doctor #</div>';
+    var savedAll = recentRefs.concat(otherSaved);
+
+    // If we have saved/recent refs, show them
+    if (savedAll.length) {
+      dd.innerHTML = savedAll.map(function(r) {
+        return buildRefRowHtml(
+          { last:r.last, first:r.first||'', num:r.num, spec:r.spec||'', city:'', saved:true },
+          dropdownId, hiddenId, nameId, recentNums, null
+        );
+      }).join('');
       dd.style.display = 'block';
       return;
     }
-    dd.innerHTML = all.map(function(r) {
-      return buildRefRowHtml(
-        { last:r.last, first:r.first||'', num:r.num, spec:r.spec||'', city:'', saved:true },
-        dropdownId, hiddenId, nameId, recentNums, null
-      );
-    }).join('');
+
+    // No saved refs — show top Kelowna physicians from local directory so
+    // the dropdown appears immediately on focus rather than looking broken
+    if (typeof BC_PHYSICIANS_LOCAL !== 'undefined' && BC_PHYSICIANS_LOCAL.length) {
+      var kelowna = BC_PHYSICIANS_LOCAL.filter(function(p) {
+        return p[4] === 'Kelowna';
+      }).slice(0, 12);
+      dd.innerHTML =
+        '<div style="padding:6px 10px;font-size:10px;color:var(--text3);border-bottom:.5px solid var(--border)">Kelowna physicians — type to search all BC</div>' +
+        kelowna.map(function(p) {
+          return buildRefRowHtml(
+            { last:p[0], first:p[1], num:p[2], spec:p[3]||'', city:p[4]||'', saved:false },
+            dropdownId, hiddenId, nameId, recentNums, null
+          );
+        }).join('');
+      dd.style.display = 'block';
+      return;
+    }
+
+    // Fallback
+    dd.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--text2)">Start typing a name or doctor #</div>';
     dd.style.display = 'block';
     return;
   }
