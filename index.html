@@ -520,7 +520,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.25</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.26</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -681,7 +681,7 @@ input[type=file] { display:none; }
     <label>Referred by</label>
     <input id="f-ref-search" placeholder="Type name or doctor #..." autocorrect="off"
       data-dd="f-ref-dd" data-hidden="f-refby" data-name="f-refby-name"
-      oninput="refSearchEl(this)" onfocus="refSearchEl(this)">
+      oninput="refSearchEl(this);this.style.cssText='';this.placeholder='Type name or doctor #...'" onfocus="refSearchEl(this)">
     <div class="ref-dd" id="f-ref-dd"></div>
     <input id="f-refby"      type="hidden">
     <input id="f-refby-name" type="hidden">
@@ -689,7 +689,7 @@ input[type=file] { display:none; }
     <label style="margin-top:4px">Diagnosis</label>
     <input id="f-icd-search" placeholder="Type diagnosis or code..." autocorrect="off" autocomplete="off"
       data-dd="f-icd-dd" data-hidden="f-icd"
-      oninput="icdSearchEl(this)" onfocus="icdSearchEl(this)">
+      oninput="icdSearchEl(this);this.style.cssText='';this.placeholder='Type diagnosis or code...'" onfocus="icdSearchEl(this)">
     <input id="f-icd" type="hidden" value="410">
     <div class="ref-dd" id="f-icd-dd"></div>
   </div>
@@ -1562,6 +1562,26 @@ async function syncFromSheets() {
         var hadBadRef = looksLikeMRPService(p.refbyName);
         sanitizeReferrer(p);
         if (hadBadRef && SHEETS_URL) push('savePatient', p);  // overwrite stale bad data on Sheets
+      });
+
+      // Back-fill blank refby/refbyName on patient from their claim history
+      // This repairs existing dirty rows in Sheets on every sync
+      d.patients.forEach(function(p) {
+        if (!p.refby || !p.refbyName) {
+          var patClaims = (d.claims || []).filter(function(c) {
+            return c.phn === p.phn && c.refby && c.refbyName && !looksLikeMRPService(c.refbyName);
+          });
+          // Use most recent claim with a valid referring MD
+          patClaims.sort(function(a, b) {
+            return (b.id || '').localeCompare(a.id || '');
+          });
+          if (patClaims.length) {
+            var best = patClaims[0];
+            if (!p.refby)     p.refby     = best.refby;
+            if (!p.refbyName) p.refbyName = best.refbyName;
+            if (SHEETS_URL) push('savePatient', p);  // push back-filled values to Sheets
+          }
+        }
       });
       var remoteById = {};
       d.patients.forEach(function(p) { remoteById[p.id] = true; });
@@ -2839,8 +2859,10 @@ function submitOtherClaim() {
   var dateFmt = fmtD(new Date(dateISO));
 
   // Back-populate to patient record so subsequent claims inherit
-  if (icd && icd !== p.icd) p.icd = icd;
-  if (refby && refby !== p.refby) { p.refby = refby; p.refbyName = refName; }
+  var patientUpdated = false;
+  if (icd && icd !== p.icd)           { p.icd = icd; patientUpdated = true; }
+  if (refby && refby !== p.refby)     { p.refby = refby; p.refbyName = refName; patientUpdated = true; }
+  else if (refName && refName !== p.refbyName) { p.refbyName = refName; patientUpdated = true; }
 
   var pClone = Object.assign({}, p, { icd: icd, refby: refby, refbyName: refName });
 
@@ -2848,6 +2870,8 @@ function submitOtherClaim() {
   p.roundedToday = TODAY;
   sv('patients', st.patients);
   sv('claims',   st.claims);
+  // Push patient back to Sheets so refby/icd are never blank there
+  if (patientUpdated && SHEETS_URL) push('savePatient', p);
   showToast(fee + ' claim added for ' + p.last);
   closeClaimScreen();
 }
@@ -3949,9 +3973,12 @@ function updatePatientFromClaimForm(p) {
 
   var rb = document.getElementById('cb-refby');
   var rn = document.getElementById('cb-refby-name');
-  if (rb && rb.value && rb.value !== p.refby) {
-    p.refby     = rb.value;
-    if (rn) p.refbyName = rn.value;
+  if (rb && rb.value) {
+    // Update if number changed, OR if number matches but name was blank (backfill)
+    if (rb.value !== p.refby || (!p.refbyName && rn && rn.value)) {
+      p.refby     = rb.value;
+      if (rn && rn.value && !looksLikeMRPService(rn.value)) p.refbyName = rn.value;
+    }
   }
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
@@ -4105,7 +4132,37 @@ function addPatient() {
   if (!last) { showToast('Enter patient last name'); return; }
 
   var ward = gv('f-ward');
-  var icd  = gv('f-icd') || '3062';
+  var icd  = gv('f-icd') || '';
+
+  // Required: referring MD and diagnosis must be filled before adding
+  var addMissing = [];
+  if (!gv('f-refby-num') && !gv('f-refby')) addMissing.push('refby');
+  if (!icd) addMissing.push('icd');
+  if (addMissing.length) {
+    if (addMissing.indexOf('refby') !== -1) {
+      var refEl = document.getElementById('f-ref-search');
+      if (refEl) {
+        refEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)';
+        refEl.placeholder = 'Required — type name or doctor #';
+        refEl.focus();
+      }
+    }
+    if (addMissing.indexOf('icd') !== -1) {
+      var icdEl = document.getElementById('f-icd-search');
+      if (icdEl) {
+        icdEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)';
+        icdEl.placeholder = 'Required — type diagnosis or code';
+        if (addMissing.indexOf('refby') === -1) icdEl.focus();
+      }
+    }
+    var msgs = [];
+    if (addMissing.indexOf('refby') !== -1) msgs.push('referring MD');
+    if (addMissing.indexOf('icd')   !== -1) msgs.push('diagnosis');
+    showToast('Required: ' + msgs.join(' and '));
+    return;
+  }
+
+  icd = icd || '3062';
 
   // Check for duplicate PHN
   if (phn) {
