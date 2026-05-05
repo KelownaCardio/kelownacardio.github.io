@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>KGH Sticker OCR — On-Device Test</title>
+<style>
+  :root {
+    --bg: #f5f5f7; --surface: #fff; --surface2: #f0f0f3;
+    --text: #1c1c1e; --text2: #636366; --text3: #8e8e93;
+    --border: rgba(0,0,0,.06); --border2: rgba(0,0,0,.12);
+    --blue: #007aff; --blue-bg: #e3f0ff; --blue-t: #0050a0;
+    --green: #34c759; --green-bg: #d4f4dd; --green-t: #1a7a35;
+    --red: #ff3b30; --red-bg: #ffe5e3; --red-t: #b3201a;
+    --amber: #ff9500; --amber-bg: #fff0d6; --amber-t: #a55c00;
+    --rsm: 8px; --rmd: 12px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         background: var(--bg); color: var(--text); font-size: 14px; -webkit-text-size-adjust: 100%; }
+  .hdr { background: var(--surface); border-bottom: .5px solid var(--border); padding: 12px 16px;
+         position: sticky; top: 0; z-index: 50; }
+  .hdr-title { font-size: 16px; font-weight: 700; }
+  .hdr-sub { font-size: 11px; color: var(--text2); margin-top: 2px; }
+  .container { padding: 16px; max-width: 600px; margin: 0 auto; }
+  .card { background: var(--surface); border-radius: var(--rmd); padding: 14px; margin-bottom: 12px;
+          border: .5px solid var(--border); }
+  .card-title { font-size: 11px; font-weight: 700; color: var(--text3); text-transform: uppercase;
+                letter-spacing: .5px; margin-bottom: 10px; }
+  label { display: block; font-size: 11px; color: var(--text2); margin: 8px 0 4px; font-weight: 600; }
+  input, select { width: 100%; padding: 10px; border: .5px solid var(--border2); border-radius: var(--rsm);
+                  font-size: 14px; background: var(--surface); font-family: inherit; }
+  input:focus, select:focus { outline: 2px solid var(--blue); outline-offset: -2px; }
+  .btn { width: 100%; padding: 12px; border: none; border-radius: var(--rsm);
+         font-size: 15px; font-weight: 700; font-family: inherit; cursor: pointer; margin-top: 8px; }
+  .btn-p { background: var(--blue); color: #fff; }
+  .btn-s { background: var(--surface2); color: var(--text); }
+  .btn-g { background: var(--green); color: #fff; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .badge { display: inline-block; font-size: 10px; padding: 3px 8px; border-radius: 10px;
+           font-weight: 700; margin-left: 6px; vertical-align: middle; }
+  .badge-engine-ml { background: var(--green-bg); color: var(--green-t); }
+  .badge-engine-tess { background: var(--amber-bg); color: var(--amber-t); }
+  .status { padding: 10px 12px; border-radius: var(--rsm); font-size: 13px; margin: 10px 0;
+            display: none; font-weight: 600; }
+  .status.show { display: block; }
+  .status.info { background: var(--blue-bg); color: var(--blue-t); }
+  .status.ok { background: var(--green-bg); color: var(--green-t); }
+  .status.err { background: var(--red-bg); color: var(--red-t); }
+  .status.warn { background: var(--amber-bg); color: var(--amber-t); }
+  .raw-text { font-family: ui-monospace, "SF Mono", monospace; font-size: 11px; color: var(--text2);
+              white-space: pre-wrap; background: var(--surface2); padding: 10px;
+              border-radius: var(--rsm); max-height: 200px; overflow-y: auto; line-height: 1.4; }
+  .hidden { display: none !important; }
+  .preview-img { width: 100%; max-height: 280px; object-fit: contain; border-radius: var(--rsm);
+                 background: #000; margin-bottom: 8px; }
+  .field-warn { border-color: var(--amber-t) !important; background: var(--amber-bg); }
+  .field-note { font-size: 10px; color: var(--amber-t); margin-top: -2px; margin-bottom: 4px; font-weight: 600; }
+  .file-input { display: none; }
+  .pill-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  .pill { padding: 6px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;
+          background: var(--surface2); color: var(--text2); }
+  .pill.active { background: var(--blue); color: #fff; }
+  details { background: var(--surface); border-radius: var(--rsm); padding: 8px 12px;
+            margin: 8px 0; border: .5px solid var(--border); }
+  summary { font-size: 12px; font-weight: 600; color: var(--text2); cursor: pointer; }
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="hdr-title">KGH Sticker OCR <span id="engine-badge" class="badge">detecting...</span></div>
+  <div class="hdr-sub">On-device test environment v0.1 — no network required</div>
+</div>
+
+<div class="container">
+
+  <!-- Mode toggle -->
+  <div class="card">
+    <div class="card-title">What are you scanning?</div>
+    <div class="pill-row">
+      <div id="mode-sticker" class="pill active" onclick="setMode('sticker')">Patient sticker</div>
+      <div id="mode-meditech" class="pill" onclick="setMode('meditech')">Meditech chart header</div>
+    </div>
+    <button class="btn btn-p" onclick="document.getElementById('file-camera').click()">📷 Take photo</button>
+    <button class="btn btn-s" onclick="document.getElementById('file-upload').click()">Upload image</button>
+    <input id="file-camera" class="file-input" type="file" accept="image/*" capture="environment" onchange="handleFile(event)">
+    <input id="file-upload" class="file-input" type="file" accept="image/*" onchange="handleFile(event)">
+  </div>
+
+  <div id="status" class="status"></div>
+
+  <!-- Image preview -->
+  <div id="preview-card" class="card hidden">
+    <div class="card-title">Captured image</div>
+    <img id="preview-img" class="preview-img">
+  </div>
+
+  <!-- Extracted fields -->
+  <div id="fields-card" class="card hidden">
+    <div class="card-title">Extracted fields — verify and edit</div>
+    <div id="field-warnings"></div>
+
+    <div class="row">
+      <div>
+        <label>Last name</label>
+        <input id="f-last" type="text" autocorrect="off" autocapitalize="words">
+        <div id="f-last-note" class="field-note hidden"></div>
+      </div>
+      <div>
+        <label>First name</label>
+        <input id="f-first" type="text" autocorrect="off" autocapitalize="words">
+        <div id="f-first-note" class="field-note hidden"></div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label>PHN (10 digits)</label>
+        <input id="f-phn" type="text" inputmode="numeric" autocorrect="off">
+        <div id="f-phn-note" class="field-note hidden"></div>
+      </div>
+      <div>
+        <label>DOB (DD/MM/YYYY)</label>
+        <input id="f-dob" type="text" inputmode="numeric" autocorrect="off">
+        <div id="f-dob-note" class="field-note hidden"></div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label>Sex</label>
+        <select id="f-sex">
+          <option value="">—</option>
+          <option value="M">M</option>
+          <option value="F">F</option>
+        </select>
+      </div>
+      <div>
+        <label>MRP service</label>
+        <select id="f-mrp">
+          <option value="">—</option>
+          <option value="Cardiology">Cardiology</option>
+          <option value="Hospitalist">Hospitalist</option>
+          <option value="CTU">CTU</option>
+          <option value="ICU">ICU</option>
+          <option value="CSICU">CSICU</option>
+          <option value="Cardiac Surgery">Cardiac Surgery</option>
+          <option value="General Surgery">General Surgery</option>
+          <option value="Orthopedics">Orthopedics</option>
+          <option value="Neurology">Neurology</option>
+          <option value="Nephrology">Nephrology</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="meditech-fields" class="hidden">
+      <div class="row">
+        <div>
+          <label>Ward</label>
+          <input id="f-ward" type="text" autocorrect="off" autocapitalize="characters">
+        </div>
+        <div>
+          <label>Room</label>
+          <input id="f-room" type="text" autocorrect="off" autocapitalize="characters">
+        </div>
+      </div>
+    </div>
+
+    <button class="btn btn-g" onclick="confirmAndSave()">✓ Confirm extracted data</button>
+    <button class="btn btn-s" onclick="resetForm()">Cancel / scan another</button>
+
+    <details>
+      <summary>Show raw OCR output</summary>
+      <div id="raw-text" class="raw-text" style="margin-top: 8px"></div>
+    </details>
+
+    <details>
+      <summary>Show parser steps</summary>
+      <div id="parse-log" class="raw-text" style="margin-top: 8px"></div>
+    </details>
+  </div>
+
+  <!-- Saved confirmations log -->
+  <div id="log-card" class="card hidden">
+    <div class="card-title">Saved this session</div>
+    <div id="saved-log"></div>
+  </div>
+
+</div>
+
+<!-- Tesseract.js loaded only if needed (iOS) -->
+<script>
+  // ── Engine detection ──────────────────────────────────────────────
+  let engine = null;
+  let tesseractWorker = null;
+  let mode = 'sticker';
+  let lastRawText = '';
+  let lastParseLog = [];
+  let savedItems = [];
+
+  async function detectEngine() {
+    if ('TextDetector' in window) {
+      try {
+        // Verify it actually works (some browsers expose it but throw)
+        new TextDetector();
+        engine = 'mlkit';
+        document.getElementById('engine-badge').className = 'badge badge-engine-ml';
+        document.getElementById('engine-badge').textContent = 'Native ML Kit';
+        return;
+      } catch (e) {}
+    }
+    engine = 'tesseract';
+    document.getElementById('engine-badge').className = 'badge badge-engine-tess';
+    document.getElementById('engine-badge').textContent = 'Tesseract.js';
+    showStatus('info', 'Loading Tesseract.js (one-time download, ~2 MB)…');
+    await loadTesseract();
+  }
+
+  async function loadTesseract() {
+    if (window.Tesseract) return;
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+      s.onload = async () => {
+        try {
+          tesseractWorker = await Tesseract.createWorker('eng');
+          hideStatus();
+          resolve();
+        } catch (e) { reject(e); }
+      };
+      s.onerror = () => {
+        showStatus('err', 'Could not load Tesseract.js — check internet for first-time setup');
+        reject(new Error('Tesseract load failed'));
+      };
+      document.head.appendChild(s);
+    });
+  }
+
+  function setMode(m) {
+    mode = m;
+    document.getElementById('mode-sticker').classList.toggle('active', m === 'sticker');
+    document.getElementById('mode-meditech').classList.toggle('active', m === 'meditech');
+    document.getElementById('meditech-fields').classList.toggle('hidden', m !== 'meditech');
+  }
+
+  function showStatus(type, msg) {
+    const el = document.getElementById('status');
+    el.className = 'status show ' + type;
+    el.textContent = msg;
+  }
+  function hideStatus() {
+    document.getElementById('status').className = 'status';
+  }
+
+  // ── File handling ─────────────────────────────────────────────────
+  async function handleFile(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    event.target.value = ''; // reset for re-pick
+
+    const dataUrl = await fileToDataURL(file);
+    document.getElementById('preview-img').src = dataUrl;
+    document.getElementById('preview-card').classList.remove('hidden');
+    document.getElementById('fields-card').classList.add('hidden');
+
+    showStatus('info', 'Running OCR (' + (engine === 'mlkit' ? 'native' : 'Tesseract') + ')…');
+
+    try {
+      const rawText = await runOCR(dataUrl);
+      lastRawText = rawText;
+      const parsed = parseSticker(rawText);
+      populateFields(parsed);
+      document.getElementById('raw-text').textContent = rawText;
+      document.getElementById('parse-log').textContent = lastParseLog.join('\n');
+      document.getElementById('fields-card').classList.remove('hidden');
+      hideStatus();
+    } catch (e) {
+      showStatus('err', 'OCR failed: ' + (e.message || e));
+    }
+  }
+
+  function fileToDataURL(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+  }
+
+  // ── OCR engines ───────────────────────────────────────────────────
+  async function runOCR(dataUrl) {
+    if (engine === 'mlkit') return runMLKit(dataUrl);
+    return runTesseract(dataUrl);
+  }
+
+  async function runMLKit(dataUrl) {
+    const img = await loadImage(dataUrl);
+    const detector = new TextDetector();
+    const blocks = await detector.detect(img);
+    // Sort blocks top-to-bottom by their bounding box y position
+    blocks.sort((a, b) => a.boundingBox.top - b.boundingBox.top);
+    return blocks.map(b => b.rawValue).join('\n');
+  }
+
+  async function runTesseract(dataUrl) {
+    if (!tesseractWorker) await loadTesseract();
+    const result = await tesseractWorker.recognize(dataUrl);
+    return result.data.text;
+  }
+
+  function loadImage(src) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = src;
+    });
+  }
+
+  // ── Parser — BC sticker layout aware ──────────────────────────────
+  // Reads top-to-bottom, anchors on ACT KG line, BCC line, MRP/FAM lines.
+  function parseSticker(rawText) {
+    lastParseLog = [];
+    function log(msg) { lastParseLog.push(msg); }
+
+    // Normalise: each line trimmed, blanks removed
+    const lines = rawText
+      .split(/\r?\n/)
+      .map(l => l.trim())
+      .filter(l => l.length > 0);
+
+    log('=== Input lines (' + lines.length + ') ===');
+    lines.forEach((l, i) => log('  [' + i + '] ' + l));
+
+    // Routing codes that may appear before the name — ignore these lines entirely
+    const ROUTING_CODES = /^(MOS|REN|AGG|EDC|ACIN|MHL|D MOS|ID MOS|D\s+MOS)$/i;
+
+    // Find ACT KG line — most reliable anchor
+    let actLineIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (/ACT\s+KG\d/i.test(lines[i])) { actLineIdx = i; break; }
+    }
+    log('ACT KG anchor at line ' + actLineIdx);
+
+    // ── Name extraction ─────────────────────────────────────────────
+    // Name is on the line immediately above ACT line, skipping routing codes
+    let nameRaw = '';
+    let nameClipped = false;
+    if (actLineIdx > 0) {
+      // Walk upward skipping routing codes
+      for (let i = actLineIdx - 1; i >= 0; i--) {
+        if (ROUTING_CODES.test(lines[i])) { log('Skipping routing code: ' + lines[i]); continue; }
+        // Skip empty header noise like "PATIENT STICKER"
+        if (/^[A-Z\s]{8,}$/.test(lines[i]) && !/[,.]/.test(lines[i])) {
+          log('Skipping all-caps header: ' + lines[i]);
+          continue;
+        }
+        nameRaw = lines[i];
+        log('Name line: ' + nameRaw);
+        break;
+      }
+    }
+
+    // Hole punch detection — name doesn't start with a capital letter or starts mid-word
+    if (nameRaw && !/^[A-Z]/.test(nameRaw)) {
+      nameClipped = true;
+      log('Name appears clipped by hole punch');
+    }
+
+    // Split on first comma OR period (OCR often misreads , as .)
+    let last = '', first = '';
+    if (nameRaw) {
+      const sep = nameRaw.search(/[,.]/);
+      if (sep > 0) {
+        last  = nameRaw.slice(0, sep).trim();
+        first = nameRaw.slice(sep + 1).trim();
+      } else {
+        last = nameRaw.trim();
+      }
+      // Apply OCR substitution corrections
+      last  = fixNameOCR(last);
+      first = fixNameOCR(first);
+      // Strip noise
+      last  = stripLeadingNoise(last);
+      first = stripLeadingNoise(first);
+      if (nameClipped && last) last = '*' + last;
+    }
+
+    // ── PHN extraction — BCC/WCB anchor ─────────────────────────────
+    // HCN line has format: "HCN ##########NS ##########BCC" (or WCB for WorkSafe)
+    let phn = '';
+    let phnClipped = false;
+    for (const line of lines) {
+      // Look for digits immediately followed by BCC, WCB, or BCG
+      const m = line.match(/(\d{7,10})\s*(?:BCC|WCB|BCG)\b/i);
+      if (m) {
+        phn = m[1];
+        if (phn.length < 10) {
+          phnClipped = true;
+          phn = '*' + phn;
+        }
+        log('PHN from BCC/WCB anchor: ' + phn);
+        break;
+      }
+    }
+
+    // Fallback — find any 10-digit number on an HCN line
+    if (!phn) {
+      for (const line of lines) {
+        if (/^HCN/i.test(line)) {
+          const m = line.match(/(\d{10})/);
+          if (m) { phn = m[1]; log('PHN fallback from HCN line: ' + phn); break; }
+        }
+      }
+    }
+
+    // ── DOB extraction — anchor on "DOB" keyword (loose match) ──────
+    // OCR may read DOB as boB, D0B, DO8 etc.
+    let dob = '';
+    const monthMap = {
+      'jan':'01','feb':'02','mar':'03','apr':'04','may':'05','jun':'06',
+      'jul':'07','aug':'08','sep':'09','oct':'10','nov':'11','dec':'12',
+      'rpr':'04','apt':'04','4pr':'04', // Apr variants
+      'jul':'07','jvl':'07','ju1':'07', // Jul variants
+    };
+    for (const line of lines) {
+      // Look for "DD MMM YYYY" pattern
+      const m = line.match(/(\d{1,2})\s+([A-Za-z0-9]{3})\s+(\d{4})/);
+      if (m) {
+        const day = m[1].padStart(2, '0');
+        const monAbbr = m[2].toLowerCase();
+        const year = m[3];
+        const month = monthMap[monAbbr] || monthMap[monAbbr.replace(/[018]/g, c => ({'0':'o','1':'l','8':'b'}[c])).toLowerCase()];
+        if (month && year >= '1900' && year <= '2030') {
+          // DOB is the OLDEST date — store first match, override only if older
+          const candidate = day + '/' + month + '/' + year;
+          const yearNum = parseInt(year);
+          if (!dob || yearNum < parseInt(dob.slice(6))) {
+            dob = candidate;
+            log('DOB candidate: ' + candidate + ' from line: ' + line);
+          }
+        }
+      }
+    }
+
+    // ── Sex extraction — L:M or L:F (legal sex) ─────────────────────
+    let sex = '';
+    for (const line of lines) {
+      const m = line.match(/L\s*[:.]\s*([MF])/i);
+      if (m) { sex = m[1].toUpperCase(); log('Sex from L: ' + sex); break; }
+    }
+    // Fallback — any standalone M or F on the DOB line
+    if (!sex) {
+      for (const line of lines) {
+        if (/\d{4}/.test(line)) {
+          const m = line.match(/\b([MF])\b/);
+          if (m) { sex = m[1]; log('Sex fallback: ' + sex); break; }
+        }
+      }
+    }
+
+    // ── MRP extraction — find "MRP" line ────────────────────────────
+    // Format: "MRP  Cardiology..." or "MRP  Patton,Daniel McGee"
+    // Known service names — if MRP value contains one, use it; otherwise it's a person → "Other"
+    const KNOWN_SERVICES = [
+      'Cardiology','Hospitalist','CTU','ICU','CSICU','Cardiac Surgery',
+      'General Surgery','Orthopedics','Neurology','Nephrology','Internal Medicine',
+      'Respirology','GIM','Gastroenterology','Oncology','Palliative'
+    ];
+    let mrp = '';
+    for (const line of lines) {
+      // Match MRP with optional leading noise (checkbox marks, punctuation)
+      const m = line.match(/(?:^|\W)MRP\b\s*(.+)$/i);
+      if (m) {
+        const value = m[1].trim();
+        log('MRP raw value: ' + value);
+        // Check for known service names
+        const matched = KNOWN_SERVICES.find(svc =>
+          value.toLowerCase().includes(svc.toLowerCase())
+        );
+        if (matched) {
+          mrp = matched;
+          log('MRP matched service: ' + matched);
+        } else if (/^[A-Z][a-z]+[,.]/.test(value)) {
+          // Looks like a person's name (Last,First or Last.First) → Other
+          mrp = 'Other';
+          log('MRP looks like person name → Other');
+        } else {
+          mrp = 'Other';
+          log('MRP unrecognised → Other');
+        }
+        break;
+      }
+    }
+
+    // ── Meditech-specific: ward/room ────────────────────────────────
+    let ward = '', room = '';
+    if (mode === 'meditech') {
+      const decoded = decodeMeditechLocation(lines);
+      ward = decoded.ward;
+      room = decoded.room;
+    }
+
+    return { last, first, phn, dob, sex, mrp, ward, room,
+             nameClipped, phnClipped };
+  }
+
+  // ── OCR substitution corrections for names ────────────────────────
+  function fixNameOCR(s) {
+    if (!s) return s;
+    return s
+      .replace(/LL/g, 'tt')   // doubled L → tt
+      .replace(/Lh/g, 'th')   // Lh → th
+      .replace(/lh/g, 'th');
+  }
+
+  function stripLeadingNoise(s) {
+    if (!s) return s;
+    return s.replace(/^[^A-Za-z0-9*]+/, '').trim();
+  }
+
+  // ── Meditech location decoding ────────────────────────────────────
+  // Maps "ADM ACIN, KELKGHS2S KGHS0226-A" → ward=2S, room=226A
+  function decodeMeditechLocation(lines) {
+    const WARDS = {
+      'KELKGHSCCU':'CCU','KELKGHICSI':'CSICU','KELKGHCSI':'CSICU',
+      'KELKGHS2S':'2S','KELKGHS2W':'2W','KELKGHS3E':'3E','KELKGHS3W':'3W',
+      'KELKGHS4E':'4E','KELKGHS4W':'4W','KELKGHS3MU':'3MU',
+      'KELKGHR4A':'4A','KELKGHR4B':'4B','KELKGHR5B':'5B',
+      'KELKGHC6W':'6W','KELKGHC1C':'C1C','KELKGHCEOF':'ED','KELKGHCMT':'ED',
+      'KELKGHAREH':'REH','KELKGHSHAH':'HAH'
+    };
+    let ward = '', room = '';
+    for (const line of lines) {
+      // Look for ward code
+      const wm = line.match(/KELKGH[A-Z0-9]+/);
+      if (wm && WARDS[wm[0]]) { ward = WARDS[wm[0]]; log('Ward: ' + ward); }
+      // Look for room code KGHS#### or KGHC#### with optional bed letter
+      const rm = line.match(/KGH[A-Z]+(\d{4})\s*-?\s*([A-Z])?/);
+      if (rm) {
+        const num = rm[1];
+        const bed = rm[2] || '';
+        if (ward === 'CCU') {
+          // CCU: bed = last 2 digits of room number
+          const bedNum = parseInt(num.slice(2));
+          room = String(bedNum);
+        } else if (num.startsWith('0')) {
+          // Standard 3-digit: strip leading 0
+          room = num.replace(/^0+/, '') + bed;
+        } else {
+          // 4-digit Royal/CSICU: keep full
+          room = num + bed;
+        }
+        log('Room: ' + room);
+      }
+    }
+    function log(msg) { lastParseLog.push(msg); }
+    return { ward, room };
+  }
+
+  // ── Populate UI fields with extracted data ────────────────────────
+  function populateFields(p) {
+    document.getElementById('f-last').value  = p.last  || '';
+    document.getElementById('f-first').value = p.first || '';
+    document.getElementById('f-phn').value   = p.phn   || '';
+    document.getElementById('f-dob').value   = p.dob   || '';
+    document.getElementById('f-sex').value   = p.sex   || '';
+    document.getElementById('f-mrp').value   = p.mrp   || '';
+    document.getElementById('f-ward').value  = p.ward  || '';
+    document.getElementById('f-room').value  = p.room  || '';
+
+    // Warnings
+    const warnings = [];
+    if (p.nameClipped) warnings.push('Name may be clipped by hole punch — verify spelling');
+    if (p.phnClipped)  warnings.push('PHN may be clipped — verify all 10 digits');
+    if (!p.last)       warnings.push('No name extracted — please enter manually');
+    if (!p.phn)        warnings.push('No PHN extracted — please enter manually');
+    if (!p.dob)        warnings.push('No DOB extracted — please enter manually');
+
+    const warnEl = document.getElementById('field-warnings');
+    if (warnings.length) {
+      warnEl.innerHTML = warnings.map(w =>
+        '<div class="status warn show" style="margin: 4px 0">⚠ ' + w + '</div>'
+      ).join('');
+    } else {
+      warnEl.innerHTML = '<div class="status ok show" style="margin: 4px 0">✓ All fields extracted — please verify</div>';
+    }
+
+    // Highlight clipped fields
+    if (p.nameClipped) document.getElementById('f-last').classList.add('field-warn');
+    if (p.phnClipped)  document.getElementById('f-phn').classList.add('field-warn');
+  }
+
+  // ── Confirm and save (test version: just logs) ───────────────────
+  function confirmAndSave() {
+    const data = {
+      last:  document.getElementById('f-last').value.trim(),
+      first: document.getElementById('f-first').value.trim(),
+      phn:   document.getElementById('f-phn').value.trim(),
+      dob:   document.getElementById('f-dob').value.trim(),
+      sex:   document.getElementById('f-sex').value,
+      mrp:   document.getElementById('f-mrp').value,
+      ward:  document.getElementById('f-ward').value.trim(),
+      room:  document.getElementById('f-room').value.trim(),
+      ts:    new Date().toLocaleTimeString()
+    };
+    savedItems.unshift(data);
+    renderSavedLog();
+    showStatus('ok', '✓ Confirmed: ' + data.last + ', ' + data.first);
+    setTimeout(hideStatus, 3000);
+    resetForm();
+  }
+
+  function renderSavedLog() {
+    const c = document.getElementById('log-card');
+    if (!savedItems.length) { c.classList.add('hidden'); return; }
+    c.classList.remove('hidden');
+    document.getElementById('saved-log').innerHTML = savedItems.map(d =>
+      '<div style="padding: 8px 0; border-bottom: .5px solid var(--border); font-size: 12px">' +
+      '<strong>' + escapeHtml(d.last) + ', ' + escapeHtml(d.first) + '</strong> ' +
+      '<span style="color: var(--text3)">@ ' + d.ts + '</span><br>' +
+      '<span style="color: var(--text2)">PHN ' + escapeHtml(d.phn) + ' · DOB ' + escapeHtml(d.dob) +
+      ' · ' + escapeHtml(d.sex) + ' · MRP: ' + escapeHtml(d.mrp || '—') +
+      (d.ward ? ' · ' + escapeHtml(d.ward) + ' ' + escapeHtml(d.room) : '') +
+      '</span></div>'
+    ).join('');
+  }
+
+  function escapeHtml(s) {
+    return String(s || '').replace(/[<>&"]/g, c =>
+      ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+  }
+
+  function resetForm() {
+    document.getElementById('preview-card').classList.add('hidden');
+    document.getElementById('fields-card').classList.add('hidden');
+    document.getElementById('f-last').classList.remove('field-warn');
+    document.getElementById('f-phn').classList.remove('field-warn');
+  }
+
+  // Boot
+  detectEngine();
+</script>
+
+</body>
+</html>
