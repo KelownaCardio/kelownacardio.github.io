@@ -520,7 +520,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.20</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.21</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -3140,13 +3140,14 @@ function openPatientSummary(pid) {
 // Get short ICD-9 label: "Description (code)"
 // Format a startTime value from any source (HH:MM string, Date object, ISO string)
 // to display HH:MM only. Sheets stores time-only as 1899-12-30T<HH>:<MM>:00.000Z
-// Normalise claim date — Sheets serialises DD/MM/YYYY back as ISO timestamps
-// like "2026-05-05T07:00:00.000Z". Convert anything ISO-shaped back to DD/MM/YYYY.
+// Normalise claim date — Sheets may serialise DD/MM/YYYY back as
+// ISO timestamps, JS Date strings, or pandas Timestamps. Always
+// produce DD/MM/YYYY for storage and display.
 function fmtClaimDate(d) {
   if (!d) return '';
   // Already clean DD/MM/YYYY?
   if (typeof d === 'string' && /^\d{2}\/\d{2}\/\d{4}$/.test(d)) return d;
-  // ISO timestamp from Sheets — extract YYYY-MM-DD then flip to DD/MM/YYYY
+  // ISO date or timestamp — extract YYYY-MM-DD then flip to DD/MM/YYYY
   if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/.test(d)) {
     var m = d.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (m) return m[3] + '/' + m[2] + '/' + m[1];
@@ -3154,6 +3155,13 @@ function fmtClaimDate(d) {
   // Date object
   if (d instanceof Date && !isNaN(d)) {
     return pad(d.getDate()) + '/' + pad(d.getMonth()+1) + '/' + d.getFullYear();
+  }
+  // Last-resort parse — handles JS Date strings, anything Date can swallow
+  if (typeof d === 'string') {
+    var parsed = new Date(d);
+    if (!isNaN(parsed)) {
+      return pad(parsed.getDate()) + '/' + pad(parsed.getMonth()+1) + '/' + parsed.getFullYear();
+    }
   }
   return String(d);
 }
