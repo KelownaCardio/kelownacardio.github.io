@@ -144,7 +144,7 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 .bb-rnd  { background:var(--blue-bg);  border-color:#a8c4e8; color:var(--blue-t); }
 .bb-dir  { background:var(--amber-bg); border-color:#d4a84a; color:var(--amber-t); }
 .bb-ccu  { background:var(--red-bg);   border-color:#e0a090; color:var(--red-t); }
-.bb-done { background:var(--green-bg); border-color:#7ec49a; color:var(--green-t); font-weight:700; cursor:default; opacity:.9; }
+.bb-done { background:var(--green); border-color:var(--green); color:#fff; font-weight:700; cursor:pointer; }
 .bb-comb { background:var(--teal-bg);  border-color:#7ec4c4; color:var(--teal-t); }
 
 /* FORMS */
@@ -520,7 +520,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.28</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.18</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -614,19 +614,14 @@ input[type=file] { display:none; }
           <option value="ICUA">ICU A</option>
           <option value="ICUB">ICU B</option>
           <option value="ICUD">ICU D</option>
-          <option value="3E">3E</option>
-          <option value="3MU">3MU</option>
-          <option value="3W">3W</option>
-          <option value="4E">4E</option>
-          <option value="4W">4W</option>
-          <option value="4A">4A</option>
-          <option value="4B">4B</option>
-          <option value="5B">5B</option>
-          <option value="6W">6W</option>
-          <option value="C1C">C1C (ED)</option>
           <option value="ED">ED</option>
-          <option value="REH">Rehab</option>
-          <option value="HAH">Hosp at Home</option>
+          <option value="3E">3E</option>
+          <option value="3W">3W</option>
+          <option value="3MU">3MU</option>
+          <option value="4AB">4A/B</option>
+          <option value="REHAB">Rehab</option>
+          <option value="6W">6W</option>
+          <option value="5B">5B</option>
           <option value="OTHER">Other</option>
         </select>
         <div id="f-ward-other-wrap" style="display:none;margin-top:-3px">
@@ -739,8 +734,9 @@ input[type=file] { display:none; }
   <div class="stats" id="exp-stats" style="grid-template-columns:1fr 1fr 1fr"></div>
   <div class="sec-lbl">Pending claims</div>
   <div id="export-q"></div>
-  <button class="btn btn-s" onclick="clearQueue()" style="margin-top:8px">Clear queue</button>
-  <div style="font-size:10px;color:var(--text3);text-align:center;padding:4px 0 0">Claims sync to Google Sheet → exported to iClinic from there</div>
+  <button class="btn btn-g" onclick="exportCSV()" style="margin-top:8px">Export iClinic CSV</button>
+  <button class="btn btn-s" onclick="clearQueue()">Clear queue</button>
+  <div style="font-size:10px;color:var(--text3);text-align:center;padding:4px 0 0">OA040 · I/E location · iClinic format · CCU codes auto-consolidated</div>
   <div class="sec-lbl" style="margin-top:13px">Change log</div>
   <div id="change-log"></div>
 </div>
@@ -771,11 +767,7 @@ input[type=file] { display:none; }
   <div class="loc-grid" id="loc-grid"></div>
   <div id="loc-room-wrap">
     <label>Room / bed</label>
-    <select id="loc-room" style="margin-bottom:5px"></select>
-    <div id="loc-room-other-wrap" style="display:none;margin-bottom:9px">
-      <input id="loc-room-other" placeholder="Type room / bed…" autocorrect="off" autocomplete="off"
-        style="margin-bottom:0">
-    </div>
+    <select id="loc-room" style="margin-bottom:9px"></select>
   </div>
   <div class="fl" style="margin-bottom:9px">
     <div class="f1"><label>On / Off service</label>
@@ -800,10 +792,20 @@ input[type=file] { display:none; }
     <div class="modal-title">Who are you?</div>
     <div style="font-size:12px;color:var(--text2);margin-top:-8px;margin-bottom:10px">Tap your name to sign in</div>
     <div id="doc-opts"></div>
+    <div class="divider"></div>
+    <div class="divider"></div>
+    <div class="card-title" style="margin-bottom:4px">Add or update MSP number</div>
+    <div style="font-size:11px;color:var(--text2);margin-bottom:8px">Enter your alias and MSP billing # to update your profile</div>
+    <div class="fl" style="gap:6px;margin-bottom:6px">
+      <input id="new-alias" placeholder="Alias (SB)" style="margin:0" maxlength="8" autocorrect="off" autocapitalize="characters">
+      <input id="new-num" placeholder="Doctor #" style="margin:0" inputmode="numeric" autocorrect="off">
+    </div>
+    <input id="new-name" placeholder="Dr. Full Name" style="margin-bottom:8px" autocorrect="off" autocapitalize="words">
+    <button class="btn btn-p" onclick="addDoctor()">Add and sign in</button>
+    <button class="btn btn-s" onclick="hideModal('doc-modal')">Cancel</button>
     <div class="divider" style="margin-top:14px"></div>
     <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Clear all local data and re-sync from Sheets. Use if your device is showing stale or test patients.</div>
     <button class="btn" style="background:var(--red-bg);color:var(--red-t);border:.5px solid var(--red-t);width:100%;margin:0" onclick="resetLocalData()">⚠ Reset local data &amp; re-sync</button>
-    <button class="btn btn-s" style="margin-top:8px" onclick="hideModal('doc-modal')">Cancel</button>
   </div>
 </div>
 
@@ -875,89 +877,45 @@ var BC_PHYSICIANS_LOCAL = [["Aartsma","Durk","59243","Psychiatry","Vernon"],["Ab
 var SHEETS_URL = 'https://script.google.com/macros/s/AKfycbzQOQa6dZCCyXu15jvkyUTFghtnhGzZFj4NZ4uyczxLov72zj8qNZIgk9pzL4i8Dfuy5Q/exec';
 var SHARED_KEY = 'kgh2026';
 
-var ALIAS_MAP = {};  // (deprecated, was unused)
+var ALIAS_MAP = {
+  FH:'FH', LH:'LH', DP:'DPatton', KB:'KBrown', JKT:'KT',
+  JW:'JW', KH:'KHoskin', AS:'ASodhi', AK:'AKhosla', EM:'EMMassie', SB:'SB'
+};
 
-// Format a doctor's full name as "F. Last" for the user list display.
-// Doctors are managed in the Doctors tab of Google Sheets — the `name`
-// column is always populated (controlled by sheet admin), so no fallback
-// is needed beyond a sensible default for malformed input.
-function formatDocName(fullName) {
-  if (!fullName) return '?';
-  var s = String(fullName).replace(/^Dr\.?\s+/i, '').trim();
-  var parts = s.split(/\s+/);
-  if (parts.length === 1) return parts[0];           // single word → as-is
-  var first = parts[0] || '';
-  var last  = parts[parts.length - 1] || '';
-  if (!first) return last;
-  return first.charAt(0).toUpperCase() + '. ' + last;
-}
-
-// DOCTORS_SEED is intentionally empty — the Doctors tab in the
-// Google Sheet is the single source of truth. The first call to
-// syncFromSheets() loads the live list. mergeDoctors() is retained
-// in case future fallback rows are needed but currently passes
-// through whatever Sheets returns.
-var DOCTORS_SEED = [];
-
-// mergeDoctors — returns the remote doctors list, optionally unioned
-// with DOCTORS_SEED if any local fallback entries are defined. Sheets
-// is the single source of truth: whatever rows the Doctors tab has,
-// that's what shows up in the sign-in screen. mergeDoctors() preserves
-// the historical signature in case fallback seeds are needed later.
-function mergeDoctors(remote) {
-  var byAlias = {};
-  // Apply any (currently empty) fallback seed first
-  DOCTORS_SEED.forEach(function(d) {
-    byAlias[d.alias] = { id:'d'+d.alias, alias:d.alias, num:'', name:d.name };
-  });
-  // Overlay remote rows from Sheets — these win on any conflict
-  if (Array.isArray(remote)) {
-    remote.forEach(function(rd) {
-      if (!rd || !rd.alias) return;
-      byAlias[rd.alias] = Object.assign(byAlias[rd.alias] || {}, rd);
-    });
-  }
-  // Return all aliases (seed first in seed order, then any remote-only ones)
-  var seen = {}, out = [];
-  DOCTORS_SEED.forEach(function(d) {
-    if (byAlias[d.alias] && !seen[d.alias]) { out.push(byAlias[d.alias]); seen[d.alias] = 1; }
-  });
-  Object.keys(byAlias).forEach(function(a) {
-    if (!seen[a]) { out.push(byAlias[a]); seen[a] = 1; }
-  });
-  return out;
-}
+// Pre-loaded doctor profiles — shown in sign-in screen on first launch
+// num = MSP billing number (fill in if not already in the app)
+var DOCTORS_SEED = [
+  { alias:'FH',      name:'Dr. Frank Halperin'  },
+  { alias:'LH',      name:'Dr. Laura Halperin'  },
+  { alias:'DPatton', name:'Dr. Daniel Patton'   },
+  { alias:'KBrown',  name:'Dr. Kathryn Brown'   },
+  { alias:'KT',      name:'Dr. Keith Todd'      },
+  { alias:'JW',      name:'Dr. Jordan Webber'   },
+  { alias:'KHoskin', name:'Dr. Kurt Hoskin'     },
+  { alias:'ASodhi',  name:'Dr. Amit Sodhi'      },
+  { alias:'AKhosla', name:'Dr. Amit Khosla'     },
+  { alias:'EMMassie',name:'Dr. Emma Massie'     },
+  { alias:'SB',      name:'Dr. Sandy Baker'     },
+];
 
 // Ward definitions: label, default list, default care type, preset rooms
 var WARDS = {
-  // ── Strathcona: Cardiology on-service ──────────────────
-  CCU:   { label:'CICU',          list:'on',  care:'ccu',       role:'mrp',        rooms:['1','2','3','4','5','6','7','8'] },
-  '2S':  { label:'2S',            list:'on',  care:'daily',     role:'mrp',        rooms:['217A','218A','219A','220A','221A','222A','223A','224A','225A','225B','226A','226B','227A','228A','229A','230A','231A','232A','233A','234A','Hallway 1','Hallway 2'] },
-  '2W':  { label:'2W',            list:'on',  care:'daily',     role:'mrp',        rooms:['201A','202A','203A','204A','205A','206A','207A','208A','209A','210A','211A','212A','213A','214A','Hallway'] },
-  // ── Strathcona: ICU / critical care ────────────────────
-  CSICU: { label:'CSICU',         list:'off', care:'ccu',       role:'consultant', rooms:['2601A','2602A','2603A','2604A','2605A','2606A','2607A','2608A'] },
-  ICUA:  { label:'ICU A',         list:'off', care:'ccu',       role:'consultant', rooms:['2001A','2002A','2003A','2004A','2005A','2006A','2007A','2008A'] },
-  ICUB:  { label:'ICU B',         list:'off', care:'ccu',       role:'consultant', rooms:['2101A','2102A','2103A','2104A','2105A','2106A','2107A','2108A','2109A','2110A','2111A','2112A','2113A','2114A','2115A','2116A','2117A','2118A','2119A','2120A'] },
-  ICUD:  { label:'ICU D',         list:'off', care:'ccu',       role:'consultant', rooms:[] },
-  // ── Strathcona: Medical / surgical ─────────────────────
-  '3E':  { label:'3E',            list:'off', care:'directive', role:'consultant', rooms:['311A','312A','313A','314A','315A','316A','317A','318A','319A','319B','320A'] },
-  '3MU': { label:'3MU',           list:'off', care:'directive', role:'consultant', rooms:['3MU 01','3MU 02','3MU 03','3MU 04','3MU 05'] },
-  '3W':  { label:'3W',            list:'off', care:'directive', role:'consultant', rooms:['301A','302A','303A','304A','305A','306A','307A','308A','309A','310A','310B','Hallway'] },
-  '4E':  { label:'4E',            list:'off', care:'directive', role:'consultant', rooms:['411A','412A','413A','414A','415A','416A','417A','418A','419A','420A'] },
-  '4W':  { label:'4W',            list:'off', care:'directive', role:'consultant', rooms:['401A','402A','403A','404A','404B','404C','405A','406A','407A','407B','408A','409A','410A'] },
-  // ── Royal Building ─────────────────────────────────────
-  '4A':  { label:'4A',            list:'off', care:'directive', role:'consultant', rooms:['4001A','4002A','4003A','4004A','4005A','4006A','4007A','4008A','4009A','4010A','4011A','4012A','4012B','4013A','4014A','4014B','Hallway'] },
-  '4B':  { label:'4B',            list:'off', care:'directive', role:'consultant', rooms:['4101A','4102A','4103A','4104A','4105A','4106A','4107A','4108A','4109A','4110A','4111A','4112A','4113A','4114A','4115A','4116A','4116B','4117A','4118A','4119A','4120A','4121A','4122A','4123A','4124A','4125A','4125B','Hallway'] },
-  '5B':  { label:'5B',            list:'off', care:'directive', role:'consultant', rooms:['5101A','5102A','5103A','5104A','5105A','5106A','5107A','5108A','5109A','5110A','5111A','5112A','5113A','5114A','5115A','5116A','5117A','5118A','5119A','5120A','5121A','5122A','5123A','5124A','5125A','5125B','5126A','5127A','5128A','5128B','5128C','Hallway'] },
-  // ── Centennial Building ────────────────────────────────
-  '6W':  { label:'6W',            list:'off', care:'directive', role:'consultant', rooms:['611A','612A','613A','614A','615A','616A','617A','618A','619A','620A','621A','622A','623A','624A','625A','626A','Hallway'] },
-  C1C:   { label:'C1C (ED)',       list:'off', care:'directive', role:'consultant', rooms:['1C01','1C02','1C03','1C04','1C05','1C06','1C07','1C08','1C09','1C10','1C11','1C12','1C13','1C14','1C15','1C16','1C17A','1C18'] },
-  ED:    { label:'ED',             list:'off', care:'directive', role:'consultant', rooms:['Main','C1','Streaming','Minor Treatment 1','Minor Treatment 2','Minor Treatment 3','Minor Treatment 4','Minor Treatment 5','EDOF 1','EDOF 2','EDOF 3','BCAS 1','BCAS 2','BCAS 3','Resus 1','Resus 2'] },
-  // ── Annexed Rehab ──────────────────────────────────────
-  REH:   { label:'Rehab',          list:'off', care:'directive', role:'consultant', rooms:['117A','117B','117C','128A','128B','128C','130A','130B','130C'] },
-  // ── Virtual / other ───────────────────────────────────
-  HAH:   { label:'Hosp at Home',   list:'off', care:'directive', role:'consultant', rooms:['01','02','03','04','05','06','07','08','09','10'] },
-  OTHER: { label:'Other',          list:'off', care:'directive', role:'consultant', rooms:[] }
+  CCU:  { label:'CICU',     list:'on',  care:'ccu',      role:'mrp',       rooms:['1','2','3','4','5','6','7','8'] },
+  '2S': { label:'2S',       list:'on',  care:'daily',    role:'mrp',     rooms:['217A','218','219','220','221','222A','223','224','225A','225B','226A','226B','227','228','229','230','231','232','233','234','Hallway 1','Hallway 2'] },
+  '2W': { label:'2W',       list:'on',  care:'daily',    role:'mrp',     rooms:['201','202','203','204','205','206','207','208','209','210','211','212','213'] },
+  CSICU:{ label:'CSICU',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
+  ICUA: { label:'ICU A',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
+  ICUB: { label:'ICU B',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
+  ICUD: { label:'ICU D',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
+  ED:   { label:'ED',       list:'off', care:'directive', role:'consultant', rooms:['Resus 1','Resus 2','Bay 1','Bay 2','Bay 3','Bay 4','Other'] },
+  '3E': { label:'3E',       list:'off', care:'directive', role:'consultant', rooms:[] },
+  '3W': { label:'3W',       list:'off', care:'directive', role:'consultant', rooms:[] },
+  '3MU':{ label:'3MU',      list:'off', care:'directive', role:'consultant', rooms:[] },
+  '4AB':{ label:'4A/B',     list:'off', care:'directive', role:'consultant', rooms:[] },
+  REHAB:{ label:'Rehab',    list:'off', care:'directive', role:'consultant', rooms:[] },
+  '6W': { label:'6W',       list:'off', care:'directive', role:'consultant', rooms:[] },
+  '5B': { label:'5B',       list:'off', care:'directive', role:'consultant', rooms:[] },
+  OTHER:{ label:'Other',    list:'off', care:'directive', role:'consultant', rooms:[] }
 };
 
 var OCR_WORKER_URL = 'https://kgh-ocr.kathrynb77.workers.dev';
@@ -1000,7 +958,7 @@ function calcDailyTotal() {
   var count = 0;
   st.claims.forEach(function(c) {
     if (c.alias !== st.doc.alias) return;
-    if (toDMY(c.date) !== TODAY) return;
+    if (c.date !== TODAY) return;
     if (c.fee === 'CCU_DAILY') return; // excluded — shown consolidated at export
     var rate = FEE_RATES[c.fee] || 0;
     total += rate * (c.units || 1);
@@ -1515,19 +1473,10 @@ async function loadLocal() {
       }
     } catch(e) {}
   }
-  // Repair any ISO/Date values that may have been cached locally before
-  // the toDMY normalizer was added. One-shot heal — once cleaned and
-  // re-saved, future sessions skip the work.
-  if (Array.isArray(st.patients)) {
-    st.patients.forEach(function(p) {
-      if (p.dob)       p.dob       = toDMY(p.dob);
-      if (p.admitDate) p.admitDate = toDMY(p.admitDate);
-    });
-  }
+  // Normalise any 1899-epoch startTimes from old saved data
   if (Array.isArray(st.claims)) {
     st.claims.forEach(function(c) {
-      if (c.dob)  c.dob  = toDMY(c.dob);
-      if (c.date) c.date = toDMY(c.date);
+      if (c.startTime) c.startTime = fmtStartTime(c.startTime);
     });
   }
 }
@@ -1549,24 +1498,6 @@ async function syncFromSheets() {
     var d = await r.json();
     if (d.error) { setSyncState('error'); return; }
 
-    // ── Normalize dates from Sheets ────────────────────────
-    // Google Sheets auto-detects date cells and getValues() returns JS
-    // Date objects which serialize to ISO strings on the wire. Convert
-    // any DOB/date fields back to the app's DD/MM/YYYY convention so
-    // comparisons (c.date === TODAY) and display work correctly.
-    if (d.patients && Array.isArray(d.patients)) {
-      d.patients.forEach(function(p) {
-        if (p.dob)       p.dob       = toDMY(p.dob);
-        if (p.admitDate) p.admitDate = toDMY(p.admitDate);
-      });
-    }
-    if (d.claims && Array.isArray(d.claims)) {
-      d.claims.forEach(function(c) {
-        if (c.dob)  c.dob  = toDMY(c.dob);
-        if (c.date) c.date = toDMY(c.date);
-      });
-    }
-
     var NOW_MS      = Date.now();
     var GRACE_MS    = 2 * 60 * 1000; // 2 min — anything older than this is not "in flight"
 
@@ -1581,18 +1512,10 @@ async function syncFromSheets() {
       var merged = d.patients.map(function(rp) {
         var lp = st.patients.find(function(p) { return p.id === rp.id; });
         if (!lp) return rp;
-        // Remote wins for all fields; preserve a few local-only signals:
+        // Remote wins for all fields; preserve local roundedToday only if it's today
         var out = Object.assign({}, rp);
-        // 1. Today's rounds tap is per-device — local wins if newer
         if (lp.roundedToday === TODAY && rp.roundedToday !== TODAY) {
           out.roundedToday = TODAY;
-        }
-        // 2. Discharge flags — if local has them and remote doesn't, keep local
-        // (defensive: covers transitional case where Apps Script schema was
-        //  updated but old rows on the sheet don't have these columns yet)
-        if (lp.discharged && !rp.discharged) {
-          out.discharged   = true;
-          out.dischargedAt = lp.dischargedAt;
         }
         return out;
       });
@@ -1613,6 +1536,10 @@ async function syncFromSheets() {
     // Remote is authoritative. Local-only claims kept only within
     // the grace window (push in flight). Orphaned old local claims dropped.
     if (d.claims && Array.isArray(d.claims)) {
+      // Normalise startTime — Sheets returns time-only fields as ISO with 1899 epoch
+      d.claims.forEach(function(c) {
+        if (c.startTime) c.startTime = fmtStartTime(c.startTime);
+      });
       var remoteClaimIds = {};
       d.claims.forEach(function(c) { remoteClaimIds[c.id] = true; });
 
@@ -1631,9 +1558,7 @@ async function syncFromSheets() {
       st.claims = mergedClaims;
     }
 
-    // Doctors come from the Sheets Doctors tab (source of truth).
-    // mergeDoctors passes them through; DOCTORS_SEED is empty.
-    st.doctors = mergeDoctors(d.doctors);
+    if (d.doctors)   st.doctors   = d.doctors;
     if (d.changelog) st.changelog = d.changelog;
 
     ['patients','claims','doctors','changelog'].forEach(function(k) { sv(k, st[k]); });
@@ -1659,96 +1584,51 @@ async function push(action, body) {
 //                 CCU consolidation, directive weekly limit
 // ═══════════════════════════════════════════════════════
 
-// ── Date helpers ───────────────────────────────────────
-// IMPORTANT: All dates in this app are Vancouver time (PST/PDT).
-// Pass YYYY-MM-DD strings through parseLocalDate() to avoid the
-// "new Date('2026-05-04')" timezone trap which parses as UTC midnight
-// (= Sunday 5pm in Vancouver, NOT Monday).
-
-// Parse YYYY-MM-DD (or YYYY-MM-DDT...) as a local-time Date.
-// Returns null for empty/invalid input.
-function parseLocalDate(dateStr) {
-  if (!dateStr) return null;
-  var s = String(dateStr).slice(0, 10);
-  var p = s.split('-');
-  if (p.length !== 3) return null;
-  var y = parseInt(p[0], 10), m = parseInt(p[1], 10), d = parseInt(p[2], 10);
-  if (isNaN(y) || isNaN(m) || isNaN(d)) return null;
-  return new Date(y, m - 1, d);
+// ── BC Statutory Holidays ──────────────────────────────
+function easterDate(y) {
+  var a=y%19, b=Math.floor(y/100), c=y%100, d=Math.floor(b/4), e=b%4,
+      f=Math.floor((b+8)/25), g=Math.floor((b-f+1)/3),
+      h=(19*a+b-d-g+15)%30, i=Math.floor(c/4), k=c%4,
+      l=(32+2*e+2*i-h-k)%7, m=Math.floor((a+11*h+22*l)/451),
+      mo=Math.floor((h+l-7*m+114)/31), da=((h+l-7*m+114)%31)+1;
+  return new Date(y, mo-1, da);
 }
 
-// Today's date as YYYY-MM-DD in Vancouver time (regardless of device TZ).
-function todayISO() {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Vancouver' });
+function bcStatHolidays(year) {
+  var y = year;
+  function nthMon(n, m) { var d=new Date(y,m,1); d.setDate(1+(8-d.getDay())%7+(n-1)*7); return d; }
+  function monBefore(m, day) { var d=new Date(y,m,day); while(d.getDay()!==1) d.setDate(d.getDate()-1); return d; }
+  var easter = easterDate(y);
+  var goodFri = new Date(easter); goodFri.setDate(easter.getDate()-2);
+  var easterMon = new Date(easter); easterMon.setDate(easter.getDate()+1);
+  return [
+    new Date(y,0,1),          // New Year's Day
+    nthMon(3,1),              // Family Day — 3rd Monday Feb
+    goodFri,                  // Good Friday
+    easterMon,                // Easter Monday
+    monBefore(4,25),          // Victoria Day — Monday before May 25
+    new Date(y,6,1),          // Canada Day
+    nthMon(1,7),              // BC Day — 1st Monday Aug
+    nthMon(1,8),              // Labour Day — 1st Monday Sep
+    new Date(y,8,30),         // National Day for Truth & Reconciliation
+    nthMon(2,9),              // Thanksgiving — 2nd Monday Oct
+    new Date(y,10,11),        // Remembrance Day
+    new Date(y,11,25),        // Christmas Day
+    new Date(y,11,26),        // Boxing Day
+  ].map(function(d) {
+    return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+  });
 }
-
-// ── BC MSP-Designated Holidays ─────────────────────────
-// Source: https://www2.gov.bc.ca/gov/content/health/practitioner-professional-resources/msp/claim-submission-payment/designated-holidays-and-close-off-dates
-// MSP publishes its own annual list. This is NOT just BC Employment
-// Standards Act stat holidays — observed/in-lieu dates can differ.
-// UPDATE THIS TABLE EACH NOVEMBER when MSP publishes the next year.
-var BC_MSP_HOLIDAYS = {
-  '2024': [
-    '2024-01-01', // New Year's Day (Mon)
-    '2024-02-19', // Family Day
-    '2024-03-29', // Good Friday
-    '2024-04-01', // Easter Monday
-    '2024-05-20', // Victoria Day
-    '2024-07-01', // Canada Day
-    '2024-08-05', // BC Day
-    '2024-09-02', // Labour Day
-    '2024-09-30', // Truth & Reconciliation Day
-    '2024-10-14', // Thanksgiving
-    '2024-11-11', // Remembrance Day
-    '2024-12-25', // Christmas Day
-    '2024-12-26'  // Boxing Day
-  ],
-  '2025': [
-    '2025-01-01', // New Year's Day (Wed)
-    '2025-02-17', // Family Day
-    '2025-04-18', // Good Friday
-    '2025-04-21', // Easter Monday
-    '2025-05-19', // Victoria Day
-    '2025-07-01', // Canada Day
-    '2025-08-04', // BC Day
-    '2025-09-01', // Labour Day
-    '2025-09-30', // Truth & Reconciliation Day
-    '2025-10-13', // Thanksgiving
-    '2025-11-11', // Remembrance Day
-    '2025-12-25', // Christmas Day
-    '2025-12-26'  // Boxing Day
-  ],
-  '2026': [
-    '2026-01-01', // New Year's Day (Thu)
-    '2026-02-16', // Family Day
-    '2026-04-03', // Good Friday
-    '2026-04-06', // Easter Monday
-    '2026-05-18', // Victoria Day
-    '2026-07-01', // Canada Day
-    '2026-08-03', // BC Day
-    '2026-09-07', // Labour Day
-    '2026-09-30', // Truth & Reconciliation Day
-    '2026-10-12', // Thanksgiving
-    '2026-11-11', // Remembrance Day
-    '2026-12-25', // Christmas Day
-    '2026-12-28'  // Boxing Day (in lieu — Dec 26 is Saturday)
-  ]
-  // 2027+ to be added when MSP publishes the list (~Nov 2026)
-};
 
 function isBCStat(dateStr) {
-  if (!dateStr) return false;
-  var iso = String(dateStr).slice(0, 10);
-  var year = iso.slice(0, 4);
-  var list = BC_MSP_HOLIDAYS[year];
-  return !!(list && list.indexOf(iso) !== -1);
+  var d = new Date(dateStr);
+  var key = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+  return bcStatHolidays(d.getFullYear()).indexOf(key) !== -1;
 }
 
 function isWeekendOrStat(dateStr) {
   if (!dateStr) return false;
-  var d = parseLocalDate(dateStr);
-  if (!d) return false;
-  var dow = d.getDay();
+  var d = new Date(dateStr); var dow = d.getDay();
   return dow === 0 || dow === 6 || isBCStat(dateStr);
 }
 
@@ -1954,7 +1834,6 @@ function logChange(p, action, detail) {
     detail:  detail || '',
     doctor:  st.doc ? st.doc.alias : '—',
     ts:      new Date().toLocaleString('en-CA', {
-      timeZone: 'America/Vancouver',
       hour12:false, year:'2-digit', month:'2-digit',
       day:'2-digit', hour:'2-digit', minute:'2-digit'
     })
@@ -2635,9 +2514,8 @@ function selectFeeCode(code, desc) {
 
 function buildOtherClaimForm(p) {
   var now      = new Date();
-  var todayStr = todayISO(); // Vancouver date (was: UTC date via toISOString)
-  var nowTime  = now.toLocaleTimeString('en-CA',
-                   { timeZone: 'America/Vancouver', hour12: false }).slice(0, 5);
+  var todayISO = now.toISOString().slice(0, 10);
+  var nowTime  = pad(now.getHours()) + ':' + pad(now.getMinutes());
 
   // Pre-fill ICD and referring MD from patient record
   var curDx  = DIAGNOSES.find(function(d) { return String(d.code) === String(p.icd || ''); });
@@ -2664,7 +2542,7 @@ function buildOtherClaimForm(p) {
   // Date + start time
   h += '<div class="fl">';
   h +=   '<div class="f1"><label>Date</label>' +
-         '<input type="date" id="oc-date" value="' + todayStr + '" oninput="updateOtherPreview()"></div>';
+         '<input type="date" id="oc-date" value="' + todayISO + '" oninput="updateOtherPreview()"></div>';
   h +=   '<div class="f1"><label>Start time <span style="font-size:10px;color:var(--text3)">(if required)</span></label>' +
          '<input type="time" id="oc-start" value="' + nowTime + '"></div>';
   h += '</div>';
@@ -2746,7 +2624,7 @@ function submitOtherClaim() {
   if (!fee)     { showToast('Enter a fee code'); return; }
   if (!dateISO) { showToast('Enter a date');     return; }
 
-  var dateFmt = fmtD(parseLocalDate(dateISO));
+  var dateFmt = fmtD(new Date(dateISO));
 
   // Override patient's ICD and refby with whatever was entered here
   var pClone = Object.assign({}, p, { icd: icd, refby: refby, refbyName: refName });
@@ -2781,10 +2659,9 @@ function selCT(type) {
 
   // Post-render setup for consult form
   if (type === 'consult') {
-    // Always Vancouver time for prefill (matches billing reality)
-    var vanTime = new Date().toLocaleTimeString('en-CA', { timeZone: 'America/Vancouver', hour12: false });
-    document.getElementById('cb-start').value = vanTime.slice(0, 5);
-    document.getElementById('cb-date').value  = todayISO();
+    var now = new Date();
+    document.getElementById('cb-start').value = pad(now.getHours()) + ':' + pad(now.getMinutes());
+    document.getElementById('cb-date').value  = new Date().toISOString().slice(0, 10);
     updateConsultUI();
   }
 }
@@ -3061,7 +2938,13 @@ function openPatientSummary(pid) {
         // Doctor alias + edit/delete
         html +=   '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0">';
         html +=     '<div style="font-size:10px;color:var(--text3);text-align:right">' + esc(c.alias || '—');
-        if (c.startTime) html += '<div style="margin-top:1px">' + esc(c.startTime) + '</div>';
+        if (c.startTime) {
+          var displayTime = fmtStartTime(c.startTime);
+          // Defensive: skip if still looks like an ISO timestamp (parser failed)
+          if (displayTime && displayTime.length <= 5 && !/T|Z|\d{4}-/.test(displayTime)) {
+            html += '<div style="margin-top:1px">' + esc(displayTime) + '</div>';
+          }
+        }
         html +=     '</div>';
         html +=     '<div style="display:flex;gap:4px">';
         html +=       '<button class="claim-action-btn claim-edit-btn" data-cid="' + c.id + '" data-pid="' + p.id + '" onclick="openClaimEdit(this)" title="Edit claim">✎</button>';
@@ -3082,6 +2965,30 @@ function openPatientSummary(pid) {
 }
 
 // Get short ICD-9 label: "Description (code)"
+// Format a startTime value from any source (HH:MM string, Date object, ISO string)
+// to display HH:MM only. Sheets stores time-only as 1899-12-30T<HH>:<MM>:00.000Z
+function fmtStartTime(t) {
+  if (!t) return '';
+  // Already a clean HH:MM string?
+  if (typeof t === 'string' && /^\d{1,2}:\d{2}$/.test(t)) return t;
+  // ISO date string with the Sheets epoch placeholder?
+  if (typeof t === 'string' && t.indexOf('1899-12-30') !== -1) {
+    var m = t.match(/T(\d{2}):(\d{2})/);
+    if (m) return m[1] + ':' + m[2];
+  }
+  // Generic ISO / parseable date
+  if (typeof t === 'string' && t.indexOf('T') !== -1) {
+    var m2 = t.match(/T(\d{2}):(\d{2})/);
+    if (m2) return m2[1] + ':' + m2[2];
+  }
+  // Date object
+  if (t instanceof Date && !isNaN(t)) {
+    return pad(t.getHours()) + ':' + pad(t.getMinutes());
+  }
+  // Fallback — return as-is
+  return String(t);
+}
+
 function icdShortLabel(code) {
   if (!code) return '—';
   var c = String(code).trim();
@@ -3158,9 +3065,8 @@ function openClaimEdit(btn) {
 
   // Build doctor options for performing physician selector
   var docOptions = st.doctors.map(function(d) {
-    var disp = formatDocName(d.name) || d.alias;
     return '<option value="' + esc(d.alias) + '"' + (c.alias === d.alias ? ' selected' : '') + '>' +
-           esc(disp) + ' (' + esc(d.alias) + ')</option>';
+           esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
   }).join('');
 
   var html =
@@ -3452,7 +3358,7 @@ function savePatientEdit(pid) {
   var icdHid = document.getElementById('pe-icd');
   if (icdHid && icdHid.value) p.icd = icdHid.value;
 
-  ensureRoomKnown(p.ward, p.bed, st.doc && st.doc.alias);
+  saveCustomRoom(p.ward, p.bed);
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
   logChange(p, 'Demographics edited', '');
@@ -3469,13 +3375,10 @@ function savePatientEdit(pid) {
 // ═══════════════════════════════════════════════════════
 
 function buildConsultForm(p) {
-  var todayStr = todayISO();
-  // Vancouver-local current time as HH:MM
-  var nowTime  = new Date().toLocaleTimeString('en-CA',
-                   { timeZone: 'America/Vancouver', hour12: false }).slice(0, 5);
-  // End time = start + 45 min
-  var nowParts = nowTime.split(':');
-  var endTime  = minsToTime(parseInt(nowParts[0], 10) * 60 + parseInt(nowParts[1], 10) + 45);
+  var now      = new Date();
+  var todayISO = now.toISOString().slice(0, 10);
+  var nowTime  = pad(now.getHours()) + ':' + pad(now.getMinutes());
+  var endTime  = minsToTime(now.getHours() * 60 + now.getMinutes() + 45);
 
   var h = '<div class="card">';
   h += '<div class="card-title">Consult</div>';
@@ -3494,7 +3397,7 @@ function buildConsultForm(p) {
   // Date + Start time (pre-filled with now)
   h += '<div class="fl">' +
        '<div class="f1"><label>Date</label>' +
-       '<input type="date" id="cb-date" value="' + todayStr + '" oninput="updateConsultUI()"></div>' +
+       '<input type="date" id="cb-date" value="' + todayISO + '" oninput="updateConsultUI()"></div>' +
        '<div class="f1"><label>Start time</label>' +
        '<input type="time" id="cb-start" value="' + nowTime + '" oninput="updateConsultUI()"></div>' +
        '</div>';
@@ -3513,50 +3416,12 @@ function buildConsultForm(p) {
   // ICD-9 and referring MD
   h += buildIcdRefCard(p);
 
-  // Notes field — visible to doctor, editable, populated with CCFPP if detected.
-  // These notes are submitted as ADDITIONAL_CLAIM_NOTES on both the base
-  // consult claim and the increment modifier claim. Inpatient billing
-  // only — keep clinical info OUT of this field.
-  h += '<div class="card">';
-  h += '<label>Notes <span style="font-size:10px;color:var(--text3)">(MSP claim notes — e.g. CCFPP, time documentation)</span></label>';
-  h += '<input id="cb-notes" placeholder="Optional — submitted to MSP" autocorrect="off" autocomplete="off" oninput="markNotesEdited()">';
-  h += '<input id="cb-notes-edited" type="hidden" value="0">';
-  h += '</div>';
-
   // Live claim preview
   h += '<div class="cp" id="cb-preview"><div class="cp-title">Claims preview</div></div>';
 
   // Submit button
   h += '<button class="btn btn-p" onclick="submitConsult()">Add consult claims</button>';
   return h;
-}
-
-// Mark the notes field as manually edited so auto-CCFPP doesn't overwrite.
-function markNotesEdited() {
-  var f = document.getElementById('cb-notes-edited');
-  if (f) f.value = '1';
-}
-
-// Detect CCFPP situation given current form state.
-// Returns the suggested CCFPP note string, or '' if none applies.
-function detectCCFPP() {
-  var start = gv('cb-start');
-  var dateFmt = gv('cb-date') ? fmtD(parseLocalDate(gv('cb-date'))) : '';
-  if (!start || !dateFmt || !st.doc) return '';
-  var thisStartM = t2m(start);
-  var found = '';
-  st.claims.forEach(function(c) {
-    if (c.alias !== st.doc.alias) return;
-    if (c.date  !== dateFmt)      return;
-    if (c.fee !== '33010' && c.fee !== '33012') return;
-    if (!c.startTime) return;
-    var prevStartM = t2m(c.startTime);
-    var diff = (thisStartM - prevStartM + 24 * 60) % (24 * 60);
-    if (diff > 0 && diff <= 75) {
-      found = 'CCFPP ' + c.last + ', ' + c.first;
-    }
-  });
-  return found;
 }
 
 function toggleConsultCode(code) {
@@ -3576,13 +3441,11 @@ function updateConsultUI() {
   var end     = gv('cb-end');
   var dateISO = gv('cb-date');
 
-  // If start changed, update end to start+45 only if end hasn't been manually set
-  // We detect "manual" by comparing to the previous auto-value — simplest: always update
-  // end when start changes unless end is already set to something other than start+45
-  if (start && end) {
-    // keep whatever the doctor typed
-  } else if (start && !end) {
-    var endEl = document.getElementById('cb-end');
+  // Track which field triggered this update so the end time follows the start time
+  // unless the doctor has manually edited the end. Start input always pulls end +45 min.
+  var endEl = document.getElementById('cb-end');
+  var changed = (typeof event !== 'undefined' && event && event.target) ? event.target.id : '';
+  if (start && (changed === 'cb-start' || !end)) {
     if (endEl) endEl.value = minsToTime(t2m(start) + 45);
     end = gv('cb-end');
   }
@@ -3623,18 +3486,6 @@ function updateConsultUI() {
   }
 
   updateConsultPreview(modBase, modInc);
-
-  // Auto-suggest CCFPP into the notes field, unless doctor has manually
-  // edited the field (in which case respect their typed value).
-  var notesEl  = document.getElementById('cb-notes');
-  var editedEl = document.getElementById('cb-notes-edited');
-  if (notesEl && editedEl && editedEl.value !== '1') {
-    var suggested = detectCCFPP();
-    notesEl.value = suggested;
-    notesEl.placeholder = suggested
-      ? 'Auto-detected CCFPP — edit if needed'
-      : 'Optional — submitted to MSP';
-  }
 }
 
 function updateConsultPreview(modBase, modInc) {
@@ -3675,22 +3526,16 @@ function submitConsult() {
   var start   = gv('cb-start');
   if (!dateISO) { showToast('Enter date'); return; }
 
-  var dateFmt = fmtD(parseLocalDate(dateISO));
+  var dateFmt = fmtD(new Date(dateISO));
   var loc     = p.ward === 'ED' ? 'E' : 'I';
-
-  // Read notes from the form. Whatever the doctor typed (or accepted from
-  // the auto-CCFPP suggestion) is attached to BOTH the base consult and
-  // the increment modifier claim per MSP CCFPP convention.
-  var notes = (document.getElementById('cb-notes') || {}).value || '';
-  notes = notes.trim();
 
   // Save any ICD-9/referrer changes back to patient record
   updatePatientFromClaimForm(p);
 
-  // Consult row — always include SERVICE_START_TIME, attach notes
-  addClaim(p, code, code, 1, dateFmt, loc, start, notes);
+  // Consult row — always include SERVICE_START_TIME
+  addClaim(p, code, code, 1, dateFmt, loc, start);
 
-  // MOST — no notes (separate claim, not eligible for CCFPP)
+  // MOST
   if (_mostOn) addClaim(p, '78720', '78720', 1, dateFmt, loc);
 
   var end      = gv('cb-end');
@@ -3700,13 +3545,38 @@ function submitConsult() {
   var modInc   = hasInc ? getModifierForIncrement(start, dateISO) : null;
 
   if (modBase) {
-    // Base modifier claim: start time required by MSP, attach notes
-    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start, notes);
+    // Base claim: start time required by MSP
+    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start);
 
     if (modInc) {
-      // Increment start time = consult start + 30 min, attach same notes
+      // Increment start time = consult start + 30 min
       var incStart = minsToTime((t2m(start) + 30) % (24 * 60));
-      addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, notes);
+
+      // CCFPP detection — did this doctor start another consult today
+      // whose window overlaps with this one?
+      var ccfppNote = '';
+      if (start) {
+        var thisStartM = t2m(start);
+        st.claims.forEach(function(c) {
+          if (c.alias !== st.doc.alias) return;
+          if (c.date  !== dateFmt)      return;
+          if (c.phn   === p.phn)        return; // same patient
+          if (c.fee !== '33010' && c.fee !== '33012') return;
+          if (!c.startTime) return;
+          // Previous consult's window ends at its start + 45 min
+          var prevEndM = (t2m(c.startTime) + 45) % (24 * 60);
+          // Overlap if this consult starts before previous consult's window ends
+          var prevStartM = t2m(c.startTime);
+          var windowEnd  = (prevStartM + 75) % (24 * 60); // 75 min = max possible window
+          // Simple check: if previous consult started within last 75 min
+          var diff = (thisStartM - prevStartM + 24 * 60) % (24 * 60);
+          if (diff <= 75) {
+            ccfppNote = 'CCFPP ' + c.last + ', ' + c.first;
+          }
+        });
+      }
+
+      addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, ccfppNote);
     }
   }
 
@@ -3776,7 +3646,7 @@ function updatePatientFromClaimForm(p) {
 
 // ── Daily rounds (33008) ───────────────────────────────
 function buildDailyForm(p) {
-  var iso = todayISO();
+  var iso = new Date().toISOString().slice(0, 10);
   return '<div class="card"><div class="card-title">Daily rounds (33008)</div>' +
     '<div class="fl">' +
       '<div class="f1"><label>Start date</label><input type="date" id="cb-dal-start" value="' + iso + '"></div>' +
@@ -3792,7 +3662,7 @@ function submitDaily() {
   var days = parseInt(gv('cb-dal-days')) || 1;
   if (!ds) { showToast('Enter start date'); return; }
   updatePatientFromClaimForm(p);
-  addClaim(p, '33008', '33008', days, fmtD(parseLocalDate(ds)), 'I');
+  addClaim(p, '33008', '33008', days, fmtD(new Date(ds)), 'I');
   p.roundedToday = TODAY;
   sv('patients', st.patients); sv('claims', st.claims);
   showToast('33008 ×' + days + ' — ' + p.last);
@@ -3801,7 +3671,7 @@ function submitDaily() {
 
 // ── Combined daily care (33008, up to 2×/day for ICU) ─
 function buildCombinedForm(p) {
-  var iso = todayISO();
+  var iso = new Date().toISOString().slice(0, 10);
   return '<div class="card"><div class="card-title">Combined daily care (33008)</div>' +
     '<div class="fl">' +
       '<div class="f1"><label>Date</label><input type="date" id="cb-dal-start" value="' + iso + '"></div>' +
@@ -3834,8 +3704,8 @@ function submitCombined() {
   var note2 = document.getElementById('cb-comb-note') ? gv('cb-comb-note') : '';
   if (v === 2 && !note2) { showToast('Note required for 2nd visit'); return; }
   updatePatientFromClaimForm(p);
-  addClaim(p, '33008', '33008', 1, fmtD(parseLocalDate(ds)), 'I');
-  if (v === 2) addClaim(p, '33008', '33008', 1, fmtD(parseLocalDate(ds)), 'I', null, note2 || 'Second visit — patient unstable');
+  addClaim(p, '33008', '33008', 1, fmtD(new Date(ds)), 'I');
+  if (v === 2) addClaim(p, '33008', '33008', 1, fmtD(new Date(ds)), 'I', null, note2 || 'Second visit — patient unstable');
   p.roundedToday = TODAY;
   sv('patients', st.patients); sv('claims', st.claims);
   showToast('Combined daily ×' + v + ' — ' + p.last);
@@ -3845,7 +3715,7 @@ function submitCombined() {
 // ── Directive visit (33006, max 2/week Sun–Sat) ────────
 function buildDirectiveForm(p) {
   var cnt = dirCountThisWeek(p.phn);
-  var iso = todayISO();
+  var iso = new Date().toISOString().slice(0, 10);
   var h   = cnt >= 2
     ? '<div class="dir-warn">⚠ ' + cnt + ' directive visits already billed this Sun–Sat week. Note required if proceeding.</div>'
     : '';
@@ -3869,7 +3739,7 @@ function submitDirective() {
   var note = cnt >= 2 ? (document.getElementById('cb-dir-note') ? gv('cb-dir-note') : '') : '';
   if (cnt >= 2 && !note) { showToast('Note required for additional directive visit this week'); return; }
   updatePatientFromClaimForm(p);
-  addClaim(p, '33006', '33006', 1, fmtD(parseLocalDate(ds)), 'I', null, note);
+  addClaim(p, '33006', '33006', 1, fmtD(new Date(ds)), 'I', null, note);
   p.roundedToday = TODAY;
   sv('patients', st.patients); sv('claims', st.claims);
   showToast('33006 directive — ' + p.last);
@@ -3947,7 +3817,7 @@ function addPatient() {
     needsSticker: !phn
   };
 
-  ensureRoomKnown(ward, p.bed, st.doc && st.doc.alias);
+  saveCustomRoom(ward, p.bed);
   st.patients.push(p);
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
@@ -4033,32 +3903,6 @@ function saveCustomRoom(ward, room) {
   if (saved.indexOf(room) !== -1) return; // already saved
   saved.push(room);
   try { localStorage.setItem('kgh5:rooms:' + ward, JSON.stringify(saved)); } catch(e) {}
-}
-
-// ensureRoomKnown — adds unknown rooms to WARDS in memory, persists to localStorage,
-// and logs silently to the ChangeLog sheet so the list can be improved over time.
-function ensureRoomKnown(ward, room, doctorAlias) {
-  if (!ward || !room) return;
-  room = String(room).trim();
-  if (!room || room.indexOf('Hallway') === 0) return; // hallway beds are ephemeral
-  var wdef = WARDS[ward];
-  if (!wdef) return;
-  var isKnown = (wdef.rooms || []).indexOf(room) !== -1 ||
-                getSavedRooms(ward).indexOf(room) !== -1;
-  if (isKnown) return;
-  // Add to localStorage so it persists across sessions
-  saveCustomRoom(ward, room);
-  // Refresh datalist if it's currently showing this ward
-  if (gv('f-ward') === ward) populateBedDatalist('f-bed-list', ward);
-  if (gv('pe-ward') === ward) populateBedDatalist('pe-bed-list', ward);
-  // Log to sheet — fire and forget, silent fail
-  if (SHEETS_URL) {
-    fetch(SHEETS_URL + '?action=logNewRoom&key=' + SHARED_KEY +
-      '&ward=' + encodeURIComponent(ward) +
-      '&room=' + encodeURIComponent(room) +
-      '&doctor=' + encodeURIComponent(doctorAlias || ''))
-      .catch(function() {});
-  }
 }
 
 function populateBedDatalist(listId, ward) {
@@ -4442,14 +4286,7 @@ function cropUse() {
 // Worker returns the parsed patient JSON directly — no Apps Script roundtrip.
 function handleOCRResult(data, bar) {
   if (!data || data.error) {
-    var errMsg = (data && data.error) || 'unknown error';
-    var rawMsg = (data && data.raw) ? '\n\nRAW: ' + data.raw : '';
-    if (bar) {
-      bar.className = 'ocr-bar ocr-warn';
-      bar.style.cursor = 'pointer';
-      bar.textContent = 'OCR: ' + errMsg + '  [tap for raw]';
-      bar.onclick = function() { alert('OCR error:\n' + errMsg + rawMsg); };
-    }
+    if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'OCR: ' + ((data && data.error) || 'unknown error'); }
     return;
   }
 
@@ -4468,20 +4305,7 @@ function handleOCRResult(data, bar) {
   if (p.phn)   document.getElementById('f-phn').value   = (p.phn + '').replace(/\D/g,'').slice(0,10);
   if (p.dob)   document.getElementById('f-dob').value   = p.dob;
   if (p.sex)   { var s = document.getElementById('f-sex'); if (s) s.value = p.sex; }
-
-  // ── Decode location via parseLocCode (single source of truth) ─────
-  // Worker may return ward/room as either:
-  //   • clean WARDS keys + room strings  (e.g. ward='2S', room='226A')
-  //   • raw Meditech codes               (e.g. ward='KELKGHS2S', room='KGHS0226-A')
-  // parseLocCode handles both cases — passing already-clean values through unchanged.
-  var decodedLoc = parseLocCode(p.ward || '', p.room || '');
-  var ocrWard = decodedLoc.ward;
-  var ocrRoom = decodedLoc.room;
-
-  if (ocrWard && WARDS[ocrWard]) {
-    document.getElementById('f-ward').value = ocrWard;
-    wardChange();
-  }
+  if (p.ward && WARDS[p.ward]) { document.getElementById('f-ward').value = p.ward; wardChange(); }
   if (p.mrp) {
     var mrpSel = document.getElementById('f-mrp');
     if (mrpSel) {
@@ -4499,50 +4323,18 @@ function handleOCRResult(data, bar) {
       if (mrpVal) { mrpSel.value = mrpVal; mrpChange(); }
     }
   }
-  if (ocrRoom) {
+  if (p.room) {
+    // Strip Meditech prefix and leading zeros: KGHS0226-A → 226A
+    var roomRaw = String(p.room).toUpperCase().replace(/^KGHS/,'').replace(/-/g,'');
+    var roomMatch = roomRaw.match(/^0*([1-9]\d{0,3})([A-Z]?)$/);
+    var roomClean = roomMatch ? (roomMatch[1] + roomMatch[2]) : roomRaw;
     var bedInp = document.getElementById('f-bed');
-    if (bedInp) bedInp.value = ocrRoom;
-    ensureRoomKnown(gv('f-ward'), ocrRoom, st.doc && st.doc.alias);
+    if (bedInp) bedInp.value = roomClean;
+    saveCustomRoom(gv('f-ward'), roomClean);
   }
-  // ── OCR debug panel (beta) ────────────────────────────
-  // Shows raw worker output + what each field decoded to.
-  // Tap the bar to expand/collapse. Remove once OCR is stable.
-  var wardDecoded  = p.ward || '(none)';
-  var wardAccepted = ocrWard && WARDS[ocrWard] ? ocrWard : (p.ward ? p.ward + ' => decoded: ' + ocrWard : '(none)');
-  var roomRawDebug = p.room || '(none)';
-  var roomFinal    = (document.getElementById('f-bed') || {}).value || '(none)';
-  var debugLines = [
-    'RAW WORKER JSON:',
-    JSON.stringify(p, null, 2),
-    '',
-    'DECODED:',
-    '  last  → ' + (p.last  || '(empty)'),
-    '  first → ' + (p.first || '(empty)'),
-    '  phn   → ' + (p.phn   || '(empty)'),
-    '  dob   → ' + (p.dob   || '(empty)'),
-    '  sex   → ' + (p.sex   || '(empty)'),
-    '  ward  → raw:"' + wardDecoded + '"  used:"' + wardAccepted + '"',
-    '  room  → raw:"' + roomRawDebug + '"  decoded:"' + roomFinal + '"',
-    '  mrp   → ' + (p.mrp   || '(empty)')
-  ].join('\n');
-
   if (bar) {
     bar.className = 'ocr-bar ocr-ok';
-    bar.style.cursor = 'pointer';
-    bar.title = 'Tap to see OCR debug report';
-    bar.textContent = '✓ Extracted: ' + (p.last||'?') + ', ' + (p.first||'?') + (p.phn ? ' · ' + p.phn : '') + '  [tap for details]';
-    bar.onclick = function() {
-      var existing = document.getElementById('ocr-debug-panel');
-      if (existing) { existing.remove(); bar.onclick = null; return; }
-      var panel = document.createElement('pre');
-      panel.id = 'ocr-debug-panel';
-      panel.style.cssText = 'background:var(--surface2);border:.5px solid var(--border2);border-radius:var(--rsm);' +
-        'font-size:11px;font-family:monospace;padding:10px 12px;margin-top:6px;white-space:pre-wrap;' +
-        'word-break:break-all;color:var(--text);max-height:320px;overflow-y:auto;';
-      panel.textContent = debugLines;
-      // Insert right after the bar
-      bar.parentNode.insertBefore(panel, bar.nextSibling);
-    };
+    bar.textContent = '✓ Extracted: ' + (p.last||'?') + ', ' + (p.first||'?') + (p.phn ? ' · ' + p.phn : '');
   }
 }
 
@@ -4611,36 +4403,19 @@ function selectLocWard(ward) {
     if (careSel) careSel.value = w.care || 'daily';
   }
 
-  // Populate room selector — preset + saved custom rooms + free-text fallback
-  var rooms = (w.rooms || []).slice();
-  var saved = getSavedRooms(ward);
-  saved.forEach(function(r) { if (rooms.indexOf(r) === -1) rooms.push(r); });
-  var roomSel = document.getElementById('loc-room');
-  roomSel.innerHTML =
+  // Populate room selector
+  var rooms = w.rooms || [];
+  document.getElementById('loc-room').innerHTML =
     '<option value="">— select —</option>' +
-    rooms.map(function(r) { return '<option value="' + r + '">' + r + '</option>'; }).join('') +
-    '<option value="__other__">Other (type below)…</option>';
-  // Show/hide free-text input
-  var otherWrap = document.getElementById('loc-room-other-wrap');
-  if (otherWrap) otherWrap.style.display = 'none';
-  roomSel.onchange = function() {
-    if (otherWrap) otherWrap.style.display = roomSel.value === '__other__' ? 'block' : 'none';
-  };
+    rooms.map(function(r) { return '<option value="' + r + '">' + r + '</option>'; }).join('');
 }
 
 function confirmLocChange() {
   var p    = getP(_locPid);
   var from = p.ward;
-  var roomVal = gv('loc-room');
-  // If doctor chose "Other (type below)…", use the free-text input
-  if (roomVal === '__other__') {
-    roomVal = ((document.getElementById('loc-room-other') || {}).value || '').trim();
-    if (!roomVal) { showToast('Enter a room or bed number'); return; }
-  }
   p.ward   = _locWard;
-  p.bed    = roomVal;
+  p.bed    = gv('loc-room');
   p.care   = gv('loc-care');
-  ensureRoomKnown(p.ward, p.bed, st.doc && st.doc.alias);
 
   // Safety rule: any ward outside the geographic view (CCU/2S/2W)
   // is forced to Off Service so the patient doesn't disappear from rounds.
@@ -4884,36 +4659,23 @@ function removeOnly() {
 function removePatient(pid) {
   var p = st.patients.find(function(p) { return p.id === pid; });
   if (!p) return;
-  // Soft delete locally — keep for 21 days for "Recent patients" claims, then purge
-  // (purgeOldPatients on next launch sends the actual deletePatient to the sheet)
+  // Soft delete — keep for 21 days for "Recent patients" claims, then purge
   p.dischargedAt = Date.now();
   p.discharged   = true;
   sv('patients', st.patients);
-  // Persist discharge flags to the sheet so other devices see this patient as removed
-  if (SHEETS_URL) push('savePatient', p);
+  if (SHEETS_URL) push('savePatient', p); // update on sheets too
   render();
-}
-
-// Hard-delete a patient from local cache and the sheet right now.
-// Used by purgeOldPatients for patients discharged > 21 days ago.
-function hardDeletePatient(p) {
-  if (!p || !p.id) return;
-  if (SHEETS_URL) push('deletePatient', { id: p.id });
 }
 
 function purgeOldPatients() {
   var cutoff = Date.now() - (21 * 24 * 60 * 60 * 1000); // 21 days
-  var toPurge = st.patients.filter(function(p) {
-    return p.discharged && p.dischargedAt && p.dischargedAt <= cutoff;
-  });
-  if (!toPurge.length) return;
-  // Hard-delete each from the sheet so the row goes away
-  toPurge.forEach(hardDeletePatient);
-  // Drop from local cache too
+  var before = st.patients.length;
   st.patients = st.patients.filter(function(p) {
-    return !p.discharged || !p.dischargedAt || p.dischargedAt > cutoff;
+    return !p.discharged || p.dischargedAt > cutoff;
   });
-  sv('patients', st.patients);
+  if (st.patients.length < before) {
+    sv('patients', st.patients);
+  }
 }
 
 // ── 11_export.js ──
@@ -4972,10 +4734,79 @@ function clearQueue() {
   showToast('Queue cleared');
 }
 
-// NOTE: iClinic CSV export was previously handled here in the mobile app
-// but is now done from Google Sheets via the Apps Script function
-// exportClaimsOnDemand(). The app's job ends at syncing claims to the
-// Google Sheet — claims sync via push() in saveClaim() and friends.
+function exportCSV() {
+  if (!st.claims.length) { showToast('No claims to export'); return; }
+
+  // Non-CCU claims + consolidated CCU bands
+  var raw = st.claims.filter(function(c) { return c.fee !== 'CCU_DAILY'; });
+  var ccu = ccuConsolidate();
+  var all = raw.concat(ccu);
+
+  var header = [
+    'DOCTOR_NUMBER','PAYEE_ALIAS','PATIENT_FIRST_NAME','PATIENT_LAST_NAME','PATIENT_NAME',
+    'PHN','OTHER_INSURER_CODE','GENDER','DOB','',
+    'FEE_ITEM','FEE_ITEM_CODE','ICD9_CODE','AMOUNT_BILLED','SERVICE_UNITS',
+    'PERCENT_BILLED','FEE_SCHEDULE','SERVICE_DATE','SERVICE_START_TIME',
+    'ADDITIONAL_CLAIM_NOTES','REFERRED_BY_DOCTOR_NUMBER','REFERRED_TO_DOCTOR_NUMBER',
+    'REFERRED_BY_DOCTOR_NAME','SERVICE_LOCATION_CODE','FACILITY_NUMBER',
+    'SUB_FACILITY_NUMBER','SUBMISSION_CODE','CORRESPONDENCE_CODE',
+    'AFTER_HOURS_INDICATOR_CODE','SCC_CODE','CLAIM_TYPE',
+    'ICBC_CLAIM_NUMBER','WORK_SAFE_CLAIM_NUMBER','WORK_SAFE_INJURY_DATE',
+    'WORK_SAFE_INJURY_AREA_CODE','WORK_SAFE_INJURY_NATURE_CODE','WORK_SAFE_ANATOMICAL_POSITION'
+  ].join(',');
+
+  var rows = all.map(function(c) {
+    // PATIENT_NAME format: "Last,First" (with outer quotes)
+    var pname   = '"\"' + (c.last || '') + ',' + (c.first || '') + '\""';
+    var refName = c.refbyName ? '"\"' + c.refbyName + '\""' : '';
+    return [
+      c.docnum  || '',
+      c.alias   || '',
+      c.first   || '',
+      c.last    || '',
+      pname,
+      c.phn     || '',
+      '',
+      c.sex     || '',
+      c.dob     || '',
+      '',                     // blank column (per iClinic format)
+      c.fee,
+      c.feeCode || c.fee,
+      c.icd     || '3062',
+      '',                     // AMOUNT_BILLED (calculated by iClinic)
+      c.units   || 1,
+      '100',
+      'MSP',
+      c.date,
+      c.startTime || '',      // SERVICE_START_TIME — always populated for consults
+      c.notes   || '',
+      c.refby   || '',
+      '',                     // REFERRED_TO
+      refName,
+      c.loc     || 'I',       // I = inpatient, E = ED
+      'OA040',                // KGH facility number
+      '',                     // SUB_FACILITY_NUMBER
+      'P',                    // SUBMISSION_CODE
+      '',
+      '',
+      '',
+      'MSP',                  // CLAIM_TYPE
+      '','','','','',''       // ICBC / WCB fields
+    ].join(',');
+  });
+
+  var csv  = header + '\n' + rows.join('\n');
+  var blob = new Blob([csv], { type:'text/csv;charset=utf-8;' });
+  var url  = URL.createObjectURL(blob);
+  var a    = document.createElement('a');
+  a.href     = url;
+  a.download = 'iClinic_KGH_' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('Exported ' + all.length + ' claims');
+}
 
 // ── 12_referrers.js ──
 // ═══════════════════════════════════════════════════════
@@ -4996,7 +4827,7 @@ function searchPhysiciansLocal(query) {
   // Saved referrers first
   st.refs.forEach(function(r) {
     var name = (r.last + ' ' + (r.first||'')).toLowerCase();
-    if (name.indexOf(q) !== -1 || String(r.num||'').indexOf(q) !== -1) {
+    if (name.indexOf(q) !== -1 || (r.num||'').indexOf(q) !== -1) {
       if (!seen[r.num]) {
         seen[r.num] = true;
         results.push({ last:r.last, first:r.first||'', num:r.num, spec:r.spec||'', city:'', saved:true });
@@ -5332,148 +5163,34 @@ document.addEventListener('click', function(e) {
 // 13_meditech.js — Meditech rounds list bulk photo import
 // ═══════════════════════════════════════════════════════
 
-// ─────────────────────────────────────────────────────────────────────
-// parseLocCode — single source of truth for decoding Meditech location
-// strings (header chart + sticker + bulk list) into {ward, room}.
-//
-// KGH location grammar:  KEL KGH [BLDG] [UNIT] [ROOM##] [-BED]
-//
-//   BLDG codes:
-//     C    = Centennial Building (ED, EDOF, C1C, 6W)
-//     R    = Royal Building      (4A, 4B, 5B)
-//     S    = Strathcona Building (CCU/CICU, CSICU, 2S, 2W, 3E, 3MU,
-//                                 3W, 4E, 4W)
-//     I    = Strathcona ICU rooms (KGHI2604-A used for CSICU)
-//     A    = Annexed (AREH = Annexed Rehab; AC = Annexed Centennial)
-//
-//   ROOM rules:
-//     • CCU/CICU      KGHS25NN-A  → Bed = (last 2 of NN) e.g. 2502→2, 2506→6
-//     • CSICU         KGHI26NN-A  → "26NN" + bed letter (4-digit kept whole)
-//     • Royal 4-digit KGHR40NN-A  → "40NN" + bed letter (4-digit kept whole)
-//     • Std 3-digit   KGHS0NNN-A  → strip leading 0(s) → "NNN" + bed letter
-//     • C1C rooms     KGHC1C17-A  → "1C17" + bed letter (preserve 1C prefix)
-//     • REH rooms     KGHAC0NNN-C → strip leading zero → "NNN" + bed letter
-//     • Hallway       KGH[BLDG]H[UNIT]-X → "Hallway X"
-//     • 3MU           KGHS3MU NN  → "3MU NN" (zero-pad to 2 digits)
-//     • EDOF          KGHCEDOF NN → "EDOF NN"
-//
-// Inputs may already be partially-decoded by the worker (e.g. ward='2S',
-// room='226A' arrive ready-to-use) — we detect and pass through cleanly.
-// ─────────────────────────────────────────────────────────────────────
+// Decode Meditech location code + room-bed string into ward and room
 function parseLocCode(locCode, roomBed) {
-  var ward = '';
+  var ward = 'OTHER';
   var room = '';
-  var loc  = (locCode || '').toUpperCase().trim();
-  var rb   = (roomBed  || '').toUpperCase().trim();
+  var loc  = (locCode || '').toUpperCase();
 
-  // ── Step 1: ward decode ───────────────────────────────────────────
-  // Most-specific patterns first. Worker may pass the raw KELKGH... code,
-  // a partially-decoded code (KGHS2W), or a clean WARDS key (2W).
-  if (WARDS[locCode]) {
-    ward = locCode;                       // already a clean WARDS key
-  } else if (loc.indexOf('SCCU')  !== -1 || loc === 'CCU' || loc === 'CICU') {
-    ward = 'CCU';
-  } else if (loc.indexOf('ICSI')  !== -1 || loc.indexOf('CSICU') !== -1) {
-    ward = 'CSICU';
-  } else if (loc.indexOf('ICUA')  !== -1) { ward = 'ICUA';
-  } else if (loc.indexOf('ICUB')  !== -1) { ward = 'ICUB';
-  } else if (loc.indexOf('ICUD')  !== -1) { ward = 'ICUD';
-  } else if (loc.indexOf('S2W')   !== -1) { ward = '2W';
-  } else if (loc.indexOf('S2S')   !== -1) { ward = '2S';
-  } else if (loc.indexOf('S3MU')  !== -1 || loc.indexOf('3MU') !== -1) { ward = '3MU';
-  } else if (loc.indexOf('S3E')   !== -1) { ward = '3E';
-  } else if (loc.indexOf('S3W')   !== -1) { ward = '3W';
-  } else if (loc.indexOf('S4E')   !== -1) { ward = '4E';
-  } else if (loc.indexOf('S4W')   !== -1) { ward = '4W';
-  } else if (loc.indexOf('R4A')   !== -1) { ward = '4A';
-  } else if (loc.indexOf('R4B')   !== -1) { ward = '4B';
-  } else if (loc.indexOf('R5B')   !== -1) { ward = '5B';
-  } else if (loc.indexOf('C6W')   !== -1 || loc === '6W')   { ward = '6W';
-  } else if (loc.indexOf('C1C')   !== -1)                    { ward = 'C1C';
-  } else if (loc.indexOf('AREH')  !== -1 || loc.indexOf('REH') !== -1) { ward = 'REH';
-  } else if (loc.indexOf('SHAH')  !== -1 || loc.indexOf('HAH') !== -1) { ward = 'HAH';
-  } else if (loc.indexOf('CEOF')  !== -1 || loc.indexOf('EDOF') !== -1 ||
-             loc.indexOf('CMT')   !== -1 || loc.indexOf('ED')   !== -1 ||
-             loc.indexOf('EMERG') !== -1) {
-    ward = 'ED';
-  } else {
-    ward = 'OTHER';
-  }
+  // CCU: KELKGHSCCU — must check before S2W/S2S since it contains neither
+  if      (loc.indexOf('SCCU') !== -1 || loc.indexOf('CCU') !== -1)  ward = 'CCU';
+  else if (loc.indexOf('S2W')  !== -1)                               ward = '2W';
+  else if (loc.indexOf('S2S')  !== -1)                               ward = '2S';
+  else if (loc.indexOf('CSICU')!== -1)                               ward = 'CSICU';
+  else if (loc.indexOf('ICUA') !== -1)                               ward = 'ICUA';
+  else if (loc.indexOf('ICUB') !== -1)                               ward = 'ICUB';
+  else if (loc.indexOf('ED')   !== -1 || loc.indexOf('EMERG') !== -1) ward = 'ED';
 
-  // ── Step 2: room decode ───────────────────────────────────────────
-  if (!rb) return { ward: ward, room: '' };
-
-  // 2a. If room is already clean (matches a known WARDS room), keep as-is.
-  var wdef = WARDS[ward];
-  if (wdef && wdef.rooms && wdef.rooms.indexOf(roomBed) !== -1) {
-    return { ward: ward, room: roomBed };
-  }
-
-  // 2b. Hallway: KGHCH6W-B, KGHRH4A-F, KGHSH3W-D
-  var hallway = rb.match(/KGH[CSRA]+H[A-Z0-9]+[-\s]([A-Z0-9]+)/);
-  if (hallway) {
-    return { ward: ward, room: 'Hallway ' + hallway[1] };
-  }
-
-  // 2c. 3MU: KGHS3MU 03 → 3MU 03
-  if (/3MU/.test(rb)) {
-    var mu = rb.match(/3MU\s*(\d+)/);
-    return { ward: ward, room: mu ? '3MU ' + String(parseInt(mu[1],10)).padStart(2,'0') : '3MU' };
-  }
-
-  // 2d. EDOF: KGHCEDOF 18 → EDOF 18
-  if (/EDOF/.test(rb)) {
-    var ed = rb.match(/EDOF\s*(\d+)/);
-    return { ward: ward, room: ed ? 'EDOF ' + ed[1] : 'EDOF' };
-  }
-
-  // 2e. ED sub-locations (no standard room number): MT, ST, BCAS, C1, MAIN
-  if (ward === 'ED') {
-    if (/BCAS/.test(rb))                return { ward: ward, room: 'BCAS' };
-    if (/\bMT\b|MINOR/.test(rb))        return { ward: ward, room: 'Minor Treatment' };
-    if (/\bST\b|STREAM/.test(rb))       return { ward: ward, room: 'Streaming' };
-    if (/\bC1\b/.test(rb) && !/C1C/.test(rb)) return { ward: ward, room: 'C1' };
-    if (/MAIN/.test(rb))                return { ward: ward, room: 'Main' };
-  }
-
-  // 2f. CCU: bed number is the last 2 digits of the 4-digit room code
-  //         KGHS2502-A → "2"   KGHS2506-A → "6"   KGHS2508-A → "8"
+  // Parse room number
+  // CCU:  KGHS2502-A → bed = parseInt("2502") % 100 = 2
+  // Ward: KGHS0201-A → strip leading zeros → "201A"
+  var rb = (roomBed || '').replace(/-/g, '').toUpperCase().replace(/^KGHS/, '');
   if (ward === 'CCU') {
-    var cn = rb.match(/(\d{4})/);
-    if (cn) return { ward: ward, room: String(parseInt(cn[1], 10) % 100) };
+    var num = parseInt(rb, 10);
+    if (!isNaN(num)) room = String(num % 100);
+  } else {
+    var m = rb.match(/^0*(\d+)([A-Z]?)$/);
+    if (m) room = m[1] + m[2];
   }
 
-  // 2g. C1C: KGHC1C17-A → "1C17A"  (preserve the 1C unit prefix in the room)
-  if (ward === 'C1C') {
-    var c1c = rb.match(/1C\s*(\d+)\s*[-]?\s*([A-Z]?)/);
-    if (c1c) return { ward: ward, room: '1C' + c1c[1] + (c1c[2] || '') };
-  }
-
-  // 2g2. HAH: short zero-padded numeric codes ("01"-"10") — keep as-is
-  if (ward === 'HAH') {
-    var h = rb.match(/^(\d{1,2})$/);
-    if (h) return { ward: ward, room: h[1].padStart(2, '0') };
-  }
-
-  // 2h. Standard pattern: strip "KGH" + building letter(s), keep digits + bed
-  //     KGHS0226-A   → 226A  (3-digit + bed, strip leading zeros)
-  //     KGHI2604-A   → 2604A (4-digit + bed, keep all digits)
-  //     KGHR4001-A   → 4001A
-  //     KGHC0617-A   → 617A
-  //     KGHAC0117-C  → 117C  (annexed rehab)
-  var clean = rb.replace(/^KGH[A-Z]+/, '').replace(/[-\s]/g, ' ').trim();
-  // After stripping, expect "NNNN A" or "NNN" (bed letter optional)
-  var m = clean.match(/(\d{2,4})\s*([A-Z]?)$/);
-  if (m) {
-    var digits = m[1];
-    // Strip leading zeros, but only when the first non-zero digit is 1-9
-    // (i.e. "0226" → "226", "0017" → "17", but "2604" stays "2604")
-    digits = digits.replace(/^0+([1-9])/, '$1');
-    return { ward: ward, room: digits + (m[2] || '') };
-  }
-
-  // 2i. Fallback: pass roomBed through as-is, uppercased
-  return { ward: ward, room: rb };
+  return { ward:ward, room:room };
 }
 
 // Infer On/Off service and care type from ward and attending provider string
@@ -5535,37 +5252,45 @@ function handleMediteachPhoto(inp) {
   reader.readAsDataURL(file);
 }
 
-// Route bulk Meditech list extraction through the same Cloudflare Worker
-// as single-sticker OCR. The worker holds the Anthropic API key server-side.
-// Worker is expected to handle mode:'meditech-list' and return a JSON array.
 async function extractMediteachAI(dataUrl) {
   var status = document.getElementById('mit-status');
   try {
     var b64 = dataUrl.split(',')[1];
     var mt  = dataUrl.split(';')[0].split(':')[1];
-    var resp = await fetch(OCR_WORKER_URL, {
+    var resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode: 'meditech-list', image: b64, mediaType: mt })
+      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2000,
+        messages: [{ role:'user', content: [
+          { type:'image', source:{ type:'base64', media_type:mt, data:b64 } },
+          { type:'text', text:
+            'Meditech rounds list from Kelowna General Hospital (KGH). Extract EVERY patient row visible.\n\n' +
+            'Return a JSON array. Each object must have exactly these fields:\n' +
+            '  last, first, sex, age, locationCode, roomBed, reason, attending, los\n\n' +
+            'locationCode = top line of first column e.g. "KELKGHSCCU", "KELKGHS2W", "KELKGHS2S", "KELKGHS3E"\n' +
+            'roomBed      = second line of first column e.g. "KGHS2502-A", "KGHS0201-A", "KGHS0225-B"\n' +
+            'first        = use preferred name in brackets if shown e.g. "(Steve)" → "Steve"\n' +
+            'reason       = full text, do not truncate\n\n' +
+            'KGH reference:\n' +
+            '  CCU  = KELKGHSCCU, rooms KGHS2502-A (2502 = Bed 2, 2506 = Bed 6 etc.)\n' +
+            '  2W   = KELKGHS2W,  rooms KGHS0201-A to KGHS0213-A\n' +
+            '  2S   = KELKGHS2S,  rooms KGHS0217-A to KGHS0234-B (225 and 226 have A and B)\n' +
+            '  Other location codes = off-service ward\n\n' +
+            'Return ONLY a JSON array, no markdown, no explanation.'
+          }
+        ]}]
+      })
     });
-    if (!resp.ok) throw new Error('Worker HTTP ' + resp.status);
     var data = await resp.json();
-    if (data.error) throw new Error(data.error);
-
-    // Worker may return either { patients: [...] } directly, or { text: "..." }
-    // containing a JSON array as a string. Handle both shapes.
-    var parsed = data.patients || data;
-    if (typeof data.text === 'string') {
-      var match = data.text.match(/\[[\s\S]*\]/);
-      if (!match) throw new Error('No JSON array in worker response');
-      parsed = JSON.parse(match[0]);
-    }
+    var text = data.content.filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
+    var parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
     if (!Array.isArray(parsed)) parsed = [parsed];
     renderMediteachPreview(parsed);
   } catch(e) {
-    status.className   = 'ocr-bar ocr-warn';
+    status.className  = 'ocr-bar ocr-warn';
     status.textContent = 'Could not read list — try a clearer photo, or add patients manually.';
-    status.title       = e && e.message ? e.message : '';
   }
 }
 
@@ -5685,10 +5410,13 @@ async function init() {
     document.getElementById('doc-label').textContent = st.doc.alias;
     document.getElementById('doc-dot').classList.add('on');
   }
-  // Pass local doctors through mergeDoctors. DOCTORS_SEED is empty —
-  // doctors live in the Sheets Doctors tab. The next sync will refresh.
-  st.doctors = mergeDoctors(st.doctors);
-  sv('doctors', st.doctors);
+  // Seed doctor profiles on first launch
+  if (!st.doctors.length) {
+    st.doctors = DOCTORS_SEED.map(function(d) {
+      return { id:'d'+d.alias, alias:d.alias, name:d.name };
+    });
+    sv('doctors', st.doctors);
+  }
 
   // (test patients removed for live deployment)
     // Restore any custom wards saved from previous sessions
@@ -5742,10 +5470,7 @@ async function resetLocalData() {
       if (!d.error) {
         if (d.patients)  { st.patients  = d.patients;  sv('patients',  st.patients);  }
         if (d.claims)    { st.claims    = d.claims;    sv('claims',    st.claims);    }
-        // Doctors: always merge with seed so all 11 appear regardless of
-        // what's in the Sheets Doctors tab (might be 1 row, might be empty).
-        st.doctors = mergeDoctors(d.doctors);
-        sv('doctors', st.doctors);
+        if (d.doctors)   { st.doctors   = d.doctors;   sv('doctors',   st.doctors);   }
         if (d.changelog) { st.changelog = d.changelog; sv('changelog', st.changelog); }
         setSyncState('synced');
         showToast('Sync complete — ' + st.patients.filter(function(p){return !p.discharged;}).length + ' active patients loaded');
@@ -5825,15 +5550,15 @@ function hideModal(id) {
 function renderDocOpts() {
   document.getElementById('doc-opts').innerHTML = st.doctors.length
     ? st.doctors.map(function(d) {
-        var displayName = formatDocName(d.name);
-        var ini = (d.name || '').replace(/^Dr\.?\s+/i, '').split(' ').map(function(w){return w[0]||''}).join('').slice(0,2).toUpperCase();
-        return '<div class="doc-opt" data-alias="' + d.alias + '" data-num="' + (d.num || '') + '" data-name="' + esc(d.name) + '" onclick="selectDocEl(this)">' +
+        var ini = d.name.replace('Dr. ','').split(' ').map(function(w){return w[0]||''}).join('').slice(0,2).toUpperCase();
+        var numLine = d.alias;
+        return '<div class="doc-opt" data-alias="' + d.alias + '" data-num="' + d.num + '" data-name="' + esc(d.name) + '" onclick="selectDocEl(this)">' +
           '<div class="doc-av">' + ini + '</div>' +
-          '<div style="flex:1"><div style="font-size:14px;font-weight:700">' + esc(displayName) + '</div>' +
-          '<div style="font-size:11px;color:var(--text2);margin-top:1px">' + esc(d.alias) + '</div></div>' +
+          '<div style="flex:1"><div style="font-size:14px;font-weight:700">' + esc(d.name) + '</div>' +
+          '<div style="font-size:11px;color:var(--text2);margin-top:1px">' + numLine + '</div></div>' +
           '</div>';
       }).join('')
-    : '<div class="empty" style="padding:10px 0">No profiles found. Add doctors to the Google Sheet \u2192 Doctors tab.</div>';
+    : '<div class="empty" style="padding:10px 0">No profiles found.</div>';
 }
 
 function selectDocEl(el) {
@@ -5851,6 +5576,35 @@ function selectDoc(alias, num, name) {
   document.getElementById('doc-dot').classList.add('on');
   hideModal('doc-modal');
   showToast('Signed in as ' + name);
+}
+
+function addDoctor() {
+  var alias = gv('new-alias');
+  var num   = gv('new-num');
+  var name  = gv('new-name');
+  if (!alias) { showToast('Need alias'); return; }
+  var mapped = ALIAS_MAP[alias] || alias;
+  // Update existing doctor if alias matches (e.g. adding MSP number)
+  var existing = st.doctors.find(function(d) { return d.alias === mapped; });
+  if (existing) {
+    if (num)  existing.num  = num;
+    if (name) existing.name = name;
+    sv('doctors', st.doctors);
+    if (SHEETS_URL) push('saveDoctor', existing);
+    document.getElementById('new-alias').value = '';
+    document.getElementById('new-num').value   = '';
+    document.getElementById('new-name').value  = '';
+    selectDoc(existing.alias, existing.num, existing.name);
+    return;
+  }
+  var d = { alias:mapped, num:num || '', name:name || 'Dr. ' + alias };
+  st.doctors.push(d);
+  sv('doctors', st.doctors);
+  if (SHEETS_URL) push('saveDoctor', d);
+  document.getElementById('new-alias').value = '';
+  document.getElementById('new-num').value   = '';
+  document.getElementById('new-name').value  = '';
+  selectDoc(mapped, num, name || 'Dr. ' + alias);
 }
 
 // ── Utility functions ──────────────────────────────────
@@ -5877,10 +5631,8 @@ function esc(s) {
 }
 
 function todayStr() {
-  // Always Vancouver time — DD/MM/YYYY format
-  var iso = todayISO();              // YYYY-MM-DD in Vancouver
-  var p = iso.split('-');
-  return p[2] + '/' + p[1] + '/' + p[0];
+  var d = new Date();
+  return pad(d.getDate()) + '/' + pad(d.getMonth()+1) + '/' + d.getFullYear();
 }
 
 function fmtD(d) {
@@ -5891,27 +5643,6 @@ function fmtD(d) {
 function parseDMY(s) {
   var p = s.split('/');
   return new Date(parseInt(p[2]), parseInt(p[1])-1, parseInt(p[0]));
-}
-
-// Normalize any date-ish value to DD/MM/YYYY string.
-// Handles: ISO strings ("1942-10-03T07:00:00.000Z"), Date objects,
-// already-formatted DD/MM/YYYY strings, empty/null. Returns '' on failure.
-// Used to clean up data coming back from Google Sheets, where date-typed
-// cells get auto-converted to JS Date objects on getValues() and serialise
-// as ISO strings on the wire.
-function toDMY(v) {
-  if (!v) return '';
-  // Already DD/MM/YYYY?
-  if (typeof v === 'string' && /^\d{2}\/\d{2}\/\d{4}$/.test(v)) return v;
-  // ISO date string?
-  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) {
-    var ymd = v.slice(0, 10).split('-');
-    return ymd[2] + '/' + ymd[1] + '/' + ymd[0];
-  }
-  // Date object or anything else parseable
-  var d = (v instanceof Date) ? v : new Date(v);
-  if (isNaN(d.getTime())) return typeof v === 'string' ? v : '';
-  return pad(d.getDate()) + '/' + pad(d.getMonth()+1) + '/' + d.getFullYear();
 }
 
 function pad(n) { return String(n).padStart(2, '0'); }
