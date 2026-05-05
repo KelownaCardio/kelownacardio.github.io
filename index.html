@@ -522,7 +522,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.28</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.29</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1865,7 +1865,7 @@ function dirCountThisWeek(phn) {
     if (c.phn !== phn || c.fee !== '33006') return false;
     var p = c.date.split('/');
     if (p.length !== 3) return false;
-    var cd = new Date(parseInt(p[2]), parseInt(p[1])-1, parseInt(p[0]));
+    var cd = parseDMYsafe(c.date) ? new Date(parseDMYsafe(c.date)) : new Date(parseInt(p[2]), parseInt(p[1])-1, parseInt(p[0]));
     return cd >= weekStart && cd <= weekEnd;
   }).length;
 }
@@ -2937,7 +2937,7 @@ function submitOtherClaim() {
   var validateP = Object.assign({}, p, { icd: icd, refby: refby, refbyName: refName });
   if (!validateRequiredForClaim(validateP)) { highlightMissingFields(); return; }
 
-  var dateFmt = fmtD(new Date(dateISO));
+  var dateFmt = fmtD(parseISODate(dateISO));
 
   // Back-populate to patient record so subsequent claims inherit
   var patientUpdated = false;
@@ -3291,24 +3291,19 @@ function openPatientSummary(pid) {
 // produce DD/MM/YYYY for storage and display.
 function fmtClaimDate(d) {
   if (!d) return '';
-  // Already clean DD/MM/YYYY?
+  // Already clean DD/MM/YYYY — return immediately, no further parsing
   if (typeof d === 'string' && /^\d{2}\/\d{2}\/\d{4}$/.test(d)) return d;
-  // ISO date or timestamp — extract YYYY-MM-DD then flip to DD/MM/YYYY
+  // ISO date string or timestamp (from Sheets) — YYYY-MM-DD[T...] — flip to DD/MM/YYYY
+  // Use string slicing, never new Date(), to avoid UTC-midnight shift in negative-offset zones
   if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/.test(d)) {
     var m = d.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (m) return m[3] + '/' + m[2] + '/' + m[1];
   }
-  // Date object
+  // Date object (already local) — extract local day/month/year
   if (d instanceof Date && !isNaN(d)) {
     return pad(d.getDate()) + '/' + pad(d.getMonth()+1) + '/' + d.getFullYear();
   }
-  // Last-resort parse — handles JS Date strings, anything Date can swallow
-  if (typeof d === 'string') {
-    var parsed = new Date(d);
-    if (!isNaN(parsed)) {
-      return pad(parsed.getDate()) + '/' + pad(parsed.getMonth()+1) + '/' + parsed.getFullYear();
-    }
-  }
+  // Unknown format — return as-is rather than risk MM/DD mis-parse via new Date(string)
   return String(d);
 }
 
@@ -3942,7 +3937,7 @@ function submitConsult() {
   var start   = gv('cb-start');
   if (!dateISO) { showToast('Enter date'); return; }
 
-  var dateFmt = fmtD(new Date(dateISO));
+  var dateFmt = fmtD(parseISODate(dateISO));
   var loc     = p.ward === 'ED' ? 'E' : 'I';
 
   // Save any ICD-9/referrer changes back to patient record
@@ -4082,7 +4077,7 @@ function submitDaily() {
   if (!ds) { showToast('Enter start date'); return; }
   updatePatientFromClaimForm(p);
   if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
-  addClaim(p, '33008', '33008', days, fmtD(new Date(ds)), 'I');
+  addClaim(p, '33008', '33008', days, fmtD(parseISODate(ds)), 'I');
   p.roundedToday = TODAY;
   sv('patients', st.patients); sv('claims', st.claims);
   showToast('33008 ×' + days + ' — ' + p.last);
@@ -4125,8 +4120,8 @@ function submitCombined() {
   if (v === 2 && !note2) { showToast('Note required for 2nd visit'); return; }
   updatePatientFromClaimForm(p);
   if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
-  addClaim(p, '33008', '33008', 1, fmtD(new Date(ds)), 'I');
-  if (v === 2) addClaim(p, '33008', '33008', 1, fmtD(new Date(ds)), 'I', null, note2 || 'Second visit — patient unstable');
+  addClaim(p, '33008', '33008', 1, fmtD(parseISODate(ds)), 'I');
+  if (v === 2) addClaim(p, '33008', '33008', 1, fmtD(parseISODate(ds)), 'I', null, note2 || 'Second visit — patient unstable');
   p.roundedToday = TODAY;
   sv('patients', st.patients); sv('claims', st.claims);
   showToast('Combined daily ×' + v + ' — ' + p.last);
@@ -4161,7 +4156,7 @@ function submitDirective() {
   if (cnt >= 2 && !note) { showToast('Note required for additional directive visit this week'); return; }
   updatePatientFromClaimForm(p);
   if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
-  addClaim(p, '33006', '33006', 1, fmtD(new Date(ds)), 'I', null, note);
+  addClaim(p, '33006', '33006', 1, fmtD(parseISODate(ds)), 'I', null, note);
   p.roundedToday = TODAY;
   sv('patients', st.patients); sv('claims', st.claims);
   showToast('33006 directive — ' + p.last);
@@ -6051,6 +6046,15 @@ function esc(s) {
 function todayStr() {
   var d = new Date();
   return pad(d.getDate()) + '/' + pad(d.getMonth()+1) + '/' + d.getFullYear();
+}
+
+// Parse a YYYY-MM-DD string to a local-midnight Date — avoids UTC-shift bug
+// where new Date("2025-05-04") returns May 3 in UTC-7 timezones.
+function parseISODate(s) {
+  if (!s) return null;
+  var m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  return new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
 }
 
 function fmtD(d) {
