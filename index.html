@@ -520,7 +520,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.21</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.23</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -2139,6 +2139,41 @@ function renderOff() {
   document.getElementById('off-list').innerHTML = h;
 }
 
+// Find the most recent claim for this patient by any cardiologist in the group.
+// Returns chip HTML like "Last seen by KB May 1" or empty string if never billed.
+function lastSeenByGroup(p) {
+  if (!p.phn) return '';
+  var newest = null;
+  for (var i = 0; i < st.claims.length; i++) {
+    var c = st.claims[i];
+    if (c.phn !== p.phn) continue;
+    if (!c.date) continue;
+    var t = parseDMYsafe(c.date);
+    if (!t) continue;
+    if (!newest || t > newest.t) newest = { t: t, claim: c };
+  }
+  if (!newest) return '';
+
+  var d = new Date(newest.t);
+  var monthsShort = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var label = monthsShort[d.getMonth()] + ' ' + d.getDate();
+  var alias = newest.claim.alias || '?';
+
+  // Days since — thresholds tied to directive care intervals (2/week ~= every 3-4 days)
+  var days = Math.floor((Date.now() - newest.t) / 86400000);
+  var color, weight;
+  if (days > 5) {
+    color = 'var(--red-t)';     weight = '700';   // overdue
+  } else if (days >= 3) {
+    color = 'var(--amber-t)';   weight = '700';   // approaching limit
+  } else {
+    color = 'var(--text3)';     weight = '500';   // recent (<= 2 days)
+  }
+
+  return '<span style="font-size:10px;color:' + color + ';font-weight:' + weight +
+    ';margin-left:2px;white-space:nowrap">Last seen by ' + esc(alias) + ' ' + label + '</span>';
+}
+
 // Single off-service patient row
 function offRow(p) {
   var dn       = p.roundedToday === TODAY;
@@ -2152,6 +2187,7 @@ function offRow(p) {
         '<button class="row-pencil-btn" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'edit\')">' +
           '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
         '</button>' +
+        lastSeenByGroup(p) +
       '</div>' +
       '<div class="wp-meta">' + calcAgeGender(p) + (p.bed ? ' &bull; <span style="font-size:inherit;color:var(--text3)">Rm </span><span style="font-weight:700">' + esc(p.bed) + '</span>' : '') + ' &bull; ' + mrpLabel(p) + lastBilledChip(p) + '</div>' +
       '<div class="wp-acts">' + quickActBtns(p) +
