@@ -520,7 +520,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.23</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.24</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1486,6 +1486,8 @@ async function loadLocal() {
   }
   if (Array.isArray(st.patients)) {
     st.patients.forEach(function(p) {
+      // Normalise DOB — Sheets may store as ISO timestamp (1943-05-05T07:00:00.000Z)
+      if (p.dob) p.dob = fmtClaimDate(p.dob);
       var hadBadRef = looksLikeMRPService(p.refbyName);
       sanitizeReferrer(p);
       if (hadBadRef && SHEETS_URL) push('savePatient', p);  // push the clean version back to Sheets
@@ -1555,6 +1557,8 @@ async function syncFromSheets() {
     // Anything older that isn't on Sheets was deliberately removed — drop it.
     if (d.patients && Array.isArray(d.patients)) {
       d.patients.forEach(function(p) {
+        // Normalise DOB from Sheets ISO timestamp
+        if (p.dob) p.dob = fmtClaimDate(p.dob);
         var hadBadRef = looksLikeMRPService(p.refbyName);
         sanitizeReferrer(p);
         if (hadBadRef && SHEETS_URL) push('savePatient', p);  // overwrite stale bad data on Sheets
@@ -2211,7 +2215,9 @@ function offRow(p) {
 function calcAgeGender(p) {
   var age = '';
   if (p.dob) {
-    var parts = p.dob.split('/');
+    // Normalise DOB defensively in case it wasn't caught on load/sync
+    var dobClean = fmtClaimDate(p.dob);
+    var parts = dobClean.split('/');
     if (parts.length === 3) {
       var dob = new Date(parseInt(parts[2]), parseInt(parts[1])-1, parseInt(parts[0]));
       var now = new Date();
@@ -2223,8 +2229,8 @@ function calcAgeGender(p) {
   }
   // Format: DOB · AgeGender  e.g. "15/03/1948 · 77M"
   var ageGender = (age + (p.sex || '')) || '';
-  if (p.dob && ageGender) return esc(p.dob) + ' &bull; ' + ageGender;
-  if (p.dob)              return esc(p.dob);
+  if (p.dob && ageGender) return esc(dobClean) + ' &bull; ' + ageGender;
+  if (p.dob)              return esc(dobClean);
   if (ageGender)          return ageGender;
   return '—';
 }
