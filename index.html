@@ -1477,6 +1477,10 @@ async function loadLocal() {
   if (Array.isArray(st.claims)) {
     st.claims.forEach(function(c) {
       if (c.startTime) c.startTime = fmtStartTime(c.startTime);
+      if (c.date)      c.date      = fmtClaimDate(c.date);
+      if (c.fee)       c.fee       = String(c.fee).trim();
+      if (c.feeCode)   c.feeCode   = String(c.feeCode).trim();
+      if (c.icd)       c.icd       = String(c.icd).trim();
       sanitizeReferrer(c);
     });
   }
@@ -1588,7 +1592,12 @@ async function syncFromSheets() {
       d.claims.forEach(function(c) {
         var hadBadRef = looksLikeMRPService(c.refbyName);
         sanitizeReferrer(c);
-        if (hadBadRef && SHEETS_URL) push('saveClaim', c);  // overwrite stale bad data on Sheets
+        if (c.date)      c.date      = fmtClaimDate(c.date);
+        if (c.startTime) c.startTime = fmtStartTime(c.startTime);
+        if (c.fee)       c.fee       = String(c.fee).trim();
+        if (c.feeCode)   c.feeCode   = String(c.feeCode).trim();
+        if (c.icd)       c.icd       = String(c.icd).trim();
+        if (hadBadRef && SHEETS_URL) push('saveClaim', c);
       });
       // Normalise startTime — Sheets returns time-only fields as ISO with 1899 epoch
       d.claims.forEach(function(c) {
@@ -1857,6 +1866,13 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes) {
   if (looksLikeMRPService(p.refbyName)) {
     p.refbyName = '';
     p.refby     = '';
+  }
+  // Inherit refby/icd from patient's prior claims if currently blank
+  if (!p.refby || !p.refbyName || !p.icd) {
+    var inherited = inheritRefAndDxFromHistory(p);
+    if (!p.refby     && inherited.refby)     p.refby     = inherited.refby;
+    if (!p.refbyName && inherited.refbyName) p.refbyName = inherited.refbyName;
+    if (!p.icd       && inherited.icd)       p.icd       = inherited.icd;
   }
   var c = {
     id:        'c' + Date.now() + Math.floor(Math.random() * 9999),
@@ -3124,6 +3140,24 @@ function openPatientSummary(pid) {
 // Get short ICD-9 label: "Description (code)"
 // Format a startTime value from any source (HH:MM string, Date object, ISO string)
 // to display HH:MM only. Sheets stores time-only as 1899-12-30T<HH>:<MM>:00.000Z
+// Normalise claim date — Sheets serialises DD/MM/YYYY back as ISO timestamps
+// like "2026-05-05T07:00:00.000Z". Convert anything ISO-shaped back to DD/MM/YYYY.
+function fmtClaimDate(d) {
+  if (!d) return '';
+  // Already clean DD/MM/YYYY?
+  if (typeof d === 'string' && /^\d{2}\/\d{2}\/\d{4}$/.test(d)) return d;
+  // ISO timestamp from Sheets — extract YYYY-MM-DD then flip to DD/MM/YYYY
+  if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/.test(d)) {
+    var m = d.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return m[3] + '/' + m[2] + '/' + m[1];
+  }
+  // Date object
+  if (d instanceof Date && !isNaN(d)) {
+    return pad(d.getDate()) + '/' + pad(d.getMonth()+1) + '/' + d.getFullYear();
+  }
+  return String(d);
+}
+
 function fmtStartTime(t) {
   if (!t) return '';
   // Already a clean HH:MM string?
@@ -3193,6 +3227,38 @@ function ptSummaryEdit(btn) {
 
 // ── Claim edit / delete ────────────────────────────────
 
+// Find most recent referring MD and ICD from patient's prior claims.
+// Used to pre-populate new claim entry (e.g. CCU daily inherits from earlier consult).
+function inheritRefAndDxFromHistory(p) {
+  var inherited = { refby: p.refby || '', refbyName: p.refbyName || '', icd: p.icd || '' };
+  if (!p.phn) return inherited;
+  // Walk claims in reverse chronological order
+  var claims = st.claims.filter(function(c) { return c.phn === p.phn; })
+    .sort(function(a, b) {
+      var da = parseDMYsafe(a.date), db = parseDMYsafe(b.date);
+      return db - da;
+    });
+  for (var i = 0; i < claims.length; i++) {
+    var c = claims[i];
+    if (!inherited.refby && c.refby && !looksLikeMRPService(c.refbyName)) {
+      inherited.refby = c.refby;
+      inherited.refbyName = c.refbyName || '';
+    }
+    if (!inherited.icd && c.icd) {
+      inherited.icd = String(c.icd).trim();
+    }
+    if (inherited.refby && inherited.icd) break;
+  }
+  return inherited;
+}
+
+function parseDMYsafe(s) {
+  if (!s) return 0;
+  var p = String(s).split('/');
+  if (p.length !== 3) return 0;
+  return new Date(parseInt(p[2]), parseInt(p[1])-1, parseInt(p[0])).getTime();
+}
+
 function openClaimEdit(btn) {
   var cid = btn.getAttribute('data-cid');
   var pid = btn.getAttribute('data-pid');
@@ -3215,7 +3281,7 @@ function openClaimEdit(btn) {
 
   var feeSelect = '<select id="ce-fee">' +
     feeOptions.map(function(f) {
-      return '<option value="' + f.code + '"' + (c.fee === f.code ? ' selected' : '') + '>' + f.label + '</option>';
+      return '<option value="' + f.code + '"' + (String(c.fee).trim() === f.code ? ' selected' : '') + '>' + f.label + '</option>';
     }).join('') + '</select>';
 
   var curDx = DIAGNOSES.find(function(d) { return d.code === c.icd; });
@@ -3226,14 +3292,37 @@ function openClaimEdit(btn) {
            esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
   }).join('');
 
+  // Convert DD/MM/YYYY to YYYY-MM-DD for the date input
+  var cleanDate = fmtClaimDate(c.date || '');
+  var dateISO = '';
+  if (cleanDate && /^\d{2}\/\d{2}\/\d{4}$/.test(cleanDate)) {
+    var dp = cleanDate.split('/');
+    dateISO = dp[2] + '-' + dp[1] + '-' + dp[0];
+  }
+  var startTimeClean = fmtStartTime(c.startTime || '');
+
+  var refLabel = c.refbyName ? c.refbyName + (c.refby ? ' #' + c.refby : '') : '';
+
   var html =
     '<div style="font-size:14px;font-weight:800;margin-bottom:12px">Edit claim — ' + esc(p.last) + ', ' + esc(p.first) + '</div>' +
     '<div class="card" style="padding:12px">' +
-      '<label>Date</label>' +
-      '<input id="ce-date" value="' + esc(c.date || '') + '" placeholder="DD/MM/YYYY" autocorrect="off" style="margin-bottom:7px">' +
-      '<label>Performing physician</label>' +
+      '<div class="fl">' +
+        '<div class="f1"><label>Date</label>' +
+          '<input id="ce-date" type="date" value="' + esc(dateISO) + '"></div>' +
+        '<div class="f1"><label>Start time</label>' +
+          '<input id="ce-time" type="time" value="' + esc(startTimeClean) + '"></div>' +
+      '</div>' +
+      '<label style="margin-top:7px">Performing physician</label>' +
       '<select id="ce-alias" style="margin-bottom:7px">' + docOptions + '</select>' +
       '<label>Fee code</label>' + feeSelect +
+      '<label style="margin-top:10px">Referring MD</label>' +
+      '<input id="ce-ref-search" value="' + esc(refLabel) + '" ' +
+      'placeholder="Type name or doctor #..." autocorrect="off" autocomplete="off" ' +
+      'data-dd="ce-ref-dd" data-hidden="ce-refby" data-name="ce-refby-name" ' +
+      'oninput="refSearchEl(this)" onfocus="refSearchEl(this)">' +
+      '<input id="ce-refby"      type="hidden" value="' + esc(c.refby || '') + '">' +
+      '<input id="ce-refby-name" type="hidden" value="' + esc(c.refbyName || '') + '">' +
+      '<div class="ref-dd" id="ce-ref-dd"></div>' +
       '<label style="margin-top:10px">Diagnosis</label>' +
       '<input id="ce-icd-search" value="' + esc(curDx ? curDx.label : (c.icd || '')) + '" ' +
       'placeholder="Type diagnosis or code..." autocorrect="off" autocomplete="off" ' +
@@ -3259,17 +3348,33 @@ function saveClaimEdit(btn) {
   var p   = getP(pid);
   if (!c) return;
 
-var newFee   = document.getElementById('ce-fee').value;
+  var newFee   = document.getElementById('ce-fee').value;
   var newIcd   = document.getElementById('ce-icd').value || c.icd;
   var newAlias = document.getElementById('ce-alias').value;
-  var newDate  = (document.getElementById('ce-date') || {}).value || c.date;
+  var newDateISO = (document.getElementById('ce-date') || {}).value || '';
+  var newTime    = (document.getElementById('ce-time') || {}).value || '';
   var newNotes = (document.getElementById('ce-notes') || {}).value || '';
+  var newRefby     = (document.getElementById('ce-refby')      || {}).value || '';
+  var newRefName   = (document.getElementById('ce-refby-name') || {}).value || '';
+
+  // Convert YYYY-MM-DD back to DD/MM/YYYY for storage
+  var newDate = c.date;
+  if (newDateISO && /^\d{4}-\d{2}-\d{2}$/.test(newDateISO)) {
+    var dp = newDateISO.split('-');
+    newDate = dp[2] + '/' + dp[1] + '/' + dp[0];
+  }
 
   c.fee     = newFee;
   c.feeCode = newFee;
   c.icd     = newIcd;
   c.date    = newDate;
+  c.startTime = newTime;
   c.notes   = newNotes;
+  // Block writing service strings as referring MD
+  if (newRefby && newRefName && !looksLikeMRPService(newRefName)) {
+    c.refby     = newRefby;
+    c.refbyName = newRefName;
+  }
   if (newAlias) {
     var doc = st.doctors.find(function(d) { return d.alias === newAlias; });
     c.alias  = newAlias;
@@ -5313,7 +5418,7 @@ document.addEventListener('click', function(e) {
     if (t.id === 'f-ref-search' || t.id === 'cb-ref-search' ||
         t.id === 'pe-ref-search' || t.id === 'f-icd-search' ||
         t.id === 'cb-icd-search' || t.id === 'pe-icd-search' ||
-        t.id === 'ce-icd-search' || t.id === 'oc-icd-search' ||
+        t.id === 'ce-icd-search' || t.id === 'ce-ref-search' || t.id === 'oc-icd-search' ||
         t.id === 'oc-ref-search' ||
         t.id === 'oc-fee-search') return;
     document.querySelectorAll('.ref-dd').forEach(function(dd) { dd.style.display = 'none'; });
