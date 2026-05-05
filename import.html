@@ -214,7 +214,7 @@
             <th>Role</th>
             <th>List</th>
             <th>MRP</th>
-            <th>Meditech MRP (refbyName)</th>
+            <th>Detected MRP service</th>
           </tr>
         </thead>
         <tbody id="rows"></tbody>
@@ -381,7 +381,7 @@ async function renderPreview() {
       <td>${escapeHTML(p.role || '?')}</td>
       <td><span class="badge ${p.list === 'on' ? 'on' : 'off'}">${escapeHTML(p.list || '?')}</span></td>
       <td>${escapeHTML(p.mrp || 'Other')}</td>
-      <td class="mono">${escapeHTML(p.refbyName || '—')}</td>
+      <td class="mono">${escapeHTML(sanitiseMRP(p.mrp || p.refbyName) || '—')}</td>
     `;
     rowsEl.appendChild(tr);
   });
@@ -481,6 +481,26 @@ commitBtn.addEventListener('click', async () => {
   }
 });
 
+// Map loose strings like "Hospitalist,KGH Kelowna" to a known service name.
+// Returns 'Other' if it doesn't match anything recognisable.
+function sanitiseMRP(value) {
+  if (!value) return '';
+  var v = String(value).toLowerCase();
+  var map = [
+    ['cardiology','Cardiology'], ['hospitalist','Hospitalist'], ['ctu','CTU'],
+    ['csicu','CSICU'], ['cardiac surg','Cardiac Surgery'],
+    ['icu','ICU'], ['critical care','ICU'],
+    ['general surg','General Surgery'], ['orthop','Orthopedics'],
+    ['neurol','Neurology'], ['nephr','Nephrology'],
+    ['internal med','Internal Medicine'], ['respir','Respirology'],
+    ['gastro','Gastroenterology'], ['oncol','Oncology'], ['palliat','Palliative']
+  ];
+  for (var i = 0; i < map.length; i++) {
+    if (v.indexOf(map[i][0]) !== -1) return map[i][1];
+  }
+  return 'Other';
+}
+
 // Build the patient object that goes into the sheet, matching the
 // exact shape the mobile app's addPatient() produces.
 function buildSheetPayload(p) {
@@ -494,10 +514,11 @@ function buildSheetPayload(p) {
     ward:      p.ward      || 'OTHER',
     bed:       p.bed       || '',
     fac:       'OA040',
-    refby:     '',                                 // numeric MSC blank — to be filled later
-    refbyName: p.refbyName || '',                  // raw Meditech MRP string
+    refby:     '',                                 // numeric MSC blank — referring MD set when consult is billed
+    refbyName: '',                                 // never populate from MRP/attending — must be a person, set at consult time
     role:      p.role      || 'consultant',
-    mrp:       p.mrp       || 'Other',
+    // Worker may return Meditech MRP string in p.refbyName (legacy) or p.mrp — use whichever is present
+    mrp:       sanitiseMRP(p.mrp || p.refbyName) || 'Other',
     list:      p.list      || 'off',
     care:      '',                                 // app infers from role+ward
     icd:       '',                                 // doctor sets when seen
