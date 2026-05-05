@@ -520,7 +520,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.19</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.20</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1477,12 +1477,56 @@ async function loadLocal() {
   if (Array.isArray(st.claims)) {
     st.claims.forEach(function(c) {
       if (c.startTime) c.startTime = fmtStartTime(c.startTime);
+      sanitizeReferrer(c);
+    });
+  }
+  if (Array.isArray(st.patients)) {
+    st.patients.forEach(function(p) {
+      var hadBadRef = looksLikeMRPService(p.refbyName);
+      sanitizeReferrer(p);
+      if (hadBadRef && SHEETS_URL) push('savePatient', p);  // push the clean version back to Sheets
     });
   }
 }
 
 async function sv(key, val) {
   try { await LS.set(STORAGE_PREFIX + key, JSON.stringify(val)); } catch(e) {}
+}
+
+// ── Refby sanitiser ────────────────────────────────────
+// Strip MRP service strings that have been wrongly written into refbyName.
+// A real referring MD is a person's name like "Dr. Smith, John #62289" — never
+// a service like "Hospitalist", "Cardiology", or "Hospitalist,KGH Kelowna".
+// This runs on every load + sync to clean stale bad data.
+var KNOWN_SERVICE_TOKENS = [
+  'cardiology','hospitalist','ctu','csicu','icu','cardiac surgery','cardiac surg',
+  'general surgery','general surg','orthopedics','orthop','neurology','neurol',
+  'nephrology','nephr','internal medicine','respirology','respir','gim',
+  'gastroenterology','gastro','oncology','oncol','palliative','palliat',
+  'critical care'
+];
+function looksLikeMRPService(value) {
+  if (!value) return false;
+  var v = String(value).toLowerCase().trim();
+  // Strip everything from first comma onward (handles "Hospitalist,KGH Kelowna")
+  var head = v.split(',')[0].trim();
+  for (var i = 0; i < KNOWN_SERVICE_TOKENS.length; i++) {
+    if (head === KNOWN_SERVICE_TOKENS[i] || head.indexOf(KNOWN_SERVICE_TOKENS[i]) === 0) {
+      return true;
+    }
+  }
+  // Also catch combined-form tokens like "CardiologyMRP"
+  for (var j = 0; j < KNOWN_SERVICE_TOKENS.length; j++) {
+    if (head.indexOf(KNOWN_SERVICE_TOKENS[j] + 'mrp') !== -1) return true;
+  }
+  return false;
+}
+function sanitizeReferrer(obj) {
+  if (!obj) return;
+  if (obj.refbyName && looksLikeMRPService(obj.refbyName)) {
+    obj.refbyName = '';
+    obj.refby     = '';
+  }
 }
 
 // ── Google Sheets sync ──
@@ -1506,6 +1550,11 @@ async function syncFromSheets() {
     // if they were created within the last 2 min (push still in flight).
     // Anything older that isn't on Sheets was deliberately removed — drop it.
     if (d.patients && Array.isArray(d.patients)) {
+      d.patients.forEach(function(p) {
+        var hadBadRef = looksLikeMRPService(p.refbyName);
+        sanitizeReferrer(p);
+        if (hadBadRef && SHEETS_URL) push('savePatient', p);  // overwrite stale bad data on Sheets
+      });
       var remoteById = {};
       d.patients.forEach(function(p) { remoteById[p.id] = true; });
 
@@ -1536,6 +1585,11 @@ async function syncFromSheets() {
     // Remote is authoritative. Local-only claims kept only within
     // the grace window (push in flight). Orphaned old local claims dropped.
     if (d.claims && Array.isArray(d.claims)) {
+      d.claims.forEach(function(c) {
+        var hadBadRef = looksLikeMRPService(c.refbyName);
+        sanitizeReferrer(c);
+        if (hadBadRef && SHEETS_URL) push('saveClaim', c);  // overwrite stale bad data on Sheets
+      });
       // Normalise startTime — Sheets returns time-only fields as ISO with 1899 epoch
       d.claims.forEach(function(c) {
         if (c.startTime) c.startTime = fmtStartTime(c.startTime);
@@ -1799,6 +1853,11 @@ function ccuConsolidate() {
 
 // ── Add Claim Helper ───────────────────────────────────
 function addClaim(p, fee, feeCode, units, date, loc, startTime, notes) {
+  // Guard: never write an MRP service string into refby/refbyName
+  if (looksLikeMRPService(p.refbyName)) {
+    p.refbyName = '';
+    p.refby     = '';
+  }
   var c = {
     id:        'c' + Date.now() + Math.floor(Math.random() * 9999),
     alias:     st.doc.alias,
@@ -3450,7 +3509,7 @@ function savePatientEdit(pid) {
   var refby = document.getElementById('pe-refby');
   var refName = document.getElementById('pe-refby-name');
   if (refby && refby.value)   p.refby     = refby.value;
-  if (refName && refName.value) p.refbyName = refName.value;
+  if (refName && refName.value && !looksLikeMRPService(refName.value)) p.refbyName = refName.value;
 
   // Diagnosis
   var icdHid = document.getElementById('pe-icd');
