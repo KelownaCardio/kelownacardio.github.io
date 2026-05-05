@@ -520,7 +520,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.24</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.25</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -5137,31 +5137,21 @@ function exportCSV() {
 
 // ── Tier 1+2: Local search ────────────────────────────
 function searchPhysiciansLocal(query) {
-  var q = query.toLowerCase();
+  var q = query.toLowerCase().trim();
   var results = [];
   var seen = {};
 
-  // Saved referrers first
-  st.refs.forEach(function(r) {
-    var name = (r.last + ' ' + (r.first||'')).toLowerCase();
-    if (name.indexOf(q) !== -1 || (r.num||'').indexOf(q) !== -1) {
-      if (!seen[r.num]) {
-        seen[r.num] = true;
-        results.push({ last:r.last, first:r.first||'', num:r.num, spec:r.spec||'', city:'', saved:true });
-      }
-    }
-  });
-
-  // Interior BC embedded directory
+  // Search BC embedded directory (all ~2300 Interior BC physicians)
   if (typeof BC_PHYSICIANS_LOCAL !== 'undefined') {
-    for (var i = 0; i < BC_PHYSICIANS_LOCAL.length && results.length < 20; i++) {
+    for (var i = 0; i < BC_PHYSICIANS_LOCAL.length; i++) {
       var p = BC_PHYSICIANS_LOCAL[i];
-      var name2 = (p[0] + ' ' + p[1]).toLowerCase();
-      var num2  = String(p[2]).toLowerCase();
-      if (name2.indexOf(q) !== -1 || num2.indexOf(q) !== -1) {
+      var fullName = (p[0] + ' ' + p[1]).toLowerCase();
+      var num      = String(p[2]).toLowerCase();
+      if (fullName.indexOf(q) !== -1 || num.indexOf(q) !== -1) {
         if (!seen[p[2]]) {
           seen[p[2]] = true;
-          results.push({ last:p[0], first:p[1], num:p[2], spec:p[3]||'', city:p[4]||'', saved:false });
+          results.push({ last:p[0], first:p[1], num:p[2], spec:p[3]||'', city:p[4]||'' });
+          if (results.length >= 15) break;
         }
       }
     }
@@ -5192,36 +5182,33 @@ function searchPhysiciansRemote(query, dropdownId, hiddenId, nameId) {
         var shownNums = [];
         dd.querySelectorAll('[data-num]').forEach(function(el) { shownNums.push(el.getAttribute('data-num')); });
         // Append new results
-        data.filter(function(p) { return shownNums.indexOf(String(p[2])) === -1; })
+        var extraHtml = data
+            .filter(function(p) { return shownNums.indexOf(String(p[2])) === -1; })
             .slice(0, 8)
-            .forEach(function(p) {
-              var row = buildRefRow(
-                { last:p[0], first:p[1]||'', num:p[2], spec:p[3]||'', city:p[4]||'', saved:false },
-                dropdownId, hiddenId, nameId, [], 'ALL BC'
+            .map(function(p) {
+              return buildRefRowHtml(
+                { last:p[0], first:p[1]||'', num:p[2], spec:p[3]||'', city:p[4]||'' },
+                dropdownId, hiddenId, nameId
               );
-              dd.insertBefore(row, dd.querySelector('.ref-dd-add'));
-            });
+            }).join('');
+          if (extraHtml) {
+            var addRow = dd.querySelector('.ref-dd-add');
+            if (addRow) addRow.insertAdjacentHTML('beforebegin', extraHtml);
+            else dd.innerHTML += extraHtml;
+          }
       })
       .catch(function() {}); // silent fail — offline OK
   }, 400);
 }
 
 // ── Build a ref row HTML string (same pattern as icdSearch — reliable on iOS) ──
-function buildRefRowHtml(r, dropdownId, hiddenId, nameId, recentNums, forceBadge) {
-  var display  = 'Dr. ' + r.last + (r.first ? ', ' + r.first : '');
-  var badge    = '';
-  if (forceBadge) {
-    badge = '<span style="font-size:9px;color:var(--teal-t);font-weight:700;margin-right:4px">' + esc(forceBadge) + '</span>';
-  } else if (recentNums.indexOf(r.num) !== -1) {
-    badge = '<span class="recent-badge">RECENT</span>';
-  } else if (r.saved) {
-    badge = '<span style="font-size:9px;color:var(--blue-t);font-weight:700;margin-right:4px">SAVED</span>';
-  }
-  var sub = (r.spec||'') + (r.city ? (r.spec ? ' &bull; ' : '') + r.city : '');
+function buildRefRowHtml(r, dropdownId, hiddenId, nameId) {
+  var display = 'Dr. ' + r.last + (r.first ? ', ' + r.first : '');
+  var sub = (r.spec||'') + (r.city ? (r.spec ? ' • ' : '') + r.city : '');
   return '<div class="ref-dd-row" data-num="' + esc(r.num) + '" data-name="' + esc(display) + '" ' +
          'data-dd="' + esc(dropdownId) + '" data-hidden="' + esc(hiddenId) + '" data-nameid="' + esc(nameId) + '" ' +
          'onclick="selectRefRow(this)">' +
-         badge + esc(display) + ' <span style="color:var(--text3)">#' + esc(r.num) + '</span>' +
+         esc(display) + ' <span style="color:var(--text3)">#' + esc(r.num) + '</span>' +
          (sub ? '<div style="font-size:10px;color:var(--text2);margin-top:1px">' + sub + '</div>' : '') +
          '</div>';
 }
@@ -5238,70 +5225,36 @@ function buildAddNewRowHtml(query, dropdownId, hiddenId, nameId) {
 function refSearch(query, dropdownId, hiddenId, nameId) {
   var dd = document.getElementById(dropdownId);
   if (!dd) return;
-  var recentNums = (st.recentRefs || []).map(function(r) { return r.num; });
 
-  // Empty query: show recent/saved refs, then fall through to local BC directory
+  // Empty field on focus — show top Kelowna physicians as a starting list
   if (!query || !query.trim()) {
-    var recentRefs = recentNums.map(function(num) {
-      return st.refs.find(function(r) { return r.num === num; });
-    }).filter(Boolean);
-    var otherSaved = st.refs
-      .filter(function(r) { return recentNums.indexOf(r.num) === -1; })
-      .slice(0, 8);
-    var savedAll = recentRefs.concat(otherSaved);
-
-    // If we have saved/recent refs, show them
-    if (savedAll.length) {
-      dd.innerHTML = savedAll.map(function(r) {
-        return buildRefRowHtml(
-          { last:r.last, first:r.first||'', num:r.num, spec:r.spec||'', city:'', saved:true },
-          dropdownId, hiddenId, nameId, recentNums, null
-        );
-      }).join('');
-      dd.style.display = 'block';
-      return;
-    }
-
-    // No saved refs — show top Kelowna physicians from local directory so
-    // the dropdown appears immediately on focus rather than looking broken
     if (typeof BC_PHYSICIANS_LOCAL !== 'undefined' && BC_PHYSICIANS_LOCAL.length) {
-      var kelowna = BC_PHYSICIANS_LOCAL.filter(function(p) {
-        return p[4] === 'Kelowna';
-      }).slice(0, 12);
+      var kelowna = BC_PHYSICIANS_LOCAL.filter(function(p) { return p[4] === 'Kelowna'; }).slice(0, 12);
       dd.innerHTML =
-        '<div style="padding:6px 10px;font-size:10px;color:var(--text3);border-bottom:.5px solid var(--border)">Kelowna physicians — type to search all BC</div>' +
-        kelowna.map(function(p) {
-          return buildRefRowHtml(
-            { last:p[0], first:p[1], num:p[2], spec:p[3]||'', city:p[4]||'', saved:false },
-            dropdownId, hiddenId, nameId, recentNums, null
-          );
-        }).join('');
+        '<div style="padding:5px 10px;font-size:10px;color:var(--text3)">Type to search all BC physicians</div>' +
+        kelowna.map(function(p) { return buildRefRowHtml({ last:p[0], first:p[1], num:p[2], spec:p[3]||'', city:p[4]||'' }, dropdownId, hiddenId, nameId); }).join('');
       dd.style.display = 'block';
-      return;
     }
-
-    // Fallback
-    dd.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--text2)">Start typing a name or doctor #</div>';
-    dd.style.display = 'block';
     return;
   }
 
-  // Local search (tiers 1+2)
+  // Search local BC directory as user types
   var local = searchPhysiciansLocal(query);
 
   if (!local.length) {
-    dd.innerHTML = '<div class="bc-searching" style="padding:8px 10px;font-size:11px;color:var(--text2)">' +
-      (typeof SHEETS_URL !== 'undefined' && SHEETS_URL ? 'Searching all BC...' : 'Not found in Interior BC directory') +
-      '</div>' + buildAddNewRowHtml(query, dropdownId, hiddenId, nameId);
+    dd.innerHTML =
+      '<div class="bc-searching" style="padding:8px 10px;font-size:11px;color:var(--text2)">Searching all BC...</div>' +
+      buildAddNewRowHtml(query, dropdownId, hiddenId, nameId);
     dd.style.display = 'block';
     searchPhysiciansRemote(query, dropdownId, hiddenId, nameId);
     return;
   }
 
   var html = local.map(function(r) {
-    return buildRefRowHtml(r, dropdownId, hiddenId, nameId, recentNums, null);
+    return buildRefRowHtml(r, dropdownId, hiddenId, nameId);
   }).join('');
 
+  // Also search remote if fewer than 5 local results
   if (local.length < 5 && typeof SHEETS_URL !== 'undefined' && SHEETS_URL) {
     html += '<div class="bc-searching" style="padding:6px 10px;font-size:10px;color:var(--text3)">Also searching all BC...</div>';
     searchPhysiciansRemote(query, dropdownId, hiddenId, nameId);
