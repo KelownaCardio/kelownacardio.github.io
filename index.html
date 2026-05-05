@@ -3714,7 +3714,7 @@ function buildConsultForm(p) {
   var now      = new Date();
   var todayISO = now.toISOString().slice(0, 10);
   var nowTime  = pad(now.getHours()) + ':' + pad(now.getMinutes());
-  var endTime  = minsToTime(now.getHours() * 60 + now.getMinutes() + 45);
+  var endTime  = minsToTime(now.getHours() * 60 + now.getMinutes() + 50);
 
   var h = '<div class="card">';
   h += '<div class="card-title">Consult</div>';
@@ -3782,7 +3782,7 @@ function updateConsultUI() {
   var endEl = document.getElementById('cb-end');
   var changed = (typeof event !== 'undefined' && event && event.target) ? event.target.id : '';
   if (start && (changed === 'cb-start' || !end)) {
-    if (endEl) endEl.value = minsToTime(t2m(start) + 45);
+    if (endEl) endEl.value = minsToTime(t2m(start) + 50);
     end = gv('cb-end');
   }
 
