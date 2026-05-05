@@ -520,7 +520,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.18</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.19</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -2288,6 +2288,80 @@ function unbillToday(pid, feeTypes) {
   return true;
 }
 
+// ── Required-field guard ────────────────────────────────
+// Per MSP rules: every claim needs a referring MD and a diagnosis.
+// If a patient is missing either, the quick-tap shortcut routes them
+// into the full claim form with the missing fields highlighted as required.
+function needsRefAndDx(p) {
+  var missing = [];
+  if (!p) return missing;
+  if (!p.refby || !p.refbyName) missing.push('refby');
+  if (!p.icd) missing.push('icd');
+  return missing;
+}
+
+// Open full claim screen with the chosen claim type pre-selected and
+// missing required fields flagged. Used by quick-tap shortcuts when
+// the patient is missing required referring MD or diagnosis.
+function openClaimWithRequiredFields(pid, claimType) {
+  _requiredFieldsPending = needsRefAndDx(getP(pid));
+  openClaimScreen(pid);
+  setTimeout(function() {
+    selCT(claimType);
+    setTimeout(highlightMissingFields, 50);
+  }, 50);
+}
+
+function highlightMissingFields() {
+  if (!_requiredFieldsPending || !_requiredFieldsPending.length) return;
+  var bodyEl = document.getElementById('claim-body');
+  if (!bodyEl) return;
+
+  // Banner at top of claim body
+  var banner = document.getElementById('required-field-banner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'required-field-banner';
+    banner.style.cssText = 'background:var(--amber-bg);color:var(--amber-t);' +
+      'padding:10px 12px;border-radius:var(--rsm);font-size:12px;font-weight:700;' +
+      'margin-bottom:10px;border:.5px solid var(--amber-t)';
+    var msgs = [];
+    if (_requiredFieldsPending.indexOf('refby') !== -1) msgs.push('referring MD');
+    if (_requiredFieldsPending.indexOf('icd') !== -1) msgs.push('diagnosis (ICD-9)');
+    banner.textContent = 'Required for billing: please add ' + msgs.join(' and ') + ' before saving.';
+    bodyEl.insertBefore(banner, bodyEl.firstChild);
+  }
+
+  // Highlight any matching ref/icd search inputs in the form
+  ['cb-ref-search','ce-ref-search','pe-ref-search','oc-ref-search'].forEach(function(id) {
+    if (_requiredFieldsPending.indexOf('refby') !== -1) {
+      var el = document.getElementById(id);
+      if (el) el.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)';
+    }
+  });
+  ['cb-icd-search','ce-icd-search','pe-icd-search','oc-icd-search'].forEach(function(id) {
+    if (_requiredFieldsPending.indexOf('icd') !== -1) {
+      var el = document.getElementById(id);
+      if (el) el.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)';
+    }
+  });
+}
+
+var _requiredFieldsPending = [];
+
+// Validate a patient has required fields BEFORE adding any claim.
+// Returns true if OK to proceed, false if missing fields (caller should NOT submit).
+// Shows a toast naming what's missing.
+function validateRequiredForClaim(p) {
+  var missing = needsRefAndDx(p);
+  if (!missing.length) return true;
+  var labels = [];
+  if (missing.indexOf('refby') !== -1) labels.push('referring MD');
+  if (missing.indexOf('icd')   !== -1) labels.push('diagnosis');
+  showToast('Missing ' + labels.join(' & ') + ' - required for billing');
+  return false;
+}
+
 function quickDailyBtn(btn) {
   var pid = btn.getAttribute('data-pid');
   if (!checkDoc()) return;
@@ -2301,6 +2375,13 @@ function quickDailyBtn(btn) {
   }
   if (alreadyBilledToday(pid, ['CCU_DAILY','33006'])) {
     showToast('A different visit already claimed today');
+    return;
+  }
+  // Required field check — open full form if missing
+  var p0 = getP(pid);
+  if (needsRefAndDx(p0).length) {
+    var t = p0.care === 'combined' ? 'combined' : 'daily';
+    openClaimWithRequiredFields(pid, t);
     return;
   }
   var p = getP(pid);
@@ -2328,6 +2409,11 @@ function quickDirectiveBtn(btn) {
     showToast('Directive already claimed today for this patient');
     return;
   }
+  // Required field check — open full form if missing
+  if (needsRefAndDx(getP(pid)).length) {
+    openClaimWithRequiredFields(pid, 'directive');
+    return;
+  }
   var p = getP(pid);
   addClaim(p, '33006', '33006', 1, TODAY, 'I');
   p.roundedToday = TODAY;
@@ -2351,6 +2437,11 @@ function quickCCUBtn(btn) {
   }
   if (alreadyBilledToday(pid, ['33008','33006'])) {
     showToast('A different visit already claimed today');
+    return;
+  }
+  // Required field check — open full form if missing
+  if (needsRefAndDx(getP(pid)).length) {
+    openClaimWithRequiredFields(pid, 'ccu');
     return;
   }
   var p = getP(pid);
@@ -2624,9 +2715,16 @@ function submitOtherClaim() {
   if (!fee)     { showToast('Enter a fee code'); return; }
   if (!dateISO) { showToast('Enter a date');     return; }
 
+  // Validate: must have referring MD and ICD before submitting
+  var validateP = Object.assign({}, p, { icd: icd, refby: refby, refbyName: refName });
+  if (!validateRequiredForClaim(validateP)) { highlightMissingFields(); return; }
+
   var dateFmt = fmtD(new Date(dateISO));
 
-  // Override patient's ICD and refby with whatever was entered here
+  // Back-populate to patient record so subsequent claims inherit
+  if (icd && icd !== p.icd) p.icd = icd;
+  if (refby && refby !== p.refby) { p.refby = refby; p.refbyName = refName; }
+
   var pClone = Object.assign({}, p, { icd: icd, refby: refby, refbyName: refName });
 
   var c = addClaim(pClone, fee, fee, units, dateFmt, loc, start, notes);
@@ -3531,6 +3629,7 @@ function submitConsult() {
 
   // Save any ICD-9/referrer changes back to patient record
   updatePatientFromClaimForm(p);
+  if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
 
   // Consult row — always include SERVICE_START_TIME
   addClaim(p, code, code, 1, dateFmt, loc, start);
@@ -3662,6 +3761,7 @@ function submitDaily() {
   var days = parseInt(gv('cb-dal-days')) || 1;
   if (!ds) { showToast('Enter start date'); return; }
   updatePatientFromClaimForm(p);
+  if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
   addClaim(p, '33008', '33008', days, fmtD(new Date(ds)), 'I');
   p.roundedToday = TODAY;
   sv('patients', st.patients); sv('claims', st.claims);
@@ -3704,6 +3804,7 @@ function submitCombined() {
   var note2 = document.getElementById('cb-comb-note') ? gv('cb-comb-note') : '';
   if (v === 2 && !note2) { showToast('Note required for 2nd visit'); return; }
   updatePatientFromClaimForm(p);
+  if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
   addClaim(p, '33008', '33008', 1, fmtD(new Date(ds)), 'I');
   if (v === 2) addClaim(p, '33008', '33008', 1, fmtD(new Date(ds)), 'I', null, note2 || 'Second visit — patient unstable');
   p.roundedToday = TODAY;
@@ -3739,6 +3840,7 @@ function submitDirective() {
   var note = cnt >= 2 ? (document.getElementById('cb-dir-note') ? gv('cb-dir-note') : '') : '';
   if (cnt >= 2 && !note) { showToast('Note required for additional directive visit this week'); return; }
   updatePatientFromClaimForm(p);
+  if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
   addClaim(p, '33006', '33006', 1, fmtD(new Date(ds)), 'I', null, note);
   p.roundedToday = TODAY;
   sv('patients', st.patients); sv('claims', st.claims);
@@ -3769,6 +3871,7 @@ function buildCCUForm(p) {
 function submitCCU(isDuplicate) {
   var p = getP(_claimPid); if (!checkDoc()) return;
   updatePatientFromClaimForm(p);
+  if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
   addClaim(p, 'CCU_DAILY', 'CCU_DAILY', 1, TODAY, 'I');
   p.roundedToday = TODAY;
   sv('patients', st.patients); sv('claims', st.claims);
