@@ -537,7 +537,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.77</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.78</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -2127,19 +2127,11 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime) 
   var c = {
     id:        'c' + Date.now() + Math.floor(Math.random() * 9999),
     alias:     st.doc.alias,
-    docnum:    st.doc.num,
-    last:      p.last,
-    first:     p.first,
     phn:       p.phn,
-    dob:       fmtClaimDate(p.dob),
-    sex:       p.sex,
     fee:       fee,
-    feeCode:   feeCode,
     icd:       p.icd || '3062',
     units:     units || 1,
     date:      date,
-    loc:       loc || 'I',
-    fac:       'OA040',
     refby:     p.refby     || '',
     refbyName: p.refbyName || '',
     notes:     notes       || '',
@@ -3539,7 +3531,7 @@ function openPatientSummary(pid) {
   // Also check by name if no PHN match (sticker not yet scanned)
   if (!claims.length || !p.phn) {
     var nameClaims = st.claims.filter(function(c) {
-      return c.last === p.last && c.first === p.first;
+      return c.phn === p.phn;
     }).sort(function(a, b) { return parseDMY(a.date) - parseDMY(b.date); });
     if (nameClaims.length > claims.length) claims = nameClaims;
   }
@@ -3928,7 +3920,7 @@ function saveClaimEdit(btn) {
   }
 
   c.fee     = newFee;
-  c.feeCode = newFee;
+
   c.icd     = newIcd;
   c.date    = newDate;
   c.startTime = newTime;
@@ -3942,7 +3934,6 @@ function saveClaimEdit(btn) {
   if (newAlias) {
     var doc = st.doctors.find(function(d) { return d.alias === newAlias; });
     c.alias  = newAlias;
-    c.docnum = doc ? (doc.num || c.docnum) : c.docnum;
   }
 
   sv('claims', st.claims);
@@ -4413,7 +4404,8 @@ function submitConsult() {
       var diff = (thisStartM - prevStartM + 24 * 60) % (24 * 60);
       if (diff <= 75) {
         // Include last name, first name and PHN as required
-        ccfppNote = 'CCFPP ' + c.last + ', ' + c.first + ' (' + c.phn + ')';
+        var _ccfppPat = (st.patients||[]).find(function(_pp){return _pp.phn===c.phn;}) || {};
+        ccfppNote = 'CCFPP ' + (_ccfppPat.last||'') + ', ' + (_ccfppPat.first||'') + ' (' + c.phn + ')';
       }
     });
   }
@@ -5837,11 +5829,16 @@ function renderSubmitted() {
     if (!byDate[dk]) { byDate[dk]=[]; dateOrder.push(dk); }
     byDate[dk].push(c);
   });
+  var _patByPhn = {};
+  (st.patients||[]).forEach(function(p) { if (p.phn) _patByPhn[p.phn] = p; });
   qEl.innerHTML = dateOrder.map(function(dk) {
     return '<div class="sec-lbl" style="margin-top:10px">Exported ' + esc(dk) + '</div>' +
       byDate[dk].map(function(c) {
+        var _p = _patByPhn[c.phn] || {};
+        var _last  = _p.last  || '';
+        var _first = _p.first || '';
         return '<div class="q-row" style="cursor:pointer" data-cid="' + esc(c.id) + '" onclick="editSubmittedClaim(this.dataset.cid)">' +
-          '<div class="q-info"><div class="q-name">' + esc(c.last) + ', ' + esc(c.first) + '</div>' +
+          '<div class="q-info"><div class="q-name">' + esc(_last) + ', ' + esc(_first) + '</div>' +
           '<div class="q-sub">' + esc(dispDate(c.date)) + ' &bull; ' + esc(c.fee||'') + ' &times;' + (c.units||1) + ' &bull; ' + esc(c.alias||'') + '</div></div>' +
           '<div style="font-size:11px;color:var(--blue-t);flex-shrink:0;padding-left:8px">&#9998;</div></div>';
       }).join('');
@@ -5852,7 +5849,7 @@ function editSubmittedClaim(cid) {
   var c = st.claims.find(function(x){ return x.id===cid; });
   if (!c) return;
   var p = st.patients.find(function(x){ return x.phn===c.phn; });
-  if (!p) p = { id:'stub_'+cid, phn:c.phn, last:c.last, first:c.first, dob:c.dob, sex:c.sex };
+  if (!p) p = { id:'stub_'+cid, phn:c.phn, last:'', first:'', dob:'', sex:'' };
   _claimOriginPane='p4'; _claimOriginNavIdx=3;
   var fakeBtn = { getAttribute: function(k){ return k==='data-cid' ? cid : p.id; } };
   openClaimEdit(fakeBtn);
@@ -5885,11 +5882,24 @@ function _buildAndDownloadCSV(claims, filename) {
     var d=f==='33010'||f==='33012'?50:f==='33006'?20:f==='33008'?15:f==='33005'?30:(f==='1411'||f==='1421'||f==='1431')?30:15;
     return minsToTime((sm+d)%(24*60));
   }
+  // Lookups for derived fields
+  var docByAlias = {};
+  (st.doctors||[]).forEach(function(d) { docByAlias[d.alias] = d; });
+  var patByPhn = {};
+  (st.patients||[]).forEach(function(p) { if (p.phn) patByPhn[p.phn] = p; });
+
   var hdr='DOCTOR_NUMBER,PAYEE_ALIAS,PATIENT_FIRST_NAME,PATIENT_LAST_NAME,PATIENT_NAME,PHN,OTHER_INSURER_CODE,GENDER,DOB,MRN,CORRECTIONAL_ID,FEE_ITEM_CODE,ICD9_CODE,AMOUNT_BILLED,SERVICE_UNITS,PERCENT_BILLED,FEE_SCHEDULE,SERVICE_DATE,SERVICE_START_TIME,SERVICE_END_TIME,ADDITIONAL_CLAIM_NOTES,REFERRED_BY_DOCTOR_NUMBER,REFERRED_TO_DOCTOR_NUMBER,REFERRED_BY_DOCTOR_NAME,SERVICE_LOCATION_CODE,FACILITY_NUMBER,SUB_FACILITY_NUMBER,SUBMISSION_CODE,CORRESPONDENCE_CODE,AFTER_HOURS_INDICATOR_CODE,SCC_CODE,CLAIM_TYPE,ICBC_CLAIM_NUMBER,WORK_SAFE_CLAIM_NUMBER,WORK_SAFE_INJURY_DATE,WORK_SAFE_INJURY_AREA_CODE,WORK_SAFE_INJURY_NATURE_CODE,WORK_SAFE_ANATOMICAL_POSITION';
   var rows=claims.map(function(c){
-    var pn='"\"'+(c.last||'')+','+(c.first||'')+'\""';
+    var doc = docByAlias[c.alias] || {};
+    var pat = patByPhn[c.phn] || {};
+    var first = pat.first || '';
+    var last  = pat.last  || '';
+    var dob   = pat.dob   || '';
+    var sex   = pat.sex   || '';
+    var loc   = pat.ward === 'ED' ? 'E' : 'I';
+    var pn='"\"'+last+','+first+'\""';
     var rn=c.refbyName?'"\"'+c.refbyName+'\""':'';
-    return [c.docnum||'',c.alias||'',c.first||'',c.last||'',pn,c.phn||'','',c.sex||'',c.dob||'','','',c.feeCode||c.fee,c.icd||'3062','',c.units||1,'100','MSP',c.date,c.startTime||'',_cet(c),c.notes||'',c.refby||'','',rn,c.loc||'I','OA040','','P','','','','MSP','','','','','',''].join(',');
+    return [doc.num||'',c.alias||'',first,last,pn,c.phn||'','',sex,dob,'','',c.fee,c.icd||'3062','',c.units||1,'100','MSP',c.date,c.startTime||'',_cet(c),c.notes||'',c.refby||'','',rn,loc,'OA040','','P','','','','MSP','','','','','',''].join(',');
   });
   var blob=new Blob([hdr+'\n'+rows.join('\n')],{type:'text/csv;charset=utf-8;'});
   var url=URL.createObjectURL(blob);
