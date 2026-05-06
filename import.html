@@ -168,7 +168,14 @@
     border-radius: 50%; animation: spin 0.8s linear infinite;
     margin-right: 6px; vertical-align: -1px;
   }
-  @keyframes spin { to { transform: rotate(360deg); } }
+  .cell-sel {
+    font-family: var(--mono); font-size: 11px;
+    padding: 3px 4px; border: 1px solid var(--line);
+    border-radius: 3px; background: white; color: var(--ink);
+    cursor: pointer;
+  }
+  .cell-sel:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  tr.skipped .cell-sel { opacity: 0.4; pointer-events: none; }
 </style>
 </head>
 <body>
@@ -214,7 +221,7 @@
             <th>Role</th>
             <th>List</th>
             <th>MRP</th>
-            <th>Detected MRP service</th>
+            <th>Meditech MRP (refbyName)</th>
           </tr>
         </thead>
         <tbody id="rows"></tbody>
@@ -225,8 +232,8 @@
       <button class="secondary" id="cancelBtn">Cancel</button>
     </div>
     <div class="hint">
-      Selected rows are added (new) or have <strong>ward/bed updated only</strong> (existing PHN match).
-      Existing patients keep their current role, MRP, list, ICD, and referrer.
+      ✓ = included on commit. Uncheck to skip a patient. Edit Ward, Role, List, or MRP inline before committing.
+      Existing patients (↻ Update) will have <strong>all editable fields updated</strong> — not just location.
     </div>
     <div class="status" id="commitStatus"></div>
     <div class="log" id="log" style="display:none;"></div>
@@ -335,9 +342,22 @@ function fileToBase64(file) {
   });
 }
 
+// ───────── DROPDOWN OPTIONS ─────────
+const WARD_OPTS = [
+  'CCU','2S','2W','CSICU','ICUA','ICUB','ICUD',
+  '3E','3MU','3W','4E','4W','4A','4B','5B','6W','C1C','ED','REH','HAH','OTHER'
+];
+const MRP_OPTS  = ['Cardiology','Hospitalist','CTU','ICU','Cardiac Surgery','Other'];
+
+function selOpts(opts, current) {
+  return opts.map(o =>
+    `<option value="${escapeHTML(o)}"${o === current ? ' selected' : ''}>${escapeHTML(o)}</option>`
+  ).join('');
+}
+
 // ───────── PREVIEW ─────────
 async function renderPreview() {
-  // Fetch existing patients for client-side new/update preview
+  // Fetch existing patients for client-side dedup preview
   let existing = [];
   try {
     const r = await fetch(`${APPS_SCRIPT_URL}?key=${SHARED_KEY}&action=listPatients`);
@@ -360,32 +380,58 @@ async function renderPreview() {
   rowsEl.innerHTML = '';
 
   parsedPatients.forEach((p, i) => {
-    const phn = String(p.phn || '').trim();
-    const match = phn ? phnMap.get(phn) : null;
-    p._action = match ? 'update' : 'new';
-    p._selected = true;
+    const phn    = String(p.phn || '').trim();
+    const match  = phn ? phnMap.get(phn) : null;
+    p._action    = match ? 'update' : 'new';
+    p._selected  = true;
     if (match) updateCount++; else newCount++;
+
+    // For existing patients, start editable fields from current sheet values
+    // so the doctor can see what's there and change if needed.
+    const ward = p.ward  || (match && match.ward)  || 'OTHER';
+    const role = p.role  || (match && match.role)  || 'consultant';
+    const list = p.list  || (match && match.list)  || 'off';
+    const mrp  = p.mrp   || (match && match.mrp)   || 'Other';
 
     const tr = document.createElement('tr');
     tr.dataset.idx = i;
     tr.innerHTML = `
       <td><input type="checkbox" class="row-cb" data-idx="${i}" checked></td>
-      <td><span class="badge ${p._action}">${p._action === 'new' ? '+ New' : '↻ Loc'}</span></td>
+      <td><span class="badge ${p._action}">${p._action === 'new' ? '+ New' : '↻ Update'}</span></td>
       <td class="name">${escapeHTML(p.last || '?')}, ${escapeHTML(p.first || '?')}</td>
       <td class="mono">${escapeHTML(phn || '—')}</td>
       <td class="mono">${escapeHTML(p.dob || '—')}</td>
       <td>${escapeHTML(p.sex || '—')}</td>
-      <td class="mono">${escapeHTML(p.ward || '?')}</td>
+      <td>
+        <select class="cell-sel" data-field="ward" data-idx="${i}" style="min-width:72px">
+          ${selOpts(WARD_OPTS, ward)}
+        </select>
+      </td>
       <td class="mono">${escapeHTML(p.bed || '?')}</td>
       <td class="mono">${escapeHTML(p.admitDate || '—')}</td>
-      <td>${escapeHTML(p.role || '?')}</td>
-      <td><span class="badge ${p.list === 'on' ? 'on' : 'off'}">${escapeHTML(p.list || '?')}</span></td>
-      <td>${escapeHTML(p.mrp || 'Other')}</td>
-      <td class="mono">${escapeHTML(sanitiseMRP(p.mrp || p.refbyName) || '—')}</td>
+      <td>
+        <select class="cell-sel" data-field="role" data-idx="${i}" style="min-width:90px">
+          <option value="mrp"${role === 'mrp' ? ' selected' : ''}>mrp</option>
+          <option value="consultant"${role === 'consultant' ? ' selected' : ''}>consultant</option>
+        </select>
+      </td>
+      <td>
+        <select class="cell-sel" data-field="list" data-idx="${i}" style="min-width:60px">
+          <option value="on"${list === 'on' ? ' selected' : ''}>on</option>
+          <option value="off"${list === 'off' ? ' selected' : ''}>off</option>
+        </select>
+      </td>
+      <td>
+        <select class="cell-sel" data-field="mrp" data-idx="${i}" style="min-width:110px">
+          ${selOpts(MRP_OPTS, mrp)}
+        </select>
+      </td>
+      <td class="mono">${escapeHTML(p.refbyName || '—')}</td>
     `;
     rowsEl.appendChild(tr);
   });
 
+  // Checkbox toggles row opacity
   rowsEl.querySelectorAll('.row-cb').forEach(cb => {
     cb.addEventListener('change', e => {
       const idx = parseInt(e.target.dataset.idx, 10);
@@ -394,10 +440,20 @@ async function renderPreview() {
     });
   });
 
+  // Live-write select changes back to parsedPatients so buildSheetPayload
+  // always reads current values regardless of how the user edits.
+  rowsEl.querySelectorAll('.cell-sel').forEach(sel => {
+    sel.addEventListener('change', e => {
+      const idx   = parseInt(e.target.dataset.idx, 10);
+      const field = e.target.dataset.field;
+      parsedPatients[idx][field] = e.target.value;
+    });
+  });
+
   summaryEl.innerHTML = `
     <div class="stat"><span class="n">${parsedPatients.length}</span><span class="l">Parsed</span></div>
     <div class="stat"><span class="n">${newCount}</span><span class="l">New</span></div>
-    <div class="stat"><span class="n">${updateCount}</span><span class="l">Update location</span></div>
+    <div class="stat"><span class="n">${updateCount}</span><span class="l">Update</span></div>
     <div class="stat"><span class="n">${existing.length}</span><span class="l">In sheet</span></div>
   `;
   previewPanel.classList.add('shown');
@@ -481,26 +537,6 @@ commitBtn.addEventListener('click', async () => {
   }
 });
 
-// Map loose strings like "Hospitalist,KGH Kelowna" to a known service name.
-// Returns 'Other' if it doesn't match anything recognisable.
-function sanitiseMRP(value) {
-  if (!value) return '';
-  var v = String(value).toLowerCase();
-  var map = [
-    ['cardiology','Cardiology'], ['hospitalist','Hospitalist'], ['ctu','CTU'],
-    ['csicu','CSICU'], ['cardiac surg','Cardiac Surgery'],
-    ['icu','ICU'], ['critical care','ICU'],
-    ['general surg','General Surgery'], ['orthop','Orthopedics'],
-    ['neurol','Neurology'], ['nephr','Nephrology'],
-    ['internal med','Internal Medicine'], ['respir','Respirology'],
-    ['gastro','Gastroenterology'], ['oncol','Oncology'], ['palliat','Palliative']
-  ];
-  for (var i = 0; i < map.length; i++) {
-    if (v.indexOf(map[i][0]) !== -1) return map[i][1];
-  }
-  return 'Other';
-}
-
 // Build the patient object that goes into the sheet, matching the
 // exact shape the mobile app's addPatient() produces.
 function buildSheetPayload(p) {
@@ -514,11 +550,10 @@ function buildSheetPayload(p) {
     ward:      p.ward      || 'OTHER',
     bed:       p.bed       || '',
     fac:       'OA040',
-    refby:     '',                                 // numeric MSC blank — referring MD set when consult is billed
-    refbyName: '',                                 // never populate from MRP/attending — must be a person, set at consult time
+    refby:     '',                                 // numeric MSC blank — to be filled later
+    refbyName: p.refbyName || '',                  // raw Meditech MRP string
     role:      p.role      || 'consultant',
-    // Worker may return Meditech MRP string in p.refbyName (legacy) or p.mrp — use whichever is present
-    mrp:       sanitiseMRP(p.mrp || p.refbyName) || 'Other',
+    mrp:       p.mrp       || 'Other',
     list:      p.list      || 'off',
     care:      '',                                 // app infers from role+ward
     icd:       '',                                 // doctor sets when seen
