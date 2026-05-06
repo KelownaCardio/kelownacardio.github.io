@@ -537,7 +537,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.74</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.75</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -3666,10 +3666,29 @@ function fmtClaimDate(d) {
   // Already clean DD/MM/YYYY — return immediately, no further parsing
   if (typeof d === 'string' && /^\d{2}\/\d{2}\/\d{4}$/.test(d)) return d;
   // ISO date string or timestamp (from Sheets) — YYYY-MM-DD[T...] — flip to DD/MM/YYYY
-  // Use string slicing, never new Date(), to avoid UTC-midnight shift in negative-offset zones
   if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/.test(d)) {
     var m = d.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (m) return m[3] + '/' + m[2] + '/' + m[1];
+    if (m) {
+      var yr = parseInt(m[1]), mo = parseInt(m[2]), dy = parseInt(m[3]);
+      // Sanity check: if the ISO date is in the future (month hasn't arrived yet)
+      // and swapping day/month would give a past/present date, it's the UTC-offset
+      // bug where toISOString() crossed midnight and swapped DD and MM.
+      // e.g. 2026-06-05 with today in May 2026 → swap to 2026-05-06 → 06/05/2026
+      var now = new Date();
+      var isFuture = (yr > now.getFullYear()) ||
+                     (yr === now.getFullYear() && mo > now.getMonth() + 1);
+      if (isFuture && dy <= 12) {
+        // Try swapping day and month
+        var swappedMo = dy, swappedDy = mo;
+        var swapFuture = (yr > now.getFullYear()) ||
+                         (yr === now.getFullYear() && swappedMo > now.getMonth() + 1);
+        if (!swapFuture) {
+          // Swapped version is not in the future — use it
+          return pad(swappedDy) + '/' + pad(swappedMo) + '/' + yr;
+        }
+      }
+      return pad(dy) + '/' + pad(mo) + '/' + yr;
+    }
   }
   // Date object (already local) — extract local day/month/year
   if (d instanceof Date && !isNaN(d)) {
