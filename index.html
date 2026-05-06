@@ -534,7 +534,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.63</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.64</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -787,7 +787,7 @@ input[type=file] { display:none; }
 </div>
 
 <!-- ═══ ADD CLAIM PANE ═══ -->
-<div class="pane" id="p-addclaim">
+<div class="pane" id="p-addclaim" style="padding-top:52px">
   <div class="search-wrap">
     <svg class="search-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
     <input id="addclaim-search" placeholder="Search name or PHN…"
@@ -3303,13 +3303,18 @@ function renderAddClaimResults(query) {
   var container = document.getElementById('addclaim-results');
   var q = (query || '').toLowerCase().trim();
 
+  // Normalise discharged flag inline in case Sheets returned 'True'/'False' strings
+  st.patients.forEach(function(p) {
+    p.discharged = parseBool(p.discharged);
+  });
+
   // Active patients (on rounds list)
   var active = st.patients.filter(function(p) { return !p.discharged; });
 
   // Discharged patients — all of them, most recently discharged first
   var recent = st.patients.filter(function(p) {
     return p.discharged;
-  }).sort(function(a, b) { return (b.dischargedAt || 0) - (a.dischargedAt || 0); });
+  }).sort(function(a, b) { return (parseDischargedAt(b.dischargedAt) || 0) - (parseDischargedAt(a.dischargedAt) || 0); });
 
   var allPatients = active.concat(recent);
 
