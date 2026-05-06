@@ -537,7 +537,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.76</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.77</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -2217,9 +2217,20 @@ function parseDischargedAt(v) {
 // Drives the green card tint — claim-based, syncs across all devices.
 function claimedToday(p) {
   if (!p || !p.phn) return false;
-  return st.claims.some(function(c) {
+  var match = st.claims.some(function(c) {
     return c.phn === p.phn && fmtClaimDate(c.date) === TODAY;
   });
+  // Diagnostic: log when patient HAS claims but none match TODAY
+  if (!match && window._dbgGreen) {
+    var phnClaims = st.claims.filter(function(c) { return c.phn === p.phn; });
+    if (phnClaims.length) {
+      console.log('[no-green]', p.last, 'phn=' + p.phn, 'TODAY=' + TODAY,
+        'claims:', phnClaims.map(function(c) {
+          return { rawDate: c.date, fmtDate: fmtClaimDate(c.date), phn: c.phn, fee: c.fee };
+        }));
+    }
+  }
+  return match;
 }
 
 // Returns true if any claim of the given fee types exists today from ANY doctor.
@@ -2294,6 +2305,7 @@ function roleChip(p) {
 
 function render() {
   TODAY = todayStr(); // refresh in case app was open past midnight
+  window._dbgGreen = true;
   if (!st.loaded) return;
   updateDailyTotal();
   var all = st.patients.filter(function(p) { return !p.discharged; });
