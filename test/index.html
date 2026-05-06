@@ -121,12 +121,14 @@
 
   <!-- Mode toggle + capture -->
   <div id="capture-card" class="card">
-    <div class="card-title">What are you scanning?</div>
+    <div class="card-title">Scan — type auto-detected from image</div>
     <div class="pill-row">
-      <div id="mode-sticker"  class="pill active" onclick="setMode('sticker')">Patient sticker</div>
-      <div id="mode-labvial"  class="pill"         onclick="setMode('labvial')">Lab vial label</div>
-      <div id="mode-meditech" class="pill"         onclick="setMode('meditech')">Meditech header</div>
+      <div id="mode-auto"    class="pill active"  onclick="setMode('auto')">Auto-detect</div>
+      <div id="mode-sticker" class="pill"         onclick="setMode('sticker')">Patient sticker</div>
+      <div id="mode-labvial" class="pill"         onclick="setMode('labvial')">Lab vial label</div>
+      <div id="mode-meditech"class="pill"         onclick="setMode('meditech')">Meditech header</div>
     </div>
+    <div id="detected-type" style="display:none;font-size:11px;color:var(--text2);margin-bottom:4px"></div>
     <button class="btn btn-p" onclick="document.getElementById('file-camera').click()">📷 Take photo</button>
     <button class="btn btn-s" onclick="document.getElementById('file-upload').click()">Upload image</button>
     <input id="file-camera" class="file-input" type="file" accept="image/*" capture="environment" onchange="handleFile(event)">
@@ -242,8 +244,14 @@
 
   <!-- Saved this session -->
   <div id="log-card" class="card hidden">
-    <div class="card-title">Saved this session</div>
+    <div class="card-title">Saved scans <span id="scan-count-pill" class="stat-pill"></span></div>
     <div id="saved-log"></div>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px; padding-top:10px; border-top:.5px solid var(--border); font-size:11px; color:var(--text3)">
+      <span id="storage-usage">—</span>
+      <button onclick="clearAllStoredScans()" style="background:none; border:none; color:var(--red); font-size:11px; font-weight:600; cursor:pointer; font-family:inherit; padding:0">
+        Clear all stored scans
+      </button>
+    </div>
   </div>
 
   <!-- Learning stats -->
@@ -266,7 +274,7 @@
 //═══════════════════════════════════════════════════════════════════
 let engine = null;
 let tesseractWorker = null;
-let mode = 'sticker';
+let mode = 'auto';
 let lastRawText = '';
 let lastParseLog = [];
 let lastParsed = null;
@@ -274,10 +282,15 @@ let lastImageDataUrl = '';
 let savedItems = [];
 let scanCount = 0;
 let autoCorrectHits = 0;
+let lastCropDataUrl = '';          // raw crop (what doctor saw)
+let lastPreprocessedDataUrl = '';  // grayscale+contrast (what OCR saw)
 
 const LS_PREFIX      = 'kgh_ocr_test_v0.3:';
 const LS_CORRECTIONS = LS_PREFIX + 'corrections';
 const LS_STATS       = LS_PREFIX + 'stats';
+const LS_SCANS       = LS_PREFIX + 'scans';
+const MAX_STORED_SCANS = 10;              // testing phase — keep cache small
+const SCAN_TTL_MS = 48 * 60 * 60 * 1000;  // auto-purge after 48 hours
 
 //═══════════════════════════════════════════════════════════════════
 // BC PHN Checksum (CAN health checksum algorithm)
@@ -433,10 +446,15 @@ async function loadTesseract() {
 
 function setMode(m) {
   mode = m;
-  ['sticker','labvial','meditech'].forEach(id => {
+  ['auto','sticker','labvial','meditech'].forEach(id => {
     document.getElementById('mode-' + id).classList.toggle('active', id === m);
   });
   document.getElementById('meditech-fields').classList.toggle('hidden', m !== 'meditech');
+  // Hide detected-type label when user manually picks a mode
+  if (m !== 'auto') {
+    const dt = document.getElementById('detected-type');
+    dt.style.display = 'none';
+  }
 }
 
 function showStatus(type, msg) {
@@ -553,21 +571,28 @@ async function runOCRWithCrop() {
   const x2 = Math.round(cropBR.x * w), y2 = Math.round(cropBR.y * h);
   const cw = x2 - x1, ch = y2 - y1;
 
+  // ── Raw crop (what the doctor saw) ─────────────────────────────
+  const rawCanvas = document.createElement('canvas');
+  rawCanvas.width = cw; rawCanvas.height = ch;
+  rawCanvas.getContext('2d').drawImage(img, x1, y1, cw, ch, 0, 0, cw, ch);
+  // Resize for storage if larger than 800px on long edge
+  lastCropDataUrl = downscaleForStorage(rawCanvas, 800, 0.80);
+
+  // ── Preprocessed (what OCR sees) ───────────────────────────────
   const canvas = document.createElement('canvas');
   canvas.width = cw; canvas.height = ch;
   const ctx = canvas.getContext('2d');
   ctx.drawImage(img, x1, y1, cw, ch, 0, 0, cw, ch);
-
-  // Preprocessing: grayscale + contrast boost
   const imageData = ctx.getImageData(0, 0, cw, ch);
   const d = imageData.data;
   for (let i = 0; i < d.length; i += 4) {
     const lum = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
-    let v = ((lum - 128) * 1.5) + 128;  // slightly stronger contrast than v0.2
+    let v = ((lum - 128) * 1.5) + 128;
     v = Math.max(0, Math.min(255, v));
     d[i] = d[i+1] = d[i+2] = v;
   }
   ctx.putImageData(imageData, 0, 0);
+  lastPreprocessedDataUrl = downscaleForStorage(canvas, 800, 0.80);
 
   document.getElementById('crop-card').classList.add('hidden');
   showStatus('info', 'Running OCR (' + (engine === 'mlkit' ? 'native ML Kit' : 'Tesseract') + ')…');
@@ -577,6 +602,10 @@ async function runOCRWithCrop() {
     lastRawText = rawText;
     const parsed = parseSticker(rawText);
     lastParsed = parsed;
+    // Show ward/room fields if meditech was detected (auto or manual)
+    const isMeditech = mode === 'meditech' ||
+      (mode === 'auto' && document.getElementById('detected-type').textContent.includes('Meditech'));
+    document.getElementById('meditech-fields').classList.toggle('hidden', !isMeditech);
     populateFields(parsed);
     document.getElementById('raw-text').textContent = rawText;
     document.getElementById('parse-log').textContent = lastParseLog.join('\n');
@@ -585,6 +614,19 @@ async function runOCRWithCrop() {
   } catch (e) {
     showStatus('err', 'OCR failed: ' + (e.message || e));
   }
+}
+
+// Downscale canvas to max long-edge px, return JPEG dataURL at given quality
+function downscaleForStorage(srcCanvas, maxEdge, quality) {
+  const sw = srcCanvas.width, sh = srcCanvas.height;
+  const longEdge = Math.max(sw, sh);
+  if (longEdge <= maxEdge) return srcCanvas.toDataURL('image/jpeg', quality);
+  const scale = maxEdge / longEdge;
+  const dw = Math.round(sw * scale), dh = Math.round(sh * scale);
+  const out = document.createElement('canvas');
+  out.width = dw; out.height = dh;
+  out.getContext('2d').drawImage(srcCanvas, 0, 0, sw, sh, 0, 0, dw, dh);
+  return out.toDataURL('image/jpeg', quality);
 }
 
 function resetCapture() {
@@ -628,9 +670,48 @@ function loadImage(src) {
 //═══════════════════════════════════════════════════════════════════
 // Parser — mode-dispatched
 //═══════════════════════════════════════════════════════════════════
+function detectStickerType(text) {
+  // Lab vial: has BD prefix before DOB + explicit HCN label + FAM line
+  // All three together are unique to lab vials
+  const hasBD     = /\bBD\s+\d/i.test(text);
+  const hasHCN    = /\bHCN\s+\d/i.test(text);
+  const hasFAM    = /\bFAM\b/i.test(text);
+  if (hasBD && hasHCN && hasFAM) return 'labvial';
+
+  // Meditech header: has ADM line and KELKGH location codes, no ACT KG
+  const hasKELKGH = /KELKGH/i.test(text);
+  const hasADM    = /\bADM\b/i.test(text);
+  if (hasKELKGH && hasADM && !/ACT\s+KG/i.test(text)) return 'meditech';
+
+  // Default: wristband sticker
+  return 'sticker';
+}
+
 function parseSticker(rawText) {
-  if (mode === 'labvial') return parseLabVial(rawText);
-  return parseStickerOrHeader(rawText);
+  let effectiveMode = mode;
+
+  if (mode === 'auto') {
+    effectiveMode = detectStickerType(rawText);
+    // Show what was detected under the pills
+    const labels = { sticker: 'Patient sticker', labvial: 'Lab vial label', meditech: 'Meditech header' };
+    const dt = document.getElementById('detected-type');
+    dt.textContent = 'Auto-detected: ' + labels[effectiveMode];
+    dt.style.display = 'block';
+    // Highlight the matching pill without changing the active selection
+    ['sticker','labvial','meditech'].forEach(id => {
+      document.getElementById('mode-' + id).style.outline =
+        id === effectiveMode ? '2px solid var(--blue)' : '';
+    });
+  } else {
+    // Clear any auto-detect outlines
+    ['sticker','labvial','meditech'].forEach(id => {
+      document.getElementById('mode-' + id).style.outline = '';
+    });
+  }
+
+  if (effectiveMode === 'labvial') return parseLabVial(rawText);
+  // Pass effectiveMode into parseStickerOrHeader so it knows meditech vs sticker
+  return parseStickerOrHeader(rawText, effectiveMode);
 }
 
 //─────────────────────────────────────────────────────────────────
@@ -815,11 +896,11 @@ function reconcileDualPHN(hcnRaw, bccRaw, log) {
 //─────────────────────────────────────────────────────────────────
 // Wristband sticker + Meditech header parser
 //─────────────────────────────────────────────────────────────────
-function parseStickerOrHeader(rawText) {
+function parseStickerOrHeader(rawText, effectiveMode) {
   lastParseLog = [];
   function log(msg) { lastParseLog.push(msg); }
   log('Engine: ' + engine);
-  log('Mode: ' + mode);
+  log('Mode: ' + effectiveMode + (mode === 'auto' ? ' (auto-detected)' : ''));
   log('');
 
   // Apply learned raw corrections
@@ -982,7 +1063,7 @@ function parseStickerOrHeader(rawText) {
 
   // ── Ward/room for Meditech header mode ──────────────────────────
   let ward = '', room = '';
-  if (mode === 'meditech') {
+  if (effectiveMode === 'meditech') {
     const dec = decodeMeditechLocation(lines);
     ward = dec.ward; room = dec.room;
     if (ward) log('Ward: ' + ward);
@@ -1183,7 +1264,27 @@ function confirmAndSave() {
   }
 
   scanCount++;
-  savedItems.unshift({ ...final, ts: new Date().toLocaleTimeString(), learned: learnedCount });
+
+  // Persist scan record WITH cropped image to localStorage
+  const scanRecord = {
+    id: 'scan_' + Date.now(),
+    ts: new Date().toISOString(),
+    tsDisplay: new Date().toLocaleString(),
+    final,
+    parsed: lastParsed || {},
+    rawText: lastRawText,
+    parseLog: lastParseLog.slice(),
+    crop: lastCropDataUrl || '',
+    preprocessed: lastPreprocessedDataUrl || '',
+    learned: learnedCount,
+    detectedMode: mode === 'auto'
+      ? (document.getElementById('detected-type').textContent.replace('Auto-detected: ',''))
+      : mode
+  };
+  saveScanRecord(scanRecord);
+
+  // Update in-memory log (for the current session UI)
+  savedItems.unshift({ ...final, ts: new Date().toLocaleTimeString(), id: scanRecord.id, learned: learnedCount });
   localStorage.setItem(LS_STATS, JSON.stringify({ scanCount, autoCorrectHits }));
   document.getElementById('stat-pill').textContent = scanCount + ' scans · ' + autoCorrectHits + ' auto-fixes';
   renderSavedLog();
@@ -1193,6 +1294,58 @@ function confirmAndSave() {
     ? '✓ Saved + learned ' + learnedCount + ' correction' + (learnedCount > 1 ? 's' : '')
     : '✓ Confirmed: ' + final.last);
   resetCapture();
+}
+
+//═══════════════════════════════════════════════════════════════════
+// Scan record storage (with images)
+//═══════════════════════════════════════════════════════════════════
+function saveScanRecord(record) {
+  const all = loadScanRecords();
+  all.unshift(record);
+  // Cap at MAX_STORED_SCANS, dropping oldest
+  while (all.length > MAX_STORED_SCANS) all.pop();
+  // Try to write; if quota exceeded, drop more aggressively
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      localStorage.setItem(LS_SCANS, JSON.stringify(all));
+      return;
+    } catch (e) {
+      // Quota exceeded — drop oldest and retry
+      all.pop();
+      if (all.length === 0) {
+        console.warn('Cannot store scan even after dropping all — image too large');
+        return;
+      }
+    }
+  }
+}
+
+function loadScanRecords() {
+  let all = [];
+  try { all = JSON.parse(localStorage.getItem(LS_SCANS) || '[]'); }
+  catch (e) { return []; }
+  // Purge anything older than TTL
+  const cutoff = Date.now() - SCAN_TTL_MS;
+  const fresh = all.filter(r => {
+    const t = r.ts ? new Date(r.ts).getTime() : 0;
+    return t >= cutoff;
+  });
+  if (fresh.length !== all.length) {
+    try { localStorage.setItem(LS_SCANS, JSON.stringify(fresh)); } catch (e) {}
+  }
+  return fresh;
+}
+
+function getScanRecord(id) {
+  return loadScanRecords().find(r => r.id === id);
+}
+
+function clearAllStoredScans() {
+  if (!confirm('Delete all stored scans and photos? This cannot be undone.')) return;
+  localStorage.removeItem(LS_SCANS);
+  savedItems = [];
+  renderSavedLog();
+  toast('All stored scans cleared');
 }
 
 function saveFieldCorrection(field, from, to) {
@@ -1226,15 +1379,86 @@ function renderSavedLog() {
   const c = document.getElementById('log-card');
   if (!savedItems.length) { c.classList.add('hidden'); return; }
   c.classList.remove('hidden');
-  document.getElementById('saved-log').innerHTML = savedItems.map(d =>
-    '<div style="padding: 8px 0; border-bottom: .5px solid var(--border); font-size: 12px">' +
-    '<strong>' + esc(d.last) + ', ' + esc(d.first) + '</strong> ' +
-    '<span style="color: var(--text3)">@ ' + d.ts + '</span>' +
-    (d.learned ? ' <span class="stat-pill" style="background:var(--green-bg);color:var(--green-t)">+' + d.learned + ' learned</span>' : '') +
-    '<br><span style="color: var(--text2)">PHN ' + esc(d.phn) + ' · DOB ' + esc(d.dob) +
-    ' · ' + esc(d.sex) + (d.mrp ? ' · MRP: ' + esc(d.mrp) : '') +
-    (d.ward ? ' · ' + esc(d.ward) + ' ' + esc(d.room) : '') + '</span></div>'
-  ).join('');
+
+  // Update count pill and storage usage
+  const all = loadScanRecords();
+  document.getElementById('scan-count-pill').textContent =
+    all.length + ' stored / max ' + MAX_STORED_SCANS;
+  try {
+    const bytes = (localStorage.getItem(LS_SCANS) || '').length * 2; // 2 bytes per char (UTF-16)
+    document.getElementById('storage-usage').textContent =
+      (bytes / 1024 / 1024).toFixed(2) + ' MB used (5 MB limit)';
+  } catch (e) {}
+
+  document.getElementById('saved-log').innerHTML = savedItems.map(d => {
+    const rec = d.id ? getScanRecord(d.id) : null;
+    const hasImg = rec && rec.crop;
+    return (
+      '<div style="padding: 10px 0; border-bottom: .5px solid var(--border); font-size: 12px">' +
+        '<div style="display:flex; gap:10px; align-items:flex-start">' +
+          (hasImg ?
+            '<img src="' + rec.crop + '" alt="sticker" ' +
+              'style="width:60px; height:60px; object-fit:cover; border-radius:6px; ' +
+                     'border:.5px solid var(--border2); cursor:pointer; flex-shrink:0" ' +
+              'onclick="openScanPhoto(\'' + d.id + '\')">'
+            : '<div style="width:60px;height:60px;background:var(--surface2);border-radius:6px;flex-shrink:0"></div>'
+          ) +
+          '<div style="flex:1; min-width:0">' +
+            '<strong>' + esc(d.last) + ', ' + esc(d.first) + '</strong> ' +
+            '<span style="color: var(--text3)">@ ' + d.ts + '</span>' +
+            (d.learned ? ' <span class="stat-pill" style="background:var(--green-bg);color:var(--green-t)">+' + d.learned + ' learned</span>' : '') +
+            '<br><span style="color: var(--text2)">PHN ' + esc(d.phn) + ' · DOB ' + esc(d.dob) +
+            ' · ' + esc(d.sex) + (d.mrp ? ' · MRP: ' + esc(d.mrp) : '') +
+            (d.ward ? ' · ' + esc(d.ward) + ' ' + esc(d.room) : '') + '</span>' +
+            (d.id ?
+              '<br><button onclick="copyDebugBundleFromHistory(\'' + d.id + '\')" ' +
+                'style="background:none;border:none;color:var(--blue);font-size:11px;padding:4px 0;cursor:pointer;font-family:inherit;font-weight:600">' +
+                '📋 Copy debug bundle (with photo)</button>'
+              : ''
+            ) +
+          '</div>' +
+        '</div>' +
+      '</div>'
+    );
+  }).join('');
+}
+
+// Open the cropped sticker photo full-screen for review
+function openScanPhoto(id) {
+  const rec = getScanRecord(id);
+  if (!rec || !rec.crop) return;
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:200;' +
+    'display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;cursor:pointer';
+  ov.innerHTML =
+    '<div style="color:#fff;font-size:13px;margin-bottom:10px;text-align:center">' +
+      esc(rec.final.last) + ', ' + esc(rec.final.first) + ' · ' + esc(rec.final.phn) + '<br>' +
+      '<span style="color:#999;font-size:11px">Tap to close</span>' +
+    '</div>' +
+    '<img src="' + rec.crop + '" style="max-width:100%; max-height:60vh; object-fit:contain; border-radius:8px">' +
+    (rec.preprocessed && rec.preprocessed !== rec.crop ?
+      '<div style="color:#999;font-size:11px;margin-top:14px">What OCR saw (preprocessed):</div>' +
+      '<img src="' + rec.preprocessed + '" style="max-width:100%; max-height:25vh; object-fit:contain; border-radius:8px; margin-top:6px">'
+      : ''
+    );
+  ov.onclick = () => ov.remove();
+  document.body.appendChild(ov);
+}
+
+// Copy a debug bundle for any historical scan, including the photo
+function copyDebugBundleFromHistory(id) {
+  const rec = getScanRecord(id);
+  if (!rec) { toast('Scan not found in storage'); return; }
+  const bundle = buildDebugBundle(rec);
+  navigator.clipboard.writeText(bundle).then(() => {
+    toast('📋 Debug bundle copied (' + Math.round(bundle.length / 1024) + ' KB with photo)');
+  }).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = bundle; document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy');
+    document.body.removeChild(ta);
+    toast('📋 Copied');
+  });
 }
 
 function renderLearningCard() {
@@ -1252,50 +1476,85 @@ function renderLearningCard() {
 }
 
 //═══════════════════════════════════════════════════════════════════
-// Debug bundle
+// Debug bundle — shared format used for current scan AND history
 //═══════════════════════════════════════════════════════════════════
-function copyDebugBundle() {
-  const final = {
-    last:  document.getElementById('f-last').value.trim(),
-    first: document.getElementById('f-first').value.trim(),
-    phn:   document.getElementById('f-phn').value.trim(),
-    dob:   document.getElementById('f-dob').value.trim(),
-    sex:   document.getElementById('f-sex').value,
-    mrp:   document.getElementById('f-mrp').value,
-    ward:  document.getElementById('f-ward').value.trim(),
-    room:  document.getElementById('f-room').value.trim()
-  };
-  const orig = lastParsed || {};
+function buildDebugBundle(rec) {
+  const final  = rec.final  || {};
+  const parsed = rec.parsed || {};
   function diff(field) {
-    const o = (orig[field] || '').replace(/^\*/, '');
+    const o = (parsed[field] || '').replace(/^\*/, '');
     const f = final[field] || '';
     if (!o && !f) return null;
     if (o === f) return field + ': ' + (f || '(blank)') + ' [OK]';
     return field + ': "' + o + '" → "' + f + '" [CORRECTED]';
   }
-  const bundle = [
-    '=== KGH OCR DEBUG v0.3 #' + (scanCount + 1) + ' ===',
-    'Engine:  ' + engine,
-    'Mode:    ' + mode,
-    'Time:    ' + new Date().toISOString(),
-    'PHN valid: ' + (final.phn.length === 10 ? isValidBCPHN(final.phn) : 'n/a (not 10 digits)'),
+  const phnValid = final.phn && final.phn.length === 10 ? isValidBCPHN(final.phn) : 'n/a';
+  const lines = [
+    '=== KGH OCR DEBUG v0.3 ===',
+    'Scan ID:   ' + (rec.id || 'unsaved'),
+    'Time:      ' + (rec.tsDisplay || rec.ts || new Date().toISOString()),
+    'Engine:    ' + (rec.engine || engine || 'unknown'),
+    'Mode:      ' + (rec.detectedMode || mode),
+    'PHN valid: ' + phnValid,
     '',
     '--- RAW OCR ---',
-    lastRawText,
+    rec.rawText || '(none)',
     '',
-    '--- PARSED ---',
-    JSON.stringify(orig, null, 2),
+    '--- PARSED (auto-extracted) ---',
+    JSON.stringify(parsed, null, 2),
+    '',
+    '--- FINAL (after doctor edits) ---',
+    JSON.stringify(final, null, 2),
     '',
     '--- DOCTOR CORRECTIONS ---',
     Object.keys(final).map(diff).filter(Boolean).join('\n') || '(none)',
     '',
     '--- PARSER LOG ---',
-    lastParseLog.join('\n'),
-    '=== END ==='
-  ].join('\n');
+    (rec.parseLog || []).join('\n'),
+    ''
+  ];
+  if (rec.crop) {
+    lines.push('--- STICKER PHOTO (raw crop, base64 JPEG) ---');
+    lines.push(rec.crop);
+    lines.push('');
+  }
+  if (rec.preprocessed && rec.preprocessed !== rec.crop) {
+    lines.push('--- PREPROCESSED (what OCR saw, base64 JPEG) ---');
+    lines.push(rec.preprocessed);
+    lines.push('');
+  }
+  lines.push('=== END ===');
+  return lines.join('\n');
+}
 
+function copyDebugBundle() {
+  // Build a record from current state
+  const rec = {
+    id: 'current',
+    tsDisplay: new Date().toLocaleString(),
+    engine,
+    detectedMode: mode === 'auto'
+      ? document.getElementById('detected-type').textContent.replace('Auto-detected: ','')
+      : mode,
+    rawText:  lastRawText,
+    parsed:   lastParsed || {},
+    parseLog: lastParseLog.slice(),
+    crop:     lastCropDataUrl,
+    preprocessed: lastPreprocessedDataUrl,
+    final: {
+      last:  document.getElementById('f-last').value.trim(),
+      first: document.getElementById('f-first').value.trim(),
+      phn:   document.getElementById('f-phn').value.trim(),
+      dob:   document.getElementById('f-dob').value.trim(),
+      sex:   document.getElementById('f-sex').value,
+      mrp:   document.getElementById('f-mrp').value,
+      ward:  document.getElementById('f-ward').value.trim(),
+      room:  document.getElementById('f-room').value.trim()
+    }
+  };
+  const bundle = buildDebugBundle(rec);
   navigator.clipboard.writeText(bundle).then(() => {
-    toast('📋 Debug bundle copied — paste in chat');
+    toast('📋 Bundle copied (' + Math.round(bundle.length / 1024) + ' KB)');
   }).catch(() => {
     const ta = document.createElement('textarea');
     ta.value = bundle;
@@ -1336,8 +1595,28 @@ function esc(s) {
 
 // Boot
 loadStats();
+restoreSavedItems();
 detectEngine();
 renderLearningCard();
+renderSavedLog();
+
+function restoreSavedItems() {
+  const all = loadScanRecords();
+  // Build the in-memory savedItems from persisted records (newest first)
+  savedItems = all.slice(0, 20).map(r => ({
+    last:  r.final.last,
+    first: r.final.first,
+    phn:   r.final.phn,
+    dob:   r.final.dob,
+    sex:   r.final.sex,
+    mrp:   r.final.mrp,
+    ward:  r.final.ward,
+    room:  r.final.room,
+    ts:    new Date(r.ts).toLocaleTimeString(),
+    id:    r.id,
+    learned: r.learned || 0
+  }));
+}
 </script>
 </body>
 </html>
