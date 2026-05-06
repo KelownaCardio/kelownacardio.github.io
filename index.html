@@ -123,8 +123,8 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 .wp-pos { width:21px; height:21px; border-radius:50%; background:var(--surface2); display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:var(--text2); flex-shrink:0; margin-top:2px; }
 .wp-pos.done { background:var(--green-bg); color:var(--green-t); }
 .wp-pos-wrap { position:relative; flex-shrink:0; margin-top:2px; }
-.wp-pos-badge { position:absolute; top:-4px; right:-4px; width:11px; height:11px; border-radius:50%; background:var(--green); display:flex; align-items:center; justify-content:center; border:1.5px solid var(--surface); }
-.wp-pos-badge svg { width:6px; height:6px; stroke:#fff; fill:none; stroke-width:3; }
+
+
 .wp-info { flex:1; min-width:0; }
 .wp-name { font-size:13px; font-weight:700; }
 .wp-meta { font-size:10px; color:var(--text2); margin-top:2px; }
@@ -533,7 +533,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.40</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.41</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -2197,7 +2197,6 @@ function wardHtml(ward) {
       h += '<div class="wp' + (dn ? ' done' : '') + '">' +
            '<div class="wp-pos-wrap">' +
              '<div class="wp-pos' + (dn ? ' done' : '') + '" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(String(pos)) + '</div>' +
-             (dn ? '<div class="wp-pos-badge"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>' : '') +
            '</div>' +
            '<div class="wp-main">' +
              '<div class="wp-name-row">' +
@@ -2497,6 +2496,14 @@ function showsCCUDaily(p) {
   return p.role === 'mrp' || p.care === 'ccu'; // support both old and new field
 }
 
+// Instantly style a quick-tap button as done (dark green ✓) before render().
+// This gives immediate visual feedback without waiting for DOM re-render.
+function bbDone(btn, label) {
+  btn.className = 'bb bb-done';
+  btn.textContent = '✓ ' + label;
+  btn.disabled = true;
+}
+
 function quickActBtns(p) {
   // Alpha and off-service views reuse same role logic as ward rows
   return wardActBtns(p);
@@ -2686,6 +2693,7 @@ function quickDailyBtn(btn) {
   }
   var p = getP(pid);
   var label = p.care === 'combined' ? 'Combined daily' : 'Daily';
+  bbDone(btn, label);
   addClaim(p, '33008', '33008', 1, TODAY, 'I');
   p.roundedToday = TODAY;
   p.lastBilled   = label;
@@ -2719,6 +2727,7 @@ function quickDirectiveBtn(btn) {
     return;
   }
   var p = getP(pid);
+  bbDone(btn, 'Directive');
   addClaim(p, '33006', '33006', 1, TODAY, 'I');
   p.roundedToday = TODAY;
   p.lastBilled   = 'Directive';
@@ -2751,6 +2760,7 @@ function quickCCUBtn(btn) {
   var p   = getP(pid);
   var fee = ccuFeeForToday(p);
   var feeLabels = { '1411':'CCU day 1 (1411)', '1421':'CCU days 2–7 (1421)', '1431':'CCU days 8+ (1431)' };
+  bbDone(btn, feeLabels[fee] || fee);
   addClaim(p, fee, fee, 1, TODAY, 'I');
   p.roundedToday = TODAY;
   p.lastBilled   = feeLabels[fee] || fee;
