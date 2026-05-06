@@ -534,7 +534,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.62</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.63</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -3547,7 +3547,7 @@ function openPatientSummary(pid) {
       var dayClaims = byDate[date];
 
       // Date header
-      html += '<div style="font-size:11px;font-weight:700;color:var(--text2);margin:10px 0 5px;padding-bottom:4px;border-bottom:.5px solid var(--border)">' + date + '</div>';
+      html += '<div style="font-size:11px;font-weight:700;color:var(--text2);margin:10px 0 5px;padding-bottom:4px;border-bottom:.5px solid var(--border)">' + dispDate(date) + '</div>';
 
       dayClaims.forEach(function(c) {
         var feeLabel = getFeeLabel(c.fee);
@@ -4270,7 +4270,6 @@ function claimSubmitOnce(fn) {
 }
 
 function submitConsult() {
-  if (_submitGuard) return;
   var p = getP(_claimPid);
   if (!checkDoc()) return;
 
