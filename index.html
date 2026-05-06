@@ -522,7 +522,7 @@ input[type=file] { display:none; }
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
     <div>
-      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.29</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">KGH Cardiology Billing <span style="font-size:9px;opacity:.5;font-weight:400">v2.33</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1504,6 +1504,7 @@ async function loadLocal() {
       }
       if (!c.icd)       c.icd       = '3062';
       if (!c.startTime) c.startTime = '08:00';
+      if (c.endTime) c.endTime = fmtStartTime(c.endTime);
     });
   }
   if (Array.isArray(st.patients)) {
@@ -1677,6 +1678,7 @@ async function syncFromSheets() {
         }
         if (!c.icd)       { c.icd = '3062'; changed = true; }
         if (!c.startTime) { c.startTime = '08:00'; changed = true; }
+        if (c.endTime) c.endTime = fmtStartTime(c.endTime);
         if (changed && SHEETS_URL) push('saveClaim', c);
       });
       st.claims = mergedClaims;
@@ -1952,7 +1954,7 @@ function ccuConsolidate() {
 }
 
 // ── Add Claim Helper ───────────────────────────────────
-function addClaim(p, fee, feeCode, units, date, loc, startTime, notes) {
+function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime) {
   // Guard: never write an MRP service string into refby/refbyName
   if (looksLikeMRPService(p.refbyName)) {
     p.refbyName = '';
@@ -1988,7 +1990,8 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes) {
     refby:     p.refby     || '',
     refbyName: p.refbyName || '',
     notes:     notes       || '',
-    startTime: _start
+    startTime: _start,
+    endTime:   endTime || ''
   };
   st.claims.push(c);
   if (SHEETS_URL) push('saveClaim', c);
@@ -3957,8 +3960,8 @@ function submitConsult() {
   var modInc   = hasInc ? getModifierForIncrement(start, dateISO) : null;
 
   if (modBase) {
-    // Base claim: start time required by MSP
-    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start);
+    // Base claim: start time and end time required by MSP
+    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start, '', end);
 
     if (modInc) {
       // Increment start time = consult start + 30 min
@@ -5180,11 +5183,28 @@ function exportCSV() {
   var ccu = ccuConsolidate();
   var all = raw.concat(ccu);
 
+  // Derive end time for export: use stored endTime, or calculate from fee type
+  function csvEndTime(c) {
+    if (c.endTime) return c.endTime;
+    if (!c.startTime) return '';
+    var startM = t2m(c.startTime);
+    var durM;
+    var f = String(c.fee);
+    if (f === '33010' || f === '33012') durM = 50; // full / limited consult
+    else if (f === '33006')             durM = 20; // directive
+    else if (f === '33008')             durM = 15; // daily
+    else if (f === '33005')             durM = 30; // emergency
+    else if (f === '1411' || f === '1421' || f === '1431') durM = 30; // CCU
+    else                                durM = 15; // default
+    return minsToTime((startM + durM) % (24 * 60));
+  }
+
+  // Header matches real iClinic import file structure exactly (38 cols)
   var header = [
     'DOCTOR_NUMBER','PAYEE_ALIAS','PATIENT_FIRST_NAME','PATIENT_LAST_NAME','PATIENT_NAME',
-    'PHN','OTHER_INSURER_CODE','GENDER','DOB','',
-    'FEE_ITEM','FEE_ITEM_CODE','ICD9_CODE','AMOUNT_BILLED','SERVICE_UNITS',
-    'PERCENT_BILLED','FEE_SCHEDULE','SERVICE_DATE','SERVICE_START_TIME',
+    'PHN','OTHER_INSURER_CODE','GENDER','DOB','MRN',
+    'CORRECTIONAL_ID','FEE_ITEM_CODE','ICD9_CODE','AMOUNT_BILLED','SERVICE_UNITS',
+    'PERCENT_BILLED','FEE_SCHEDULE','SERVICE_DATE','SERVICE_START_TIME','SERVICE_END_TIME',
     'ADDITIONAL_CLAIM_NOTES','REFERRED_BY_DOCTOR_NUMBER','REFERRED_TO_DOCTOR_NUMBER',
     'REFERRED_BY_DOCTOR_NAME','SERVICE_LOCATION_CODE','FACILITY_NUMBER',
     'SUB_FACILITY_NUMBER','SUBMISSION_CODE','CORRESPONDENCE_CODE',
@@ -5194,7 +5214,7 @@ function exportCSV() {
   ].join(',');
 
   var rows = all.map(function(c) {
-    // PATIENT_NAME format: "Last,First" (with outer quotes)
+    // PATIENT_NAME format: "Last,First" (with outer quotes — iClinic convention)
     var pname   = '"\"' + (c.last || '') + ',' + (c.first || '') + '\""';
     var refName = c.refbyName ? '"\"' + c.refbyName + '\""' : '';
     return [
@@ -5204,32 +5224,33 @@ function exportCSV() {
       c.last    || '',
       pname,
       c.phn     || '',
-      '',
+      '',                           // OTHER_INSURER_CODE
       c.sex     || '',
-      c.dob     || '',
-      '',                     // blank column (per iClinic format)
-      c.fee,
-      c.feeCode || c.fee,
-      c.icd     || '3062',
-      '',                     // AMOUNT_BILLED (calculated by iClinic)
+      c.dob     || '',              // DOB — DD/MM/YYYY
+      '',                           // MRN (col 9 — blank)
+      '',                           // CORRECTIONAL_ID
+      c.feeCode || c.fee,           // FEE_ITEM_CODE
+      c.icd     || '3062',          // ICD9_CODE
+      '',                           // AMOUNT_BILLED (calculated by iClinic)
       c.units   || 1,
       '100',
       'MSP',
-      c.date,
-      c.startTime || '',      // SERVICE_START_TIME — always populated for consults
-      c.notes   || '',
-      c.refby   || '',
-      '',                     // REFERRED_TO
-      refName,
-      c.loc     || 'I',       // I = inpatient, E = ED
-      'OA040',                // KGH facility number
-      '',                     // SUB_FACILITY_NUMBER
-      'P',                    // SUBMISSION_CODE
-      '',
-      '',
-      '',
-      'MSP',                  // CLAIM_TYPE
-      '','','','','',''       // ICBC / WCB fields
+      c.date,                       // SERVICE_DATE — DD/MM/YYYY
+      c.startTime || '',            // SERVICE_START_TIME
+      csvEndTime(c),                // SERVICE_END_TIME
+      c.notes   || '',              // ADDITIONAL_CLAIM_NOTES
+      c.refby   || '',              // REFERRED_BY_DOCTOR_NUMBER
+      '',                           // REFERRED_TO_DOCTOR_NUMBER
+      refName,                      // REFERRED_BY_DOCTOR_NAME
+      c.loc     || 'I',             // SERVICE_LOCATION_CODE (I=inpatient, E=ED)
+      'OA040',                      // FACILITY_NUMBER (KGH)
+      '',                           // SUB_FACILITY_NUMBER
+      'P',                          // SUBMISSION_CODE
+      '',                           // CORRESPONDENCE_CODE
+      '',                           // AFTER_HOURS_INDICATOR_CODE
+      '',                           // SCC_CODE
+      'MSP',                        // CLAIM_TYPE
+      '','','','','',''             // ICBC / WCB fields
     ].join(',');
   });
 
