@@ -534,7 +534,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.55</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.57</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1545,6 +1545,10 @@ async function loadLocal() {
     st.patients.forEach(function(p) {
       // Normalise DOB — Sheets may store as ISO timestamp (1943-05-05T07:00:00.000Z)
       if (p.dob) p.dob = fmtClaimDate(p.dob);
+      // Normalise roundedToday — Sheets auto-converts DD/MM/YYYY to datetime
+      if (p.roundedToday) p.roundedToday = fmtClaimDate(p.roundedToday);
+      // Normalise dischargedAt — Sheets may format epoch ms as a date string
+      if (p.dischargedAt) p.dischargedAt = parseDischargedAt(p.dischargedAt);
       var hadBadRef = looksLikeMRPService(p.refbyName);
       sanitizeReferrer(p);
       if (hadBadRef && SHEETS_URL) push('savePatient', p);  // push the clean version back to Sheets
@@ -1616,6 +1620,10 @@ async function syncFromSheets() {
       d.patients.forEach(function(p) {
         // Normalise DOB from Sheets ISO timestamp
         if (p.dob) p.dob = fmtClaimDate(p.dob);
+        // Normalise roundedToday — Sheets auto-converts DD/MM/YYYY to datetime
+        if (p.roundedToday) p.roundedToday = fmtClaimDate(p.roundedToday);
+        // Normalise dischargedAt — Sheets auto-formats epoch ms as date string
+        if (p.dischargedAt) p.dischargedAt = parseDischargedAt(p.dischargedAt);
         var hadBadRef = looksLikeMRPService(p.refbyName);
         sanitizeReferrer(p);
         if (hadBadRef && SHEETS_URL) push('savePatient', p);  // overwrite stale bad data on Sheets
@@ -2104,6 +2112,20 @@ function logChange(p, action, detail) {
   if (st.changelog.length > 200) st.changelog = st.changelog.slice(0, 200);
   sv('changelog', st.changelog);
   if (SHEETS_URL) push('logChange', entry);
+}
+
+// Parse dischargedAt to epoch ms regardless of whether Sheets returned
+// a number, an ISO string, or a Date-formatted string.
+function parseDischargedAt(v) {
+  if (!v && v !== 0) return 0;
+  if (typeof v === 'number') return v;
+  // ISO string: "2026-05-06T21:39:57.176Z" or "2026-05-06T21:39:57Z"
+  var n = Number(new Date(String(v)));
+  if (!isNaN(n) && n > 1000000000000) return n; // sanity: must be after year 2001
+  // Plain number stored as string: "1778078397176"
+  var direct = Number(String(v).replace(/[^0-9]/g,''));
+  if (!isNaN(direct) && direct > 1000000000000) return direct;
+  return 0;
 }
 
 // Returns true if any claim exists for this patient today from any doctor.
@@ -3288,9 +3310,10 @@ function addClaimRow(p) {
 
   var statusChip = '';
   if (p.discharged) {
-    var daysAgo = Math.floor((Date.now() - p.dischargedAt) / (24 * 60 * 60 * 1000));
-    var daysLabel = daysAgo === 0 ? 'today' : daysAgo === 1 ? '1 day ago' : daysAgo + ' days ago';
-    statusChip = '<span class="chip chip-grey">Discharged ' + daysLabel + '</span>';
+    var _dat = parseDischargedAt(p.dischargedAt);
+    var daysAgo = _dat ? Math.floor((Date.now() - _dat) / (24 * 60 * 60 * 1000)) : null;
+    var daysLabel = daysAgo === null ? '' : daysAgo === 0 ? 'today' : daysAgo === 1 ? '1 day ago' : daysAgo + ' days ago';
+    statusChip = '<span class="chip chip-grey">Discharged' + (daysLabel ? ' ' + daysLabel : '') + '</span>';
   } else if (p.roundedToday === TODAY) {
     statusChip = '<span class="chip chip-green">Seen today</span>';
   }
@@ -3385,7 +3408,7 @@ function openPatientSummary(pid) {
   html +=   '</div>';
   // Discharge badge if applicable
   if (p.discharged) {
-    var daysAgo = Math.floor((Date.now() - p.dischargedAt) / 86400000);
+    var daysAgo = Math.floor((Date.now() - parseDischargedAt(p.dischargedAt)) / 86400000);
     html += '<span class="chip chip-grey" style="margin-top:3px">Discharged ' + (daysAgo === 0 ? 'today' : daysAgo + 'd ago') + '</span>';
   }
   html += '</div>';
@@ -3515,15 +3538,23 @@ function fmtClaimDate(d) {
 }
 
 function fmtStartTime(t) {
-  if (!t) return '';
+  if (!t && t !== 0) return '';
+  // Decimal day-fraction from Sheets time cell (e.g. 0.029861 = 00:43, 0.919444 = 22:04)
+  if (typeof t === 'number') {
+    if (t > 0 && t < 1) {
+      var totalMins = Math.round(t * 24 * 60);
+      return pad(Math.floor(totalMins / 60)) + ':' + pad(totalMins % 60);
+    }
+    return ''; // other numbers not meaningful as time
+  }
   // Already a clean HH:MM string?
   if (typeof t === 'string' && /^\d{1,2}:\d{2}$/.test(t)) return t;
-  // ISO date string with the Sheets epoch placeholder?
+  // ISO date string with the Sheets 1899 epoch placeholder
   if (typeof t === 'string' && t.indexOf('1899-12-30') !== -1) {
     var m = t.match(/T(\d{2}):(\d{2})/);
     if (m) return m[1] + ':' + m[2];
   }
-  // Generic ISO / parseable date
+  // Generic ISO string — extract HH:MM from time part
   if (typeof t === 'string' && t.indexOf('T') !== -1) {
     var m2 = t.match(/T(\d{2}):(\d{2})/);
     if (m2) return m2[1] + ':' + m2[2];
@@ -3532,7 +3563,7 @@ function fmtStartTime(t) {
   if (t instanceof Date && !isNaN(t)) {
     return pad(t.getHours()) + ':' + pad(t.getMinutes());
   }
-  // Fallback — return as-is
+  // Fallback
   return String(t);
 }
 
@@ -5523,10 +5554,14 @@ function removePatient(pid) {
 }
 
 function purgeOldPatients() {
-  var cutoff = Date.now() - (21 * 24 * 60 * 60 * 1000); // 21 days
+  // Keep all discharged patients — Recent Patients tab shows them with Restore button.
+  // Only purge if dischargedAt is somehow zero/invalid (data corruption guard).
+  // The 21-day local cache limit is removed: Sheets is the long-term store.
   var before = st.patients.length;
   st.patients = st.patients.filter(function(p) {
-    return !p.discharged || p.dischargedAt > cutoff;
+    if (!p.discharged) return true;         // active — always keep
+    var ms = parseDischargedAt(p.dischargedAt);
+    return ms > 0;                          // keep if valid timestamp; drop if corrupt
   });
   if (st.patients.length < before) {
     sv('patients', st.patients);
