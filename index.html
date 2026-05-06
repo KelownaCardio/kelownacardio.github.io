@@ -122,6 +122,9 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 .wp.directive { border-color:#d4a84a; }
 .wp-pos { width:21px; height:21px; border-radius:50%; background:var(--surface2); display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:var(--text2); flex-shrink:0; margin-top:2px; }
 .wp-pos.done { background:var(--green-bg); color:var(--green-t); }
+.wp-pos-wrap { position:relative; flex-shrink:0; margin-top:2px; }
+.wp-pos-badge { position:absolute; top:-4px; right:-4px; width:11px; height:11px; border-radius:50%; background:var(--green); display:flex; align-items:center; justify-content:center; border:1.5px solid var(--surface); }
+.wp-pos-badge svg { width:6px; height:6px; stroke:#fff; fill:none; stroke-width:3; }
 .wp-info { flex:1; min-width:0; }
 .wp-name { font-size:13px; font-weight:700; }
 .wp-meta { font-size:10px; color:var(--text2); margin-top:2px; }
@@ -530,7 +533,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.38</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.40</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1960,6 +1963,31 @@ function ccuConsolidate() {
   return out;
 }
 
+// Returns the correct CCU fee code for today based on consecutive episode length.
+//   Day 1 of episode → 1411 | Days 2–7 → 1421 | Days 8+ → 1431
+// Episode resets on any gap > 1 calendar day in CCU claims.
+function ccuFeeForToday(p) {
+  var CCU_FEES = ['CCU_DAILY','1411','1421','1431'];
+  var DAY_MS   = 86400000;
+  var taps = st.claims
+    .filter(function(c) { return c.phn === p.phn && CCU_FEES.indexOf(c.fee) !== -1; })
+    .sort(function(a, b) { return parseDMYsafe(a.date) - parseDMYsafe(b.date); });
+  if (!taps.length) return '1411';
+  var todayMs = parseDMYsafe(TODAY);
+  var dateMsSet = {};
+  taps.forEach(function(c) {
+    var ms = parseDMYsafe(c.date);
+    if (ms && ms < todayMs) dateMsSet[ms] = true;
+  });
+  var consec = 0;
+  var checkMs = todayMs - DAY_MS;
+  while (dateMsSet[checkMs]) { consec++; checkMs -= DAY_MS; }
+  var dayNum = consec + 1;
+  if (dayNum === 1) return '1411';
+  if (dayNum <= 7)  return '1421';
+  return '1431';
+}
+
 // ── Add Claim Helper ───────────────────────────────────
 function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime) {
   // Guard: never write an MRP service string into refby/refbyName
@@ -2040,6 +2068,15 @@ function claimedToday(p) {
   if (!p || !p.phn) return false;
   return st.claims.some(function(c) {
     return c.phn === p.phn && c.date === TODAY;
+  });
+}
+
+// Returns true if any claim of the given fee types exists today from ANY doctor.
+// Used to drive quick-tap button done-state across devices.
+function claimedTodayFee(p, feeTypes) {
+  if (!p || !p.phn) return false;
+  return st.claims.some(function(c) {
+    return c.phn === p.phn && c.date === TODAY && feeTypes.indexOf(c.fee) !== -1;
   });
 }
 
@@ -2158,7 +2195,10 @@ function wardHtml(ward) {
               : isWard ? (p.bed || (i+1))
               :          (i+1);
       h += '<div class="wp' + (dn ? ' done' : '') + '">' +
-           '<div class="wp-pos' + (dn ? ' done' : '') + '" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + (dn ? chkIco10() : pos) + '</div>' +
+           '<div class="wp-pos-wrap">' +
+             '<div class="wp-pos' + (dn ? ' done' : '') + '" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(String(pos)) + '</div>' +
+             (dn ? '<div class="wp-pos-badge"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>' : '') +
+           '</div>' +
            '<div class="wp-main">' +
              '<div class="wp-name-row">' +
                '<span class="wp-name" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' +
@@ -2427,23 +2467,21 @@ function mrpLabel(p) {
 // - CCU/ICU MRP      → + CCU daily
 // - Consulting       → + Directive  + Combined daily
 function wardActBtns(p) {
-  var billed = alreadyBilledToday(p.id, ['33008','33006','CCU_DAILY']);
-
   if (showsCCUDaily(p)) {
-    var ccuDone = alreadyBilledToday(p.id, ['CCU_DAILY']);
+    var ccuDone = claimedTodayFee(p, ['CCU_DAILY','1411','1421','1431']);
     return ccuDone
       ? '<button class="bb bb-done" data-pid="' + p.id + '" onclick="event.stopPropagation();quickCCUBtn(this)" title="Tap to undo">✓ CCU daily</button>'
       : '<button class="bb bb-ccu" data-pid="' + p.id + '" onclick="event.stopPropagation();quickCCUBtn(this)">+ CCU daily</button>';
   }
   if (p.role === 'mrp') {
-    var dailyDone = alreadyBilledToday(p.id, ['33008']);
+    var dailyDone = claimedTodayFee(p, ['33008']);
     return dailyDone
       ? '<button class="bb bb-done" data-pid="' + p.id + '" onclick="event.stopPropagation();quickDailyBtn(this)" title="Tap to undo">✓ Daily</button>'
       : '<button class="bb bb-rnd" data-pid="' + p.id + '" onclick="event.stopPropagation();quickDailyBtn(this)">+ Daily</button>';
   }
   // Consulting
-  var dirDone  = alreadyBilledToday(p.id, ['33006']);
-  var combDone = alreadyBilledToday(p.id, ['33008']);
+  var dirDone  = claimedTodayFee(p, ['33006']);
+  var combDone = claimedTodayFee(p, ['33008']);
   return (dirDone
       ? '<button class="bb bb-done" data-pid="' + p.id + '" onclick="event.stopPropagation();quickDirectiveBtn(this)" title="Tap to undo">✓ Directive</button>'
       : '<button class="bb bb-dir" data-pid="' + p.id + '" onclick="event.stopPropagation();quickDirectiveBtn(this)">+ Directive</button>') +
@@ -2635,7 +2673,7 @@ function quickDailyBtn(btn) {
     }
     return;
   }
-  if (alreadyBilledToday(pid, ['CCU_DAILY','33006'])) {
+  if (alreadyBilledToday(pid, ['CCU_DAILY','1411','1421','1431','33006'])) {
     showToast('A different visit already claimed today');
     return;
   }
@@ -2694,8 +2732,8 @@ function quickCCUBtn(btn) {
   var pid = btn.getAttribute('data-pid');
   if (!checkDoc()) return;
   // If already billed — toggle off (undo)
-  if (alreadyBilledToday(pid, ['CCU_DAILY'])) {
-    if (unbillToday(pid, ['CCU_DAILY'])) {
+  if (alreadyBilledToday(pid, ['CCU_DAILY','1411','1421','1431'])) {
+    if (unbillToday(pid, ['CCU_DAILY','1411','1421','1431'])) {
       showToast('CCU daily removed — ' + getP(pid).last);
       render();
     }
@@ -2710,13 +2748,15 @@ function quickCCUBtn(btn) {
     openClaimWithRequiredFields(pid, 'ccu');
     return;
   }
-  var p = getP(pid);
-  addClaim(p, 'CCU_DAILY', 'CCU_DAILY', 1, TODAY, 'I');
+  var p   = getP(pid);
+  var fee = ccuFeeForToday(p);
+  var feeLabels = { '1411':'CCU day 1 (1411)', '1421':'CCU days 2–7 (1421)', '1431':'CCU days 8+ (1431)' };
+  addClaim(p, fee, fee, 1, TODAY, 'I');
   p.roundedToday = TODAY;
-  p.lastBilled   = 'CCU daily';
+  p.lastBilled   = feeLabels[fee] || fee;
   sv('patients', st.patients);
   sv('claims', st.claims);
-  showToast('✓ CCU daily — ' + p.last);
+  showToast('✓ ' + (feeLabels[fee] || fee) + ' — ' + p.last);
   render();
 }
 
@@ -3508,6 +3548,8 @@ function openClaimEdit(btn) {
           '<input id="ce-date" type="date" value="' + esc(dateISO) + '"></div>' +
         '<div class="f1"><label>Start time</label>' +
           '<input id="ce-time" type="time" value="' + esc(startTimeClean) + '"></div>' +
+        '<div class="f1"><label>End time</label>' +
+          '<input id="ce-end-time" type="time" value="' + esc(fmtStartTime(c.endTime || '')) + '"></div>' +
       '</div>' +
       '<label style="margin-top:7px">Performing physician</label>' +
       '<select id="ce-alias" style="margin-bottom:7px">' + docOptions + '</select>' +
@@ -3549,7 +3591,8 @@ function saveClaimEdit(btn) {
   var newIcd   = document.getElementById('ce-icd').value || c.icd;
   var newAlias = document.getElementById('ce-alias').value;
   var newDateISO = (document.getElementById('ce-date') || {}).value || '';
-  var newTime    = (document.getElementById('ce-time') || {}).value || '';
+  var newTime    = (document.getElementById('ce-time')     || {}).value || '';
+  var newEndTime = (document.getElementById('ce-end-time') || {}).value || '';
   var newNotes = (document.getElementById('ce-notes') || {}).value || '';
   var newRefby     = (document.getElementById('ce-refby')      || {}).value || '';
   var newRefName   = (document.getElementById('ce-refby-name') || {}).value || '';
@@ -3566,6 +3609,7 @@ function saveClaimEdit(btn) {
   c.icd     = newIcd;
   c.date    = newDate;
   c.startTime = newTime;
+  c.endTime   = newEndTime;
   c.notes   = newNotes;
   // Block writing service strings as referring MD
   if (newRefby && newRefName && !looksLikeMRPService(newRefName)) {
