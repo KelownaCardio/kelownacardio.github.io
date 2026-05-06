@@ -293,6 +293,76 @@ const MAX_STORED_SCANS = 10;              // testing phase — keep cache small
 const SCAN_TTL_MS = 48 * 60 * 60 * 1000;  // auto-purge after 48 hours
 
 //═══════════════════════════════════════════════════════════════════
+// DOB sanity + rescue
+// Day must be 01-31 (and ≤ days-in-month), month 01-12, year 1900-now.
+// Brute-forces closest valid (DD,MM) by OCR-weighted distance.
+//═══════════════════════════════════════════════════════════════════
+const DOB_OCR_COST = {
+  '0-8':1,'8-0':1, '0-6':1,'6-0':1, '1-7':1,'7-1':1,
+  '3-9':1,'9-3':1, '5-6':1,'6-5':1, '2-3':1,'3-2':1,
+  '0-9':2,'9-0':2, '1-4':2,'4-1':2, '5-8':2,'8-5':2
+};
+
+function isValidDOB(d, m, y) {
+  d = parseInt(d, 10); m = parseInt(m, 10); y = parseInt(y, 10);
+  if (!d || !m || !y) return false;
+  if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+  if (y < 1900 || y > new Date().getFullYear()) return false;
+  return d <= [31,29,31,30,31,30,31,31,30,31,30,31][m - 1];
+}
+
+function ocrDigitDist(a, b) {
+  if (a.length !== b.length) return 999;
+  let total = 0;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] === b[i]) continue;
+    const c = DOB_OCR_COST[a[i] + '-' + b[i]];
+    total += (c === undefined) ? 5 : c;
+  }
+  return total;
+}
+
+// Returns { dob, change, valid, rescued, ambiguous } or null
+function validateAndRescueDOB(dobStr) {
+  if (!dobStr) return null;
+  const parts = dobStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!parts) return null;
+  const dd = parts[1].padStart(2, '0');
+  const mm = parts[2].padStart(2, '0');
+  const yy = parts[3];
+
+  if (isValidDOB(dd, mm, yy)) {
+    return { dob: dd + '/' + mm + '/' + yy, change: 'valid', valid: true, rescued: false, ambiguous: false };
+  }
+  // Don't rescue obvious garbage
+  if (parseInt(dd, 10) === 0 && parseInt(mm, 10) === 0) return null;
+
+  // Brute force closest valid (DD,MM) for the same year
+  const candidates = [];
+  for (let m2 = 1; m2 <= 12; m2++) {
+    const dim = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m2 - 1];
+    for (let d2 = 1; d2 <= dim; d2++) {
+      const cd = String(d2).padStart(2, '0');
+      const cm = String(m2).padStart(2, '0');
+      if (!isValidDOB(cd, cm, yy)) continue;
+      const dist = ocrDigitDist(dd, cd) + ocrDigitDist(mm, cm);
+      if (dist < 5) candidates.push({ cd, cm, dist });
+    }
+  }
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => a.dist - b.dist);
+  const best = candidates[0];
+  const ambiguous = candidates.length > 1 && candidates[1].dist <= best.dist;
+  return {
+    dob: best.cd + '/' + best.cm + '/' + yy,
+    change: dd + '/' + mm + ' → ' + best.cd + '/' + best.cm + ' (cost ' + best.dist + ')',
+    valid: false,
+    rescued: true,
+    ambiguous: ambiguous
+  };
+}
+
+//═══════════════════════════════════════════════════════════════════
 // BC PHN Checksum (CAN health checksum algorithm)
 // BC PHNs start with 9. Weights applied to digits 2-9 (0-indexed 1-8).
 //═══════════════════════════════════════════════════════════════════
@@ -929,23 +999,25 @@ function parseStickerOrHeader(rawText, effectiveMode) {
   // Collapse intra-digit OCR spaces (runs twice to catch adjacent pairs)
   const col = noKG.replace(/(\d)\s+(\d)/g, '$1$2').replace(/(\d)\s+(\d)/g, '$1$2');
 
-  // Extract left copy: digits between HCN and INS
+  // Extract HCN copy: digits immediately after "HCN" (works inline AND multi-line)
+  // On standard chart stickers HCN and INS are on separate lines; on wristbands they're
+  // sometimes on one line. Both layouts work because we only require "HCN" then digits.
   let hcnRaw = null;
-  const hcnInsMatch = col.match(/HCN\s*(\d{7,12})\s*INS/i);
-  if (hcnInsMatch) {
-    hcnRaw = hcnInsMatch[1].slice(0, 10);
+  const hcnMatch = col.match(/HCN\s*(\d{7,12})\b/i);
+  if (hcnMatch) {
+    hcnRaw = hcnMatch[1].slice(0, 10);
     log('HCN copy raw: ' + hcnRaw + (hcnRaw.length < 10 ? ' [SHORT]' : ''));
   }
 
-  // Extract right copy: digits between INS and BCC (most reliable)
+  // Extract INS/BCC copy: digits immediately after "INS"
   let bccRaw = null;
-  const insBccMatch = col.match(/INS\s*(\d{7,12})\s*(?:BCC|WCB|BCG)\b/i);
-  if (insBccMatch) {
-    bccRaw = insBccMatch[1].slice(0, 10);
-    log('BCC copy raw: ' + bccRaw + (bccRaw.length < 10 ? ' [SHORT]' : ''));
+  const insMatch = col.match(/INS\s*(\d{7,12})\b/i);
+  if (insMatch) {
+    bccRaw = insMatch[1].slice(0, 10);
+    log('INS/BCC copy raw: ' + bccRaw + (bccRaw.length < 10 ? ' [SHORT]' : ''));
   }
 
-  // Fallback A: digits immediately before BCC (single-copy sticker or INS not found)
+  // Fallback: digits immediately before BCC anchor (older format / no INS)
   if (!bccRaw) {
     const bccOnly = col.match(/(\d{7,12})\s*(?:BCC|WCB|BCG)\b/i);
     if (bccOnly) {
@@ -973,6 +1045,7 @@ function parseStickerOrHeader(rawText, effectiveMode) {
   // ── DOB ──────────────────────────────────────────────────────────
   const dateRegex = /(\d{1,2})\s+([A-Za-z0-9]{3,4})\s+(\d{4})/g;
   let dob = '', dobYear = 9999;
+  let dobValid = false, dobRescued = false, dobAmbiguous = false;
   let m;
   while ((m = dateRegex.exec(text)) !== null) {
     const day   = m[1].padStart(2, '0');
@@ -989,39 +1062,84 @@ function parseStickerOrHeader(rawText, effectiveMode) {
       }
     }
   }
-  if (!dob) log('DOB: NOT FOUND');
+  // Sanity-check + rescue
+  if (dob) {
+    const dr = validateAndRescueDOB(dob);
+    if (dr) {
+      if (dr.rescued) {
+        log('DOB rescued: ' + dr.change + (dr.ambiguous ? ' [AMBIGUOUS]' : ''));
+        dob = dr.dob;
+        dobRescued = true;
+        dobAmbiguous = dr.ambiguous;
+        if (!dr.ambiguous) autoCorrectHits++;
+      } else {
+        log('DOB checksum: valid');
+        dobValid = true;
+      }
+    } else {
+      log('DOB invalid and unrecoverable: ' + dob);
+      dob = '';  // clear it — better blank than wrong
+    }
+  } else {
+    log('DOB: NOT FOUND');
+  }
 
   // ── Lines for anchored extraction ────────────────────────────────
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
 
   // ── Name ─────────────────────────────────────────────────────────
-  const ROUTING = /^(MOS|REN|AGG|EDC|ACIN|MHL|D\s*MOS|ID\s*MOS)$/i;
-  let actLineIdx = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (/ACT\s+KG\d/i.test(lines[i])) { actLineIdx = i; break; }
-  }
-  log('ACT line index: ' + actLineIdx);
+  // Standard chart stickers ALWAYS have the name on line 1, format:
+  //   LastName,FirstName MiddleName    (or . separator)
+  // Tesseract may wrap long names across two lines (e.g. "Cayer,Denni" + "s Edmond")
+  // So: find the first line containing a comma/period, then check if the
+  // next non-empty line is a wrap continuation (no separators, no anchors).
+  const ROUTING = /^(MOS|REN|AGG|EDC|ACIN|MHL|D\s*MOS|ID\s*MOS|ACT|ADM|HCN|INS|MRP|FRM|FAM|DOB|BD|RCIN|SPEC)\b/i;
+  const NAME_PATTERN = /^[A-Za-z*][A-Za-z\s\-']{1,30}[,.][A-Za-z]/;  // Lastname[,.]Firstname
 
-  let nameRaw = '', nameClipped = false;
-  if (actLineIdx > 0) {
-    for (let i = actLineIdx - 1; i >= 0; i--) {
-      if (ROUTING.test(lines[i])) { log('Skip routing: ' + lines[i]); continue; }
-      if (/^[A-Z\s]{8,}$/.test(lines[i]) && !/[,.]/.test(lines[i])) {
-        log('Skip header: ' + lines[i]); continue;
-      }
+  let nameLineIdx = -1;
+  let nameRaw = '';
+  for (let i = 0; i < Math.min(lines.length, 8); i++) {
+    if (ROUTING.test(lines[i])) { log('Skip routing: ' + lines[i]); continue; }
+    // Skip lines that are just digits (e.g. "3", "25a")
+    if (/^[\d\s]+$/.test(lines[i]) || lines[i].length < 4) {
+      log('Skip noise line: "' + lines[i] + '"');
+      continue;
+    }
+    if (NAME_PATTERN.test(lines[i])) {
+      nameLineIdx = i;
       nameRaw = lines[i];
-      // Strip "ACT KG..." if it bled onto this line
-      nameRaw = nameRaw.replace(/\s*ACT\s+KG.*/i, '').trim();
-      log('Name line: ' + nameRaw);
+      log('Name line found at ' + i + ': ' + nameRaw);
       break;
     }
   }
-  if (nameRaw && !/^[A-Z*]/i.test(nameRaw)) {
-    nameClipped = true;
-    log('Name clipped (no leading capital)');
+
+  // Check if name was wrapped across two lines by Tesseract.
+  // Indicator: line ends abruptly (last char is letter, no space after) AND
+  // next line starts with letter(s) followed by space, OR next line is short letters.
+  if (nameLineIdx >= 0 && nameLineIdx + 1 < lines.length) {
+    const nextLine = lines[nameLineIdx + 1];
+    const isContinuation =
+      // Next line doesn't start with a known anchor
+      !ROUTING.test(nextLine) &&
+      // Next line is alphabetic and short, like "s Edmond" or "ie Mary"
+      /^[a-z]/.test(nextLine) &&
+      nextLine.length < 25 &&
+      // Doesn't contain a name separator itself
+      !/[,.]/.test(nextLine);
+    if (isContinuation) {
+      log('Detected wrap continuation: "' + nameRaw + '" + "' + nextLine + '"');
+      // Join, removing one trailing letter that was probably split
+      // Cayer,Denni + s Edmond  →  Cayer,Dennis Edmond
+      nameRaw = nameRaw + nextLine;
+    }
   }
 
-  let last = '', first = '';
+  // Strip "ACT KG..." if it bled onto this line
+  if (nameRaw) {
+    nameRaw = nameRaw.replace(/\s*ACT\s+KG.*/i, '').trim();
+  }
+
+  let last = '', first = '', nameClipped = false;
   if (nameRaw) {
     const sep = nameRaw.search(/[,.]/);
     if (sep > 0) {
@@ -1035,7 +1153,15 @@ function parseStickerOrHeader(rawText, effectiveMode) {
     if (prefMatch) { first = prefMatch[1]; log('Preferred name used: ' + first); }
     last  = stripLeadingNoise(fixNameOCR(last));
     first = stripLeadingNoise(fixNameOCR(first));
-    if (nameClipped && last && !last.startsWith('*')) last = '*' + last;
+    // Hole punch detection (rare on chart stickers, but kept for wristbands)
+    if (last && !/^[A-Z*]/i.test(last)) {
+      nameClipped = true;
+      last = '*' + last;
+      log('Name clipped (no leading capital)');
+    }
+  }
+  if (!last) {
+    log('Name extraction FAILED — no line matched name pattern');
   }
 
   // ── Sex ──────────────────────────────────────────────────────────
@@ -1071,7 +1197,7 @@ function parseStickerOrHeader(rawText, effectiveMode) {
   }
 
   // ── Apply learned field corrections (name + MRP only — not PHN) ─
-  const result = { last, first, phn, dob, sex, mrp, ward, room, nameClipped, phnClipped, phnRescued, phnInvalid, phnNote };
+  const result = { last, first, phn, dob, sex, mrp, ward, room, nameClipped, phnClipped, phnRescued, phnInvalid, phnNote, dobRescued, dobAmbiguous };
   if (learned.fieldSubs) {
     ['last','first','mrp'].forEach(field => {  // PHN excluded — patient-specific
       const subs = learned.fieldSubs[field];
@@ -1349,11 +1475,31 @@ function clearAllStoredScans() {
 }
 
 function saveFieldCorrection(field, from, to) {
+  // Reject corrections that aren't generalisable patterns:
+  // - 'from' too short (< 3 chars) — likely a parser failure, not a recurring OCR pattern
+  // - 'from' is less than half the length of 'to' — same issue (e.g. 'f' → 'Cayer')
+  // - 'from' is empty or whitespace-only
+  // - 'from' is just digits (PHN, DOB are patient-specific; should not be saved here either)
+  const fromStr = String(from || '').trim();
+  const toStr = String(to || '').trim();
+  if (!fromStr || fromStr.length < 3) {
+    console.log('Skipping junk correction: ' + field + ' "' + fromStr + '" → "' + toStr + '" (from too short)');
+    return;
+  }
+  if (toStr.length > 0 && fromStr.length < toStr.length / 2) {
+    console.log('Skipping junk correction: ' + field + ' "' + fromStr + '" → "' + toStr + '" (from << to)');
+    return;
+  }
+  if (/^[\d\s\/\-]+$/.test(fromStr)) {
+    console.log('Skipping numeric correction: ' + field + ' "' + fromStr + '" → "' + toStr + '" (patient-specific)');
+    return;
+  }
+
   const data = loadCorrections();
   if (!data.fieldSubs) data.fieldSubs = {};
   if (!data.fieldSubs[field]) data.fieldSubs[field] = [];
-  data.fieldSubs[field] = data.fieldSubs[field].filter(s => s.from !== from);
-  data.fieldSubs[field].push({ from, to, ts: Date.now() });
+  data.fieldSubs[field] = data.fieldSubs[field].filter(s => s.from !== fromStr);
+  data.fieldSubs[field].push({ from: fromStr, to: toStr, ts: Date.now() });
   if (data.fieldSubs[field].length > 200) data.fieldSubs[field] = data.fieldSubs[field].slice(-200);
   localStorage.setItem(LS_CORRECTIONS, JSON.stringify(data));
 }
