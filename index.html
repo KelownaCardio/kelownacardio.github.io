@@ -534,7 +534,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.58</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.61</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -562,6 +562,7 @@ input[type=file] { display:none; }
   <button class="nb on" onclick="nav(0,this)">Rounds</button>
   <button class="nb" onclick="nav(1,this)">Add patient</button>
   <button class="nb" onclick="nav(2,this)">Recent patients</button>
+  <button class="nb" onclick="nav(3,this)">Export</button>
 </div>
 
 <!-- ═══ ROUNDS PANE ═══ -->
@@ -757,14 +758,32 @@ input[type=file] { display:none; }
 
 <!-- ═══ EXPORT PANE ═══ -->
 <div class="pane" id="p4">
-  <div class="stats" id="exp-stats" style="grid-template-columns:1fr 1fr 1fr"></div>
-  <div class="sec-lbl">Pending claims</div>
-  <div id="export-q"></div>
-  <button class="btn btn-g" onclick="exportCSV()" style="margin-top:8px">Export iClinic CSV</button>
-  <button class="btn btn-s" onclick="clearQueue()">Clear queue</button>
-  <div style="font-size:10px;color:var(--text3);text-align:center;padding:4px 0 0">OA040 · I/E location · iClinic format · CCU codes auto-consolidated</div>
-  <div class="sec-lbl" style="margin-top:13px">Change log</div>
-  <div id="change-log"></div>
+  <div style="display:flex;gap:4px;padding:8px 8px 0;background:var(--surface2);border-bottom:1px solid var(--border2)">
+    <button id="exp-tab-pending" class="nb on" style="flex:1;font-size:11px" onclick="switchExpTab('pending')">Pending</button>
+    <button id="exp-tab-submitted" class="nb" style="flex:1;font-size:11px" onclick="switchExpTab('submitted')">Submitted</button>
+    <button id="exp-tab-log" class="nb" style="flex:1;font-size:11px" onclick="switchExpTab('log')">Log</button>
+  </div>
+  <div id="exp-pane-pending">
+    <div class="stats" id="exp-stats" style="grid-template-columns:1fr 1fr 1fr;margin-top:8px"></div>
+    <div class="sec-lbl">Pending claims</div>
+    <div id="export-q"></div>
+    <button class="btn btn-g" onclick="exportCSV()" style="margin-top:8px">Export iClinic CSV</button>
+    <button class="btn btn-s" onclick="clearQueue()">Clear queue</button>
+    <div style="font-size:10px;color:var(--text3);text-align:center;padding:4px 0 0">OA040 · I/E location · iClinic format · CCU codes auto-consolidated</div>
+  </div>
+  <div id="exp-pane-submitted" style="display:none">
+    <div id="submitted-stats" class="stats" style="grid-template-columns:1fr 1fr;margin-top:8px"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin:4px 0 2px">
+      <div class="sec-lbl" style="margin:0">Submitted claims</div>
+      <button class="bb" style="font-size:10px" onclick="reexportSubmitted()">&#8595; Re-export CSV</button>
+    </div>
+    <div style="font-size:10px;color:var(--text3);padding:0 0 6px">Tap any row to edit. Purged after 90 days.</div>
+    <div id="submitted-q"></div>
+  </div>
+  <div id="exp-pane-log" style="display:none">
+    <div class="sec-lbl" style="margin-top:8px">Change log</div>
+    <div id="change-log"></div>
+  </div>
 </div>
 
 <!-- ═══ ADD CLAIM PANE ═══ -->
@@ -1659,13 +1678,31 @@ async function syncFromSheets() {
       });
 
       // Keep local-only patients only within the grace window
+      // Load confirmed patients set
+      var _confPStr = '';
+      try { var _cpr = localStorage.getItem('kgh5:confirmedPatients'); _confPStr = _cpr || ''; } catch(e) {}
+      var _confP = _confPStr ? JSON.parse(_confPStr) : {};
+      d.patients.forEach(function(p) { _confP[p.id] = true; });
+
       st.patients.forEach(function(lp) {
         if (!remoteById[lp.id]) {
-          var age = NOW_MS - (parseInt(lp.id.replace('p','')) || 0);
-          if (age < GRACE_MS) merged.push(lp); // push still in flight — keep
-          // else: not on Sheets and too old — was deliberately removed, drop it
+          if (_confP[lp.id]) {
+            // Was on Sheets before, now gone — deleted remotely, drop it
+          } else {
+            // Never confirmed on Sheets — keep and retry push
+            merged.push(lp);
+            if (SHEETS_URL) push('savePatient', lp);
+          }
         }
       });
+
+      var _confPKeys = Object.keys(_confP);
+      if (_confPKeys.length > 200) {
+        var _prunedP = {};
+        _confPKeys.slice(-200).forEach(function(k) { _prunedP[k] = true; });
+        _confP = _prunedP;
+      }
+      try { localStorage.setItem('kgh5:confirmedPatients', JSON.stringify(_confP)); } catch(e) {}
 
       st.patients = merged;
     }
@@ -1693,15 +1730,33 @@ async function syncFromSheets() {
 
       var mergedClaims = d.claims.slice();
 
+      // Load the set of claim IDs we know have previously reached Sheets
+      var _confirmedStr = '';
+      try { var _cr = localStorage.getItem('kgh5:confirmedClaims'); _confirmedStr = _cr || ''; } catch(e) {}
+      var _confirmed = _confirmedStr ? JSON.parse(_confirmedStr) : {};
+      // Mark all claims now on Sheets as confirmed
+      d.claims.forEach(function(c) { _confirmed[c.id] = true; });
+
       st.claims.forEach(function(lc) {
         if (!remoteClaimIds[lc.id]) {
-          // Claim ID format: 'c' + timestamp + random
-          var ts  = parseInt(lc.id.replace('c','').slice(0, 13)) || 0;
-          var age = NOW_MS - ts;
-          if (age < GRACE_MS) mergedClaims.push(lc); // in flight — keep
-          // else: old local-only claim not on Sheets — drop silently
+          if (_confirmed[lc.id]) {
+            // Was previously on Sheets but now gone — it was deleted remotely, drop it
+          } else {
+            // Never reached Sheets yet (push failed or in flight) — keep it and re-push
+            mergedClaims.push(lc);
+            if (SHEETS_URL) push('saveClaim', lc); // retry push
+          }
         }
       });
+
+      // Persist the confirmed set (prune to last 500 to avoid unbounded growth)
+      var _confirmedKeys = Object.keys(_confirmed);
+      if (_confirmedKeys.length > 500) {
+        var _pruned = {};
+        _confirmedKeys.slice(-500).forEach(function(k) { _pruned[k] = true; });
+        _confirmed = _pruned;
+      }
+      try { localStorage.setItem('kgh5:confirmedClaims', JSON.stringify(_confirmed)); } catch(e) {}
 
       // Patch claim rows that are missing refby/refbyName/icd/startTime.
       // IMPORTANT: Only push back claims that came from Sheets (not local-only new claims).
@@ -2142,7 +2197,7 @@ function parseDischargedAt(v) {
 function claimedToday(p) {
   if (!p || !p.phn) return false;
   return st.claims.some(function(c) {
-    return c.phn === p.phn && c.date === TODAY;
+    return c.phn === p.phn && fmtClaimDate(c.date) === TODAY;
   });
 }
 
@@ -2151,7 +2206,7 @@ function claimedToday(p) {
 function claimedTodayFee(p, feeTypes) {
   if (!p || !p.phn) return false;
   return st.claims.some(function(c) {
-    return c.phn === p.phn && c.date === TODAY && feeTypes.indexOf(c.fee) !== -1;
+    return c.phn === p.phn && fmtClaimDate(c.date) === TODAY && feeTypes.indexOf(c.fee) !== -1;
   });
 }
 
@@ -2217,6 +2272,7 @@ function roleChip(p) {
 }
 
 function render() {
+  TODAY = todayStr(); // refresh in case app was open past midnight
   if (!st.loaded) return;
   updateDailyTotal();
   var all = st.patients.filter(function(p) { return !p.discharged; });
@@ -3016,7 +3072,7 @@ function selectFeeCode(code, desc) {
 
 function buildOtherClaimForm(p) {
   var now      = new Date();
-  var todayISO = now.toISOString().slice(0, 10);
+  var todayISO = localISODate(now);
   var nowTime  = pad(now.getHours()) + ':' + pad(now.getMinutes());
 
   // Pre-fill ICD and referring MD from patient record
@@ -3195,7 +3251,7 @@ function selCT(type) {
   if (type === 'consult') {
     var now = new Date();
     document.getElementById('cb-start').value = pad(now.getHours()) + ':' + pad(now.getMinutes());
-    document.getElementById('cb-date').value  = new Date().toISOString().slice(0, 10);
+    document.getElementById('cb-date').value  = localISODate();
     updateConsultUI();
   }
 }
@@ -4063,7 +4119,7 @@ function savePatientEdit(pid) {
 
 function buildConsultForm(p) {
   var now      = new Date();
-  var todayISO = now.toISOString().slice(0, 10);
+  var todayISO = localISODate(now);
   var nowTime  = pad(now.getHours()) + ':' + pad(now.getMinutes());
   var endTime  = minsToTime(now.getHours() * 60 + now.getMinutes() + 50);
 
@@ -4342,7 +4398,7 @@ function updatePatientFromClaimForm(p) {
 
 // ── Daily rounds (33008) ───────────────────────────────
 function buildDailyForm(p) {
-  var iso = new Date().toISOString().slice(0, 10);
+  var iso = localISODate();
   return '<div class="card"><div class="card-title">Daily rounds (33008)</div>' +
     '<div class="fl">' +
       '<div class="f1"><label>Start date</label><input type="date" id="cb-dal-start" value="' + iso + '"></div>' +
@@ -4368,7 +4424,7 @@ function submitDaily() {
 
 // ── Combined daily care (33008, up to 2×/day for ICU) ─
 function buildCombinedForm(p) {
-  var iso = new Date().toISOString().slice(0, 10);
+  var iso = localISODate();
   return '<div class="card"><div class="card-title">Combined daily care (33008)</div>' +
     '<div class="fl">' +
       '<div class="f1"><label>Date</label><input type="date" id="cb-dal-start" value="' + iso + '"></div>' +
@@ -4413,7 +4469,7 @@ function submitCombined() {
 // ── Directive visit (33006, max 2/week Sun–Sat) ────────
 function buildDirectiveForm(p) {
   var cnt = dirCountThisWeek(p.phn);
-  var iso = new Date().toISOString().slice(0, 10);
+  var iso = localISODate();
   var h   = cnt >= 2
     ? '<div class="dir-warn">⚠ ' + cnt + ' directive visits already billed this Sun–Sat week. Note required if proceeding.</div>'
     : '';
@@ -5607,8 +5663,97 @@ function purgeOldPatients() {
 // 11_export.js — iClinic CSV export, export queue render
 // ═══════════════════════════════════════════════════════
 
+function switchExpTab(tab) {
+  ['pending','submitted','log'].forEach(function(t) {
+    var pane = document.getElementById('exp-pane-' + t);
+    var btn  = document.getElementById('exp-tab-' + t);
+    if (pane) pane.style.display = t === tab ? 'block' : 'none';
+    if (btn)  btn.classList.toggle('on', t === tab);
+  });
+  if (tab === 'submitted') renderSubmitted();
+}
+
+function renderSubmitted() {
+  var subClaims = (st.claims || []).filter(function(c) { return parseBool(c.submitted); });
+  subClaims.sort(function(a,b){ return (b.submittedAt||'').localeCompare(a.submittedAt||''); });
+  var statsEl = document.getElementById('submitted-stats');
+  var qEl     = document.getElementById('submitted-q');
+  if (!statsEl || !qEl) return;
+  var docs = [];
+  subClaims.forEach(function(c){ if(c.alias && docs.indexOf(c.alias)===-1) docs.push(c.alias); });
+  statsEl.innerHTML =
+    '<div class="stat"><div class="stat-n">' + subClaims.length + '</div><div class="stat-l">Submitted</div></div>' +
+    '<div class="stat"><div class="stat-n">' + docs.length + '</div><div class="stat-l">Doctors</div></div>';
+  if (!subClaims.length) { qEl.innerHTML = '<div class="empty">No submitted claims yet.</div>'; return; }
+  var byDate = {}, dateOrder = [];
+  subClaims.forEach(function(c) {
+    var dk = c.submittedAt ? c.submittedAt.slice(0,10) : 'Unknown';
+    if (!byDate[dk]) { byDate[dk]=[]; dateOrder.push(dk); }
+    byDate[dk].push(c);
+  });
+  qEl.innerHTML = dateOrder.map(function(dk) {
+    return '<div class="sec-lbl" style="margin-top:10px">Exported ' + esc(dk) + '</div>' +
+      byDate[dk].map(function(c) {
+        return '<div class="q-row" style="cursor:pointer" data-cid="' + esc(c.id) + '" onclick="editSubmittedClaim(this.dataset.cid)">' +
+          '<div class="q-info"><div class="q-name">' + esc(c.last) + ', ' + esc(c.first) + '</div>' +
+          '<div class="q-sub">' + esc(c.date||'') + ' &bull; ' + esc(c.fee||'') + ' &times;' + (c.units||1) + ' &bull; ' + esc(c.alias||'') + '</div></div>' +
+          '<div style="font-size:11px;color:var(--blue-t);flex-shrink:0;padding-left:8px">&#9998;</div></div>';
+      }).join('');
+  }).join('');
+}
+
+function editSubmittedClaim(cid) {
+  var c = st.claims.find(function(x){ return x.id===cid; });
+  if (!c) return;
+  var p = st.patients.find(function(x){ return x.phn===c.phn; });
+  if (!p) p = { id:'stub_'+cid, phn:c.phn, last:c.last, first:c.first, dob:c.dob, sex:c.sex };
+  _claimOriginPane='p4'; _claimOriginNavIdx=3;
+  var fakeBtn = { getAttribute: function(k){ return k==='data-cid' ? cid : p.id; } };
+  openClaimEdit(fakeBtn);
+}
+
+function reexportSubmitted() {
+  var sub = (st.claims||[]).filter(function(c){ return parseBool(c.submitted); });
+  if (!sub.length) { showToast('No submitted claims to re-export'); return; }
+  _buildAndDownloadCSV(sub, 'iClinic_KGH_reexport_' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '.csv');
+  showToast('Re-exported ' + sub.length + ' submitted claims');
+}
+
+function purgeSubmittedClaims() {
+  var cutoff = new Date(); cutoff.setDate(cutoff.getDate()-90);
+  var cutoffStr = cutoff.toISOString().slice(0,10);
+  var before = st.claims.length;
+  st.claims = st.claims.filter(function(c) {
+    if (!parseBool(c.submitted)) return true;
+    if (!c.submittedAt) return true;
+    return c.submittedAt.slice(0,10) >= cutoffStr;
+  });
+  if (st.claims.length < before) sv('claims', st.claims);
+}
+
+function _buildAndDownloadCSV(claims, filename) {
+  function _cet(c) {
+    if (c.endTime) return c.endTime;
+    if (!c.startTime) return '';
+    var sm=t2m(c.startTime),f=String(c.fee);
+    var d=f==='33010'||f==='33012'?50:f==='33006'?20:f==='33008'?15:f==='33005'?30:(f==='1411'||f==='1421'||f==='1431')?30:15;
+    return minsToTime((sm+d)%(24*60));
+  }
+  var hdr='DOCTOR_NUMBER,PAYEE_ALIAS,PATIENT_FIRST_NAME,PATIENT_LAST_NAME,PATIENT_NAME,PHN,OTHER_INSURER_CODE,GENDER,DOB,MRN,CORRECTIONAL_ID,FEE_ITEM_CODE,ICD9_CODE,AMOUNT_BILLED,SERVICE_UNITS,PERCENT_BILLED,FEE_SCHEDULE,SERVICE_DATE,SERVICE_START_TIME,SERVICE_END_TIME,ADDITIONAL_CLAIM_NOTES,REFERRED_BY_DOCTOR_NUMBER,REFERRED_TO_DOCTOR_NUMBER,REFERRED_BY_DOCTOR_NAME,SERVICE_LOCATION_CODE,FACILITY_NUMBER,SUB_FACILITY_NUMBER,SUBMISSION_CODE,CORRESPONDENCE_CODE,AFTER_HOURS_INDICATOR_CODE,SCC_CODE,CLAIM_TYPE,ICBC_CLAIM_NUMBER,WORK_SAFE_CLAIM_NUMBER,WORK_SAFE_INJURY_DATE,WORK_SAFE_INJURY_AREA_CODE,WORK_SAFE_INJURY_NATURE_CODE,WORK_SAFE_ANATOMICAL_POSITION';
+  var rows=claims.map(function(c){
+    var pn='"\"'+(c.last||'')+','+(c.first||'')+'\""';
+    var rn=c.refbyName?'"\"'+c.refbyName+'\""':'';
+    return [c.docnum||'',c.alias||'',c.first||'',c.last||'',pn,c.phn||'','',c.sex||'',c.dob||'','','',c.feeCode||c.fee,c.icd||'3062','',c.units||1,'100','MSP',c.date,c.startTime||'',_cet(c),c.notes||'',c.refby||'','',rn,c.loc||'I','OA040','','P','','','','MSP','','','','','',''].join(',');
+  });
+  var blob=new Blob([hdr+'\n'+rows.join('\n')],{type:'text/csv;charset=utf-8;'});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');
+  a.href=url; a.download=filename; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
 function renderExport() {
-  var raw = st.claims.filter(function(c) { return c.fee !== 'CCU_DAILY'; });
+  purgeSubmittedClaims();
+  var raw = st.claims.filter(function(c) { return c.fee !== 'CCU_DAILY' && !parseBool(c.submitted); });
   var ccu = ccuConsolidate();
   var all = raw.concat(ccu);
 
@@ -5666,88 +5811,19 @@ function exportCSV() {
   var ccu = ccuConsolidate();
   var all = raw.concat(ccu);
 
-  // Derive end time for export: use stored endTime, or calculate from fee type
-  function csvEndTime(c) {
-    if (c.endTime) return c.endTime;
-    if (!c.startTime) return '';
-    var startM = t2m(c.startTime);
-    var durM;
-    var f = String(c.fee);
-    if (f === '33010' || f === '33012') durM = 50; // full / limited consult
-    else if (f === '33006')             durM = 20; // directive
-    else if (f === '33008')             durM = 15; // daily
-    else if (f === '33005')             durM = 30; // emergency
-    else if (f === '1411' || f === '1421' || f === '1431') durM = 30; // CCU
-    else                                durM = 15; // default
-    return minsToTime((startM + durM) % (24 * 60));
-  }
-
-  // Header matches real iClinic import file structure exactly (38 cols)
-  var header = [
-    'DOCTOR_NUMBER','PAYEE_ALIAS','PATIENT_FIRST_NAME','PATIENT_LAST_NAME','PATIENT_NAME',
-    'PHN','OTHER_INSURER_CODE','GENDER','DOB','MRN',
-    'CORRECTIONAL_ID','FEE_ITEM_CODE','ICD9_CODE','AMOUNT_BILLED','SERVICE_UNITS',
-    'PERCENT_BILLED','FEE_SCHEDULE','SERVICE_DATE','SERVICE_START_TIME','SERVICE_END_TIME',
-    'ADDITIONAL_CLAIM_NOTES','REFERRED_BY_DOCTOR_NUMBER','REFERRED_TO_DOCTOR_NUMBER',
-    'REFERRED_BY_DOCTOR_NAME','SERVICE_LOCATION_CODE','FACILITY_NUMBER',
-    'SUB_FACILITY_NUMBER','SUBMISSION_CODE','CORRESPONDENCE_CODE',
-    'AFTER_HOURS_INDICATOR_CODE','SCC_CODE','CLAIM_TYPE',
-    'ICBC_CLAIM_NUMBER','WORK_SAFE_CLAIM_NUMBER','WORK_SAFE_INJURY_DATE',
-    'WORK_SAFE_INJURY_AREA_CODE','WORK_SAFE_INJURY_NATURE_CODE','WORK_SAFE_ANATOMICAL_POSITION'
-  ].join(',');
-
-  var rows = all.map(function(c) {
-    // PATIENT_NAME format: "Last,First" (with outer quotes — iClinic convention)
-    var pname   = '"\"' + (c.last || '') + ',' + (c.first || '') + '\""';
-    var refName = c.refbyName ? '"\"' + c.refbyName + '\""' : '';
-    return [
-      c.docnum  || '',
-      c.alias   || '',
-      c.first   || '',
-      c.last    || '',
-      pname,
-      c.phn     || '',
-      '',                           // OTHER_INSURER_CODE
-      c.sex     || '',
-      c.dob     || '',              // DOB — DD/MM/YYYY
-      '',                           // MRN (col 9 — blank)
-      '',                           // CORRECTIONAL_ID
-      c.feeCode || c.fee,           // FEE_ITEM_CODE
-      c.icd     || '3062',          // ICD9_CODE
-      '',                           // AMOUNT_BILLED (calculated by iClinic)
-      c.units   || 1,
-      '100',
-      'MSP',
-      c.date,                       // SERVICE_DATE — DD/MM/YYYY
-      c.startTime || '',            // SERVICE_START_TIME
-      csvEndTime(c),                // SERVICE_END_TIME
-      c.notes   || '',              // ADDITIONAL_CLAIM_NOTES
-      c.refby   || '',              // REFERRED_BY_DOCTOR_NUMBER
-      '',                           // REFERRED_TO_DOCTOR_NUMBER
-      refName,                      // REFERRED_BY_DOCTOR_NAME
-      c.loc     || 'I',             // SERVICE_LOCATION_CODE (I=inpatient, E=ED)
-      'OA040',                      // FACILITY_NUMBER (KGH)
-      '',                           // SUB_FACILITY_NUMBER
-      'P',                          // SUBMISSION_CODE
-      '',                           // CORRESPONDENCE_CODE
-      '',                           // AFTER_HOURS_INDICATOR_CODE
-      '',                           // SCC_CODE
-      'MSP',                        // CLAIM_TYPE
-      '','','','','',''             // ICBC / WCB fields
-    ].join(',');
+  _buildAndDownloadCSV(all, 'iClinic_KGH_' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '.csv');
+  var now = new Date().toISOString();
+  all.forEach(function(c) {
+    var sc = st.claims.find(function(x){ return x.id===c.id; });
+    if (sc && !parseBool(sc.submitted)) {
+      sc.submitted   = true;
+      sc.submittedAt = now;
+      if (SHEETS_URL) push('saveClaim', sc);
+    }
   });
-
-  var csv  = header + '\n' + rows.join('\n');
-  var blob = new Blob([csv], { type:'text/csv;charset=utf-8;' });
-  var url  = URL.createObjectURL(blob);
-  var a    = document.createElement('a');
-  a.href     = url;
-  a.download = 'iClinic_KGH_' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '.csv';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  showToast('Exported ' + all.length + ' claims');
+  sv('claims', st.claims);
+  showToast('Exported ' + all.length + ' claims — marked as submitted');
+  renderExport();
 }
 
 // ── 12_referrers.js ──
@@ -6411,13 +6487,13 @@ function showPane(id) {
 function nav(n, el) {
   document.querySelectorAll('.nb').forEach(function(b, i) { b.classList.toggle('on', i === n); });
   // Tab map: 0=Rounds, 1=Add patient, 2=Recent patients
-  var paneMap = { 0:'p0', 1:'p1', 2:'p-addclaim' };
+  var paneMap = { 0:'p0', 1:'p1', 2:'p-addclaim', 3:'p4' };
   showPane(paneMap[n] || 'p0');
-  // On/Off Service banner only relevant on Rounds pane
   var listSel = document.getElementById('list-sel-bar');
   if (listSel) listSel.classList.toggle('hidden', n !== 0);
   if (n === 0) render();
   if (n === 2) initAddClaim();
+  if (n === 3) { renderExport(); switchExpTab('pending'); }
 }
 
 function setList(v) {
@@ -6553,6 +6629,14 @@ function esc(s) {
 function todayStr() {
   var d = new Date();
   return pad(d.getDate()) + '/' + pad(d.getMonth()+1) + '/' + d.getFullYear();
+}
+
+// Returns today as YYYY-MM-DD in LOCAL time (not UTC).
+// Replaces new Date().toISOString().slice(0,10) which uses UTC
+// and gives the wrong date after 17:00 PDT (= midnight UTC+1 day).
+function localISODate(d) {
+  var dt = d || new Date();
+  return dt.getFullYear() + '-' + pad(dt.getMonth()+1) + '-' + pad(dt.getDate());
 }
 
 // Parse a YYYY-MM-DD string to a local-midnight Date — avoids UTC-shift bug
