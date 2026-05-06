@@ -534,7 +534,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.66</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.69</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -551,6 +551,20 @@ input[type=file] { display:none; }
       </svg>
     </div>
   </div>
+</div>
+
+<div id="wifi-banner" style="display:none;align-items:center;justify-content:center;gap:8px;
+  background:#c42828;color:#fff;font-size:12px;font-weight:600;padding:8px 14px;
+  position:sticky;top:54px;z-index:47;">
+  <svg style="width:14px;height:14px;stroke:#fff;fill:none;stroke-width:2;flex-shrink:0" viewBox="0 0 24 24">
+    <line x1="1" y1="1" x2="23" y2="23"/>
+    <path d="M16.72 11.06A10.94 10.94 0 0119 12.55M5 12.55a10.94 10.94 0 015.17-2.39M10.71 5.05A16 16 0 0122.56 9M1.42 9a15.91 15.91 0 014.7-2.88M8.53 16.11a6 6 0 016.95 0M12 20h.01"/>
+  </svg>
+  Can't connect — switch to cellular data
+  <button onclick="setSyncState('syncing');syncFromSheets()" style="margin-left:8px;background:rgba(255,255,255,.25);
+    border:none;color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:4px;cursor:pointer;font-family:inherit">
+    Retry
+  </button>
 </div>
 
 <div class="list-sel" id="list-sel-bar">
@@ -1523,9 +1537,12 @@ var LS = window.storage || {
 };
 
 async function loadLocal() {
-  var keys = ['patients','claims','refs','doctors','doc','changelog','recentIcds','recentRefs'];
-  for (var i = 0; i < keys.length; i++) {
-    var k = keys[i];
+  // Only load non-clinical state from localStorage.
+  // patients/claims/doctors/changelog always come from Sheets — never from local cache.
+  // This ensures all devices see the same data regardless of which device last wrote.
+  var localOnlyKeys = ['doc','recentIcds','recentRefs'];
+  for (var i = 0; i < localOnlyKeys.length; i++) {
+    var k = localOnlyKeys[i];
     try {
       var r = await LS.get(STORAGE_PREFIX + k);
       if (r) {
@@ -1534,6 +1551,10 @@ async function loadLocal() {
       }
     } catch(e) {}
   }
+  // Clear any stale clinical data from localStorage to avoid confusion
+  ['patients','claims','doctors','changelog'].forEach(function(k) {
+    try { LS.delete && LS.delete(STORAGE_PREFIX + k); } catch(e) {}
+  });
   // Normalise and patch locally-saved claims
   if (Array.isArray(st.claims)) {
     var _localByPhn = {};
@@ -1576,6 +1597,9 @@ async function loadLocal() {
 }
 
 async function sv(key, val) {
+  // Never persist clinical data locally — Sheets is the source of truth.
+  // Only persist non-clinical preferences.
+  if (key === 'patients' || key === 'claims' || key === 'doctors' || key === 'changelog') return;
   try { await LS.set(STORAGE_PREFIX + key, JSON.stringify(val)); } catch(e) {}
 }
 
@@ -1618,6 +1642,8 @@ function sanitizeReferrer(obj) {
 // ── Google Sheets sync ──
 function setSyncState(s) {
   document.getElementById('sync-dot').className = 'sync-dot ' + s;
+  var banner = document.getElementById('wifi-banner');
+  if (banner) banner.style.display = s === 'error' ? 'flex' : 'none';
 }
 
 async function syncFromSheets() {
@@ -1679,30 +1705,18 @@ async function syncFromSheets() {
 
       // Keep local-only patients only within the grace window
       // Load confirmed patients set
-      var _confPStr = '';
-      try { var _cpr = localStorage.getItem('kgh5:confirmedPatients'); _confPStr = _cpr || ''; } catch(e) {}
-      var _confP = _confPStr ? JSON.parse(_confPStr) : {};
-      d.patients.forEach(function(p) { _confP[p.id] = true; });
-
+      // Keep only in-flight local patients (created < 2 min ago, not yet on Sheets).
+      // Everything else comes from Sheets. No localStorage tracking needed.
       st.patients.forEach(function(lp) {
         if (!remoteById[lp.id]) {
-          if (_confP[lp.id]) {
-            // Was on Sheets before, now gone — deleted remotely, drop it
-          } else {
-            // Never confirmed on Sheets — keep and retry push
-            merged.push(lp);
+          var age = NOW_MS - (parseInt(String(lp.id).replace('p','').slice(0,13)) || 0);
+          if (age < GRACE_MS) {
+            merged.push(lp); // push still in flight — keep temporarily
             if (SHEETS_URL) push('savePatient', lp);
           }
+          // else: not on Sheets and not in flight — drop it
         }
       });
-
-      var _confPKeys = Object.keys(_confP);
-      if (_confPKeys.length > 200) {
-        var _prunedP = {};
-        _confPKeys.slice(-200).forEach(function(k) { _prunedP[k] = true; });
-        _confP = _prunedP;
-      }
-      try { localStorage.setItem('kgh5:confirmedPatients', JSON.stringify(_confP)); } catch(e) {}
 
       st.patients = merged;
     }
@@ -1730,33 +1744,17 @@ async function syncFromSheets() {
 
       var mergedClaims = d.claims.slice();
 
-      // Load the set of claim IDs we know have previously reached Sheets
-      var _confirmedStr = '';
-      try { var _cr = localStorage.getItem('kgh5:confirmedClaims'); _confirmedStr = _cr || ''; } catch(e) {}
-      var _confirmed = _confirmedStr ? JSON.parse(_confirmedStr) : {};
-      // Mark all claims now on Sheets as confirmed
-      d.claims.forEach(function(c) { _confirmed[c.id] = true; });
-
+      // Keep only in-flight local claims (created < 2 min ago, not yet on Sheets).
       st.claims.forEach(function(lc) {
         if (!remoteClaimIds[lc.id]) {
-          if (_confirmed[lc.id]) {
-            // Was previously on Sheets but now gone — it was deleted remotely, drop it
-          } else {
-            // Never reached Sheets yet (push failed or in flight) — keep it and re-push
+          var age = NOW_MS - (parseInt(String(lc.id).replace('c','').slice(0,13)) || 0);
+          if (age < GRACE_MS) {
             mergedClaims.push(lc);
-            if (SHEETS_URL) push('saveClaim', lc); // retry push
+            if (SHEETS_URL) push('saveClaim', lc);
           }
+          // else: not on Sheets and not in flight — drop it
         }
       });
-
-      // Persist the confirmed set (prune to last 500 to avoid unbounded growth)
-      var _confirmedKeys = Object.keys(_confirmed);
-      if (_confirmedKeys.length > 500) {
-        var _pruned = {};
-        _confirmedKeys.slice(-500).forEach(function(k) { _pruned[k] = true; });
-        _confirmed = _pruned;
-      }
-      try { localStorage.setItem('kgh5:confirmedClaims', JSON.stringify(_confirmed)); } catch(e) {}
 
       // Patch claim rows that are missing refby/refbyName/icd/startTime.
       // IMPORTANT: Only push back claims that came from Sheets (not local-only new claims).
@@ -3326,10 +3324,15 @@ function renderAddClaimResults(query) {
   // Active patients (on rounds list)
   var active = st.patients.filter(function(p) { return !p.discharged; });
 
-  // Discharged patients — all of them, most recently discharged first
-  var recent = st.patients.filter(function(p) {
-    return p.discharged;
-  }).sort(function(a, b) { return (parseDischargedAt(b.dischargedAt) || 0) - (parseDischargedAt(a.dischargedAt) || 0); });
+  // Discharged patients — within last 21 days for the default list,
+  // but search covers ALL discharged patients regardless of age
+  var cutoff21 = Date.now() - (21 * 24 * 60 * 60 * 1000);
+  var allDischarged = st.patients.filter(function(p) { return p.discharged; })
+    .sort(function(a, b) { return (parseDischargedAt(b.dischargedAt)||0) - (parseDischargedAt(a.dischargedAt)||0); });
+  var recent = q ? allDischarged : allDischarged.filter(function(p) {
+    var ms = parseDischargedAt(p.dischargedAt);
+    return ms > cutoff21 || !ms; // show if within 21 days or no timestamp
+  });
 
   var allPatients = active.concat(recent);
 
@@ -6476,8 +6479,18 @@ async function init() {
   } catch(e) {}
   wardChange();
   renderRefs('');
+  // Show loading state immediately
   render();
-  if (SHEETS_URL) syncFromSheets();
+  if (SHEETS_URL) {
+    // Sync from Sheets is the primary data source — await it on startup
+    setSyncState('syncing');
+    document.getElementById('sync-dot').title = 'Loading from Sheets…';
+    try {
+      await syncFromSheets();
+    } catch(e) {
+      setSyncState('error');
+    }
+  }
 }
 
 async function resetLocalData() {
