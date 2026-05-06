@@ -49,14 +49,15 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
 /* LIST SELECTOR */
-.list-sel { display:flex; background:var(--surface); border-bottom:.5px solid var(--border); }
-.ls-btn { flex:1; padding:10px 8px; font-size:12px; font-weight:600; text-align:center; cursor:pointer; border-bottom:2.5px solid transparent; color:var(--text2); background:none; border-top:none; border-left:none; border-right:none; font-family:inherit; }
-.ls-btn.on { color:var(--blue); border-bottom-color:var(--blue); }
+.list-sel { display:flex; background:var(--surface2); border-bottom:1px solid var(--border2); position:sticky; top:54px; z-index:48; padding:4px 6px; gap:4px; }
+.list-sel.hidden { display:none; }
+.ls-btn { flex:1; padding:7px 8px; font-size:12px; font-weight:600; text-align:center; cursor:pointer; border:none; border-radius:var(--rsm); color:var(--text2); background:none; font-family:inherit; transition:background .15s,color .15s; }
+.ls-btn.on { color:var(--kca-navy); background:var(--surface); box-shadow:0 1px 3px rgba(0,0,0,.1); }
 
 /* NAV */
-.nav { display:flex; background:var(--surface); border-bottom:.5px solid var(--border); position:sticky; top:88px; z-index:49; }
-.nb { flex:1; padding:8px 3px; font-size:11px; text-align:center; color:var(--text2); cursor:pointer; border-bottom:2px solid transparent; font-family:inherit; background:none; border-top:none; border-left:none; border-right:none; }
-.nb.on { color:var(--blue); border-bottom-color:var(--blue); font-weight:600; }
+.nav { display:flex; background:var(--surface2); border-bottom:1px solid var(--border2); position:sticky; top:88px; z-index:49; padding:4px 6px; gap:4px; }
+.nb { flex:1; padding:7px 3px; font-size:11px; text-align:center; color:var(--text2); cursor:pointer; border:none; border-radius:var(--rsm); font-family:inherit; background:none; transition:background .15s,color .15s; }
+.nb.on { color:var(--kca-navy); font-weight:700; background:var(--surface); box-shadow:0 1px 3px rgba(0,0,0,.1); }
 
 /* PANES */
 .pane { display:none; padding:10px 11px 30px; }
@@ -533,7 +534,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.41</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.46</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -552,7 +553,7 @@ input[type=file] { display:none; }
   </div>
 </div>
 
-<div class="list-sel">
+<div class="list-sel" id="list-sel-bar">
   <button class="ls-btn on" id="ls-on" onclick="setList('on')">On Service <span id="ls-on-count"></span></button>
   <button class="ls-btn" id="ls-off" onclick="setList('off')">Off Service <span id="ls-off-count"></span></button>
 </div>
@@ -638,10 +639,15 @@ input[type=file] { display:none; }
           <option value="3E">3E</option>
           <option value="3W">3W</option>
           <option value="3MU">3MU</option>
-          <option value="4AB">4A/B</option>
+          <option value="4A">4A</option>
+          <option value="4B">4B</option>
+          <option value="4E">4E</option>
+          <option value="4W">4W</option>
+          <option value="5A">5A</option>
+          <option value="5B">5B</option>
           <option value="REHAB">Rehab</option>
           <option value="6W">6W</option>
-          <option value="5B">5B</option>
+          <option value="PAR">Centennial PAR</option>
           <option value="OTHER">Other</option>
         </select>
         <div id="f-ward-other-wrap" style="display:none;margin-top:-3px">
@@ -839,6 +845,16 @@ input[type=file] { display:none; }
   </div>
 </div>
 
+<div class="overlay" id="merge-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="merge-title">Duplicate PHN</div>
+    <div id="merge-body"></div>
+    <div class="divider"></div>
+    <button class="btn btn-s" onclick="hideModal('merge-modal')" style="margin-bottom:0">Cancel</button>
+  </div>
+</div>
+
 <div class="overlay" id="mit-modal">
   <div class="modal">
     <div class="modal-handle"></div>
@@ -931,11 +947,16 @@ var WARDS = {
   '3E': { label:'3E',       list:'off', care:'directive', role:'consultant', rooms:[] },
   '3W': { label:'3W',       list:'off', care:'directive', role:'consultant', rooms:[] },
   '3MU':{ label:'3MU',      list:'off', care:'directive', role:'consultant', rooms:[] },
-  '4AB':{ label:'4A/B',     list:'off', care:'directive', role:'consultant', rooms:[] },
-  REHAB:{ label:'Rehab',    list:'off', care:'directive', role:'consultant', rooms:[] },
-  '6W': { label:'6W',       list:'off', care:'directive', role:'consultant', rooms:[] },
-  '5B': { label:'5B',       list:'off', care:'directive', role:'consultant', rooms:[] },
-  OTHER:{ label:'Other',    list:'off', care:'directive', role:'consultant', rooms:[] }
+  '4A': { label:'4A',          list:'off', care:'directive', role:'consultant', rooms:[] },
+  '4B': { label:'4B',          list:'off', care:'directive', role:'consultant', rooms:[] },
+  '4E': { label:'4E',          list:'off', care:'directive', role:'consultant', rooms:[] },
+  '4W': { label:'4W',          list:'off', care:'directive', role:'consultant', rooms:[] },
+  '5A': { label:'5A',          list:'off', care:'directive', role:'consultant', rooms:[] },
+  '5B': { label:'5B',          list:'off', care:'directive', role:'consultant', rooms:[] },
+  REHAB:{ label:'Rehab',       list:'off', care:'directive', role:'consultant', rooms:[] },
+  '6W': { label:'6W',          list:'off', care:'directive', role:'consultant', rooms:[] },
+  PAR:  { label:'Centennial PAR', list:'off', care:'directive', role:'consultant', rooms:[] },
+  OTHER:{ label:'Other',       list:'off', care:'directive', role:'consultant', rooms:[] }
 };
 
 var OCR_WORKER_URL = 'https://kgh-ocr.kathrynb77.workers.dev';
@@ -2700,7 +2721,7 @@ function quickDailyBtn(btn) {
   sv('patients', st.patients);
   sv('claims', st.claims);
   showToast('✓ ' + label + ' — ' + p.last);
-  render();
+  requestAnimationFrame(render);
 }
 
 function quickDirectiveBtn(btn) {
@@ -2734,7 +2755,7 @@ function quickDirectiveBtn(btn) {
   sv('patients', st.patients);
   sv('claims', st.claims);
   showToast('✓ Directive — ' + p.last);
-  render();
+  requestAnimationFrame(render);
 }
 
 function quickCCUBtn(btn) {
@@ -2767,7 +2788,7 @@ function quickCCUBtn(btn) {
   sv('patients', st.patients);
   sv('claims', st.claims);
   showToast('✓ ' + (feeLabels[fee] || fee) + ' — ' + p.last);
-  render();
+  requestAnimationFrame(render);
 }
 
 // Show what was last billed as a chip on the done card
@@ -4302,6 +4323,93 @@ function submitCCU(isDuplicate) {
 //                 chart photo OCR, ward/room selectors
 // ═══════════════════════════════════════════════════════
 
+// PHN duplicate merge modal
+function openMergeModal(existing, isReadmit) {
+  var newLast = (gv('f-last') || '').trim().toLowerCase();
+  var newDob  = (gv('f-dob')  || '').trim();
+  var lastMatch = existing.last && newLast && existing.last.toLowerCase() === newLast;
+  var dobMatch  = existing.dob  && newDob  && fmtClaimDate(existing.dob) === fmtClaimDate(newDob);
+  var matchScore = (lastMatch ? 1 : 0) + (dobMatch ? 1 : 0);
+
+  var statusBadge = isReadmit
+    ? '<span style="background:var(--amber-bg);color:var(--amber-t);padding:2px 8px;border-radius:var(--rpill);font-size:10px;font-weight:700">Previously discharged</span>'
+    : '<span style="background:var(--red-bg);color:var(--red-t);padding:2px 8px;border-radius:var(--rpill);font-size:10px;font-weight:700">Currently on list</span>';
+
+  var matchBadge = matchScore === 2
+    ? '<div style="color:var(--green-t);font-weight:700;font-size:12px;margin-top:8px">✓ Last name and DOB both match — likely same patient</div>'
+    : matchScore === 1
+    ? '<div style="color:var(--amber-t);font-weight:700;font-size:12px;margin-top:8px">⚠ Partial match (' + (lastMatch ? 'last name' : 'DOB') + ' only) — review carefully</div>'
+    : '<div style="color:var(--red-t);font-weight:700;font-size:12px;margin-top:8px">✗ Neither last name nor DOB match — likely wrong PHN</div>';
+
+  var claimCount = st.claims.filter(function(c) { return c.phn === existing.phn; }).length;
+
+  var h = statusBadge +
+    '<div style="margin:10px 0 4px;font-size:13px;font-weight:700">' + esc(existing.last) + ', ' + esc(existing.first) + '</div>' +
+    '<div style="font-size:11px;color:var(--text2)">PHN: ' + esc(existing.phn) + ' &bull; DOB: ' + esc(existing.dob || '—') + ' &bull; ' + claimCount + ' claim(s)</div>' +
+    matchBadge +
+    '<div style="margin-top:14px;display:flex;flex-direction:column;gap:8px">';
+
+  if (matchScore >= 1) {
+    if (isReadmit) {
+      h += '<button class="btn btn-p" style="margin:0" onclick="mergePatient(\'readmit\')">Re-admit — restore to rounds list</button>';
+    } else {
+      h += '<button class="btn btn-p" style="margin:0" onclick="mergePatient(\'merge\')">Merge — keep existing patient &amp; claims</button>';
+    }
+  }
+  h += '<button class="btn btn-s" style="margin:0" onclick="mergePatient(\'review\')">Review PHN — may be entry error</button>';
+  h += '</div>';
+
+  document.getElementById('merge-title').textContent = 'PHN ' + existing.phn + ' already exists';
+  document.getElementById('merge-body').innerHTML = h;
+  showModal('merge-modal');
+}
+
+function mergePatient(action) {
+  hideModal('merge-modal');
+  if (action === 'review') {
+    // Focus PHN field for correction
+    var phnEl = document.getElementById('f-phn');
+    if (phnEl) { phnEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; phnEl.select(); phnEl.focus(); }
+    showToast('Check PHN — may be a transcription error');
+    return;
+  }
+  if (action === 'merge') {
+    // Just navigate to the existing patient's summary — no duplicate created
+    var existing = st.patients.find(function(x) { return x.phn === gv('f-phn') && !x.discharged; });
+    if (existing) {
+      showToast(existing.last + ' already on list — opening their record');
+      clearAddForm();
+      nav(0, document.querySelectorAll('.nb')[0]);
+      setTimeout(function() { openPatientSummary(existing.id); }, 300);
+    }
+    return;
+  }
+  if (action === 'readmit') {
+    // Re-activate the discharged patient with new ward/bed from the form
+    var existing = st.patients.find(function(x) { return x.phn === gv('f-phn') && x.discharged; });
+    if (!existing) return;
+    existing.discharged   = false;
+    existing.dischargedAt = null;
+    existing.dischargeDate = null;
+    existing.ward         = gv('f-ward') || existing.ward;
+    existing.bed          = gv('f-bed')  || existing.bed;
+    existing.list         = gv('f-list') || 'on';
+    existing.roundedToday = null;
+    // Update refby/icd if new values provided
+    var newRefby = gv('f-refby-num') || gv('f-refby');
+    var newIcd   = gv('f-icd');
+    if (newRefby) { existing.refby = newRefby; existing.refbyName = gv('f-refby-name') || existing.refbyName; }
+    if (newIcd)   existing.icd = newIcd;
+    sv('patients', st.patients);
+    if (SHEETS_URL) push('savePatient', existing);
+    logChange(existing, 'Re-admitted', existing.ward + (existing.bed ? ' Bed/Rm ' + existing.bed : ''));
+    showToast(existing.last + ' re-admitted');
+    clearAddForm();
+    nav(0, document.querySelectorAll('.nb')[0]);
+    render();
+  }
+}
+
 function addPatient() {
   var last = gv('f-last');
   var phn  = gv('f-phn');
@@ -4311,29 +4419,42 @@ function addPatient() {
   var icd  = gv('f-icd') || '';
 
   var addMissing = [];
-  if (!gv('f-refby-num') && !gv('f-refby')) addMissing.push('refby');
-  if (!icd) addMissing.push('icd');
+  if (!phn)                                    addMissing.push('phn');
+  if (!gv('f-refby-num') && !gv('f-refby'))   addMissing.push('refby');
+  if (!icd)                                    addMissing.push('icd');
   if (addMissing.length) {
+    if (addMissing.indexOf('phn') !== -1) {
+      var phnEl = document.getElementById('f-phn');
+      if (phnEl) { phnEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; phnEl.focus(); }
+    }
     if (addMissing.indexOf('refby') !== -1) {
       var refEl = document.getElementById('f-ref-search');
-      if (refEl) { refEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; refEl.placeholder = 'Required — type name or doctor #'; refEl.focus(); }
+      if (refEl) { refEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; refEl.placeholder = 'Required — type name or doctor #'; if (addMissing.indexOf('phn') === -1) refEl.focus(); }
     }
     if (addMissing.indexOf('icd') !== -1) {
       var icdEl = document.getElementById('f-icd-search');
-      if (icdEl) { icdEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; icdEl.placeholder = 'Required — type diagnosis or code'; if (addMissing.indexOf('refby') === -1) icdEl.focus(); }
+      if (icdEl) { icdEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; icdEl.placeholder = 'Required — type diagnosis or code'; if (addMissing.indexOf('phn') === -1 && addMissing.indexOf('refby') === -1) icdEl.focus(); }
     }
     var msgs = [];
+    if (addMissing.indexOf('phn')   !== -1) msgs.push('PHN');
     if (addMissing.indexOf('refby') !== -1) msgs.push('referring MD');
     if (addMissing.indexOf('icd')   !== -1) msgs.push('diagnosis');
-    showToast('Required: ' + msgs.join(' and '));
+    showToast('Required: ' + msgs.join(', '));
     return;
   }
-  icd = icd || '3062';
+  // No ICD default — must be explicitly entered (icd is confirmed non-empty above)
 
-  // Check for duplicate PHN
-  if (phn) {
-    var existing = st.patients.find(function(x) { return x.phn === phn; });
-    if (existing) { showToast('Patient with this PHN already on list'); return; }
+  // PHN duplicate check — offer merge if last name and/or DOB match
+  var existing = st.patients.find(function(x) { return x.phn === phn && !x.discharged; });
+  if (existing) {
+    openMergeModal(existing);
+    return;
+  }
+  // Discharged patient with same PHN — offer to re-admit
+  var dischExisting = st.patients.find(function(x) { return x.phn === phn && x.discharged; });
+  if (dischExisting) {
+    openMergeModal(dischExisting, true);
+    return;
   }
 
   var p = {
@@ -5099,9 +5220,16 @@ function dischComplex(btn) {
   _dischStep3(pid);
 }
 
-// Step 3: Final confirm
+// Step 3: Final confirm — with editable discharge date (defaults to today)
 function _dischStep3(pid) {
-  var h = '<div style="display:flex;flex-direction:column;gap:8px">' +
+  var todayISO = (function() {
+    var p = TODAY.split('/'); return p[2] + '-' + p[1] + '-' + p[0];
+  })();
+  var h = '<div style="margin-bottom:10px">' +
+    '<label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">Discharge date</label>' +
+    '<input type="date" id="disch-date-input" value="' + todayISO + '" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px">' +
+    '</div>' +
+    '<div style="display:flex;flex-direction:column;gap:8px">' +
     '<button class="btn btn-p" style="margin:0" data-pid="' + pid + '" ' +
     'onclick="dischConfirmRemove(this)">Confirm discharge &amp; remove</button>' +
     '<button class="btn btn-r" style="margin:0" data-pid="' + pid + '" ' +
@@ -5113,7 +5241,14 @@ function _dischStep3(pid) {
 function dischConfirmRemove(btn) {
   var pid = btn.getAttribute('data-pid');
   var p   = getP(pid);
-  logChange(p, 'Discharged', '');
+  var dateInput = document.getElementById('disch-date-input');
+  var dcDate = TODAY;
+  if (dateInput && dateInput.value) {
+    var dp = dateInput.value.split('-');
+    if (dp.length === 3) dcDate = dp[2] + '/' + dp[1] + '/' + dp[0];
+  }
+  p.dischargeDate = dcDate;   // DD/MM/YYYY — human-readable, pushed to Sheets
+  logChange(p, 'Discharged', 'D/C ' + dcDate);
   removePatient(pid);
   hideModal('disch-modal');
   closeClaimScreen();
@@ -6029,6 +6164,9 @@ function nav(n, el) {
   // Tab map: 0=Rounds, 1=Add patient, 2=Recent patients
   var paneMap = { 0:'p0', 1:'p1', 2:'p-addclaim' };
   showPane(paneMap[n] || 'p0');
+  // On/Off Service banner only relevant on Rounds pane
+  var listSel = document.getElementById('list-sel-bar');
+  if (listSel) listSel.classList.toggle('hidden', n !== 0);
   if (n === 0) render();
   if (n === 2) initAddClaim();
 }
