@@ -534,7 +534,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.46</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.48</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1523,6 +1523,7 @@ async function loadLocal() {
     st.claims.forEach(function(c) {
       if (c.startTime) c.startTime = fmtStartTime(c.startTime);
       if (c.date)      c.date      = fmtClaimDate(c.date);
+      if (c.dob)       c.dob       = fmtClaimDate(c.dob);
       if (c.fee)       c.fee       = String(c.fee).trim();
       if (c.feeCode)   c.feeCode   = String(c.feeCode).trim();
       if (c.icd)       c.icd       = String(c.icd).trim();
@@ -1711,6 +1712,10 @@ async function syncFromSheets() {
         if (!c.icd)       { c.icd = '3062'; changed = true; }
         if (!c.startTime) { c.startTime = '08:00'; changed = true; }
         if (c.endTime) c.endTime = fmtStartTime(c.endTime);
+        if (c.dob) {
+          var cleanDob = fmtClaimDate(c.dob);
+          if (cleanDob !== c.dob) { c.dob = cleanDob; changed = true; }
+        }
         if (changed && SHEETS_URL) push('saveClaim', c);
       });
       st.claims = mergedClaims;
@@ -2034,7 +2039,7 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime) 
     last:      p.last,
     first:     p.first,
     phn:       p.phn,
-    dob:       p.dob,
+    dob:       fmtClaimDate(p.dob),
     sex:       p.sex,
     fee:       fee,
     feeCode:   feeCode,
@@ -3872,7 +3877,7 @@ function savePatientEdit(pid) {
   p.last      = (document.getElementById('pe-last')  || {}).value || p.last;
   p.first     = (document.getElementById('pe-first') || {}).value || p.first;
   p.phn       = (document.getElementById('pe-phn')   || {}).value || p.phn;
-  p.dob       = (document.getElementById('pe-dob')   || {}).value || p.dob;
+  p.dob       = fmtClaimDate((document.getElementById('pe-dob') || {}).value || p.dob);
   p.sex       = (document.getElementById('pe-sex')   || {}).value || p.sex;
   p.ward      = ward;
   p.bed       = (document.getElementById('pe-bed')   || {}).value || p.bed;
