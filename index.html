@@ -220,6 +220,9 @@ input[type=file] { display:none; }
 
 /* REFERRER DROPDOWN */
 .ref-dd { border:.5px solid var(--border2); border-radius:var(--rsm); background:var(--surface); margin-top:-5px; margin-bottom:7px; max-height:160px; overflow-y:auto; display:none; position:relative; z-index:10; }
+.bed-dd { position:absolute; top:100%; left:0; right:0; background:var(--surface); border:.5px solid var(--border2); border-radius:var(--rsm); z-index:200; max-height:180px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,.12); display:none; }
+.bed-dd-row { padding:9px 12px; font-size:14px; cursor:pointer; }
+.bed-dd-row:active { background:var(--blue-bg); color:var(--blue-t); }
 .ref-dd-row { padding:8px 10px; font-size:12px; cursor:pointer; border-bottom:.5px solid var(--border); }
 .ref-dd-row:hover { background:var(--surface2); }
 .ref-dd-row:last-child { border-bottom:none; }
@@ -534,7 +537,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.72</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.74</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -674,9 +677,14 @@ input[type=file] { display:none; }
       </div>
       <div class="f1">
         <label id="bed-lbl">Bed / room</label>
-        <input id="f-bed" list="f-bed-list" autocorrect="off" autocomplete="off"
-          placeholder="Select or type…" style="margin-bottom:7px">
-        <datalist id="f-bed-list"></datalist>
+        <div style="position:relative">
+          <input id="f-bed" autocorrect="off" autocomplete="off"
+            placeholder="Select or type…" style="margin-bottom:0"
+            oninput="bedSearchEl(this,'f-bed-dd')"
+            onfocus="bedSearchEl(this,'f-bed-dd')"
+            onblur="setTimeout(function(){hideBedDd('f-bed-dd')},200)">
+          <div class="bed-dd" id="f-bed-dd"></div>
+        </div>
       </div>
     </div>
 
@@ -2328,20 +2336,25 @@ function wardHtml(ward) {
       '<button class="ward-add" onclick="openAddWard(this)" data-ward="' + ward + '">+ Add</button>' +
     '</div>';
 
-  // Sort by canonical room order from WARDS definition
-  var _rooms = wdef.rooms || [];
+  // Sort beds in ascending order.
+  // Normalise by stripping trailing single letter suffix for numeric comparison
+  // so 217A and 217 sort together, 225A before 225B.
+  function _bedKey(bed) {
+    var s = String(bed || '').trim();
+    // Extract leading number and optional letter suffix: "225A" -> [225, "A"]
+    var m = s.match(/^(\d+)([A-Za-z]?)(.*)$/);
+    if (m) return [parseInt(m[1], 10), m[2].toUpperCase(), m[3]];
+    // CCU single digits 1-8
+    var n = parseInt(s, 10);
+    if (!isNaN(n)) return [n, '', ''];
+    // Hallway / non-numeric — sort last
+    return [99999, s, ''];
+  }
   pts = pts.slice().sort(function(a, b) {
-    var ai = _rooms.indexOf(String(a.bed || ''));
-    var bi = _rooms.indexOf(String(b.bed || ''));
-    // If both in the rooms list, sort by position
-    if (ai !== -1 && bi !== -1) return ai - bi;
-    // Known room before unknown
-    if (ai !== -1) return -1;
-    if (bi !== -1) return  1;
-    // Both unknown — sort numerically then alphabetically
-    var an = parseInt(a.bed) || 0, bn = parseInt(b.bed) || 0;
-    if (an && bn && an !== bn) return an - bn;
-    return String(a.bed||'').localeCompare(String(b.bed||''));
+    var ak = _bedKey(a.bed), bk = _bedKey(b.bed);
+    if (ak[0] !== bk[0]) return ak[0] - bk[0];
+    if (ak[1] !== bk[1]) return ak[1] < bk[1] ? -1 : 1;
+    return ak[2].localeCompare(bk[2]);
   });
 
   if (!pts.length) {
@@ -3979,8 +3992,12 @@ function openPatientEdit(pid) {
   });
   html += '</select></div>';
   html += '<div class="f1"><label id="pe-bed-lbl">Bed / room</label>' +
-          '<input id="pe-bed" list="pe-bed-list" autocorrect="off" autocomplete="off" placeholder="Select or type…" style="margin-bottom:7px">' +
-          '<datalist id="pe-bed-list"></datalist></div>';
+          '<div style="position:relative">' +
+          '<input id="pe-bed" autocorrect="off" autocomplete="off" placeholder="Select or type…" style="margin-bottom:0"' +
+          ' oninput="bedSearchEl(this,\'pe-bed-dd\')" onfocus="bedSearchEl(this,\'pe-bed-dd\')"' +
+          ' onblur="setTimeout(function(){hideBedDd(\'pe-bed-dd\')},200)">' +
+          '<div class="bed-dd" id="pe-bed-dd"></div>' +
+          '</div></div>';
   html += '</div>';
 
   // Row 2: Cardiology role + MRP service
@@ -4845,14 +4862,49 @@ function saveCustomRoom(ward, room) {
 }
 
 function populateBedDatalist(listId, ward) {
-  var dl = document.getElementById(listId);
-  if (!dl) return;
+  // Legacy no-op — custom dropdown now handles bed search
+}
+
+function getBedRooms(ward) {
   var wdef = WARDS[ward] || {};
   var preset = (wdef.rooms || []).slice();
   var saved = getSavedRooms(ward);
   var all = preset.slice();
   saved.forEach(function(r) { if (all.indexOf(r) === -1) all.push(r); });
-  dl.innerHTML = all.map(function(r) { return '<option value="' + esc(r) + '">'; }).join('');
+  return all;
+}
+
+function getBedWard(inp) {
+  if (inp.id === 'f-bed')  return gv('f-ward');
+  if (inp.id === 'pe-bed') return (document.getElementById('pe-ward') || {}).value || '';
+  return '';
+}
+
+function bedSearchEl(inp, ddId) {
+  var dd = document.getElementById(ddId);
+  if (!dd) return;
+  var rooms = getBedRooms(getBedWard(inp));
+  var q = (inp.value || '').trim().toLowerCase();
+  var matches = q === '' ? rooms
+    : rooms.filter(function(r) { return r.toLowerCase().indexOf(q) !== -1; });
+  if (!matches.length) { dd.style.display = 'none'; return; }
+  dd.innerHTML = matches.map(function(r) {
+    return '<div class="bed-dd-row" onmousedown="selectBed(this)"' +
+           ' data-inp="' + inp.id + '" data-val="' + esc(r) + '">' + esc(r) + '</div>';
+  }).join('');
+  dd.style.display = 'block';
+}
+
+function hideBedDd(ddId) {
+  var dd = document.getElementById(ddId);
+  if (dd) dd.style.display = 'none';
+}
+
+function selectBed(row) {
+  var val = row.getAttribute('data-val');
+  var inp = document.getElementById(row.getAttribute('data-inp'));
+  if (inp) inp.value = val;
+  if (row.parentElement) row.parentElement.style.display = 'none';
 }
 
 function wardChange() {
