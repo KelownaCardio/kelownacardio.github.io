@@ -1557,9 +1557,12 @@ function renderSavedLog() {
             ' · ' + esc(d.sex) + (d.mrp ? ' · MRP: ' + esc(d.mrp) : '') +
             (d.ward ? ' · ' + esc(d.ward) + ' ' + esc(d.room) : '') + '</span>' +
             (d.id ?
-              '<br><button onclick="copyDebugBundleFromHistory(\'' + d.id + '\')" ' +
+              '<br><button onclick="rerunStoredScan(\'' + d.id + '\')" ' +
+                'style="background:none;border:none;color:var(--green-t);font-size:11px;padding:4px 8px 4px 0;cursor:pointer;font-family:inherit;font-weight:600">' +
+                '🔄 Re-run with current parser</button>' +
+              '<button onclick="copyDebugBundleFromHistory(\'' + d.id + '\')" ' +
                 'style="background:none;border:none;color:var(--blue);font-size:11px;padding:4px 0;cursor:pointer;font-family:inherit;font-weight:600">' +
-                '📋 Copy debug bundle (with photo)</button>'
+                '📋 Debug bundle</button>'
               : ''
             ) +
           '</div>' +
@@ -1605,6 +1608,101 @@ function copyDebugBundleFromHistory(id) {
     document.body.removeChild(ta);
     toast('📋 Copied');
   });
+}
+
+// Re-run a stored scan's cropped image through the current OCR + parser,
+// then show a side-by-side comparison against the original doctor-corrected values.
+async function rerunStoredScan(id) {
+  const rec = getScanRecord(id);
+  if (!rec) { toast('Scan not found in storage'); return; }
+  if (!rec.preprocessed && !rec.crop) { toast('No image stored for this scan'); return; }
+
+  toast('🔄 Re-running OCR…');
+
+  let rawText;
+  try {
+    const imgSrc = rec.preprocessed || rec.crop;
+    rawText = await runOCR(imgSrc);
+  } catch (e) {
+    toast('OCR failed: ' + (e.message || e));
+    return;
+  }
+
+  // Parse with current parser — temporarily set mode to what was used
+  const prevMode = mode;
+  if (rec.detectedMode && rec.detectedMode !== 'auto') {
+    mode = rec.detectedMode.toLowerCase().includes('lab') ? 'labvial'
+         : rec.detectedMode.toLowerCase().includes('meditech') ? 'meditech'
+         : 'sticker';
+  }
+  lastParseLog = [];
+  const newParsed = parseSticker(rawText);
+  mode = prevMode;
+
+  // Build comparison modal
+  const orig = rec.final || {};  // doctor-corrected values = ground truth
+  const fields = ['last','first','phn','dob','sex','mrp','ward','room'];
+
+  function row(field) {
+    const truth  = (orig[field]   || '').replace(/^\*/, '');
+    const newer  = (newParsed[field] || '').replace(/^\*/, '');
+    const match  = truth === newer;
+    const bg     = !truth ? '#f5f5f7'
+                 : match  ? '#d4f4dd'
+                 : '#ffe5e3';
+    const icon   = !truth ? '—' : match ? '✓' : '✗';
+    const color  = !truth ? '#999' : match ? '#1a7a35' : '#b3201a';
+    return '<tr style="border-bottom:.5px solid #e0e0e0">' +
+      '<td style="padding:6px 8px;font-size:11px;font-weight:700;color:#636366;white-space:nowrap">' + field + '</td>' +
+      '<td style="padding:6px 8px;font-size:12px;background:' + bg + '">' + esc(newer || '(empty)') + '</td>' +
+      '<td style="padding:6px 8px;font-size:12px">' + esc(truth || '(empty)') + '</td>' +
+      '<td style="padding:6px 8px;font-size:14px;color:' + color + ';text-align:center">' + icon + '</td>' +
+    '</tr>';
+  }
+
+  const matchCount  = fields.filter(f => orig[f] && (newParsed[f]||'').replace(/^\*/,'') === (orig[f]||'').replace(/^\*/,'')).length;
+  const filledCount = fields.filter(f => orig[f]).length;
+  const allGood = matchCount === filledCount;
+
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:200;overflow-y:auto;padding:16px';
+  ov.innerHTML =
+    '<div style="max-width:520px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden">' +
+      '<div style="padding:14px 16px;background:' + (allGood ? '#d4f4dd' : '#fff0d6') + ';display:flex;justify-content:space-between;align-items:center">' +
+        '<div>' +
+          '<div style="font-size:14px;font-weight:700;color:' + (allGood ? '#1a7a35' : '#a55c00') + '">' +
+            (allGood ? '✓ All fields match!' : '⚠ ' + (filledCount - matchCount) + ' field(s) differ') +
+          '</div>' +
+          '<div style="font-size:11px;color:#636366;margin-top:2px">' +
+            matchCount + '/' + filledCount + ' fields match doctor corrections' +
+          '</div>' +
+        '</div>' +
+        '<button onclick="this.closest(\'div[style*=fixed]\').remove()" ' +
+          'style="background:none;border:none;font-size:22px;cursor:pointer;padding:4px 8px;color:#636366">✕</button>' +
+      '</div>' +
+      (rec.crop ?
+        '<img src="' + rec.crop + '" style="width:100%;max-height:120px;object-fit:cover;display:block">' : '') +
+      '<table style="width:100%;border-collapse:collapse">' +
+        '<thead><tr style="background:#f5f5f7">' +
+          '<th style="padding:6px 8px;font-size:10px;font-weight:700;color:#8e8e93;text-align:left">FIELD</th>' +
+          '<th style="padding:6px 8px;font-size:10px;font-weight:700;color:#8e8e93;text-align:left">NEW PARSER</th>' +
+          '<th style="padding:6px 8px;font-size:10px;font-weight:700;color:#8e8e93;text-align:left">DOCTOR SAID</th>' +
+          '<th style="padding:6px 8px;font-size:10px;font-weight:700;color:#8e8e93;text-align:center">✓</th>' +
+        '</tr></thead>' +
+        '<tbody>' + fields.map(row).join('') + '</tbody>' +
+      '</table>' +
+      '<details style="margin:8px;border:.5px solid #e0e0e0;border-radius:8px">' +
+        '<summary style="padding:8px 12px;font-size:11px;font-weight:700;color:#636366;cursor:pointer">Parser log (new run)</summary>' +
+        '<pre style="margin:0;padding:10px;font-size:10px;color:#636366;white-space:pre-wrap;max-height:200px;overflow-y:auto">' +
+          esc(lastParseLog.join('\n')) +
+        '</pre>' +
+      '</details>' +
+      '<div style="padding:12px 16px">' +
+        '<button onclick="this.closest(\'div[style*=fixed]\').remove()" ' +
+          'style="width:100%;padding:12px;background:#007aff;color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit">Done</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(ov);
 }
 
 function renderLearningCard() {
