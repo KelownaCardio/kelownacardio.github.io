@@ -534,7 +534,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.69</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.72</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -970,8 +970,8 @@ var DOCTORS_SEED = [
 // Ward definitions: label, default list, default care type, preset rooms
 var WARDS = {
   CCU:  { label:'CICU',     list:'on',  care:'ccu',      role:'mrp',       rooms:['1','2','3','4','5','6','7','8'] },
-  '2S': { label:'2S',       list:'on',  care:'daily',    role:'mrp',     rooms:['217A','218','219','220','221','222A','223','224','225A','225B','226A','226B','227','228','229','230','231','232','233','234','Hallway 1','Hallway 2'] },
-  '2W': { label:'2W',       list:'on',  care:'daily',    role:'mrp',     rooms:['201','202','203','204','205','206','207','208','209','210','211','212','213'] },
+  '2S': { label:'2S',       list:'on',  care:'daily',    role:'mrp',     rooms:['217','218','219','220','221','222','223','224','225A','225B','226A','226B','227','228','229','230','231','232','233','234','Hallway A','Hallway B'] },
+  '2W': { label:'2W',       list:'on',  care:'daily',    role:'mrp',     rooms:['201','202','203','204','205','206','207','208','209','210','211','212','213','214','215','216','Hallway'] },
   CSICU:{ label:'CSICU',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
   ICUA: { label:'ICU A',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
   ICUB: { label:'ICU B',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
@@ -2327,6 +2327,22 @@ function wardHtml(ward) {
       '<div class="ward-lbl">' + wdef.label + '</div>' +
       '<button class="ward-add" onclick="openAddWard(this)" data-ward="' + ward + '">+ Add</button>' +
     '</div>';
+
+  // Sort by canonical room order from WARDS definition
+  var _rooms = wdef.rooms || [];
+  pts = pts.slice().sort(function(a, b) {
+    var ai = _rooms.indexOf(String(a.bed || ''));
+    var bi = _rooms.indexOf(String(b.bed || ''));
+    // If both in the rooms list, sort by position
+    if (ai !== -1 && bi !== -1) return ai - bi;
+    // Known room before unknown
+    if (ai !== -1) return -1;
+    if (bi !== -1) return  1;
+    // Both unknown — sort numerically then alphabetically
+    var an = parseInt(a.bed) || 0, bn = parseInt(b.bed) || 0;
+    if (an && bn && an !== bn) return an - bn;
+    return String(a.bed||'').localeCompare(String(b.bed||''));
+  });
 
   if (!pts.length) {
     h += '<div class="empty">No patients on ' + wdef.label + '</div>';
