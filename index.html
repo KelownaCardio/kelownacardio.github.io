@@ -534,7 +534,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.53</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.55</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1695,13 +1695,20 @@ async function syncFromSheets() {
         }
       });
 
-      // Patch claim rows that are missing refby/refbyName/icd/startTime
-      // and push corrected rows back to Sheets
+      // Patch claim rows that are missing refby/refbyName/icd/startTime.
+      // IMPORTANT: Only push back claims that came from Sheets (not local-only new claims).
+      // This prevents re-pushing claims that the Apps Script would append as duplicates.
       var _patByPhn = {};
       st.patients.forEach(function(p) { if (p.phn) _patByPhn[p.phn] = p; });
+      // Build set of claim IDs that exist in Sheets data (d.claims)
+      var _sheetsClaimIds = {};
+      (d.claims || []).forEach(function(c) { if (c.id) _sheetsClaimIds[c.id] = true; });
       mergedClaims.forEach(function(c) {
         var needsPatch = !c.refby || !c.refbyName || !c.icd || !c.startTime;
         if (!needsPatch) return;
+        // Only push back if this claim already exists in Sheets — otherwise
+        // saveClaim will be called naturally when it's first created.
+        if (!_sheetsClaimIds[c.id]) return;
         var pat = _patByPhn[c.phn];
         var changed = false;
         if (pat) {
@@ -2055,6 +2062,16 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime) 
     startTime: _start,
     endTime:   endTime || ''
   };
+  // Dedup guard: never create two claims with same phn+date+fee+alias
+  var _dupCheck = st.claims.some(function(x) {
+    return x.phn === c.phn && x.date === c.date &&
+           x.fee === c.fee && x.alias === c.alias &&
+           x.id  !== c.id;
+  });
+  if (_dupCheck) {
+    console.warn('Duplicate claim blocked:', c.fee, c.date, c.phn);
+    return c; // return without saving
+  }
   st.claims.push(c);
   if (SHEETS_URL) push('saveClaim', c);
   // If we back-filled refby/icd onto the patient object, persist to Sheets
@@ -3043,7 +3060,7 @@ function buildOtherClaimForm(p) {
   // Preview
   h += '<div class="cp" id="oc-preview"><div class="cp-title">Claim preview</div></div>';
 
-  h += '<button class="btn btn-p" onclick="submitOtherClaim()">Add claim</button>';
+  h += '<button class="btn btn-p" onclick="claimSubmitOnce(submitOtherClaim)">Add claim</button>';
   return h;
 }
 
@@ -4025,7 +4042,7 @@ function buildConsultForm(p) {
   h += '<div class="cp" id="cb-preview"><div class="cp-title">Claims preview</div></div>';
 
   // Submit button
-  h += '<button class="btn btn-p" onclick="submitConsult()">Add consult claims</button>';
+  h += '<button class="btn btn-p" onclick="claimSubmitOnce(submitConsult)">Add consult claims</button>';
   return h;
 }
 
@@ -4122,7 +4139,17 @@ function updateConsultPreview(modBase, modInc) {
   }
 }
 
+// Submit guard — prevents double/triple tap on mobile from firing twice
+var _submitGuard = false;
+function claimSubmitOnce(fn) {
+  if (_submitGuard) return;
+  _submitGuard = true;
+  setTimeout(function() { _submitGuard = false; }, 1500);
+  fn();
+}
+
 function submitConsult() {
+  if (_submitGuard) return;
   var p = getP(_claimPid);
   if (!checkDoc()) return;
 
@@ -4257,7 +4284,7 @@ function buildDailyForm(p) {
       '<div class="f1"><label>Days</label><input type="number" id="cb-dal-days" value="1" min="1" inputmode="numeric"></div>' +
     '</div></div>' +
     buildIcdRefCard(p) +
-    '<button class="btn btn-p" onclick="submitDaily()">Add daily care claim</button>';
+    '<button class="btn btn-p" onclick="claimSubmitOnce(submitDaily)">Add daily care claim</button>';
 }
 
 function submitDaily() {
@@ -4290,7 +4317,7 @@ function buildCombinedForm(p) {
     '<div id="cb-comb-note-wrap"></div>' +
     '</div>' +
     buildIcdRefCard(p) +
-    '<button class="btn btn-p" onclick="submitCombined()">Add combined daily claim</button>';
+    '<button class="btn btn-p" onclick="claimSubmitOnce(submitCombined)">Add combined daily claim</button>';
 }
 
 function combinedVisitChange() {
@@ -4333,7 +4360,7 @@ function buildDirectiveForm(p) {
   }
   h += '</div>';
   h += buildIcdRefCard(p);
-  h += '<button class="btn btn-p" onclick="submitDirective()">Add directive claim</button>';
+  h += '<button class="btn btn-p" onclick="claimSubmitOnce(submitDirective)">Add directive claim</button>';
   return h;
 }
 
@@ -4366,9 +4393,9 @@ function buildCCUForm(p) {
   h += '</div>';
   h += buildIcdRefCard(p);
   if (alreadyToday) {
-    h += '<button class="btn btn-s" onclick="submitCCU(true)">Record again (confirm duplicate)</button>';
+    h += '<button class="btn btn-s" onclick="claimSubmitOnce(function(){submitCCU(true)})">Record again (confirm duplicate)</button>';
   } else {
-    h += '<button class="btn btn-p" onclick="submitCCU(false)">Record CCU daily</button>';
+    h += '<button class="btn btn-p" onclick="claimSubmitOnce(function(){submitCCU(false)})">Record CCU daily</button>';
   }
   return h;
 }
