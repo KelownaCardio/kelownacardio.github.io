@@ -534,7 +534,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.65</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.66</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -3994,17 +3994,27 @@ function openPatientEdit(pid) {
   html += '<div class="card">';
   html += '<div class="card-title">Consult info</div>';
   html += '<label>Referred by</label>';
-  html += '<input id="pe-ref-search" value="' + esc(p.refbyName||p.refby||'') + '" placeholder="Type name or doctor #..." ' +
+  html += '<div style="position:relative">' +
+          '<input id="pe-ref-search" value="' + esc(p.refbyName||p.refby||'') + '" placeholder="Type name or doctor #..." ' +
           'autocorrect="off" data-dd="pe-ref-dd" data-hidden="pe-refby" data-name="pe-refby-name" ' +
-          'oninput="refSearchEl(this)" onfocus="refSearchEl(this)">';
+          'oninput="refSearchEl(this)" onfocus="refSearchEl(this)" style="padding-right:28px">' +
+          '<button type="button" onclick="clearSearchField(\'pe-ref-search\',\'pe-refby\',\'pe-refby-name\',\'pe-ref-dd\')" ' +
+          'style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;' +
+          'font-size:16px;color:var(--text3);cursor:pointer;padding:0;line-height:1">&times;</button>' +
+          '</div>';
   html += '<div class="ref-dd" id="pe-ref-dd"></div>';
   html += '<input id="pe-refby"      type="hidden" value="' + esc(p.refby||'') + '">';
   html += '<input id="pe-refby-name" type="hidden" value="' + esc(p.refbyName||'') + '">';
   html += '<label style="margin-top:4px">Diagnosis</label>';
   var curDx = DIAGNOSES.find(function(d) { return d.code === (p.icd||''); });
-  html += '<input id="pe-icd-search" value="' + esc(curDx ? curDx.label : (p.icd||'')) + '" ' +
+  html += '<div style="position:relative">' +
+          '<input id="pe-icd-search" value="' + esc(curDx ? curDx.label : (p.icd||'')) + '" ' +
           'placeholder="Type diagnosis or code..." autocorrect="off" autocomplete="off" ' +
-          'data-dd="pe-icd-dd" data-hidden="pe-icd" oninput="icdSearchEl(this)" onfocus="icdSearchEl(this)">';
+          'data-dd="pe-icd-dd" data-hidden="pe-icd" oninput="icdSearchEl(this)" onfocus="icdSearchEl(this)" style="padding-right:28px">' +
+          '<button type="button" onclick="clearSearchField(\'pe-icd-search\',\'pe-icd\',null,\'pe-icd-dd\')" ' +
+          'style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;' +
+          'font-size:16px;color:var(--text3);cursor:pointer;padding:0;line-height:1">&times;</button>' +
+          '</div>';
   html += '<input id="pe-icd" type="hidden" value="' + esc(p.icd||'') + '">';
   html += '<div class="ref-dd" id="pe-icd-dd"></div>';
   html += '</div>';
@@ -4050,6 +4060,20 @@ function peWardChange() {
     var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
     if (careFld) careFld.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
   }
+}
+
+// Clear a search field and its hidden value fields
+function clearSearchField(searchId, hiddenId, hiddenNameId, ddId) {
+  var s = document.getElementById(searchId);
+  if (s) { s.value = ''; s.focus(); }
+  var h = document.getElementById(hiddenId);
+  if (h) h.value = '';
+  if (hiddenNameId) {
+    var hn = document.getElementById(hiddenNameId);
+    if (hn) hn.value = '';
+  }
+  var dd = document.getElementById(ddId);
+  if (dd) { dd.innerHTML = ''; dd.style.display = 'none'; }
 }
 
 // Dynamic role change in edit form
@@ -4104,7 +4128,8 @@ function savePatientEdit(pid) {
   p.dob       = fmtClaimDate((document.getElementById('pe-dob') || {}).value || p.dob);
   p.sex       = (document.getElementById('pe-sex')   || {}).value || p.sex;
   p.ward      = ward;
-  p.bed       = (document.getElementById('pe-bed')   || {}).value || p.bed;
+  var _peBed = document.getElementById('pe-bed');
+  if (_peBed) p.bed = _peBed.value;
   p.role      = role;
   p.mrp       = (document.getElementById('pe-mrp')  || {}).value || '';
   p.list      = (document.getElementById('pe-list') || {}).value || p.list;
