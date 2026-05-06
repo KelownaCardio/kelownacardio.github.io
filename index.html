@@ -124,8 +124,8 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 .wp-pos { width:21px; height:21px; border-radius:50%; background:var(--surface2); display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:var(--text2); flex-shrink:0; margin-top:2px; }
 .wp-pos.done { background:var(--green-bg); color:var(--green-t); }
 .wp-pos-wrap { position:relative; flex-shrink:0; margin-top:2px; }
-
-
+.wp-pos-badge { position:absolute; top:-4px; right:-4px; width:11px; height:11px; border-radius:50%; background:var(--green); display:flex; align-items:center; justify-content:center; border:1.5px solid var(--surface); }
+.wp-pos-badge svg { width:6px; height:6px; stroke:#fff; fill:none; stroke-width:3; }
 .wp-info { flex:1; min-width:0; }
 .wp-name { font-size:13px; font-weight:700; }
 .wp-meta { font-size:10px; color:var(--text2); margin-top:2px; }
@@ -534,7 +534,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.48</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.50</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1048,6 +1048,7 @@ var FEES = [
   { code:'14101', desc:'Cardioversion — elective DC',                 cat:'Procedure', clr:'chip-red'  },
   { code:'14105', desc:'Cardioversion — emergency DC',                cat:'Procedure', clr:'chip-red'  },
   { code:'14113', desc:'Pacemaker insertion — temporary transvenous', cat:'Procedure', clr:'chip-red'  },
+  { code:'00751', desc:'Pericardiocentesis',                           cat:'Procedure', clr:'chip-red'  },
   // ── Discharge / Planning ───────────────────────────
   { code:'78717', desc:'Complex discharge — comprehensive planning',  cat:'Discharge', clr:'chip-green'},
   { code:'78720', desc:'MOST — advance care planning (new consult)',  cat:'Other',     clr:'chip-teal' },
@@ -2942,6 +2943,26 @@ function selectFeeCode(code, desc) {
   if (disp) disp.textContent = '';
   var dd = document.getElementById('oc-fee-dd');
   if (dd) dd.style.display = 'none';
+  var endWrap = document.getElementById('oc-end-wrap');
+  var notesEl = document.getElementById('oc-notes');
+  var startLbl = document.getElementById('oc-start-lbl');
+  if (code === '33005') {
+    if (endWrap)  endWrap.style.display = 'block';
+    if (startLbl) startLbl.innerHTML = 'Start time <span style="color:var(--red-t)">*</span>';
+    if (notesEl) {
+      notesEl.placeholder = 'Describe emergency care provided (mandatory by MSP)';
+      notesEl.style.cssText = 'border:1.5px solid var(--amber-t)';
+      notesEl.setAttribute('data-required', '1');
+    }
+  } else {
+    if (endWrap)  endWrap.style.display = 'none';
+    if (startLbl) startLbl.innerHTML = 'Start time <span style="font-size:10px;color:var(--text3)">(if required)</span>';
+    if (notesEl) {
+      notesEl.placeholder = 'Optional';
+      notesEl.style.cssText = '';
+      notesEl.removeAttribute('data-required');
+    }
+  }
   updateOtherPreview();
 }
 
@@ -2976,9 +2997,13 @@ function buildOtherClaimForm(p) {
   h += '<div class="fl">';
   h +=   '<div class="f1"><label>Date</label>' +
          '<input type="date" id="oc-date" value="' + todayISO + '" oninput="updateOtherPreview()"></div>';
-  h +=   '<div class="f1"><label>Start time <span style="font-size:10px;color:var(--text3)">(if required)</span></label>' +
+  h +=   '<div class="f1"><label id="oc-start-lbl">Start time <span style="font-size:10px;color:var(--text3)">(if required)</span></label>' +
          '<input type="time" id="oc-start" value="' + nowTime + '"></div>';
   h += '</div>';
+  h += '<div id="oc-end-wrap" style="display:none;margin-bottom:6px">' +
+       '<label>End time <span style="color:var(--red-t)">*</span></label>' +
+       '<input type="time" id="oc-end" style="width:100%;padding:10px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px">' +
+       '</div>';
 
   // Location
   h += '<label>Service location</label>';
@@ -3043,11 +3068,29 @@ function updateOtherPreview() {
 function submitOtherClaim() {
   var p = getP(_claimPid);
   if (!checkDoc()) return;
+  var _fee = ((document.getElementById('oc-fee') || {}).value || '').trim();
+  if (_fee === '33005') {
+    var _s = ((document.getElementById('oc-start') || {}).value || '').trim();
+    var _e = ((document.getElementById('oc-end')   || {}).value || '').trim();
+    var _n = ((document.getElementById('oc-notes') || {}).value || '').trim();
+    var _em = [];
+    if (!_s) _em.push('start time');
+    if (!_e) _em.push('end time');
+    if (!_n) _em.push('description of emergency care');
+    if (_em.length) {
+      if (!_s) { var _se = document.getElementById('oc-start'); if (_se) _se.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
+      if (!_e) { var _ee = document.getElementById('oc-end');   if (_ee) _ee.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
+      if (!_n) { var _ne = document.getElementById('oc-notes'); if (_ne) _ne.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
+      showToast('Required for 33005: ' + _em.join(', '));
+      return;
+    }
+  }
 
   var fee   = ((document.getElementById('oc-fee')   || {}).value || '').trim();
   var units = parseInt((document.getElementById('oc-units') || {}).value || '1') || 1;
   var dateISO = (document.getElementById('oc-date')  || {}).value || '';
   var start   = (document.getElementById('oc-start') || {}).value || '';
+  var endTime = (document.getElementById('oc-end')   || {}).value || '';
   var loc     = (document.getElementById('oc-loc')   || {}).value || 'I';
   var notes   = (document.getElementById('oc-notes') || {}).value || '';
   var icd     = (document.getElementById('oc-icd')   || {}).value || p.icd || '3062';
@@ -3071,7 +3114,7 @@ function submitOtherClaim() {
 
   var pClone = Object.assign({}, p, { icd: icd, refby: refby, refbyName: refName });
 
-  var c = addClaim(pClone, fee, fee, units, dateFmt, loc, start, notes);
+  var c = addClaim(pClone, fee, fee, units, dateFmt, loc, start, notes, endTime || '');
   p.roundedToday = TODAY;
   sv('patients', st.patients);
   sv('claims',   st.claims);
@@ -4072,10 +4115,31 @@ function submitConsult() {
   updatePatientFromClaimForm(p);
   if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
 
-  // Consult row — always include SERVICE_START_TIME
-  addClaim(p, code, code, 1, dateFmt, loc, start);
+  // CCFPP detection — did this doctor start another consult today
+  // whose window overlaps with this one? Build the note FIRST so it
+  // can be applied to ALL claim parts: consult, base modifier, increment.
+  var ccfppNote = '';
+  if (start) {
+    var thisStartM = t2m(start);
+    st.claims.forEach(function(c) {
+      if (c.alias !== st.doc.alias) return;
+      if (c.date  !== dateFmt)      return;
+      if (c.phn   === p.phn)        return; // same patient
+      if (c.fee !== '33010' && c.fee !== '33012') return;
+      if (!c.startTime) return;
+      var prevStartM = t2m(c.startTime);
+      var diff = (thisStartM - prevStartM + 24 * 60) % (24 * 60);
+      if (diff <= 75) {
+        // Include last name, first name and PHN as required
+        ccfppNote = 'CCFPP ' + c.last + ', ' + c.first + ' (' + c.phn + ')';
+      }
+    });
+  }
 
-  // MOST
+  // Base consult — CCFPP note on consult itself
+  addClaim(p, code, code, 1, dateFmt, loc, start, ccfppNote, gv('cb-end'));
+
+  // MOST — standalone item, no CCFPP
   if (_mostOn) addClaim(p, '78720', '78720', 1, dateFmt, loc);
 
   var end      = gv('cb-end');
@@ -4085,37 +4149,12 @@ function submitConsult() {
   var modInc   = hasInc ? getModifierForIncrement(start, dateISO) : null;
 
   if (modBase) {
-    // Base claim: start time and end time required by MSP
-    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start, '', end);
+    // Base modifier — CCFPP note here too
+    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start, ccfppNote, end);
 
     if (modInc) {
-      // Increment start time = consult start + 30 min
+      // Increment modifier — CCFPP note on all parts
       var incStart = minsToTime((t2m(start) + 30) % (24 * 60));
-
-      // CCFPP detection — did this doctor start another consult today
-      // whose window overlaps with this one?
-      var ccfppNote = '';
-      if (start) {
-        var thisStartM = t2m(start);
-        st.claims.forEach(function(c) {
-          if (c.alias !== st.doc.alias) return;
-          if (c.date  !== dateFmt)      return;
-          if (c.phn   === p.phn)        return; // same patient
-          if (c.fee !== '33010' && c.fee !== '33012') return;
-          if (!c.startTime) return;
-          // Previous consult's window ends at its start + 45 min
-          var prevEndM = (t2m(c.startTime) + 45) % (24 * 60);
-          // Overlap if this consult starts before previous consult's window ends
-          var prevStartM = t2m(c.startTime);
-          var windowEnd  = (prevStartM + 75) % (24 * 60); // 75 min = max possible window
-          // Simple check: if previous consult started within last 75 min
-          var diff = (thisStartM - prevStartM + 24 * 60) % (24 * 60);
-          if (diff <= 75) {
-            ccfppNote = 'CCFPP ' + c.last + ', ' + c.first;
-          }
-        });
-      }
-
       addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, ccfppNote);
     }
   }
