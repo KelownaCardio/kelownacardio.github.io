@@ -534,7 +534,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.51</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.53</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -594,8 +594,8 @@ input[type=file] { display:none; }
     <div class="card-title">Scan sticker or Meditech chart</div>
     <div class="photo-zone" id="photo-zone" onclick="document.getElementById('f-photo').click()">
       <svg style="width:26px;height:26px;stroke:var(--text3);fill:none;stroke-width:1.5" viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
-      <span style="font-size:12px;color:var(--text2)">Tap to photograph sticker or chart header</span>
-      <span style="font-size:10px;color:var(--text3)">Auto-fills name, PHN, DOB, ward, room</span>
+      <span style="font-size:12px;color:var(--text2)">Tap to photograph · or paste screenshot</span>
+      <span style="font-size:10px;color:var(--text3)">On desktop: screenshot then Ctrl+V / ⌘V here</span>
     </div>
     <input type="file" id="f-photo" accept="image/*" onchange="handleStickerPhoto(this)">
     <div class="ocr-bar" id="ocr-bar"></div>
@@ -4738,6 +4738,75 @@ function resetPhotoZone() {
 var _cropPending = null;
 var _cropState = null;
 
+// Handle paste of a screenshot (Ctrl+V / Cmd+V) from clipboard.
+// Called both from the photo-zone paste listener and the global paste
+// listener when the Add Patient pane is visible.
+function handleClipboardPaste(e) {
+  var items = (e.clipboardData || (e.originalEvent && e.originalEvent.clipboardData) || {}).items;
+  if (!items) return false;
+
+  var imageItem = null;
+  for (var i = 0; i < items.length; i++) {
+    if (items[i].type.indexOf('image') !== -1) { imageItem = items[i]; break; }
+  }
+  if (!imageItem) return false;
+
+  e.preventDefault();
+
+  var bar = document.getElementById('ocr-bar');
+  if (bar) { bar.style.display = 'block'; bar.className = 'ocr-bar ocr-ok'; bar.textContent = 'Reading pasted image…'; }
+
+  var file = imageItem.getAsFile();
+  if (!file) {
+    if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'Could not read clipboard image'; }
+    return true;
+  }
+
+  var reader = new FileReader();
+  reader.onerror = function() {
+    if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'Could not read pasted image'; }
+  };
+  reader.onload = function(ev) {
+    var dataUrl = ev.target.result || '';
+    // Show preview immediately in photo zone without crop (desktop screenshots
+    // are usually already well-framed — but open crop modal so user can trim if needed)
+    openCropModal(dataUrl, 'sticker', function(croppedDataUrl) {
+      processStickerOCR(croppedDataUrl, bar);
+    }, function() {
+      if (bar) { bar.style.display = 'none'; bar.textContent = ''; }
+      resetPhotoZone();
+    });
+  };
+  reader.readAsDataURL(file);
+  return true;
+}
+
+// Attach paste listener to photo zone element (for focused paste)
+// and to document when Add Patient pane is active (for unfocused paste)
+(function() {
+  function attachPhotoZonePaste() {
+    var pz = document.getElementById('photo-zone');
+    if (!pz || pz._pasteAttached) return;
+    pz._pasteAttached = true;
+    pz.setAttribute('tabindex', '0'); // make focusable
+    pz.addEventListener('paste', function(e) { handleClipboardPaste(e); });
+  }
+
+  // Global paste: only fire when Add Patient pane (p1) is the visible pane
+  document.addEventListener('paste', function(e) {
+    var p1 = document.getElementById('p1');
+    if (!p1 || !p1.classList.contains('on')) return;
+    handleClipboardPaste(e);
+  });
+
+  // Attach to photo zone once DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', attachPhotoZonePaste);
+  } else {
+    attachPhotoZonePaste();
+  }
+})();
+
 function handleStickerPhoto(inp) {
   var file = inp && inp.files && inp.files[0];
   if (!file) return;
@@ -5075,11 +5144,28 @@ function handleOCRResult(data, bar) {
 // ═══════════════════════════════════════════════════════
 // LOS helper — days since admission (using first claim date or addedAt)
 function losdays(p) {
-  // Use earliest claim date for this patient
   var patClaims = st.claims.filter(function(c) { return c.phn && c.phn === p.phn; });
+
+  // Priority 1: explicit admitDate on patient record
+  if (p.admitDate) {
+    var ad = parseDMYsafe(fmtClaimDate(p.admitDate));
+    if (ad) return Math.floor((Date.now() - ad) / 86400000);
+  }
+
   if (!patClaims.length) return 0;
-  patClaims.sort(function(a, b) { return parseDMY(a.date) - parseDMY(b.date); });
-  var first = parseDMY(patClaims[0].date);
+  patClaims.sort(function(a, b) { return parseDMYsafe(a.date) - parseDMYsafe(b.date); });
+
+  // Priority 2: date of earliest full consult (33010 or 33012) — marks admission
+  var consultClaims = patClaims.filter(function(c) {
+    return c.fee === '33010' || c.fee === '33012';
+  });
+  if (consultClaims.length) {
+    var consultFirst = parseDMYsafe(consultClaims[0].date);
+    if (consultFirst) return Math.floor((Date.now() - consultFirst) / 86400000);
+  }
+
+  // Priority 3: earliest claim of any type
+  var first = parseDMYsafe(patClaims[0].date);
   if (!first) return 0;
   return Math.floor((Date.now() - first) / 86400000);
 }
