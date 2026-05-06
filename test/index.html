@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>KGH Sticker OCR — Test v0.2</title>
+<title>KGH Sticker OCR — Test v0.3</title>
 <style>
   :root {
     --bg: #f5f5f7; --surface: #fff; --surface2: #f0f0f3;
@@ -31,7 +31,7 @@
                 letter-spacing: .5px; margin-bottom: 10px; }
   label { display: block; font-size: 11px; color: var(--text2); margin: 8px 0 4px; font-weight: 600; }
   input, select { width: 100%; padding: 10px; border: .5px solid var(--border2); border-radius: var(--rsm);
-                  font-size: 14px; background: var(--surface); font-family: inherit; }
+                  font-size: 14px; background: var(--surface); font-family: inherit; transition: border-color .15s, background .15s; }
   input:focus, select:focus { outline: 2px solid var(--blue); outline-offset: -2px; }
   .btn { width: 100%; padding: 12px; border: none; border-radius: var(--rsm);
          font-size: 15px; font-weight: 700; font-family: inherit; cursor: pointer; margin-top: 8px; }
@@ -39,34 +39,38 @@
   .btn-s { background: var(--surface2); color: var(--text); }
   .btn-g { background: var(--green); color: #fff; }
   .btn-a { background: var(--amber); color: #fff; }
+  .btn-g:disabled { opacity: .5; cursor: not-allowed; }
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .badge { display: inline-block; font-size: 10px; padding: 3px 8px; border-radius: 10px;
            font-weight: 700; margin-left: 6px; vertical-align: middle; }
-  .badge-engine-ml { background: var(--green-bg); color: var(--green-t); }
+  .badge-engine-ml   { background: var(--green-bg); color: var(--green-t); }
   .badge-engine-tess { background: var(--amber-bg); color: var(--amber-t); }
   .stat-pill { display: inline-block; font-size: 10px; padding: 2px 6px; border-radius: 8px;
                background: var(--surface2); color: var(--text2); margin-left: 4px; }
   .status { padding: 10px 12px; border-radius: var(--rsm); font-size: 13px; margin: 10px 0;
             display: none; font-weight: 600; }
   .status.show { display: block; }
-  .status.info { background: var(--blue-bg); color: var(--blue-t); }
-  .status.ok { background: var(--green-bg); color: var(--green-t); }
-  .status.err { background: var(--red-bg); color: var(--red-t); }
-  .status.warn { background: var(--amber-bg); color: var(--amber-t); }
+  .status.info  { background: var(--blue-bg);  color: var(--blue-t); }
+  .status.ok    { background: var(--green-bg); color: var(--green-t); }
+  .status.err   { background: var(--red-bg);   color: var(--red-t); }
+  .status.warn  { background: var(--amber-bg); color: var(--amber-t); }
   .raw-text { font-family: ui-monospace, "SF Mono", monospace; font-size: 11px; color: var(--text2);
               white-space: pre-wrap; background: var(--surface2); padding: 10px;
               border-radius: var(--rsm); max-height: 240px; overflow-y: auto; line-height: 1.5;
               -webkit-user-select: all; user-select: all; }
   .hidden { display: none !important; }
-  .field-warn { border-color: var(--amber-t) !important; background: var(--amber-bg) !important; }
-  .field-corrected { border-color: var(--green-t) !important; background: var(--green-bg) !important; }
-  .field-note { font-size: 10px; margin-top: -2px; margin-bottom: 4px; font-weight: 600; }
+  /* Field states */
+  .field-warn      { border-color: var(--amber-t) !important; background: var(--amber-bg) !important; }
+  .field-err       { border-color: var(--red-t)   !important; background: var(--red-bg)   !important; }
+  .field-ok        { border-color: var(--green-t)  !important; background: var(--green-bg)  !important; }
+  .field-note { font-size: 10px; margin-top: 2px; margin-bottom: 4px; font-weight: 700; }
   .field-note.warn { color: var(--amber-t); }
-  .field-note.ok { color: var(--green-t); }
+  .field-note.err  { color: var(--red-t); }
+  .field-note.ok   { color: var(--green-t); }
   .file-input { display: none; }
   .pill-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
   .pill { padding: 6px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;
-          background: var(--surface2); color: var(--text2); cursor: pointer; }
+          background: var(--surface2); color: var(--text2); cursor: pointer; border: .5px solid transparent; }
   .pill.active { background: var(--blue); color: #fff; }
   details { background: var(--surface); border-radius: var(--rsm); padding: 8px 12px;
             margin: 8px 0; border: .5px solid var(--border); }
@@ -91,6 +95,14 @@
            font-size: 13px; font-weight: 600; z-index: 100; opacity: 0; transition: opacity .2s;
            pointer-events: none; }
   .toast.show { opacity: 1; }
+  /* PHN checksum badge */
+  .phn-wrap { position: relative; }
+  .phn-badge { position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+               font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 6px;
+               pointer-events: none; }
+  .phn-badge.valid   { background: var(--green-bg); color: var(--green-t); }
+  .phn-badge.invalid { background: var(--red-bg);   color: var(--red-t); }
+  .phn-wrap input { padding-right: 68px; }
 </style>
 </head>
 <body>
@@ -98,25 +110,27 @@
 <div class="hdr">
   <div class="hdr-l">
     <div class="hdr-title">KGH Sticker OCR <span id="engine-badge" class="badge">…</span></div>
-    <div class="hdr-sub">Test v0.2 <span id="stat-pill" class="stat-pill">0 scans</span></div>
+    <div class="hdr-sub">Test v0.3 <span id="stat-pill" class="stat-pill">0 scans</span></div>
   </div>
-  <button id="hdr-export" class="btn btn-s" style="width: auto; padding: 8px 12px; margin: 0; font-size: 11px"
+  <button id="hdr-export" class="btn btn-s"
+          style="width: auto; padding: 8px 12px; margin: 0; font-size: 11px"
           onclick="exportLearning()">Export</button>
 </div>
 
 <div class="container">
 
-  <!-- Mode toggle and capture -->
+  <!-- Mode toggle + capture -->
   <div id="capture-card" class="card">
     <div class="card-title">What are you scanning?</div>
     <div class="pill-row">
-      <div id="mode-sticker" class="pill active" onclick="setMode('sticker')">Patient sticker</div>
-      <div id="mode-meditech" class="pill" onclick="setMode('meditech')">Meditech header</div>
+      <div id="mode-sticker"  class="pill active" onclick="setMode('sticker')">Patient sticker</div>
+      <div id="mode-labvial"  class="pill"         onclick="setMode('labvial')">Lab vial label</div>
+      <div id="mode-meditech" class="pill"         onclick="setMode('meditech')">Meditech header</div>
     </div>
     <button class="btn btn-p" onclick="document.getElementById('file-camera').click()">📷 Take photo</button>
     <button class="btn btn-s" onclick="document.getElementById('file-upload').click()">Upload image</button>
     <input id="file-camera" class="file-input" type="file" accept="image/*" capture="environment" onchange="handleFile(event)">
-    <input id="file-upload" class="file-input" type="file" accept="image/*" onchange="handleFile(event)">
+    <input id="file-upload" class="file-input" type="file" accept="image/*"                       onchange="handleFile(event)">
   </div>
 
   <div id="status" class="status"></div>
@@ -127,13 +141,13 @@
     <div id="crop-stage" class="crop-stage">
       <img id="crop-img">
       <div class="crop-overlay">
-        <div id="mask-top" class="crop-mask"></div>
+        <div id="mask-top"    class="crop-mask"></div>
         <div id="mask-bottom" class="crop-mask"></div>
-        <div id="mask-left" class="crop-mask"></div>
-        <div id="mask-right" class="crop-mask"></div>
-        <div id="crop-box" class="crop-box"></div>
-        <div id="handle-tl" class="crop-handle"></div>
-        <div id="handle-br" class="crop-handle"></div>
+        <div id="mask-left"   class="crop-mask"></div>
+        <div id="mask-right"  class="crop-mask"></div>
+        <div id="crop-box"    class="crop-box"></div>
+        <div id="handle-tl"   class="crop-handle"></div>
+        <div id="handle-br"   class="crop-handle"></div>
       </div>
     </div>
     <div class="crop-actions">
@@ -150,7 +164,7 @@
     <div class="row">
       <div>
         <label>Last name</label>
-        <input id="f-last" type="text" autocorrect="off" autocapitalize="words">
+        <input id="f-last"  type="text" autocorrect="off" autocapitalize="words">
       </div>
       <div>
         <label>First name</label>
@@ -158,18 +172,19 @@
       </div>
     </div>
 
+    <label>PHN (10 digits)</label>
+    <div class="phn-wrap">
+      <input id="f-phn" type="text" inputmode="numeric" autocorrect="off"
+             oninput="onPHNInput(this)" onchange="onPHNInput(this)" maxlength="10">
+      <span id="phn-badge" class="phn-badge" style="display:none"></span>
+    </div>
+    <div id="phn-note" class="field-note" style="display:none"></div>
+
     <div class="row">
-      <div>
-        <label>PHN (10 digits)</label>
-        <input id="f-phn" type="text" inputmode="numeric" autocorrect="off">
-      </div>
       <div>
         <label>DOB (DD/MM/YYYY)</label>
         <input id="f-dob" type="text" inputmode="numeric" autocorrect="off">
       </div>
-    </div>
-
-    <div class="row">
       <div>
         <label>Sex</label>
         <select id="f-sex">
@@ -178,23 +193,24 @@
           <option value="F">F</option>
         </select>
       </div>
-      <div>
-        <label>MRP service</label>
-        <select id="f-mrp">
-          <option value="">—</option>
-          <option value="Cardiology">Cardiology</option>
-          <option value="Hospitalist">Hospitalist</option>
-          <option value="CTU">CTU</option>
-          <option value="ICU">ICU</option>
-          <option value="CSICU">CSICU</option>
-          <option value="Cardiac Surgery">Cardiac Surgery</option>
-          <option value="General Surgery">General Surgery</option>
-          <option value="Orthopedics">Orthopedics</option>
-          <option value="Neurology">Neurology</option>
-          <option value="Nephrology">Nephrology</option>
-          <option value="Other">Other</option>
-        </select>
-      </div>
+    </div>
+
+    <div id="meditech-mrp-row">
+      <label>MRP service</label>
+      <select id="f-mrp">
+        <option value="">—</option>
+        <option value="Cardiology">Cardiology</option>
+        <option value="Hospitalist">Hospitalist</option>
+        <option value="CTU">CTU</option>
+        <option value="ICU">ICU</option>
+        <option value="CSICU">CSICU</option>
+        <option value="Cardiac Surgery">Cardiac Surgery</option>
+        <option value="General Surgery">General Surgery</option>
+        <option value="Orthopedics">Orthopedics</option>
+        <option value="Neurology">Neurology</option>
+        <option value="Nephrology">Nephrology</option>
+        <option value="Other">Other</option>
+      </select>
     </div>
 
     <div id="meditech-fields" class="hidden">
@@ -210,7 +226,7 @@
       </div>
     </div>
 
-    <button class="btn btn-g" onclick="confirmAndSave()">✓ Confirm — save & learn corrections</button>
+    <button id="confirm-btn" class="btn btn-g" onclick="confirmAndSave()">✓ Confirm — save &amp; learn corrections</button>
     <button class="btn btn-a" onclick="copyDebugBundle()">📋 Copy debug bundle (for chat)</button>
     <button class="btn btn-s" onclick="resetCapture()">Scan another</button>
 
@@ -218,7 +234,6 @@
       <summary>Show raw OCR output</summary>
       <div id="raw-text" class="raw-text" style="margin-top: 8px"></div>
     </details>
-
     <details>
       <summary>Show parser steps</summary>
       <div id="parse-log" class="raw-text" style="margin-top: 8px"></div>
@@ -246,9 +261,9 @@
 <div id="toast" class="toast"></div>
 
 <script>
-//═════════════════════════════════════════════════════════════════════
+//═══════════════════════════════════════════════════════════════════
 // State
-//═════════════════════════════════════════════════════════════════════
+//═══════════════════════════════════════════════════════════════════
 let engine = null;
 let tesseractWorker = null;
 let mode = 'sticker';
@@ -256,18 +271,123 @@ let lastRawText = '';
 let lastParseLog = [];
 let lastParsed = null;
 let lastImageDataUrl = '';
-let lastCropDataUrl = '';
 let savedItems = [];
 let scanCount = 0;
 let autoCorrectHits = 0;
 
-const LS_PREFIX = 'kgh_ocr_test_v0.2:';
+const LS_PREFIX      = 'kgh_ocr_test_v0.3:';
 const LS_CORRECTIONS = LS_PREFIX + 'corrections';
 const LS_STATS       = LS_PREFIX + 'stats';
 
-//═════════════════════════════════════════════════════════════════════
+//═══════════════════════════════════════════════════════════════════
+// BC PHN Checksum (CAN health checksum algorithm)
+// BC PHNs start with 9. Weights applied to digits 2-9 (0-indexed 1-8).
+//═══════════════════════════════════════════════════════════════════
+function isValidBCPHN(phn) {
+  if (!phn) return false;
+  const s = String(phn).replace(/\D/g, '');
+  if (s.length !== 10) return false;
+  if (s[0] !== '9') return false;
+  const weights = [2, 4, 8, 5, 10, 9, 7, 3];
+  let total = 0;
+  for (let i = 0; i < 8; i++) total += parseInt(s[i + 1], 10) * weights[i];
+  const check = (11 - (total % 11)) % 11;
+  return check === parseInt(s[9], 10);
+}
+
+// Try to rescue a PHN by single-digit OCR substitutions.
+// Returns { phn, swaps } or null if no valid alternative found.
+const DIGIT_OCR_SUBS = [
+  ['O','0'], ['0','O'],  // O↔0
+  ['l','1'], ['1','l'],  // l↔1
+  ['I','1'], ['1','I'],  // I↔1
+  ['S','5'], ['5','S'],  // S↔5
+  ['B','8'], ['8','B'],  // B↔8
+  ['G','6'], ['6','G'],  // G↔6
+  ['Z','2'], ['2','Z'],  // Z↔2
+];
+
+function tryRescuePHN(raw) {
+  if (!raw) return null;
+  const s = raw.replace(/[^0-9OlISBGZ]/gi, '');  // keep OCR-confusable chars
+  if (s.length !== 10) return null;
+
+  // First: normalise common letter→digit subs and test
+  const normalised = s
+    .replace(/O/g, '0').replace(/o/g, '0')
+    .replace(/l/gi, '1').replace(/I/g, '1')
+    .replace(/S/g, '5')
+    .replace(/B/g, '8')
+    .replace(/G/g, '6')
+    .replace(/Z/g, '2');
+  if (isValidBCPHN(normalised)) return { phn: normalised, swaps: 'auto-normalised digit chars' };
+
+  // Try flipping each digit position individually
+  const digits = normalised.split('');
+  const subs = [['0','8'],['8','0'],['3','9'],['9','3'],['1','7'],['7','1'],['4','9'],['9','4'],['0','6'],['6','0']];
+  for (let pos = 0; pos < 10; pos++) {
+    for (const [from, to] of subs) {
+      if (digits[pos] === from) {
+        const candidate = digits.slice();
+        candidate[pos] = to;
+        const str = candidate.join('');
+        if (isValidBCPHN(str)) {
+          return { phn: str, swaps: `pos ${pos}: ${from}→${to}` };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+//═══════════════════════════════════════════════════════════════════
+// Live PHN validation (wired to oninput)
+//═══════════════════════════════════════════════════════════════════
+function onPHNInput(el) {
+  const val = el.value.replace(/\D/g, '');
+  el.value = val;  // strip non-digits as user types
+  const badge = document.getElementById('phn-badge');
+  const note  = document.getElementById('phn-note');
+  const confirmBtn = document.getElementById('confirm-btn');
+
+  if (!val) {
+    // Empty — neutral, allow save
+    el.classList.remove('field-ok','field-err');
+    badge.style.display = 'none';
+    note.style.display  = 'none';
+    confirmBtn.disabled = false;
+    return;
+  }
+
+  if (val.length < 10) {
+    // Short — always red, always blocked
+    el.classList.remove('field-ok'); el.classList.add('field-err');
+    badge.className = 'phn-badge invalid';
+    badge.textContent = val.length + '/10'; badge.style.display = 'inline-block';
+    note.className = 'field-note err';
+    note.textContent = 'PHN incomplete — ' + val.length + ' of 10 digits (missing ' + (10 - val.length) + ')';
+    note.style.display = 'block';
+    confirmBtn.disabled = true;
+    return;
+  }
+
+  if (isValidBCPHN(val)) {
+    el.classList.remove('field-err'); el.classList.add('field-ok');
+    badge.className = 'phn-badge valid'; badge.textContent = '✓ Valid'; badge.style.display = 'inline-block';
+    note.style.display  = 'none';
+    confirmBtn.disabled = false;
+  } else {
+    el.classList.remove('field-ok'); el.classList.add('field-err');
+    badge.className = 'phn-badge invalid'; badge.textContent = '✗ Invalid'; badge.style.display = 'inline-block';
+    note.className = 'field-note err'; note.textContent = 'PHN checksum failed — please re-photograph or correct manually';
+    note.style.display = 'block';
+    confirmBtn.disabled = true;
+  }
+}
+
+//═══════════════════════════════════════════════════════════════════
 // Engine detection / loading
-//═════════════════════════════════════════════════════════════════════
+//═══════════════════════════════════════════════════════════════════
 async function detectEngine() {
   if ('TextDetector' in window) {
     try {
@@ -281,22 +401,23 @@ async function detectEngine() {
   engine = 'tesseract';
   document.getElementById('engine-badge').className = 'badge badge-engine-tess';
   document.getElementById('engine-badge').textContent = 'Tesseract.js';
-  showStatus('info', 'Loading Tesseract.js (one-time download, ~2 MB)…');
+  showStatus('info', 'Loading Tesseract.js (one-time ~2 MB)…');
   await loadTesseract();
 }
 
 async function loadTesseract() {
-  if (window.Tesseract) return;
+  if (tesseractWorker) return;
   return new Promise((resolve, reject) => {
     const s = document.createElement('script');
     s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
     s.onload = async () => {
       try {
         tesseractWorker = await Tesseract.createWorker('eng');
-        // Tune Tesseract for printed labels
+        // PSM 11 = sparse text (best for stickers with mixed layout)
+        // Whitelist: letters, digits, common sticker punctuation
         await tesseractWorker.setParameters({
-          tessedit_pageseg_mode: '6',  // assume uniform block of text
-          tessedit_char_blacklist: '|~`'
+          tessedit_pageseg_mode: '11',
+          tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 /.,:-()\'*#@'
         });
         hideStatus();
         resolve();
@@ -312,8 +433,9 @@ async function loadTesseract() {
 
 function setMode(m) {
   mode = m;
-  document.getElementById('mode-sticker').classList.toggle('active', m === 'sticker');
-  document.getElementById('mode-meditech').classList.toggle('active', m === 'meditech');
+  ['sticker','labvial','meditech'].forEach(id => {
+    document.getElementById('mode-' + id).classList.toggle('active', id === m);
+  });
   document.getElementById('meditech-fields').classList.toggle('hidden', m !== 'meditech');
 }
 
@@ -322,50 +444,40 @@ function showStatus(type, msg) {
   el.className = 'status show ' + type;
   el.textContent = msg;
 }
-function hideStatus() {
-  document.getElementById('status').className = 'status';
-}
+function hideStatus() { document.getElementById('status').className = 'status'; }
 function toast(msg) {
   const el = document.getElementById('toast');
   el.textContent = msg;
   el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 2000);
+  setTimeout(() => el.classList.remove('show'), 2500);
 }
 
-//═════════════════════════════════════════════════════════════════════
-// File handling
-//═════════════════════════════════════════════════════════════════════
+//═══════════════════════════════════════════════════════════════════
+// File / crop handling (unchanged from v0.2)
+//═══════════════════════════════════════════════════════════════════
 async function handleFile(event) {
   const file = event.target.files[0];
   if (!file) return;
   event.target.value = '';
-
   const dataUrl = await fileToDataURL(file);
   lastImageDataUrl = dataUrl;
-
-  // Show crop UI
   document.getElementById('crop-img').src = dataUrl;
   document.getElementById('crop-card').classList.remove('hidden');
   document.getElementById('fields-card').classList.add('hidden');
   document.getElementById('capture-card').classList.add('hidden');
-
-  // Initialise crop box once image loads
   document.getElementById('crop-img').onload = initCropBox;
 }
 
 function fileToDataURL(file) {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
-    r.onload = () => resolve(r.result);
+    r.onload  = () => resolve(r.result);
     r.onerror = reject;
     r.readAsDataURL(file);
   });
 }
 
-//═════════════════════════════════════════════════════════════════════
-// Crop UI — two-corner drag
-//═════════════════════════════════════════════════════════════════════
-let cropTL = { x: 0.05, y: 0.05 };  // fractional 0-1
+let cropTL = { x: 0.05, y: 0.05 };
 let cropBR = { x: 0.95, y: 0.95 };
 
 function initCropBox() {
@@ -388,28 +500,20 @@ function updateCropUI() {
   document.getElementById('handle-br').style.top  = y2 + 'px';
 
   const box = document.getElementById('crop-box');
-  box.style.left = x1 + 'px'; box.style.top = y1 + 'px';
-  box.style.width = (x2 - x1) + 'px'; box.style.height = (y2 - y1) + 'px';
+  box.style.left   = x1 + 'px'; box.style.top    = y1 + 'px';
+  box.style.width  = (x2 - x1) + 'px';
+  box.style.height = (y2 - y1) + 'px';
 
-  // Masks dim outside the crop
-  document.getElementById('mask-top').style.cssText =
-    `left:0;top:0;width:100%;height:${y1}px`;
-  document.getElementById('mask-bottom').style.cssText =
-    `left:0;top:${y2}px;width:100%;height:${h - y2}px`;
-  document.getElementById('mask-left').style.cssText =
-    `left:0;top:${y1}px;width:${x1}px;height:${y2 - y1}px`;
-  document.getElementById('mask-right').style.cssText =
-    `left:${x2}px;top:${y1}px;width:${w - x2}px;height:${y2 - y1}px`;
+  document.getElementById('mask-top').style.cssText    = `left:0;top:0;width:100%;height:${y1}px`;
+  document.getElementById('mask-bottom').style.cssText = `left:0;top:${y2}px;width:100%;height:${h - y2}px`;
+  document.getElementById('mask-left').style.cssText   = `left:0;top:${y1}px;width:${x1}px;height:${y2 - y1}px`;
+  document.getElementById('mask-right').style.cssText  = `left:${x2}px;top:${y1}px;width:${w - x2}px;height:${y2 - y1}px`;
 }
 
 function attachHandle(id, point) {
   const el = document.getElementById(id);
   let dragging = false;
-
-  function start(e) {
-    dragging = true;
-    e.preventDefault();
-  }
+  function start(e)  { dragging = true; e.preventDefault(); }
   function move(e) {
     if (!dragging) return;
     e.preventDefault();
@@ -421,7 +525,6 @@ function attachHandle(id, point) {
     nx = Math.max(0, Math.min(1, nx));
     ny = Math.max(0, Math.min(1, ny));
     point.x = nx; point.y = ny;
-    // Maintain corner ordering
     if (id === 'handle-tl') {
       if (point.x > cropBR.x - 0.05) point.x = cropBR.x - 0.05;
       if (point.y > cropBR.y - 0.05) point.y = cropBR.y - 0.05;
@@ -432,17 +535,15 @@ function attachHandle(id, point) {
     updateCropUI();
   }
   function end() { dragging = false; }
-
   el.addEventListener('touchstart', start, { passive: false });
-  el.addEventListener('touchmove', move, { passive: false });
-  el.addEventListener('touchend', end);
-  el.addEventListener('mousedown', start);
+  el.addEventListener('touchmove',  move,  { passive: false });
+  el.addEventListener('touchend',   end);
+  el.addEventListener('mousedown',  start);
   document.addEventListener('mousemove', move);
-  document.addEventListener('mouseup', end);
+  document.addEventListener('mouseup',   end);
 }
 
 async function runOCRWithCrop() {
-  // Crop the image to canvas using stored fractional coords
   const img = new Image();
   img.src = lastImageDataUrl;
   await new Promise(r => img.onload = r);
@@ -455,29 +556,24 @@ async function runOCRWithCrop() {
   const canvas = document.createElement('canvas');
   canvas.width = cw; canvas.height = ch;
   const ctx = canvas.getContext('2d');
-
-  // Apply contrast/grayscale preprocessing for better OCR
   ctx.drawImage(img, x1, y1, cw, ch, 0, 0, cw, ch);
+
+  // Preprocessing: grayscale + contrast boost
   const imageData = ctx.getImageData(0, 0, cw, ch);
   const d = imageData.data;
-  // Grayscale + contrast bump
   for (let i = 0; i < d.length; i += 4) {
     const lum = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
-    let v = lum;
-    // Boost contrast: stretch around 128
-    v = ((v - 128) * 1.4) + 128;
+    let v = ((lum - 128) * 1.5) + 128;  // slightly stronger contrast than v0.2
     v = Math.max(0, Math.min(255, v));
     d[i] = d[i+1] = d[i+2] = v;
   }
   ctx.putImageData(imageData, 0, 0);
 
-  lastCropDataUrl = canvas.toDataURL('image/jpeg', 0.92);
-
   document.getElementById('crop-card').classList.add('hidden');
-  showStatus('info', 'Running OCR (' + (engine === 'mlkit' ? 'native' : 'Tesseract') + ')…');
+  showStatus('info', 'Running OCR (' + (engine === 'mlkit' ? 'native ML Kit' : 'Tesseract') + ')…');
 
   try {
-    const rawText = await runOCR(lastCropDataUrl);
+    const rawText = await runOCR(canvas.toDataURL('image/jpeg', 0.92));
     lastRawText = rawText;
     const parsed = parseSticker(rawText);
     lastParsed = parsed;
@@ -498,9 +594,9 @@ function resetCapture() {
   hideStatus();
 }
 
-//═════════════════════════════════════════════════════════════════════
+//═══════════════════════════════════════════════════════════════════
 // OCR engines
-//═════════════════════════════════════════════════════════════════════
+//═══════════════════════════════════════════════════════════════════
 async function runOCR(dataUrl) {
   if (engine === 'mlkit') return runMLKit(dataUrl);
   return runTesseract(dataUrl);
@@ -523,113 +619,302 @@ async function runTesseract(dataUrl) {
 function loadImage(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.onload = () => resolve(img);
+    img.onload  = () => resolve(img);
     img.onerror = reject;
     img.src = src;
   });
 }
 
-//═════════════════════════════════════════════════════════════════════
-// Parser — anchor-based, with learned corrections
-//═════════════════════════════════════════════════════════════════════
+//═══════════════════════════════════════════════════════════════════
+// Parser — mode-dispatched
+//═══════════════════════════════════════════════════════════════════
 function parseSticker(rawText) {
+  if (mode === 'labvial') return parseLabVial(rawText);
+  return parseStickerOrHeader(rawText);
+}
+
+//─────────────────────────────────────────────────────────────────
+// Lab vial sticker parser
+// Layout:
+//   Line 1: LastName.FirstName Middle  (or LastName,FirstName)
+//   Line 2: KG######/## KG####### AGE
+//   Line 3: BD DD/MM/YYYY  HCN NNNNNNNNNN
+//   Line 4: MRP Lastname,Firstname  (ignore)
+//   Line 5: FAM Lastname,Firstname L:F  (sex here!)
+//   Line 6: SPEC ___ DD/MM/YY B:F     (NOT DOB — ignore)
+//─────────────────────────────────────────────────────────────────
+function parseLabVial(rawText) {
   lastParseLog = [];
   function log(msg) { lastParseLog.push(msg); }
+  log('Mode: lab vial');
 
+  const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+
+  // Name: first line, separator is . or ,
+  let last = '', first = '';
+  if (lines.length > 0) {
+    const nameLine = lines[0];
+    const sep = nameLine.search(/[.,]/);
+    if (sep > 0) {
+      last  = fixNameOCR(nameLine.slice(0, sep).trim());
+      // First name may have middle, take first token after separator
+      const afterSep = nameLine.slice(sep + 1).trim();
+      first = fixNameOCR(afterSep.split(/\s+/)[0] || afterSep);
+    } else {
+      last = fixNameOCR(nameLine);
+    }
+    log('Name line: ' + nameLine + ' → last=' + last + ' first=' + first);
+  }
+
+  // PHN: look for "HCN " followed by digits (NOT the KG-number which is MRN)
+  let phn = '';
+  const hcnMatch = rawText.match(/HCN\s+(\d[\d\s]{8,11})/i);
+  if (hcnMatch) {
+    phn = hcnMatch[1].replace(/\s/g, '');
+    if (phn.length > 10) phn = phn.slice(0, 10);
+    log('PHN from HCN anchor: ' + phn);
+  }
+
+  // DOB: look for "BD " followed by date (NOT SPEC line date)
+  // BD anchor is much more reliable than oldest-date heuristic for lab vials
+  let dob = '';
+  const bdMatch = rawText.match(/\bBD\s+(\d{1,2})[\/\-\s](\d{1,2}|\w{3})[\/\-\s](\d{4})/i);
+  if (bdMatch) {
+    const day = bdMatch[1].padStart(2,'0');
+    const month = normaliseMonthAny(bdMatch[2]);
+    const year = bdMatch[3];
+    if (month) { dob = day + '/' + month + '/' + year; log('DOB from BD anchor: ' + dob); }
+  }
+  // Fallback to DD/MM/YYYY on "BD" line
+  if (!dob) {
+    const bdLine = lines.find(l => /^BD\b/i.test(l));
+    if (bdLine) {
+      const m = bdLine.match(/(\d{1,2})\/(\d{2})\/(\d{4})/);
+      if (m) { dob = m[1].padStart(2,'0') + '/' + m[2] + '/' + m[3]; log('DOB fallback on BD line: ' + dob); }
+    }
+  }
+
+  // Sex: FAM line has L:F or L:M
+  let sex = '';
+  const famLine = lines.find(l => /\bFAM\b/i.test(l));
+  if (famLine) {
+    const sm = famLine.match(/L\s*[:.]\s*([MF])/i);
+    if (sm) { sex = sm[1].toUpperCase(); log('Sex from FAM line: ' + sex); }
+  }
+
+  // PHN checksum + rescue
+  let phnRescued = false, phnInvalid = false;
+  if (phn && phn.length === 10) {
+    if (!isValidBCPHN(phn)) {
+      const rescue = tryRescuePHN(phn);
+      if (rescue) {
+        log('PHN rescued via digit sub: ' + phn + ' → ' + rescue.phn + ' (' + rescue.swaps + ')');
+        phn = rescue.phn;
+        phnRescued = true;
+        autoCorrectHits++;
+      } else {
+        phnInvalid = true;
+        log('PHN checksum failed, no rescue found: ' + phn);
+      }
+    } else {
+      log('PHN checksum VALID');
+    }
+  }
+
+  return { last, first, phn, dob, sex, mrp: '', ward: '', room: '', phnClipped: false, phnRescued, phnInvalid };
+}
+
+//─────────────────────────────────────────────────────────────────
+// Dual-PHN reconciliation
+// hcnRaw = digits from HCN…INS span (may be < 10 if clipped)
+// bccRaw = digits from INS…BCC span (usually complete)
+// Returns { phn, confidence, clipped, rescued, invalid, note } or null
+//─────────────────────────────────────────────────────────────────
+function reconcileDualPHN(hcnRaw, bccRaw, log) {
+  const hcn = (hcnRaw || '').replace(/\D/g, '');
+  const bcc = (bccRaw || '').replace(/\D/g, '');
+
+  // Neither copy found
+  if (!hcn && !bcc) return null;
+
+  // Helper: validate + rescue a single candidate
+  function assess(raw, label) {
+    if (!raw || raw.length === 0) return null;
+    if (raw.length < 10) {
+      return { phn: raw, confidence: 'clipped', clipped: true, rescued: false, invalid: false,
+               note: label + ' short (' + raw.length + '/10 digits)' };
+    }
+    const s = raw.slice(0, 10);
+    if (isValidBCPHN(s)) {
+      return { phn: s, confidence: 'valid', clipped: false, rescued: false, invalid: false,
+               note: label + ' checksum OK' };
+    }
+    const rescue = tryRescuePHN(s);
+    if (rescue) {
+      return { phn: rescue.phn, confidence: 'rescued', clipped: false, rescued: true, invalid: false,
+               note: label + ' rescued (' + rescue.swaps + ')' };
+    }
+    return { phn: s, confidence: 'invalid', clipped: false, rescued: false, invalid: true,
+             note: label + ' checksum FAILED' };
+  }
+
+  const hcnA = assess(hcn, 'HCN copy');
+  const bccA = assess(bcc, 'BCC copy');
+
+  // ── Both copies present — cross-reference ────────────────────
+  if (hcnA && bccA) {
+
+    // Both full and match exactly — highest confidence
+    if (!hcnA.clipped && !bccA.clipped && hcnA.phn === bccA.phn && hcnA.confidence === 'valid') {
+      log('Both copies match and valid');
+      return { ...bccA, confidence: 'verified', note: 'Both copies match ✓' };
+    }
+
+    // BCC valid, use it (BCC is right-side copy, more reliably complete)
+    if (bccA.confidence === 'valid') {
+      if (hcnA.confidence !== 'valid') log('BCC valid; HCN copy discarded (' + hcnA.note + ')');
+      return { ...bccA, note: hcnA.confidence === 'valid' ? 'Both valid, using BCC' : 'BCC valid; HCN ' + hcnA.note };
+    }
+
+    // HCN valid, BCC not
+    if (hcnA.confidence === 'valid') {
+      log('HCN valid; BCC copy discarded (' + bccA.note + ')');
+      return { ...hcnA, note: 'HCN valid; BCC ' + bccA.note };
+    }
+
+    // BCC rescued, use it
+    if (bccA.confidence === 'rescued') return { ...bccA };
+
+    // HCN rescued
+    if (hcnA.confidence === 'rescued') return { ...hcnA };
+
+    // Both clipped — try to cross-stitch using INS as boundary
+    // HCN gives reliable prefix digits, BCC gives reliable suffix digits
+    if (hcnA.clipped && bccA.clipped) {
+      const hDigits = hcnA.phn, bDigits = bccA.phn;
+      for (let k = Math.max(0, hDigits.length - 4); k <= hDigits.length; k++) {
+        const candidate = hDigits.slice(0, k) + bDigits.slice(-(10 - k));
+        if (candidate.length === 10 && isValidBCPHN(candidate)) {
+          log('Cross-stitched: HCN[0:' + k + '] + BCC[-' + (10-k) + ':] = ' + candidate);
+          return { phn: candidate, confidence: 'reconstructed', clipped: false, rescued: true, invalid: false,
+                   note: 'Cross-stitched from both copies' };
+        }
+      }
+      log('Cross-stitch failed — both copies too short');
+    }
+
+    // Both clipped, can't reconstruct — use whichever is longer
+    const longer = hcn.length >= bcc.length ? hcnA : bccA;
+    return { ...longer, confidence: 'clipped' };
+  }
+
+  // ── Only one copy present ────────────────────────────────────
+  return hcnA || bccA;
+}
+
+//─────────────────────────────────────────────────────────────────
+// Wristband sticker + Meditech header parser
+//─────────────────────────────────────────────────────────────────
+function parseStickerOrHeader(rawText) {
+  lastParseLog = [];
+  function log(msg) { lastParseLog.push(msg); }
   log('Engine: ' + engine);
   log('Mode: ' + mode);
-  log('Raw text length: ' + rawText.length);
   log('');
 
-  // Apply learned global corrections to raw text first (cautious — only exact matches)
+  // Apply learned raw corrections
   const learned = loadCorrections();
   let text = rawText;
-  if (learned.rawSubs && learned.rawSubs.length) {
+  if (learned.rawSubs) {
     learned.rawSubs.forEach(sub => {
       if (text.includes(sub.from)) {
         text = text.split(sub.from).join(sub.to);
-        log('Applied learned raw correction: "' + sub.from + '" -> "' + sub.to + '"');
+        log('Learned raw correction: "' + sub.from + '" → "' + sub.to + '"');
         autoCorrectHits++;
       }
     });
   }
 
-  // ── PHN — anchor on BCC/WCB ──────────────────────────────────────
-  // Search the WHOLE text (not line by line) because OCR may split across lines
-  // Pattern: find BCC or WCB, walk left across whitespace, take 10 digits
-  let phn = '', phnClipped = false;
-  const bccMatch = text.match(/(\d{7,10})\s*(?:BCC|WCB|BCG|BCC\b|WCB\b)/i);
-  if (bccMatch) {
-    phn = bccMatch[1];
-    if (phn.length < 10) { phnClipped = true; phn = '*' + phn; }
-    log('PHN extracted via BCC anchor: ' + phn);
-  } else {
-    // Fallback — INS bookend
-    const insMatch = text.match(/(\d{10})\s*(?:INS|NS)\b/i);
-    if (insMatch) {
-      phn = insMatch[1];
-      log('PHN fallback from INS: ' + phn);
+  // ── PHN — dual-copy extraction ───────────────────────────────────
+  // Large-format KGH stickers print the PHN twice:
+  //   HCN  9xxxxxxxxx  INS  9xxxxxxxxx  BCC
+  //        ^ left copy       ^ right copy
+  // Both copies are identical. The left (HCN) copy is sometimes clipped
+  // by hole punch; the right (BCC) copy is more reliable.
+  // Strategy: extract both, cross-reference, use checksum to resolve.
+  //
+  // Also strip KG-prefixed MRN numbers (Meditech headers carry both).
+  const noKG = text.replace(/KG-?\s*\d{6,}/gi, '');
+  // Collapse intra-digit OCR spaces (runs twice to catch adjacent pairs)
+  const col = noKG.replace(/(\d)\s+(\d)/g, '$1$2').replace(/(\d)\s+(\d)/g, '$1$2');
+
+  // Extract left copy: digits between HCN and INS
+  let hcnRaw = null;
+  const hcnInsMatch = col.match(/HCN\s*(\d{7,12})\s*INS/i);
+  if (hcnInsMatch) {
+    hcnRaw = hcnInsMatch[1].slice(0, 10);
+    log('HCN copy raw: ' + hcnRaw + (hcnRaw.length < 10 ? ' [SHORT]' : ''));
+  }
+
+  // Extract right copy: digits between INS and BCC (most reliable)
+  let bccRaw = null;
+  const insBccMatch = col.match(/INS\s*(\d{7,12})\s*(?:BCC|WCB|BCG)\b/i);
+  if (insBccMatch) {
+    bccRaw = insBccMatch[1].slice(0, 10);
+    log('BCC copy raw: ' + bccRaw + (bccRaw.length < 10 ? ' [SHORT]' : ''));
+  }
+
+  // Fallback A: digits immediately before BCC (single-copy sticker or INS not found)
+  if (!bccRaw) {
+    const bccOnly = col.match(/(\d{7,12})\s*(?:BCC|WCB|BCG)\b/i);
+    if (bccOnly) {
+      bccRaw = bccOnly[1].slice(0, 10);
+      log('BCC-only fallback: ' + bccRaw);
     }
   }
 
-  // ── DOB — anchor on DD MMM YYYY pattern ──────────────────────────
-  // Loose month matching to handle OCR variants (Rpr, Apt, 4pr → Apr etc.)
-  const monthMap = {
-    'jan':'01','feb':'02','mar':'03','apr':'04','may':'05','jun':'06',
-    'jul':'07','aug':'08','sep':'09','oct':'10','nov':'11','dec':'12'
-  };
-  // Also accept common OCR variants
-  const monthVariants = {
-    'rpr':'04','apt':'04','4pr':'04','npr':'04',
-    'jvl':'07','ju1':'07','jvi':'07',
-    'fub':'02','feo':'02',
-    'oet':'10','ocl':'10',
-    'novn':'11',
-    'mqr':'03','tnar':'03',
-    'auq':'08','rug':'08',
-    'sup':'09','scp':'09'
-  };
+  // Reconcile both copies into a single best PHN
+  let phn = '', phnClipped = false, phnRescued = false, phnInvalid = false, phnNote = '';
 
-  function normaliseMonth(m) {
-    if (!m) return null;
-    const k = m.toLowerCase();
-    if (monthMap[k]) return monthMap[k];
-    if (monthVariants[k]) return monthVariants[k];
-    // Try removing single OCR errors: 0/o, 1/l, 8/b
-    const fuzzed = k.replace(/0/g,'o').replace(/1/g,'l').replace(/8/g,'b');
-    if (monthMap[fuzzed]) return monthMap[fuzzed];
-    return null;
+  const bestPHN = reconcileDualPHN(hcnRaw, bccRaw, log);
+  if (bestPHN) {
+    phn         = bestPHN.phn;
+    phnClipped  = bestPHN.clipped;
+    phnRescued  = bestPHN.rescued;
+    phnInvalid  = bestPHN.invalid;
+    phnNote     = bestPHN.note;
+    if (bestPHN.rescued) autoCorrectHits++;
+    log('PHN final: ' + phn + ' [' + bestPHN.confidence + '] ' + bestPHN.note);
+  } else {
+    log('PHN: NOT FOUND');
   }
 
-  // Find ALL DD MMM YYYY matches; DOB is the one with the OLDEST year
-  const dateRegex = /(\d{1,2})\s+([A-Za-z0-9]{3})\s+(\d{4})/g;
-  let dob = '';
-  let dobYear = 9999;
+  // ── DOB ──────────────────────────────────────────────────────────
+  const dateRegex = /(\d{1,2})\s+([A-Za-z0-9]{3,4})\s+(\d{4})/g;
+  let dob = '', dobYear = 9999;
   let m;
   while ((m = dateRegex.exec(text)) !== null) {
-    const day = m[1].padStart(2, '0');
-    const month = normaliseMonth(m[2]);
-    const year = m[3];
+    const day   = m[1].padStart(2, '0');
+    const month = normaliseMonthAny(m[2]);
+    const year  = m[3];
     if (month && year >= '1900' && year <= '2030') {
       const yn = parseInt(year);
       if (yn < dobYear) {
         dobYear = yn;
         dob = day + '/' + month + '/' + year;
-        log('DOB candidate: ' + dob + ' (from "' + m[0] + '")');
+        log('DOB candidate: ' + dob + ' from "' + m[0] + '"');
       } else {
-        log('Other date found (likely ADM): ' + day + '/' + month + '/' + year);
+        log('Other date (ADM?): ' + day + '/' + month + '/' + year);
       }
-    } else {
-      log('Date pattern matched but rejected: "' + m[0] + '" month="' + m[2] + '"');
     }
   }
   if (!dob) log('DOB: NOT FOUND');
 
-  // ── Lines for line-anchored extraction ──────────────────────────
+  // ── Lines for anchored extraction ────────────────────────────────
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
 
-  // ── Name — line above ACT KG anchor ─────────────────────────────
-  const ROUTING_CODES = /^(MOS|REN|AGG|EDC|ACIN|MHL|D MOS|ID MOS|D\s+MOS|ID\s+MOS)$/i;
+  // ── Name ─────────────────────────────────────────────────────────
+  const ROUTING = /^(MOS|REN|AGG|EDC|ACIN|MHL|D\s*MOS|ID\s*MOS)$/i;
   let actLineIdx = -1;
   for (let i = 0; i < lines.length; i++) {
     if (/ACT\s+KG\d/i.test(lines[i])) { actLineIdx = i; break; }
@@ -639,63 +924,63 @@ function parseSticker(rawText) {
   let nameRaw = '', nameClipped = false;
   if (actLineIdx > 0) {
     for (let i = actLineIdx - 1; i >= 0; i--) {
-      if (ROUTING_CODES.test(lines[i])) { log('Skip routing: ' + lines[i]); continue; }
+      if (ROUTING.test(lines[i])) { log('Skip routing: ' + lines[i]); continue; }
       if (/^[A-Z\s]{8,}$/.test(lines[i]) && !/[,.]/.test(lines[i])) {
         log('Skip header: ' + lines[i]); continue;
       }
       nameRaw = lines[i];
+      // Strip "ACT KG..." if it bled onto this line
+      nameRaw = nameRaw.replace(/\s*ACT\s+KG.*/i, '').trim();
       log('Name line: ' + nameRaw);
       break;
     }
   }
-  // Hole punch — name doesn't start with capital letter
-  if (nameRaw && !/^[A-Z]/.test(nameRaw)) {
+  if (nameRaw && !/^[A-Z*]/i.test(nameRaw)) {
     nameClipped = true;
-    log('Name clipped (does not start with capital)');
+    log('Name clipped (no leading capital)');
   }
 
   let last = '', first = '';
   if (nameRaw) {
     const sep = nameRaw.search(/[,.]/);
     if (sep > 0) {
-      last = nameRaw.slice(0, sep).trim();
+      last  = nameRaw.slice(0, sep).trim();
       first = nameRaw.slice(sep + 1).trim();
     } else {
       last = nameRaw.trim();
     }
-    last = stripLeadingNoise(fixNameOCR(last));
+    // Extract preferred name in brackets
+    const prefMatch = first.match(/\(([^)]+)\)/);
+    if (prefMatch) { first = prefMatch[1]; log('Preferred name used: ' + first); }
+    last  = stripLeadingNoise(fixNameOCR(last));
     first = stripLeadingNoise(fixNameOCR(first));
-    if (nameClipped && last) last = '*' + last;
+    if (nameClipped && last && !last.startsWith('*')) last = '*' + last;
   }
 
-  // ── Sex — L:M or L:F anchor ─────────────────────────────────────
+  // ── Sex ──────────────────────────────────────────────────────────
   let sex = '';
   const sexMatch = text.match(/L\s*[:.]\s*([MF])/i);
-  if (sexMatch) { sex = sexMatch[1].toUpperCase(); log('Sex from L: ' + sex); }
+  if (sexMatch) { sex = sexMatch[1].toUpperCase(); log('Sex: ' + sex); }
 
-  // ── MRP — find MRP line, classify as service or person ──────────
-  const KNOWN_SERVICES = [
-    'Cardiology','Hospitalist','CTU','ICU','CSICU','Cardiac Surgery',
+  // ── MRP ──────────────────────────────────────────────────────────
+  const KNOWN_SERVICES = ['Cardiology','Hospitalist','CTU','ICU','CSICU','Cardiac Surgery',
     'General Surgery','Orthopedics','Neurology','Nephrology','Internal Medicine',
-    'Respirology','GIM','Gastroenterology','Oncology','Palliative'
-  ];
+    'Respirology','GIM','Gastroenterology','Oncology','Palliative'];
   let mrp = '';
   for (const line of lines) {
-    if (/(?:^|\W)FAM\b/i.test(line)) continue; // skip family doctor line
+    if (/(?:^|\W)FAM\b/i.test(line)) continue;
     const mm = line.match(/(?:^|\W)MRP\b\s*(.+)$/i);
     if (mm) {
       const value = mm[1].trim();
       log('MRP raw: ' + value);
-      const matched = KNOWN_SERVICES.find(svc =>
-        value.toLowerCase().includes(svc.toLowerCase())
-      );
-      if (matched) { mrp = matched; log('MRP service: ' + matched); }
-      else { mrp = 'Other'; log('MRP person/unknown -> Other'); }
+      const matched = KNOWN_SERVICES.find(svc => value.toLowerCase().includes(svc.toLowerCase()));
+      mrp = matched || 'Other';
+      log('MRP: ' + mrp);
       break;
     }
   }
 
-  // ── Meditech ward/room ──────────────────────────────────────────
+  // ── Ward/room for Meditech header mode ──────────────────────────
   let ward = '', room = '';
   if (mode === 'meditech') {
     const dec = decodeMeditechLocation(lines);
@@ -704,16 +989,15 @@ function parseSticker(rawText) {
     if (room) log('Room: ' + room);
   }
 
-  // ── Apply learned field-level corrections ───────────────────────
-  const result = { last, first, phn, dob, sex, mrp, ward, room, nameClipped, phnClipped };
-
+  // ── Apply learned field corrections (name + MRP only — not PHN) ─
+  const result = { last, first, phn, dob, sex, mrp, ward, room, nameClipped, phnClipped, phnRescued, phnInvalid, phnNote };
   if (learned.fieldSubs) {
-    Object.keys(result).forEach(field => {
+    ['last','first','mrp'].forEach(field => {  // PHN excluded — patient-specific
       const subs = learned.fieldSubs[field];
       if (!subs || !result[field]) return;
       const hit = subs.find(s => s.from === result[field]);
       if (hit) {
-        log('Learned field correction: ' + field + ' "' + result[field] + '" -> "' + hit.to + '"');
+        log('Learned correction: ' + field + ' "' + result[field] + '" → "' + hit.to + '"');
         result[field] = hit.to;
         autoCorrectHits++;
       }
@@ -723,12 +1007,38 @@ function parseSticker(rawText) {
   return result;
 }
 
+//─────────────────────────────────────────────────────────────────
+// Shared helpers
+//─────────────────────────────────────────────────────────────────
+const MONTH_MAP = {
+  'jan':'01','feb':'02','mar':'03','apr':'04','may':'05','jun':'06',
+  'jul':'07','aug':'08','sep':'09','oct':'10','nov':'11','dec':'12'
+};
+const MONTH_VARIANTS = {
+  'rpr':'04','apt':'04','4pr':'04','npr':'04','arp':'04',
+  'jvl':'07','ju1':'07','jvi':'07','jui':'07',
+  'fub':'02','feo':'02','fe8':'02',
+  'oet':'10','ocl':'10','0ct':'10',
+  'novn':'11','nov':'11',
+  'mqr':'03','tnar':'03','mar':'03',
+  'auq':'08','rug':'08','aug':'08',
+  'sup':'09','scp':'09'
+};
+
+function normaliseMonthAny(m) {
+  if (!m) return null;
+  const k = m.toLowerCase().slice(0,4);
+  if (MONTH_MAP[k.slice(0,3)]) return MONTH_MAP[k.slice(0,3)];
+  if (MONTH_VARIANTS[k.slice(0,3)]) return MONTH_VARIANTS[k.slice(0,3)];
+  if (MONTH_VARIANTS[k]) return MONTH_VARIANTS[k];
+  // Fuzzy: 0→o, 1→l, 8→b
+  const fuzzed = k.replace(/0/g,'o').replace(/1/g,'l').replace(/8/g,'b');
+  return MONTH_MAP[fuzzed.slice(0,3)] || null;
+}
+
 function fixNameOCR(s) {
   if (!s) return s;
-  return s
-    .replace(/LL/g, 'tt')
-    .replace(/Lh/g, 'th')
-    .replace(/lh/g, 'th');
+  return s.replace(/LL/g,'tt').replace(/Lh/g,'th').replace(/lh/g,'th');
 }
 
 function stripLeadingNoise(s) {
@@ -752,60 +1062,99 @@ function decodeMeditechLocation(lines) {
     const rm = line.match(/KGH[A-Z]+(\d{4})\s*-?\s*([A-Z])?/);
     if (rm) {
       const num = rm[1], bed = rm[2] || '';
-      if (ward === 'CCU') {
-        room = String(parseInt(num.slice(2)));
-      } else if (num.startsWith('0')) {
-        room = num.replace(/^0+/, '') + bed;
-      } else {
-        room = num + bed;
-      }
+      if (ward === 'CCU') room = String(parseInt(num.slice(2)));
+      else if (num.startsWith('0')) room = num.replace(/^0+/, '') + bed;
+      else room = num + bed;
     }
   }
   return { ward, room };
 }
 
-//═════════════════════════════════════════════════════════════════════
-// Field UI
-//═════════════════════════════════════════════════════════════════════
+//═══════════════════════════════════════════════════════════════════
+// Populate fields + PHN validation UI
+//═══════════════════════════════════════════════════════════════════
 function populateFields(p) {
   document.getElementById('f-last').value  = p.last  || '';
   document.getElementById('f-first').value = p.first || '';
-  document.getElementById('f-phn').value   = p.phn   || '';
+  const rawPHN = (p.phn || '').replace(/^\*/, '');
+  document.getElementById('f-phn').value   = rawPHN;
   document.getElementById('f-dob').value   = p.dob   || '';
   document.getElementById('f-sex').value   = p.sex   || '';
   document.getElementById('f-mrp').value   = p.mrp   || '';
   document.getElementById('f-ward').value  = p.ward  || '';
   document.getElementById('f-room').value  = p.room  || '';
 
-  ['f-last','f-first','f-phn','f-dob','f-sex','f-mrp','f-ward','f-room'].forEach(id => {
-    document.getElementById(id).classList.remove('field-warn','field-corrected');
-  });
+  // Clear classes
+  ['f-last','f-first','f-dob','f-sex','f-mrp'].forEach(id =>
+    document.getElementById(id).classList.remove('field-warn','field-ok','field-err'));
 
+  // PHN — trigger live validation (handles empty, short, full valid/invalid)
+  onPHNInput(document.getElementById('f-phn'));
+
+  // Override display based on parser result
+  if (p.phnRescued) {
+    // Auto-fixed by digit substitution — show green with verify note
+    const el = document.getElementById('f-phn');
+    el.classList.remove('field-err'); el.classList.add('field-ok');
+    const badge = document.getElementById('phn-badge');
+    badge.className = 'phn-badge valid'; badge.textContent = '✓ Auto-fixed'; badge.style.display = 'inline-block';
+    const note = document.getElementById('phn-note');
+    note.className = 'field-note ok'; note.textContent = 'Digit corrected automatically — please verify';
+    note.style.display = 'block';
+    document.getElementById('confirm-btn').disabled = false;
+  } else if (p.phnClipped) {
+    // Short PHN — always red, always block confirm
+    const el = document.getElementById('f-phn');
+    el.classList.remove('field-ok'); el.classList.add('field-err');
+    const badge = document.getElementById('phn-badge');
+    badge.className = 'phn-badge invalid';
+    badge.textContent = el.value.length + '/10'; badge.style.display = 'inline-block';
+    const note = document.getElementById('phn-note');
+    note.className = 'field-note err';
+    note.textContent = 'PHN incomplete (' + el.value.length + ' digits) — re-photograph or enter manually';
+    note.style.display = 'block';
+    document.getElementById('confirm-btn').disabled = true;
+  }
+
+  // Build warning list
   const warnings = [];
-  if (p.nameClipped) { warnings.push('Name may be clipped'); document.getElementById('f-last').classList.add('field-warn'); }
-  if (p.phnClipped)  { warnings.push('PHN may be clipped'); document.getElementById('f-phn').classList.add('field-warn'); }
-  if (!p.last) warnings.push('No name extracted');
-  if (!p.phn)  warnings.push('No PHN extracted');
-  if (!p.dob)  warnings.push('No DOB extracted');
+  if (p.nameClipped) warnings.push({ type:'warn', msg:'Name may be clipped (hole punch)' });
+  if (p.phnClipped)  warnings.push({ type:'err',  msg:'PHN incomplete — only ' + (p.phn||'').replace(/\D/g,'').length + ' of 10 digits extracted' });
+  if (p.phnInvalid)  warnings.push({ type:'err',  msg:'PHN checksum failed — re-photograph or correct manually' });
+  if (!p.last)       warnings.push({ type:'warn', msg:'Name not extracted — check raw OCR output below' });
+  if (!p.dob)        warnings.push({ type:'warn', msg:'DOB not extracted' });
+  // Show reconciliation note if interesting
+  if (p.phnNote && p.phnNote !== 'BCC copy checksum OK' && p.phnNote !== 'Both copies match ✓') {
+    warnings.push({ type: p.phnRescued ? 'ok' : (p.phnClipped || p.phnInvalid ? 'err' : 'info'),
+                    msg: 'PHN: ' + p.phnNote });
+  }
 
   const warnEl = document.getElementById('field-warnings');
   if (warnings.length) {
     warnEl.innerHTML = warnings.map(w =>
-      '<div class="status warn show" style="margin: 4px 0">⚠ ' + w + '</div>'
+      '<div class="status ' + w.type + ' show" style="margin: 4px 0">' +
+      (w.type === 'err' ? '✗ ' : '⚠ ') + w.msg + '</div>'
     ).join('');
   } else {
     warnEl.innerHTML = '<div class="status ok show" style="margin: 4px 0">✓ All fields extracted — please verify</div>';
   }
 }
 
-//═════════════════════════════════════════════════════════════════════
+//═══════════════════════════════════════════════════════════════════
 // Confirm + learn corrections
-//═════════════════════════════════════════════════════════════════════
+//═══════════════════════════════════════════════════════════════════
 function confirmAndSave() {
+  const phnVal = document.getElementById('f-phn').value.trim();
+  // Final gate: don't allow save with invalid PHN (10 digits present but wrong checksum)
+  if (phnVal.length === 10 && !isValidBCPHN(phnVal)) {
+    toast('⚠ Fix PHN checksum before saving');
+    return;
+  }
+
   const final = {
     last:  document.getElementById('f-last').value.trim(),
     first: document.getElementById('f-first').value.trim(),
-    phn:   document.getElementById('f-phn').value.trim().replace(/\*/g,''),
+    phn:   phnVal,
     dob:   document.getElementById('f-dob').value.trim(),
     sex:   document.getElementById('f-sex').value,
     mrp:   document.getElementById('f-mrp').value,
@@ -813,20 +1162,19 @@ function confirmAndSave() {
     room:  document.getElementById('f-room').value.trim()
   };
 
-  // Diff against parsed → save corrections
   let learnedCount = 0;
   if (lastParsed) {
     const orig = {
       last:  (lastParsed.last  || '').replace(/^\*/, ''),
       first: lastParsed.first || '',
-      phn:   (lastParsed.phn   || '').replace(/^\*/, ''),
+      // PHN corrections are patient-specific — do NOT generalise
       dob:   lastParsed.dob   || '',
       sex:   lastParsed.sex   || '',
       mrp:   lastParsed.mrp   || '',
       ward:  lastParsed.ward  || '',
       room:  lastParsed.room  || ''
     };
-    Object.keys(final).forEach(field => {
+    ['last','first','dob','mrp','ward','room'].forEach(field => {
       if (orig[field] && final[field] && orig[field] !== final[field]) {
         saveFieldCorrection(field, orig[field], final[field]);
         learnedCount++;
@@ -834,10 +1182,10 @@ function confirmAndSave() {
     });
   }
 
-  // Save to session log
   scanCount++;
   savedItems.unshift({ ...final, ts: new Date().toLocaleTimeString(), learned: learnedCount });
   localStorage.setItem(LS_STATS, JSON.stringify({ scanCount, autoCorrectHits }));
+  document.getElementById('stat-pill').textContent = scanCount + ' scans · ' + autoCorrectHits + ' auto-fixes';
   renderSavedLog();
   renderLearningCard();
 
@@ -851,32 +1199,29 @@ function saveFieldCorrection(field, from, to) {
   const data = loadCorrections();
   if (!data.fieldSubs) data.fieldSubs = {};
   if (!data.fieldSubs[field]) data.fieldSubs[field] = [];
-  // Remove any existing rule for this exact 'from' to avoid duplicates
   data.fieldSubs[field] = data.fieldSubs[field].filter(s => s.from !== from);
   data.fieldSubs[field].push({ from, to, ts: Date.now() });
-  // Cap at 200 per field to keep storage sane
   if (data.fieldSubs[field].length > 200) data.fieldSubs[field] = data.fieldSubs[field].slice(-200);
   localStorage.setItem(LS_CORRECTIONS, JSON.stringify(data));
 }
 
 function loadCorrections() {
-  try {
-    return JSON.parse(localStorage.getItem(LS_CORRECTIONS) || '{}');
-  } catch (e) { return {}; }
+  try { return JSON.parse(localStorage.getItem(LS_CORRECTIONS) || '{}'); }
+  catch (e) { return {}; }
 }
 
 function loadStats() {
   try {
     const s = JSON.parse(localStorage.getItem(LS_STATS) || '{}');
-    scanCount = s.scanCount || 0;
+    scanCount       = s.scanCount       || 0;
     autoCorrectHits = s.autoCorrectHits || 0;
   } catch (e) {}
   document.getElementById('stat-pill').textContent = scanCount + ' scans · ' + autoCorrectHits + ' auto-fixes';
 }
 
-//═════════════════════════════════════════════════════════════════════
-// Saved log + learning dashboard
-//═════════════════════════════════════════════════════════════════════
+//═══════════════════════════════════════════════════════════════════
+// Session log + learning dashboard
+//═══════════════════════════════════════════════════════════════════
 function renderSavedLog() {
   const c = document.getElementById('log-card');
   if (!savedItems.length) { c.classList.add('hidden'); return; }
@@ -887,34 +1232,28 @@ function renderSavedLog() {
     '<span style="color: var(--text3)">@ ' + d.ts + '</span>' +
     (d.learned ? ' <span class="stat-pill" style="background:var(--green-bg);color:var(--green-t)">+' + d.learned + ' learned</span>' : '') +
     '<br><span style="color: var(--text2)">PHN ' + esc(d.phn) + ' · DOB ' + esc(d.dob) +
-    ' · ' + esc(d.sex) + ' · MRP: ' + esc(d.mrp || '—') +
-    (d.ward ? ' · ' + esc(d.ward) + ' ' + esc(d.room) : '') +
-    '</span></div>'
+    ' · ' + esc(d.sex) + (d.mrp ? ' · MRP: ' + esc(d.mrp) : '') +
+    (d.ward ? ' · ' + esc(d.ward) + ' ' + esc(d.room) : '') + '</span></div>'
   ).join('');
 }
 
 function renderLearningCard() {
   const data = loadCorrections();
   const c = document.getElementById('learning-card');
-  if (!data.fieldSubs || !Object.keys(data.fieldSubs).length) {
-    c.classList.add('hidden');
-    return;
-  }
+  const fieldSubs = data.fieldSubs || {};
+  if (!Object.keys(fieldSubs).length) { c.classList.add('hidden'); return; }
   c.classList.remove('hidden');
-  const counts = Object.entries(data.fieldSubs).map(([f, arr]) =>
-    f + ': ' + arr.length
-  ).join(' · ');
+  const counts = Object.entries(fieldSubs).map(([f, arr]) => f + ': ' + arr.length).join(' · ');
   document.getElementById('learning-stats').textContent = counts;
-
-  const list = Object.entries(data.fieldSubs).map(([f, arr]) =>
-    arr.map(s => f + ': "' + s.from + '" -> "' + s.to + '"').join('\n')
+  const list = Object.entries(fieldSubs).map(([f, arr]) =>
+    arr.map(s => f + ': "' + s.from + '" → "' + s.to + '"').join('\n')
   ).join('\n');
   document.getElementById('learning-list').textContent = list;
 }
 
-//═════════════════════════════════════════════════════════════════════
-// Debug bundle copy
-//═════════════════════════════════════════════════════════════════════
+//═══════════════════════════════════════════════════════════════════
+// Debug bundle
+//═══════════════════════════════════════════════════════════════════
 function copyDebugBundle() {
   const final = {
     last:  document.getElementById('f-last').value.trim(),
@@ -926,37 +1265,29 @@ function copyDebugBundle() {
     ward:  document.getElementById('f-ward').value.trim(),
     room:  document.getElementById('f-room').value.trim()
   };
-
   const orig = lastParsed || {};
   function diff(field) {
     const o = (orig[field] || '').replace(/^\*/, '');
     const f = final[field] || '';
     if (!o && !f) return null;
     if (o === f) return field + ': ' + (f || '(blank)') + ' [OK]';
-    return field + ': "' + o + '" -> "' + f + '" [CORRECTED]';
+    return field + ': "' + o + '" → "' + f + '" [CORRECTED]';
   }
-
   const bundle = [
-    '=== KGH OCR DEBUG #' + (scanCount + 1) + ' ===',
+    '=== KGH OCR DEBUG v0.3 #' + (scanCount + 1) + ' ===',
     'Engine:  ' + engine,
     'Mode:    ' + mode,
     'Time:    ' + new Date().toISOString(),
+    'PHN valid: ' + (final.phn.length === 10 ? isValidBCPHN(final.phn) : 'n/a (not 10 digits)'),
     '',
     '--- RAW OCR ---',
     lastRawText,
     '',
     '--- PARSED ---',
-    'last:    ' + (orig.last  || '(empty)'),
-    'first:   ' + (orig.first || '(empty)'),
-    'phn:     ' + (orig.phn   || '(empty)') + (orig.phnClipped ? ' [CLIPPED]' : ''),
-    'dob:     ' + (orig.dob   || '(empty)'),
-    'sex:     ' + (orig.sex   || '(empty)'),
-    'mrp:     ' + (orig.mrp   || '(empty)'),
-    'ward:    ' + (orig.ward  || '(empty)'),
-    'room:    ' + (orig.room  || '(empty)'),
+    JSON.stringify(orig, null, 2),
     '',
     '--- DOCTOR CORRECTIONS ---',
-    Object.keys(final).map(diff).filter(Boolean).join('\n'),
+    Object.keys(final).map(diff).filter(Boolean).join('\n') || '(none)',
     '',
     '--- PARSER LOG ---',
     lastParseLog.join('\n'),
@@ -966,29 +1297,22 @@ function copyDebugBundle() {
   navigator.clipboard.writeText(bundle).then(() => {
     toast('📋 Debug bundle copied — paste in chat');
   }).catch(() => {
-    // Fallback for browsers that block clipboard
     const ta = document.createElement('textarea');
     ta.value = bundle;
     document.body.appendChild(ta);
     ta.select();
     document.execCommand('copy');
     document.body.removeChild(ta);
-    toast('📋 Debug bundle copied');
+    toast('📋 Copied');
   });
 }
 
-//═════════════════════════════════════════════════════════════════════
+//═══════════════════════════════════════════════════════════════════
 // Export learning data
-//═════════════════════════════════════════════════════════════════════
+//═══════════════════════════════════════════════════════════════════
 function exportLearning() {
-  const data = loadCorrections();
-  const stats = { scanCount, autoCorrectHits };
-  const exported = {
-    exportedAt: new Date().toISOString(),
-    stats,
-    corrections: data
-  };
-  const text = JSON.stringify(exported, null, 2);
+  const data = { exportedAt: new Date().toISOString(), scanCount, autoCorrectHits, corrections: loadCorrections() };
+  const text = JSON.stringify(data, null, 2);
   navigator.clipboard.writeText(text).then(() => {
     toast('Learning data copied to clipboard');
   }).catch(() => {
@@ -1002,11 +1326,12 @@ function exportLearning() {
   });
 }
 
-//═════════════════════════════════════════════════════════════════════
+//═══════════════════════════════════════════════════════════════════
 // Helpers
-//═════════════════════════════════════════════════════════════════════
+//═══════════════════════════════════════════════════════════════════
 function esc(s) {
-  return String(s || '').replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+  return String(s || '').replace(/[<>&"]/g, c =>
+    ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
 }
 
 // Boot
@@ -1014,6 +1339,5 @@ loadStats();
 detectEngine();
 renderLearningCard();
 </script>
-
 </body>
 </html>
