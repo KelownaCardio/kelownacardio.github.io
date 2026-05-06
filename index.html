@@ -537,7 +537,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.75</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.76</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -6574,6 +6574,7 @@ async function init() {
     document.getElementById('sync-dot').title = 'Loading from Sheets…';
     try {
       await syncFromSheets();
+      render(); // re-render after claims load so green tints are correct
     } catch(e) {
       setSyncState('error');
     }
