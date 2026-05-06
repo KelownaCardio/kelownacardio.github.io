@@ -534,7 +534,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.64</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.65</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1832,6 +1832,21 @@ async function logoutAndRefresh() {
 
 async function push(action, body) {
   if (!SHEETS_URL) return;
+  // Guard: never push a patient or claim with no id — prevents blank row creation
+  if ((action === 'savePatient' || action === 'saveClaim') && (!body || !body.id)) {
+    console.warn('push blocked — no id on', action, body);
+    return;
+  }
+  // Guard: never push a structurally empty patient
+  if (action === 'savePatient' && body && !body.last && !body.first && !body.phn) {
+    console.warn('push blocked — empty patient record', body);
+    return;
+  }
+  // Guard: never push a structurally empty claim
+  if (action === 'saveClaim' && body && (!body.phn || !body.fee || !body.date)) {
+    console.warn('push blocked — empty claim record', body);
+    return;
+  }
   setSyncState('syncing');
   try {
     await fetch(SHEETS_URL + '?action=' + action + '&key=' + SHARED_KEY, {
