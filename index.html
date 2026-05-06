@@ -534,7 +534,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.61</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.62</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -2492,7 +2492,7 @@ function offRow(p) {
   var roomStr  = p.bed ? esc(p.bed) : (wardLabel(p.ward) || '—');
   var lastSeen = lastSeenByGroup(p);
   // Row 3: DOB · Age (Sex) · MRP
-  var dobStr   = p.dob ? esc(fmtClaimDate(p.dob)) : '';
+  var dobStr   = p.dob ? esc(dispDate(p.dob)) : '';
   var ageSex   = ageGenderShort(p);
   var row3     = (dobStr ? dobStr + ' &bull; ' : '') + esc(ageSex) + ' &bull; ' + mrpLabel(p) + lastBilledChip(p);
   return '<div class="alpha-row' + (dn ? ' done' : '') + '">' +
@@ -2544,8 +2544,8 @@ function calcAgeGender(p) {
   }
   // Format: DOB · AgeGender  e.g. "15/03/1948 · 77M"
   var ageGender = (age + (p.sex || '')) || '';
-  if (p.dob && ageGender) return esc(dobClean) + ' &bull; ' + ageGender;
-  if (p.dob)              return esc(dobClean);
+  if (p.dob && ageGender) return esc(dispDate(dobClean)) + ' &bull; ' + ageGender;
+  if (p.dob)              return esc(dispDate(dobClean));
   if (ageGender)          return ageGender;
   return '—';
 }
@@ -3877,7 +3877,7 @@ function deleteClaimBtn(btn) {
   var c   = st.claims.find(function(x) { return x.id === cid; });
   if (!c) return;
 
-  if (!confirm('Delete ' + getFeeLabel(c.fee) + ' on ' + c.date + '?')) return;
+  if (!confirm('Delete ' + getFeeLabel(c.fee) + ' on ' + dispDate(c.date) + '?')) return;
 
   st.claims = st.claims.filter(function(x) { return x.id !== cid; });
   sv('claims', st.claims);
@@ -3917,7 +3917,7 @@ function openPatientEdit(pid) {
   html += '</div>';
   html += '<div class="fl">';
   html += '<div class="f1"><label>PHN</label><input id="pe-phn" value="' + esc(p.phn||'') + '" inputmode="numeric" maxlength="10" autocorrect="off"></div>';
-  html += '<div class="f1"><label>DOB (DD/MM/YYYY)</label><input id="pe-dob" value="' + esc(p.dob||'') + '" autocorrect="off"></div>';
+  html += '<div class="f1"><label>DOB</label><input id="pe-dob" value="' + esc(p.dob||'') + '" autocorrect="off" placeholder="DD/MM/YYYY"></div>';
   html += '</div>';
   html += '<div class="fl">';
   html += '<div class="f1"><label>Sex</label><select id="pe-sex">' +
@@ -5696,7 +5696,7 @@ function renderSubmitted() {
       byDate[dk].map(function(c) {
         return '<div class="q-row" style="cursor:pointer" data-cid="' + esc(c.id) + '" onclick="editSubmittedClaim(this.dataset.cid)">' +
           '<div class="q-info"><div class="q-name">' + esc(c.last) + ', ' + esc(c.first) + '</div>' +
-          '<div class="q-sub">' + esc(c.date||'') + ' &bull; ' + esc(c.fee||'') + ' &times;' + (c.units||1) + ' &bull; ' + esc(c.alias||'') + '</div></div>' +
+          '<div class="q-sub">' + esc(dispDate(c.date)) + ' &bull; ' + esc(c.fee||'') + ' &times;' + (c.units||1) + ' &bull; ' + esc(c.alias||'') + '</div></div>' +
           '<div style="font-size:11px;color:var(--blue-t);flex-shrink:0;padding-left:8px">&#9998;</div></div>';
       }).join('');
   }).join('');
@@ -5772,7 +5772,7 @@ function renderExport() {
         return '<div class="q-row">' +
           '<div class="q-info">' +
             '<div class="q-name">' + esc(c.last) + ', ' + esc(c.first) + '</div>' +
-            '<div class="q-sub">' + c.date + ' &bull; ' + c.fee + ' &times;' + c.units + ' &bull; ' + (c.alias || '—') + '</div>' +
+            '<div class="q-sub">' + dispDate(c.date) + ' &bull; ' + c.fee + ' &times;' + c.units + ' &bull; ' + (c.alias || '—') + '</div>' +
           '</div>' +
           '<button class="del-btn" onclick="removeClaim(\'' + c.id + '\')">✕</button>' +
           '</div>';
@@ -6651,6 +6651,19 @@ function parseISODate(s) {
 function fmtD(d) {
   if (!d || isNaN(d)) return '';
   return pad(d.getDate()) + '/' + pad(d.getMonth()+1) + '/' + d.getFullYear();
+}
+
+// Display-only formatter: DD/MM/YYYY → "06 May 2026"
+// Storage and CSV export always use DD/MM/YYYY — this is UI display only.
+var _MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function dispDate(d) {
+  if (!d) return '';
+  var s = fmtClaimDate(d); // normalise to DD/MM/YYYY first
+  var p = s.split('/');
+  if (p.length !== 3) return s;
+  var mon = _MONTHS[parseInt(p[1], 10) - 1];
+  if (!mon) return s;
+  return p[0] + ' ' + mon + ' ' + p[2];
 }
 
 function parseDMY(s) {
