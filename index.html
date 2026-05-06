@@ -530,7 +530,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.37</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.38</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -2034,6 +2034,15 @@ function logChange(p, action, detail) {
   if (SHEETS_URL) push('logChange', entry);
 }
 
+// Returns true if any claim exists for this patient today from any doctor.
+// Drives the green card tint — claim-based, syncs across all devices.
+function claimedToday(p) {
+  if (!p || !p.phn) return false;
+  return st.claims.some(function(c) {
+    return c.phn === p.phn && c.date === TODAY;
+  });
+}
+
 // ── 05_render.js ──
 // ═══════════════════════════════════════════════════════
 // 05_render.js — Render rounds list (geo + alpha + off service)
@@ -2143,7 +2152,7 @@ function wardHtml(ward) {
   } else {
     h += '<div class="ward-list">';
     pts.forEach(function(p, i) {
-      var dn  = p.roundedToday === TODAY;
+      var dn  = claimedToday(p);
       // Circle label: bed # for CCU, room # for 2S/2W, index for others
       var pos = isCCU  ? (p.bed || (i+1))
               : isWard ? (p.bed || (i+1))
@@ -2306,7 +2315,7 @@ function ageGenderShort(p) {
 
 // Single off-service patient row
 function offRow(p) {
-  var dn       = p.roundedToday === TODAY;
+  var dn       = claimedToday(p);
   // Circle shows ward abbreviation for off-service
   var wardAbbr = wardLabel(p.ward).replace('Ward ', '').replace('ICU ', 'IC').slice(0, 5);
   // Row 2: room number (prominent) + last-seen chip
@@ -2326,12 +2335,12 @@ function offRow(p) {
         '</button>' +
       '</div>' +
       '<div style="display:flex;align-items:baseline;gap:7px;margin-top:1px;margin-bottom:2px">' +
-        '<span style="font-size:12px;font-weight:700;color:var(--text)">' + roomStr + '</span>' +
+        '<span style="font-size:14px;font-weight:700;color:var(--text)">' + roomStr + '</span>' +
         lastSeen +
       '</div>' +
       '<div class="wp-meta">' + row3 + '</div>' +
       '<div class="wp-acts">' + quickActBtns(p) +
-        '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
+        '<div style="width:100%"><button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button></div>' +
       '</div>' +
     '</div>' +
     '<div class="wp-side-btns">' +
@@ -2372,7 +2381,7 @@ function calcAgeGender(p) {
 }
 
 function alphaRow(p) {
-  var dn      = p.roundedToday === TODAY;
+  var dn      = claimedToday(p);
   var avCls   = wardAvCls(p.ward);
   // Circle shows ward abbreviation (same as off-service)
   var wardAbbr = wardLabel(p.ward).replace('Ward ', '').replace('ICU ', 'IC').slice(0, 5);
@@ -2651,15 +2660,19 @@ function quickDailyBtn(btn) {
 function quickDirectiveBtn(btn) {
   var pid = btn.getAttribute('data-pid');
   if (!checkDoc()) return;
+  // If already billed today — toggle off (undo), same as daily/CCU
+  if (alreadyBilledToday(pid, ['33006'])) {
+    if (unbillToday(pid, ['33006'])) {
+      showToast('Directive removed — ' + getP(pid).last);
+      render();
+    }
+    return;
+  }
   // Hard limit: 2 directives per week, no exceptions
   var cnt = dirCountThisWeek(getP(pid).phn);
   if (cnt >= 2) {
     showToast('2 directive visits already claimed this week');
     openPatientSummary(pid);
-    return;
-  }
-  if (alreadyBilledToday(pid, ['33006'])) {
-    showToast('Directive already claimed today for this patient');
     return;
   }
   // Required field check — open full form if missing
