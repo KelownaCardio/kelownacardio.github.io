@@ -60,9 +60,12 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 .ls-btn { flex:1; padding:7px 8px; font-size:12px; font-weight:600; text-align:center; cursor:pointer; border:none; border-radius:var(--rsm); color:var(--text2); background:none; font-family:inherit; transition:background .15s,color .15s; }
 .ls-btn.on { color:var(--kca-navy); background:var(--surface2); box-shadow:0 1px 3px rgba(0,0,0,.1); }
 .rounds-search-wrap { position:relative; }
-.rounds-search-wrap input { width:100%; padding:7px 10px 7px 28px; border:.5px solid var(--border2); border-radius:var(--rsm); font-size:13px; background:var(--surface2); font-family:inherit; outline:none; }
+.rounds-search-wrap input { width:100%; padding:7px 32px 7px 28px; border:.5px solid var(--border2); border-radius:var(--rsm); font-size:13px; background:var(--surface2); font-family:inherit; outline:none; }
 .rounds-search-wrap input:focus { border-color:#a8a0c8; background:var(--surface); }
 .rounds-search-ico { position:absolute; left:8px; top:50%; transform:translateY(-50%); width:13px; height:13px; stroke:var(--text3); fill:none; stroke-width:2; pointer-events:none; }
+.rounds-search-clear { position:absolute; right:4px; top:50%; transform:translateY(-50%); background:none; border:none; font-size:18px; line-height:1; color:var(--text3); cursor:pointer; padding:4px 8px; font-family:inherit; display:none; }
+.rounds-search-clear.on { display:block; }
+.rounds-search-clear:active { color:var(--text); }
 
 /* PANES */
 .pane { display:none; padding:10px 11px 30px; }
@@ -542,7 +545,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.95</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.02</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -588,7 +591,9 @@ input[type=file] { display:none; }
   </div>
   <div class="rounds-search-wrap">
     <svg class="rounds-search-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-    <input id="rounds-search" placeholder="Search patients…" oninput="roundsSearch(this.value)" autocorrect="off" autocomplete="off">
+    <input id="rounds-search" placeholder="Search active patients" oninput="roundsSearch(this.value)" autocorrect="off" autocomplete="off">
+    <button type="button" id="rounds-search-clear" class="rounds-search-clear" tabindex="-1"
+      onclick="clearRoundsSearch()" onpointerdown="event.preventDefault();clearRoundsSearch()" aria-label="Clear search">&times;</button>
   </div>
   <div class="view-tog" id="view-tog-bar">
     <button class="vt on" id="vt-geo" onclick="setView('geo')">
@@ -602,6 +607,7 @@ input[type=file] { display:none; }
 
 <!-- ═══ ROUNDS PANE ═══ -->
 <div class="pane on" id="p0">
+  <div id="search-view" style="display:none"></div>
   <div id="on-view">
     <div id="geo-view"></div>
     <div id="alpha-view" style="display:none"></div>
@@ -1502,7 +1508,7 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID = 'v2.95-2026-05-07';
+var BUILD_ID = 'v3.02-2026-05-07';
 
 (function purgeIfBuildChanged() {
   try {
@@ -2319,12 +2325,64 @@ function render() {
   if (onCount)  onCount.textContent  = on  ? '(' + on  + ')' : '';
   if (offCount) offCount.textContent = off ? '(' + off + ')' : '';
 
+  // Search overrides list selection — show unified results across On + Off Service
+  if (_roundsQuery) {
+    renderRoundsSearch();
+    return;
+  }
+
+  // Not searching: hide search-view, show appropriate list view
+  var searchView = document.getElementById('search-view');
+  var onView     = document.getElementById('on-view');
+  var offView    = document.getElementById('off-view');
+  if (searchView) searchView.style.display = 'none';
+  if (onView)     onView.style.display     = (_listView === 'on')  ? 'block' : 'none';
+  if (offView)    offView.style.display    = (_listView === 'off') ? 'block' : 'none';
+
   if (_listView === 'on') {
     if (_geoView === 'geo') renderGeo();
     else renderAlpha();
   } else {
     renderOff();
   }
+}
+
+// Unified search view across both On and Off Service lists
+function renderRoundsSearch() {
+  var searchView = document.getElementById('search-view');
+  var onView     = document.getElementById('on-view');
+  var offView    = document.getElementById('off-view');
+  if (searchView) searchView.style.display = 'block';
+  if (onView)     onView.style.display     = 'none';
+  if (offView)    offView.style.display    = 'none';
+
+  var matches = st.patients
+    .filter(function(p) {
+      if (p.discharged) return false;
+      var name = (p.last + ' ' + p.first).toLowerCase();
+      return name.indexOf(_roundsQuery) !== -1 || (p.phn || '').indexOf(_roundsQuery) !== -1;
+    })
+    .sort(function(a, b) { return a.last.localeCompare(b.last); });
+
+  if (!matches.length) {
+    searchView.innerHTML = '<div class="empty" style="padding:24px 0">No active patients matching &ldquo;' + esc(_roundsQuery) + '&rdquo;</div>';
+    return;
+  }
+
+  // Group by list for clarity
+  var onMatches  = matches.filter(function(p) { return p.list === 'on';  });
+  var offMatches = matches.filter(function(p) { return p.list === 'off'; });
+
+  var html = '';
+  if (onMatches.length) {
+    html += '<div class="sec-lbl">On Service (' + onMatches.length + ')</div>';
+    html += onMatches.map(alphaRow).join('');
+  }
+  if (offMatches.length) {
+    html += '<div class="sec-lbl" style="margin-top:10px">Off Service (' + offMatches.length + ')</div>';
+    html += offMatches.map(alphaRow).join('');
+  }
+  searchView.innerHTML = html;
 }
 
 // statBox removed — counts now shown in tab labels
@@ -2338,13 +2396,6 @@ function renderGeo() {
 
 function wardHtml(ward) {
   var pts   = st.patients.filter(function(p) { return p.ward === ward && p.list === 'on' && !p.discharged; });
-  // Apply rounds search filter if active
-  if (_roundsQuery) {
-    pts = pts.filter(function(p) {
-      return ((p.last + ' ' + p.first).toLowerCase().indexOf(_roundsQuery) !== -1) ||
-             (p.phn || '').indexOf(_roundsQuery) !== -1;
-    });
-  }
   var wdef  = WARDS[ward] || {};
   var isCCU = ward === 'CCU';
   var isWard = ward === '2S' || ward === '2W';
@@ -2433,14 +2484,8 @@ function wardHtml(ward) {
 // ── Alphabetical view ──────────────────────────────────
 function renderAlpha() {
   var on = st.patients
-    .filter(function(p) { return p.list === 'on' && !p.discharged; });
-  if (_roundsQuery) {
-    on = on.filter(function(p) {
-      return ((p.last + ' ' + p.first).toLowerCase().indexOf(_roundsQuery) !== -1) ||
-             (p.phn || '').indexOf(_roundsQuery) !== -1;
-    });
-  }
-  on = on.sort(function(a, b) { return a.last.localeCompare(b.last); });
+    .filter(function(p) { return p.list === 'on' && !p.discharged; })
+    .sort(function(a, b) { return a.last.localeCompare(b.last); });
   document.getElementById('alpha-view').innerHTML =
     on.length ? on.map(alphaRow).join('') : '<div class="empty">No on-service patients.</div>';
 }
@@ -2455,12 +2500,6 @@ function setOffView(v) {
 
 function renderOff() {
   var off = st.patients.filter(function(p) { return p.list === 'off' && !p.discharged; });
-  if (_roundsQuery) {
-    off = off.filter(function(p) {
-      return ((p.last + ' ' + p.first).toLowerCase().indexOf(_roundsQuery) !== -1) ||
-             (p.phn || '').indexOf(_roundsQuery) !== -1;
-    });
-  }
 
   var h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">' +
     '<div class="ward-lbl">Off Service</div>' +
@@ -3385,7 +3424,18 @@ function closeClaimScreen() {
 
 function roundsSearch(query) {
   _roundsQuery = (query || '').toLowerCase().trim();
+  var clearBtn = document.getElementById('rounds-search-clear');
+  if (clearBtn) clearBtn.classList.toggle('on', !!_roundsQuery);
+  // Hide geo/alpha toggle when searching (search shows unified flat list)
+  var vtBar = document.getElementById('view-tog-bar');
+  if (vtBar) vtBar.style.display = (!_roundsQuery && _listView === 'on') ? 'flex' : 'none';
   render();
+}
+
+function clearRoundsSearch() {
+  var input = document.getElementById('rounds-search');
+  if (input) { input.value = ''; input.focus(); }
+  roundsSearch('');
 }
 
 function initDischarged() {
@@ -3404,15 +3454,27 @@ function renderDischargedList(query) {
   // Normalise discharged flag
   st.patients.forEach(function(p) { p.discharged = parseBool(p.discharged); });
 
-  // Discharged patients within last 21 days (or all when searching)
-  var cutoff21 = Date.now() - (21 * 24 * 60 * 60 * 1000);
+  // Discharged patients — sorted by most recent first
   var pool = st.patients
     .filter(function(p) { return p.discharged; })
     .sort(function(a, b) { return (parseDischargedAt(b.dischargedAt)||0) - (parseDischargedAt(a.dischargedAt)||0); });
 
+  // Diagnostic: log a snapshot of discharge state
+  console.log('[discharged-list] total patients:', st.patients.length,
+              '| discharged:', pool.length,
+              '| sample:', pool.slice(0,3).map(function(p) {
+                return { name: p.last+', '+p.first, discharged: p.discharged,
+                         dischargedAt: p.dischargedAt, parsed: parseDischargedAt(p.dischargedAt) };
+              }));
+
+  // Within last 21 days (or all when searching)
+  // LENIENT: if dischargedAt is missing/invalid, still show the patient at the top
+  // (better than silently hiding them — likely a sync/timestamp glitch we'd want to see)
+  var cutoff21 = Date.now() - (21 * 24 * 60 * 60 * 1000);
   var recent = q ? pool : pool.filter(function(p) {
     var ms = parseDischargedAt(p.dischargedAt);
-    return ms && ms > cutoff21;
+    if (!ms) return true;            // no/invalid timestamp — show anyway
+    return ms > cutoff21;
   });
 
   if (q) {
@@ -3423,9 +3485,19 @@ function renderDischargedList(query) {
   }
 
   if (!recent.length) {
+    // Diagnostic: show what's in the pool to help debug
+    var debugInfo = '';
+    if (!q && pool.length) {
+      // Pool has discharged patients but none passed the date filter
+      debugInfo = '<div style="font-size:11px;color:var(--text3);margin-top:8px">' +
+        pool.length + ' discharged patient' + (pool.length === 1 ? '' : 's') +
+        ' in storage but none have a recent timestamp. Try searching for the name.</div>';
+    } else if (!q && !st.patients.length) {
+      debugInfo = '<div style="font-size:11px;color:var(--text3);margin-top:8px">No patients in storage. Sync may not have completed.</div>';
+    }
     container.innerHTML = q
       ? '<div class="empty" style="padding:18px 0 10px">No match for &ldquo;' + esc(query) + '&rdquo;</div>'
-      : '<div class="empty">No patients discharged in the last 21 days.</div>';
+      : '<div class="empty">No patients discharged in the last 21 days.</div>' + debugInfo;
     return;
   }
 
@@ -5764,6 +5836,12 @@ function removePatient(pid) {
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p); // update on sheets too
   render();
+  // If the discharged pane is currently visible, refresh it too
+  var dischPane = document.getElementById('p-discharged');
+  if (dischPane && dischPane.classList.contains('on')) {
+    var searchEl = document.getElementById('discharged-search');
+    renderDischargedList(searchEl ? searchEl.value : '');
+  }
 }
 
 function purgeOldPatients() {
@@ -6560,15 +6638,14 @@ function setList(v) {
   _listView = v;
   document.getElementById('ls-on').classList.toggle('on', v === 'on');
   document.getElementById('ls-off').classList.toggle('on', v === 'off');
-  document.getElementById('on-view').style.display  = v === 'on'  ? 'block' : 'none';
-  document.getElementById('off-view').style.display = v === 'off' ? 'block' : 'none';
-  // Show geo/alpha toggle only on On Service; hide on Off Service
+  // When search is active, search-view is shown; otherwise show on/off views per list
+  var searching = !!_roundsQuery;
+  document.getElementById('search-view').style.display = searching ? 'block' : 'none';
+  document.getElementById('on-view').style.display  = (!searching && v === 'on')  ? 'block' : 'none';
+  document.getElementById('off-view').style.display = (!searching && v === 'off') ? 'block' : 'none';
+  // Show geo/alpha toggle only on On Service AND when not searching
   var vtBar = document.getElementById('view-tog-bar');
-  if (vtBar) vtBar.style.display = v === 'on' ? 'flex' : 'none';
-  // Clear rounds search when switching lists
-  var rs = document.getElementById('rounds-search');
-  if (rs) rs.value = '';
-  _roundsQuery = '';
+  if (vtBar) vtBar.style.display = (!searching && v === 'on') ? 'flex' : 'none';
   render();
 }
 
