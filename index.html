@@ -119,8 +119,10 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 /* WARD LIST */
 .ward-list { display:flex; flex-direction:column; gap:5px; }
 .wp { display:flex; align-items:flex-start; gap:8px; padding:9px 10px; border:.5px solid var(--border); border-radius:var(--r); background:var(--surface); cursor:pointer; }
-.wp.done      { border-color:#7ec49a; background:var(--green-bg); }
-.wp.directive { border-color:#d4a84a; }
+.wp.done        { border-color:#7ec49a; background:var(--green-bg); }
+.wp.directive   { border-color:#d4a84a; }
+.wp.new-consult { border-color:#e8a0a0; background:#fff0f0; }
+.alpha-row.new-consult { border-color:#e8a0a0; background:#fff0f0; }
 .wp-pos { width:21px; height:21px; border-radius:50%; background:var(--surface2); display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:var(--text2); flex-shrink:0; margin-top:2px; }
 .wp-pos.done { background:var(--green-bg); color:var(--green-t); }
 .wp-pos-wrap { position:relative; flex-shrink:0; margin-top:2px; }
@@ -578,8 +580,7 @@ input[type=file] { display:none; }
 <div class="nav">
   <button class="nb on" onclick="nav(0,this)">Rounds</button>
   <button class="nb" onclick="nav(1,this)">Add patient</button>
-  <button class="nb" onclick="nav(2,this)">Recent patients</button>
-  <button class="nb" onclick="nav(3,this)">Export</button>
+  <button class="nb" onclick="nav(2,this)">Recently Discharged</button>
 </div>
 
 <!-- ═══ ROUNDS PANE ═══ -->
@@ -598,9 +599,9 @@ input[type=file] { display:none; }
   </div>
   <div id="off-view" style="display:none"><div id="off-list"></div></div>
   <!-- Meditech list import hidden in v1.10.0 - kept for future use, unhide by removing style="display:none" -->
-  <input type="file" id="mit-photo" accept="image/*" onchange="handleMediteachPhoto(this)">
-  <button class="mit-btn" style="margin-top:16px;display:none" onclick="document.getElementById('mit-photo').click()">
-    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Import from Meditech list
+  <input type="file" id="mit-photo" accept="image/*,application/pdf" onchange="handleMediteachPhoto(this)">
+  <button class="mit-btn" style="margin-top:16px" onclick="document.getElementById('mit-photo').click()">
+    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Import Meditech PDF or photo
   </button>
 </div>
 
@@ -812,7 +813,7 @@ input[type=file] { display:none; }
 <div class="pane" id="p-addclaim" style="padding-top:52px">
   <div class="search-wrap">
     <svg class="search-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-    <input id="addclaim-search" placeholder="Search name or PHN…"
+    <input id="addclaim-search" placeholder="Search discharged patients by name or PHN…"
       oninput="addClaimSearch(this.value)" autocorrect="off" autocomplete="off">
   </div>
   <div id="addclaim-results"></div>
@@ -2150,6 +2151,12 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime) 
   }
   st.claims.push(c);
   if (SHEETS_URL) push('saveClaim', c);
+  // Clear newConsult flag when first claim is filed — patient is now seen
+  var realP2 = st.patients.find(function(x) { return x.id === p.id; });
+  if (realP2 && realP2.newConsult) {
+    realP2.newConsult = false;
+    if (SHEETS_URL) push('savePatient', realP2);
+  }
   // If we back-filled refby/icd onto the patient object, persist to Sheets
   if (_patUpdated) {
     var realP = st.patients.find(function(x) { return x.id === p.id; });
@@ -2367,11 +2374,12 @@ function wardHtml(ward) {
     h += '<div class="ward-list">';
     pts.forEach(function(p, i) {
       var dn  = claimedToday(p);
+      var nc  = p.newConsult && !dn;
       // Circle label: bed # for CCU, room # for 2S/2W, index for others
       var pos = isCCU  ? (p.bed || (i+1))
               : isWard ? (p.bed || (i+1))
               :          (i+1);
-      h += '<div class="wp' + (dn ? ' done' : '') + '">' +
+      h += '<div class="wp' + (dn ? ' done' : nc ? ' new-consult' : '') + '">' +
            '<div class="wp-pos-wrap">' +
              '<div class="wp-pos' + (dn ? ' done' : '') + '" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(String(pos)) + '</div>' +
            '</div>' +
@@ -2384,7 +2392,7 @@ function wardHtml(ward) {
                  '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
                '</button>' +
              '</div>' +
-             '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + '</div>' +
+             '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + (nc ? ' &bull; <span style=\'color:var(--red-t);font-weight:700\'>New Consult</span>' : '') + '</div>' +
              '<div class="wp-acts">' +
                wardActBtns(p) +
                '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
@@ -2595,10 +2603,11 @@ function calcAgeGender(p) {
 
 function alphaRow(p) {
   var dn      = claimedToday(p);
+  var nc      = p.newConsult && !dn;
   var avCls   = wardAvCls(p.ward);
   // Circle shows ward abbreviation (same as off-service)
   var wardAbbr = wardLabel(p.ward).replace('Ward ', '').replace('ICU ', 'IC').slice(0, 5);
-  return '<div class="alpha-row' + (dn ? ' done' : '') + '">' +
+  return '<div class="alpha-row' + (dn ? ' done' : nc ? ' new-consult' : '') + '">' +
     '<div class="alpha-av ' + avCls + '" style="font-size:9px;font-weight:800;letter-spacing:-.3px" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(wardAbbr) + '</div>' +
     '<div class="wp-main">' +
       '<div class="wp-name-row">' +
@@ -2609,7 +2618,7 @@ function alphaRow(p) {
           '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
         '</button>' +
       '</div>' +
-      '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + lastBilledChip(p) + '</div>' +
+      '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + lastBilledChip(p) + (nc ? ' &bull; <span style=\'color:var(--red-t);font-weight:700\'>New Consult</span>' : '') + '</div>' +
       '<div class="wp-acts">' + quickActBtns(p) +
         '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
       '</div>' +
@@ -3351,65 +3360,41 @@ function renderAddClaimResults(query) {
     p.discharged = parseBool(p.discharged);
   });
 
-  // Active patients (on rounds list)
-  var active = st.patients.filter(function(p) { return !p.discharged; });
-
-  // Discharged patients — within last 21 days for the default list,
-  // but search covers ALL discharged patients regardless of age
+  // Recently discharged — all discharged:true patients with dischargedAt within last 21 days
   var cutoff21 = Date.now() - (21 * 24 * 60 * 60 * 1000);
-  var allDischarged = st.patients.filter(function(p) { return p.discharged && p.trueDischarge; })
+  var allDischarged = st.patients.filter(function(p) { return p.discharged; })
     .sort(function(a, b) { return (parseDischargedAt(b.dischargedAt)||0) - (parseDischargedAt(a.dischargedAt)||0); });
-  var recent = q ? allDischarged : allDischarged.filter(function(p) {
+  var recent = allDischarged.filter(function(p) {
     var ms = parseDischargedAt(p.dischargedAt);
-    return ms > cutoff21 || !ms; // show if within 21 days or no timestamp
+    return ms > cutoff21;
   });
 
-  var allPatients = active.concat(recent);
-
-  if (!allPatients.length) {
-    container.innerHTML =
-      '<div class="empty">No patients found.</div>' +
-      '<button class="btn btn-p" style="margin-top:8px" ' +
-        'onclick="nav(1,document.querySelectorAll(\'.nb\')[1])">Go to Add Patient</button>';
-    return;
-  }
-
-  // Filter by query if provided
-  if (q) {
-    allPatients = allPatients.filter(function(p) {
-      var name = (p.last + ' ' + p.first).toLowerCase();
-      return name.indexOf(q) !== -1 || (p.phn || '').indexOf(q) !== -1;
-    });
-  }
-
-  if (!allPatients.length) {
-    container.innerHTML =
-      '<div class="empty" style="padding:18px 0 10px">No patient matching &ldquo;' + esc(query) + '&rdquo;</div>' +
-      '<div style="font-size:12px;color:var(--text2);text-align:center;margin-bottom:12px">Patient may not be on the list yet.</div>' +
-      '<button class="btn btn-p" onclick="nav(1,document.querySelectorAll(\'.nb\')[1])">Add patient first</button>';
-    return;
-  }
+  // When searching, also include active patients so billing still works via search
+  var active = st.patients.filter(function(p) { return !p.discharged; });
 
   var html = '';
 
   if (!q) {
-    // Active patients — split pending / rounded
-    var pending = active.filter(function(p) { return p.roundedToday !== TODAY; });
-    var done    = active.filter(function(p) { return p.roundedToday === TODAY; });
-
-    if (pending.length) {
-      html += '<div class="sec-lbl">On rounds — not yet seen today</div>';
-      html += pending.map(function(p) { return addClaimRow(p); }).join('');
+    // Default view: recently discharged only
+    if (!recent.length) {
+      container.innerHTML = '<div class="empty">No recently discharged patients in the last 21 days.</div>';
+      return;
     }
-    if (done.length) {
-      html += '<div class="sec-lbl" style="margin-top:10px">On rounds — already seen today</div>';
-      html += done.map(function(p) { return addClaimRow(p); }).join('');
-    }
-    if (recent.length) {
-      html += '<div class="sec-lbl" style="margin-top:10px">Recently discharged</div>';
-      html += recent.map(function(p) { return addClaimRow(p); }).join('');
-    }
+    html += '<div class="sec-lbl">Discharged in last 21 days</div>';
+    html += recent.map(function(p) { return addClaimRow(p); }).join('');
   } else {
+    // Search mode: search across discharged + active for billing
+    var allPatients = active.concat(allDischarged).filter(function(p) {
+      var name = (p.last + ' ' + p.first).toLowerCase();
+      return name.indexOf(q) !== -1 || (p.phn || '').indexOf(q) !== -1;
+    });
+    if (!allPatients.length) {
+      container.innerHTML =
+        '<div class="empty" style="padding:18px 0 10px">No patient matching &ldquo;' + esc(query) + '&rdquo;</div>' +
+        '<div style="font-size:12px;color:var(--text2);text-align:center;margin-bottom:12px">Patient may not be on the list yet.</div>' +
+        '<button class="btn btn-p" onclick="nav(1,document.querySelectorAll(\'.nb\')[1])">Add patient first</button>';
+      return;
+    }
     html += allPatients.map(function(p) { return addClaimRow(p); }).join('');
   }
 
@@ -5781,14 +5766,14 @@ function removePatient(pid) {
 }
 
 function purgeOldPatients() {
-  // Keep all discharged patients — Recent Patients tab shows them with Restore button.
-  // Only purge if dischargedAt is somehow zero/invalid (data corruption guard).
-  // The 21-day local cache limit is removed: Sheets is the long-term store.
+  // Purge discharged patients after 21 days.
+  var cutoff21 = Date.now() - (21 * 24 * 60 * 60 * 1000);
   var before = st.patients.length;
   st.patients = st.patients.filter(function(p) {
-    if (!p.discharged) return true;         // active — always keep
+    if (!p.discharged) return true;                 // active — always keep
     var ms = parseDischargedAt(p.dischargedAt);
-    return ms > 0;                          // keep if valid timestamp; drop if corrupt
+    if (!ms) return false;                          // corrupt/missing timestamp — drop
+    return ms > cutoff21;                           // keep if within 21 days
   });
   if (st.patients.length < before) {
     sv('patients', st.patients);
@@ -6341,39 +6326,34 @@ function parseLocCode(locCode, roomBed) {
   return { ward:ward, room:room };
 }
 
-// Infer On/Off service and care type from ward and attending provider string
+// Returns true if attending string refers to Cardiology or a named cardiologist from DOCTORS list
+function isCardioAttending(attending) {
+  if (!attending) return false;
+  var att = attending.toLowerCase();
+  if (att.indexOf('cardiology') !== -1) return true;
+  // Check against last names of all configured doctors
+  return (DOCTORS || []).some(function(d) {
+    var fullName = (d.name || '').toLowerCase().replace(/^dr\.?\s*/i, '').trim();
+    var parts = fullName.split(/\s+/);
+    var last = parts[parts.length - 1];
+    return last && last.length > 2 && att.indexOf(last) !== -1;
+  });
+}
+
 function inferMRP(attending) {
   var att = (attending || '').toLowerCase();
-  if (att.indexOf('cardiology') !== -1 || att.indexOf('wan,') !== -1 ||
-      att.indexOf('soon,') !== -1 || att.indexOf('brown,') !== -1 ||
-      att.indexOf('patton,') !== -1 || att.indexOf('hoskin,') !== -1 ||
-      att.indexOf('massie,') !== -1 || att.indexOf('sodhi,') !== -1)
-    return 'Cardiology';
-  if (att.indexOf('hospitalist') !== -1 || att.indexOf('internal med') !== -1)
-    return 'Hospitalist';
-  if (att.indexOf('ctu') !== -1 || att.indexOf('clinical teach') !== -1)
-    return 'CTU';
-  if (att.indexOf('csicu') !== -1 || att.indexOf('cardiac surg') !== -1)
-    return 'Cardiac Surgery';
-  if (att.indexOf('icu') !== -1 || att.indexOf('critical care') !== -1)
-    return 'ICU';
+  if (isCardioAttending(attending)) return 'Cardiology';
+  if (att.indexOf('hospitalist') !== -1 || att.indexOf('internal med') !== -1) return 'Hospitalist';
+  if (att.indexOf('ctu') !== -1 || att.indexOf('clinical teach') !== -1) return 'CTU';
+  if (att.indexOf('csicu') !== -1 || att.indexOf('cardiac surg') !== -1) return 'Cardiac Surgery';
+  if (att.indexOf('icu') !== -1 || att.indexOf('critical care') !== -1) return 'ICU';
   return '';
 }
 
 function inferCare(ward, attending) {
-  var att = (attending || '').toLowerCase();
-  var isCardioMRP =
-    att.indexOf('cardiologymrp') !== -1 ||
-    att.indexOf('wan,')          !== -1 ||
-    att.indexOf('soon,')         !== -1 ||
-    att.indexOf('brown,')        !== -1 ||
-    att.indexOf('patton,')       !== -1 ||
-    att.indexOf('hoskin,')       !== -1 ||
-    att.indexOf('massie,')       !== -1 ||
-    att.indexOf('sodhi,')        !== -1;
-
-  if (isCardioMRP && (ward === '2S' || ward === '2W' || ward === 'CCU' || ward === 'CSICU' || ward === 'ICUA' || ward === 'ICUB')) {
-    return { list:'on', care: (ward === 'CCU' || ward === 'CSICU' || ward === 'ICUA' || ward === 'ICUB') ? 'ccu' : 'daily', role:'mrp' };
+  if (isCardioAttending(attending)) {
+    var isCCUWard = (ward === 'CCU' || ward === 'CSICU' || ward === 'ICUA' || ward === 'ICUB');
+    return { list:'on', care: isCCUWard ? 'ccu' : 'daily', role:'mrp' };
   }
   var w = WARDS[ward] || {};
   return { list: w.list || 'off', care: w.care || 'directive', role:'consultant' };
@@ -6383,24 +6363,83 @@ function inferCare(ward, attending) {
 function handleMediteachPhoto(inp) {
   var file = inp.files[0]; if (!file) return;
   inp.value = '';
+  var isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
   var reader = new FileReader();
   reader.onload = function(e) {
-    openCropModal(e.target.result, 'meditech', function(croppedDataUrl) {
-      var status = document.getElementById('mit-status');
-      status.style.display  = 'block';
-      status.className      = 'ocr-bar ocr-ok';
-      status.textContent    = 'Reading Meditech list…';
-      document.getElementById('mit-rows').innerHTML    = '';
-      document.getElementById('mit-sum').style.display = 'none';
-      document.getElementById('mit-actions').style.display = 'none';
-      showModal('mit-modal');
-      extractMediteachAI(croppedDataUrl);
-    }, function() { /* cancelled — do nothing */ });
+    var status = document.getElementById('mit-status');
+    status.style.display = 'block';
+    status.className     = 'ocr-bar ocr-ok';
+    status.textContent   = isPDF ? 'Reading Meditech PDF…' : 'Reading Meditech photo…';
+    document.getElementById('mit-rows').innerHTML    = '';
+    document.getElementById('mit-sum').style.display = 'none';
+    document.getElementById('mit-actions').style.display = 'none';
+    showModal('mit-modal');
+    if (isPDF) {
+      // Send PDF directly — no crop needed
+      var b64 = e.target.result.split(',')[1];
+      extractMediteachPDF(b64);
+    } else {
+      openCropModal(e.target.result, 'meditech', function(croppedDataUrl) {
+        extractMediteachImage(croppedDataUrl);
+      }, function() { hideModal('mit-modal'); });
+    }
   };
   reader.readAsDataURL(file);
 }
 
-async function extractMediteachAI(dataUrl) {
+// Parse the structured Meditech PDF text format
+async function extractMediteachPDF(b64) {
+  var status = document.getElementById('mit-status');
+  var PROMPT =
+    'This is a Meditech SB Rounds List PDF from Kelowna General Hospital (KGH).\n' +
+    'Extract EVERY patient. Each patient block has this structure:\n' +
+    '  Line 1: LOCATION_CODE  ROOM_BED_CODE\n' +
+    '  Line 2: Name (LastName,FirstName ...) then F or M, age, DOB (DD/MM/YYYY)\n' +
+    '  Health Care Num: <10-digit PHN>\n' +
+    '  MRP: <MRP service>\n' +
+    '  Admit Date/Time: DD/MM/YY HH:MM\n' +
+    '  LOS: <number>\n' +
+    '  Reason for Visit: <diagnosis>\n\n' +
+    'Return ONLY a JSON array, no markdown. Each element:\n' +
+    '{"last":"","first":"","sex":"","age":"","dob":"","phn":"","locationCode":"","roomBed":"","mrp":"","reason":"","los":"","admitDate":""}\n\n' +
+    'Field rules:\n' +
+    '  last/first: split on first comma in name\n' +
+    '  dob: DD/MM/YYYY format\n' +
+    '  phn: 10 digits, Health Care Num field\n' +
+    '  locationCode: the KELKGH... code e.g. KELKGHSCCU, KELKGHS2S, KELKGHS2W, KELKGHR4A\n' +
+    '  roomBed: the KGHS... code e.g. KGHS2502-A, KGHS0224-A, KGHR4007-A\n' +
+    '  mrp: exact MRP field value e.g. "CardiologyMRP,KGH Kelowna", "Hospitalist,KGH"\n' +
+    '  reason: Reason for Visit field\n' +
+    '  los: LOS number as string\n' +
+    '  admitDate: DD/MM/YYYY from Admit Date/Time\n' +
+    'Return ONLY the JSON array.';
+
+  try {
+    var resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 8000,
+        messages: [{ role:'user', content: [
+          { type:'document', source:{ type:'base64', media_type:'application/pdf', data:b64 } },
+          { type:'text', text: PROMPT }
+        ]}]
+      })
+    });
+    var data = await resp.json();
+    var text = (data.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
+    var parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
+    if (!Array.isArray(parsed)) parsed = [parsed];
+    renderMediteachPreview(parsed);
+  } catch(e) {
+    status.className   = 'ocr-bar ocr-warn';
+    status.textContent = 'Could not parse PDF — ' + e.message;
+  }
+}
+
+// Parse a photo of a Meditech list (existing image OCR flow)
+async function extractMediteachImage(dataUrl) {
   var status = document.getElementById('mit-status');
   try {
     var b64 = dataUrl.split(',')[1];
@@ -6410,135 +6449,329 @@ async function extractMediteachAI(dataUrl) {
       headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 2000,
+        max_tokens: 4000,
         messages: [{ role:'user', content: [
           { type:'image', source:{ type:'base64', media_type:mt, data:b64 } },
           { type:'text', text:
-            'Meditech rounds list from Kelowna General Hospital (KGH). Extract EVERY patient row visible.\n\n' +
-            'Return a JSON array. Each object must have exactly these fields:\n' +
-            '  last, first, sex, age, locationCode, roomBed, reason, attending, los\n\n' +
-            'locationCode = top line of first column e.g. "KELKGHSCCU", "KELKGHS2W", "KELKGHS2S", "KELKGHS3E"\n' +
-            'roomBed      = second line of first column e.g. "KGHS2502-A", "KGHS0201-A", "KGHS0225-B"\n' +
-            'first        = use preferred name in brackets if shown e.g. "(Steve)" → "Steve"\n' +
-            'reason       = full text, do not truncate\n\n' +
-            'KGH reference:\n' +
-            '  CCU  = KELKGHSCCU, rooms KGHS2502-A (2502 = Bed 2, 2506 = Bed 6 etc.)\n' +
-            '  2W   = KELKGHS2W,  rooms KGHS0201-A to KGHS0213-A\n' +
-            '  2S   = KELKGHS2S,  rooms KGHS0217-A to KGHS0234-B (225 and 226 have A and B)\n' +
-            '  Other location codes = off-service ward\n\n' +
-            'Return ONLY a JSON array, no markdown, no explanation.'
+            'Meditech SB Rounds List from Kelowna General Hospital (KGH). Extract EVERY patient.\n\n' +
+            'Return ONLY a JSON array. Each element:\n' +
+            '{"last":"","first":"","sex":"","age":"","dob":"","phn":"","locationCode":"","roomBed":"","mrp":"","reason":"","los":"","admitDate":""}\n\n' +
+            'locationCode = KELKGH... code in first column (e.g. KELKGHSCCU, KELKGHS2W)\n' +
+            'roomBed      = KGHS.../KGHR... code (e.g. KGHS2502-A, KGHR4007-A)\n' +
+            'mrp          = exact MRP field (e.g. "CardiologyMRP,KGH Kelowna", "Hospitalist,KGH")\n' +
+            'phn          = 10-digit Health Care Num\n' +
+            'dob          = DD/MM/YYYY\n' +
+            'admitDate    = DD/MM/YYYY from Admit Date/Time\n' +
+            'Return ONLY the JSON array, no markdown.'
           }
         ]}]
       })
     });
     var data = await resp.json();
-    var text = data.content.filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
+    var text = (data.content || []).filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
     var parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
     if (!Array.isArray(parsed)) parsed = [parsed];
     renderMediteachPreview(parsed);
   } catch(e) {
-    status.className  = 'ocr-bar ocr-warn';
-    status.textContent = 'Could not read list — try a clearer photo, or add patients manually.';
+    status.className   = 'ocr-bar ocr-warn';
+    status.textContent = 'Could not read photo — try a clearer image.';
   }
 }
 
 function renderMediteachPreview(patients) {
   var status = document.getElementById('mit-status');
 
+  function nameKey(last, first) {
+    return (last || '').toLowerCase().trim() + ',' + (first || '').toLowerCase().trim().split(' ')[0];
+  }
+
   _mitPats = patients.map(function(p, i) {
     var loc  = parseLocCode(p.locationCode, p.roomBed);
     var care = inferCare(loc.ward, p.attending);
     var icd  = diagToIcd(p.reason);
-    var existing = !!st.patients.find(function(ep) {
-      return ep.last.toLowerCase() === (p.last || '').toLowerCase() &&
-             ep.first.toLowerCase().split(' ')[0] === (p.first || '').toLowerCase().split(' ')[0];
-    });
-    var _mrp = care.role === 'consultant' ? inferMRP(p.attending) : '';
+    var _mrp = inferMRP(p.attending);
+
+    // Determine if this is a CardiologyMRP patient from the MRP field
+    var mrpRaw = (p.mrp || '').trim();
+    var isCardiologyMRP = mrpRaw === 'CardiologyMRP,KGH Kelowna' ||
+                          mrpRaw === 'CardiologyMRP,KGH' ||
+                          mrpRaw.toLowerCase().indexOf('cardiologymrp') !== -1;
+
+    // Match existing patient: PHN first (most reliable), then name
+    var existing = null;
+    var cleanPHN = String(p.phn || '').replace(/\D/g,'');
+    if (cleanPHN.length >= 9) {
+      existing = st.patients.find(function(ep) {
+        var epPHN = String(ep.phn || '').replace(/\D/g,'');
+        return epPHN && epPHN === cleanPHN;
+      });
+    }
+    if (!existing) {
+      existing = st.patients.find(function(ep) {
+        return nameKey(ep.last, ep.first) === nameKey(p.last, p.first);
+      });
+    }
+
+    // Rule 1: Existing patient in app → update ward/bed if location changed. Regardless of MRP.
+    // Rule 2: New patient, MRP = CardiologyMRP → import as new consult on-service.
+    // Rule 3: Everything else (consults, hospitalist, etc.) → ignore.
+
+    var action, locationChanged = false;
+    if (existing) {
+      action = 'update';
+      locationChanged = (existing.ward !== loc.ward || existing.bed !== loc.room);
+    } else if (isCardiologyMRP) {
+      action = 'import';
+    } else {
+      action = 'ignore';
+    }
+
     return Object.assign({}, p, {
-      _idx: i, _ward: loc.ward, _room: loc.room,
+      _idx: i,
+      _ward: loc.ward, _room: loc.room,
       _list: care.list, _care: care.care, _role: care.role,
-      _icd: icd, _mrp: _mrp, _include: !existing, _existing: existing
+      _icd: icd, _mrp: _mrp,
+      _action: action,
+      _existingId: existing ? existing.id : null,
+      _locationChanged: locationChanged
     });
   });
 
-  var onCnt  = _mitPats.filter(function(p) { return p._list === 'on'  && p._include; }).length;
-  var offCnt = _mitPats.filter(function(p) { return p._list === 'off' && p._include; }).length;
-  var exCnt  = _mitPats.filter(function(p) { return p._existing; }).length;
+  var allMatchedPrev = _mitPats.filter(function(p) { return p._action === 'update'; });
+  var locationChangedPrev = allMatchedPrev.filter(function(p) { return p._locationChanged; });
+  var importPats   = _mitPats.filter(function(p) { return p._action === 'import'; });
+  var ignoreCnt    = _mitPats.filter(function(p) { return p._action === 'ignore'; }).length;
 
-  status.textContent = 'Found ' + _mitPats.length + ' patients — ' + onCnt + ' on service, ' + offCnt + ' off service.';
+  // Pre-compute 2-of-3 confidence for preview display
+  allMatchedPrev.forEach(function(p) {
+    var ep = st.patients.find(function(x) { return x.id === p._existingId; });
+    if (!ep) { p._highConf = false; return; }
+    var mitPHN  = String(p.phn  || '').replace(/\D/g, '');
+    var epPHN   = String(ep.phn || '').replace(/\D/g, '');
+    var mitLast = (p.last  || '').toLowerCase().trim();
+    var epLast  = (ep.last || '').toLowerCase().trim();
+    var mitDOB  = p.dob  ? fmtClaimDate(p.dob)  : '';
+    var epDOB   = ep.dob ? fmtClaimDate(ep.dob) : '';
+    var score = ((mitPHN && epPHN && mitPHN === epPHN) ? 1 : 0) +
+                ((mitLast && epLast && mitLast === epLast) ? 1 : 0) +
+                ((mitDOB && epDOB && mitDOB === epDOB) ? 1 : 0);
+    p._highConf = score >= 2;
+    p._matchScore = score;
+  });
+
+  status.textContent = 'Found ' + _mitPats.length + ' patients — ' +
+    allMatchedPrev.length + ' matched, ' +
+    importPats.length + ' new Cardiology MRP, ' +
+    ignoreCnt + ' ignored.';
 
   var sumEl = document.getElementById('mit-sum');
   sumEl.style.display = 'block';
   sumEl.innerHTML = '<div class="imp-sum">' +
-    _mitPats.length + ' patients &bull; ' + onCnt + ' on service &bull; ' + offCnt + ' off service' +
-    (exCnt ? ' &bull; ' + exCnt + ' already on list (skipped)' : '') +
+    '<b>' + locationChangedPrev.length + '</b> location update(s)' +
+    ' &bull; <b>' + importPats.length + '</b> new Cardiology MRP' +
+    ' &bull; ' + ignoreCnt + ' non-Cardiology (ignored)' +
     '</div>';
 
-  document.getElementById('mit-rows').innerHTML = _mitPats.map(function(p) {
-    return '<div class="imp-row' + (p._existing ? ' existing' : '') + '" id="imp-row-' + p._idx + '">' +
-      '<div class="imp-chk' + (p._include ? ' on' : '') + '" id="imp-chk-' + p._idx + '" onclick="toggleImpRow(' + p._idx + ')">' +
-        (p._include ? '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>' : '') +
-      '</div>' +
-      '<div class="imp-info">' +
-        '<div class="imp-name">' + esc(p.last) + ', ' + esc(p.first) +
-          (p._existing ? ' <span style="color:var(--green-t);font-size:10px;font-weight:700">already on list</span>' : '') +
-        '</div>' +
-        '<div class="imp-meta">' + esc(p.attending || '') + (p._room ? ' Rm ' + p._room : '') +
-          ' &bull; Age ' + (p.age || '?') + ' ' + (p.sex || '') + ' &bull; ' + esc(p.los || '') + '</div>' +
-        '<div class="imp-meta" style="color:var(--text)">Dx: ' + esc(p.reason || '') + '</div>' +
-        '<div class="imp-badges">' +
-          '<span class="chip ' + (p._list === 'on' ? 'chip-blue' : 'chip-amber') + '">' +
-            (p._list === 'on' ? 'On: ' + wardLabel(p._ward) : 'Off: ' + wardLabel(p._ward)) +
-          '</span>' +
-        '</div>' +
-      '</div>' +
-      '</div>';
-  }).join('');
+  var rows = '';
 
-  document.getElementById('mit-actions').style.display = 'block';
-}
+  if (allMatchedPrev.length) {
+    var locChanged = allMatchedPrev.filter(function(p) { return p._locationChanged; });
+    var locSame    = allMatchedPrev.filter(function(p) { return !p._locationChanged; });
+    if (locChanged.length) {
+      rows += '<div class="sec-lbl" style="margin:8px 0 4px">Location updates</div>';
+      rows += locChanged.map(function(p) {
+        var ep = st.patients.find(function(x) { return x.id === p._existingId; });
+        var oldLoc = ep ? (wardLabel(ep.ward) + (ep.bed ? ' Rm ' + ep.bed : '')) : '?';
+        var newLoc = wardLabel(p._ward) + (p._room ? ' Rm ' + p._room : '');
+        var confBadge = p._highConf
+          ? '<span style="color:var(--green-t);font-size:10px">✓ demographics match</span>'
+          : '<span style="color:var(--amber-t);font-size:10px">⚠ location only — low confidence</span>';
+        return '<div class="imp-row">' +
+          '<div class="imp-info">' +
+            '<div class="imp-name">' + esc(p.last) + ', ' + esc(p.first) + '</div>' +
+            '<div class="imp-meta">' +
+              '<span style="color:var(--text3)">' + esc(oldLoc) + '</span>' +
+              ' → <b style="color:var(--amber-t)">' + esc(newLoc) + '</b>' +
+            '</div>' +
+            '<div class="imp-meta" style="margin-top:2px">' + confBadge + '</div>' +
+          '</div></div>';
+      }).join('');
+    }
+    if (locSame.length) {
+      rows += '<div class="sec-lbl" style="margin:8px 0 4px">Matched — location unchanged</div>';
+      rows += locSame.map(function(p) {
+        var ep = st.patients.find(function(x) { return x.id === p._existingId; });
+        var loc = wardLabel(p._ward) + (p._room ? ' Rm ' + p._room : '');
+        var confBadge = p._highConf
+          ? '<span style="color:var(--green-t);font-size:10px">✓ demographics will be corrected if needed</span>'
+          : '<span style="color:var(--text3);font-size:10px">location confirmed only</span>';
+        return '<div class="imp-row" style="opacity:.8">' +
+          '<div class="imp-info">' +
+            '<div class="imp-name">' + esc(p.last) + ', ' + esc(p.first) + '</div>' +
+            '<div class="imp-meta" style="color:var(--text2)">' + esc(loc) + ' — no change</div>' +
+            '<div class="imp-meta" style="margin-top:2px">' + confBadge + '</div>' +
+          '</div></div>';
+      }).join('');
+    }
+  }
 
-function toggleImpRow(idx) {
-  var p   = _mitPats[idx];
-  p._include = !p._include;
-  var chk = document.getElementById('imp-chk-' + idx);
-  var row = document.getElementById('imp-row-' + idx);
-  chk.classList.toggle('on', p._include);
-  chk.innerHTML = p._include ? '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>' : '';
-  row.classList.toggle('excluded', !p._include);
+  if (importPats.length) {
+    rows += '<div class="sec-lbl" style="margin:8px 0 4px">New Cardiology MRP patients</div>';
+    rows += importPats.map(function(p) {
+      var phnDisplay = p.phn ? String(p.phn).replace(/\D/g,'') : '';
+      var hasDemographics = phnDisplay || p.dob;
+      return '<div class="imp-row" style="border-left:3px solid var(--red);">' +
+        '<div class="imp-info">' +
+          '<div class="imp-name">' + esc(p.last) + ', ' + esc(p.first) +
+            ' <span style="font-size:11px;font-weight:400;color:var(--text2)">' +
+              esc(p.age || '?') + esc(p.sex || '') +
+            '</span></div>' +
+          '<div class="imp-meta"><b>' + esc(wardLabel(p._ward)) + (p._room ? ' Rm ' + esc(p._room) : '') + '</b>' +
+            ' &bull; LOS ' + esc(p.los || '?') + 'd' +
+          '</div>' +
+          '<div class="imp-meta" style="margin-top:1px">Dx: ' + esc(p.reason || '—') + '</div>' +
+          (hasDemographics
+            ? '<div class="imp-meta" style="color:var(--green-t);margin-top:1px">' +
+                (phnDisplay ? 'PHN ' + phnDisplay : '') +
+                (phnDisplay && p.dob ? ' &bull; ' : '') +
+                (p.dob ? 'DOB ' + esc(p.dob) : '') +
+              '</div>'
+            : '<div class="imp-meta" style="color:var(--amber-t);margin-top:1px">⚠ No PHN — scan sticker after import</div>'
+          ) +
+          '<div class="imp-badges" style="margin-top:4px">' +
+            '<span class="chip chip-red">New Consult — Not yet seen</span>' +
+          '</div>' +
+        '</div></div>';
+    }).join('');
+  }
+
+  if (!allMatchedPrev.length && !importPats.length) {
+    rows += '<div class="empty" style="padding:12px 0">No matching patients or new Cardiology MRP patients found.</div>';
+  }
+
+  if (ignoreCnt) {
+    rows += '<div style="font-size:10px;color:var(--text3);margin-top:8px;text-align:center">' +
+      ignoreCnt + ' non-Cardiology patient(s) on Meditech list — ignored</div>';
+  }
+
+  document.getElementById('mit-rows').innerHTML = rows;
+  document.getElementById('mit-actions').style.display =
+    (allMatchedPrev.length || importPats.length) ? 'block' : 'none';
 }
 
 function confirmMediteachImport() {
   if (!checkDoc()) return;
-  var toImport = _mitPats.filter(function(p) { return p._include && !p._existing; });
-  toImport.forEach(function(p) {
+
+  // All matched patients (location changed or not)
+  var allMatchedPats = _mitPats.filter(function(p) { return p._action === 'update'; });
+  var importPats     = _mitPats.filter(function(p) { return p._action === 'import'; });
+
+  // 1. Meditech is source of truth for demographics — but require 2-of-3 match
+  //    (last name, DOB, PHN) before overwriting any demographic field.
+  //    This prevents accidental overwrites from name-only fuzzy matches.
+  //    Location (ward/bed) is always updated when changed — no 2-of-3 required.
+  allMatchedPats.forEach(function(p) {
+    var ep = st.patients.find(function(x) { return x.id === p._existingId; });
+    if (!ep) return;
+    var changes = [];
+
+    // ── Confidence check: 2-of-3 must match ──────────────────────────
+    var mitPHN  = String(p.phn  || '').replace(/\D/g, '');
+    var epPHN   = String(ep.phn || '').replace(/\D/g, '');
+    var mitLast = (p.last  || '').toLowerCase().trim();
+    var epLast  = (ep.last || '').toLowerCase().trim();
+    var mitDOB  = p.dob  ? fmtClaimDate(p.dob)  : '';
+    var epDOB   = ep.dob ? fmtClaimDate(ep.dob) : '';
+
+    var phnMatch  = mitPHN  && epPHN  && mitPHN  === epPHN;
+    var lastMatch = mitLast && epLast && mitLast  === epLast;
+    var dobMatch  = mitDOB  && epDOB  && mitDOB  === epDOB;
+    var matchScore = (phnMatch ? 1 : 0) + (lastMatch ? 1 : 0) + (dobMatch ? 1 : 0);
+    var highConfidence = matchScore >= 2;
+
+    // ── Demographics — only update if high confidence ─────────────────
+    if (highConfidence) {
+      if (mitPHN && mitPHN !== epPHN) {
+        changes.push('PHN ' + (epPHN || '?') + ' → ' + mitPHN);
+        ep.phn = mitPHN;
+      }
+      if (p.last && p.last !== ep.last) {
+        changes.push('Name ' + ep.last + ' → ' + p.last);
+        ep.last  = p.last;
+        ep.first = p.first || ep.first;
+      }
+      if (mitDOB && mitDOB !== epDOB) {
+        changes.push('DOB ' + (epDOB || '?') + ' → ' + mitDOB);
+        ep.dob = mitDOB;
+      }
+      if (p.sex && p.sex !== ep.sex) {
+        ep.sex = p.sex;
+      }
+      ep.needsSticker = !ep.phn;
+    }
+
+    // ── Location — always update if changed ───────────────────────────
+    if (p._locationChanged) {
+      var oldLoc = wardLabel(ep.ward) + (ep.bed ? ' Rm ' + ep.bed : '');
+      var newLoc = wardLabel(p._ward) + (p._room ? ' Rm ' + p._room : '');
+      ep.ward = p._ward;
+      ep.bed  = p._room;
+      changes.push(oldLoc + ' → ' + newLoc);
+    }
+
+    if (changes.length) {
+      sv('patients', st.patients);
+      if (SHEETS_URL) push('savePatient', ep);
+      logChange(ep, 'Updated via Meditech' + (highConfidence ? '' : ' (location only — low confidence match)'), changes.join(' | '));
+    }
+  });
+
+  // 2. Import new CardiologyMRP patients as "New Consult — Not yet seen".
+  //    PHN, DOB, sex, admitDate filled from PDF if available.
+  //    needsSticker = true if PHN missing (prompt to scan sticker).
+  //    newConsult = true flags the card pink until first claim entered.
+  importPats.forEach(function(p) {
+    var phn = String(p.phn || '').replace(/\D/g, '');
+    var dob = p.dob ? fmtClaimDate(p.dob) : '';
+    var admitDate = p.admitDate ? fmtClaimDate(p.admitDate) : TODAY;
     var newPt = {
-      id:          'p' + Date.now() + Math.floor(Math.random() * 9999),
-      last:        p.last,
-      first:       p.first,
-      phn:         '',
-      dob:         '',
-      sex:         p.sex || '',
-      ward:        p._ward,
-      bed:         p._room,
-      fac:         'OA040',
-      refby:       '',
-      refbyName:   '',
-      care:        p._care,
-      list:        p._list,
-      icd:         p._icd,
-      roundedToday:null,
-      needsSticker:true,
-      mrp:         p._mrp || ''
+      id:           'p' + Date.now() + '_' + Math.floor(Math.random() * 9999),
+      last:         p.last  || '',
+      first:        p.first || '',
+      phn:          phn,
+      dob:          dob,
+      sex:          p.sex   || '',
+      ward:         p._ward,
+      bed:          p._room,
+      fac:          'OA040',
+      refby:        '',
+      refbyName:    '',
+      care:         p._care,
+      list:         'on',
+      role:         'mrp',
+      mrp:          'Cardiology',
+      icd:          p._icd  || '',
+      admitDate:    admitDate,
+      roundedToday: null,
+      discharged:   false,
+      needsSticker: !phn,   // only prompt for sticker if PHN missing
+      newConsult:   true,   // renders card pink — clears when first claim entered
+      addedVia:     'meditech'
     };
     st.patients.push(newPt);
+    sv('patients', st.patients);
     if (SHEETS_URL) push('savePatient', newPt);
-    logChange(newPt, 'Imported from Meditech', p._ward + (p._room ? ' Rm ' + p._room : ''));
+    logChange(newPt, 'New Cardiology MRP — Meditech import',
+      (p._ward || '') + (p._room ? ' Rm ' + p._room : '') + ' | ' + (p.reason || ''));
   });
-  sv('patients', st.patients);
+
   hideModal('mit-modal');
   render();
-  showToast(toImport.length + ' patients imported');
+  var locUpdated = allMatchedPats.filter(function(p) { return p._locationChanged; }).length;
+  var msg = [];
+  if (locUpdated) msg.push(locUpdated + ' location(s) updated');
+  if (importPats.length) msg.push(importPats.length + ' new Cardiology MRP added');
+  showToast(msg.join(' · '));
   _mitPats = [];
 }
 
@@ -6652,14 +6885,13 @@ function showPane(id) {
 
 function nav(n, el) {
   document.querySelectorAll('.nb').forEach(function(b, i) { b.classList.toggle('on', i === n); });
-  // Tab map: 0=Rounds, 1=Add patient, 2=Recent patients
-  var paneMap = { 0:'p0', 1:'p1', 2:'p-addclaim', 3:'p4' };
+  // Tab map: 0=Rounds, 1=Add patient, 2=Recently Discharged
+  var paneMap = { 0:'p0', 1:'p1', 2:'p-addclaim' };
   showPane(paneMap[n] || 'p0');
   var listSel = document.getElementById('list-sel-bar');
   if (listSel) listSel.classList.toggle('hidden', n !== 0);
   if (n === 0) render();
   if (n === 2) initAddClaim();
-  if (n === 3) { renderExport(); switchExpTab('pending'); }
 }
 
 function setList(v) {
