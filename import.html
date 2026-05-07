@@ -81,7 +81,7 @@
   .pat-row.new-consult { border-color: #e8a0a0; background: #fff8f8; }
   .pat-row.location-update { border-color: #a8c4e8; background: #f4f8fd; }
   .pat-row.demo-update { border-color: #a8c4e8; background: #f4f8fd; }
-  .pat-row.ignored { opacity: .45; }
+  .pat-row.ignored { opacity: .7; }
   .pat-check { margin-top: 2px; flex-shrink: 0; width: 18px; height: 18px; cursor: pointer; }
   .pat-body { flex: 1; min-width: 0; }
   .pat-name { font-size: 14px; font-weight: 700; }
@@ -510,7 +510,7 @@ async function buildPreview(patients) {
       _existing: existing,
       _highConf: highConf,
       _matchScore: matchScore,
-      _selected: action !== 'ignore',
+      _selected: false,  // ignored unchecked by default, but selectable
       _locationChanged: existing ? (existing.ward !== loc.ward || existing.bed !== loc.room) : true
     });
   });
@@ -559,7 +559,7 @@ function renderPreview() {
 
   // Ignored
   if (ignored.length) {
-    html += `<div class="sec-label">Ignored (not Cardiology MRP, not in app)</div>`;
+    html += `<div class="sec-label">Ignored — not Cardiology MRP (check to add manually)</div>`;
     html += ignored.map(p => patRow(p)).join('');
   }
 
@@ -589,7 +589,10 @@ function patRow(p) {
   const oldLoc = ep ? (ep.ward + (ep.bed ? ' Rm ' + ep.bed : '')) : '';
 
   let tags = '';
-  if (p._action === 'new-consult') {
+  if (p._action === 'ignore') {
+    tags += `<span class="tag tag-grey">MRP: ${esc(p._mrpRaw || 'unknown')}</span>`;
+    tags += `<span class="tag tag-amber">⚠ Manual add — verify before committing</span>`;
+  } else if (p._action === 'new-consult') {
     tags += `<span class="tag tag-red">New Consult — Not yet seen</span>`;
     tags += `<span class="tag tag-blue">${esc(p._ward)}</span>`;
     if (!p._phn) tags += `<span class="tag tag-amber">⚠ No PHN — scan sticker</span>`;
@@ -607,7 +610,7 @@ function patRow(p) {
   if (p.age)  metaParts.push(p.age + 'y');
   if (p.los)  metaParts.push('LOS ' + p.los + 'd');
 
-  const canSelect = p._action !== 'ignore';
+  const canSelect = true;  // all patients selectable, ignored just unchecked by default
 
   return `<div class="pat-row ${rowClass}">
     <input type="checkbox" class="pat-check" data-idx="${p._idx}"
@@ -623,7 +626,7 @@ function patRow(p) {
 
 // ── Commit ────────────────────────────────────────────────────────
 document.getElementById('commitBtn').addEventListener('click', async () => {
-  const selected = parsedPatients.filter(p => p._selected && p._action !== 'ignore');
+  const selected = parsedPatients.filter(p => p._selected);
   if (!selected.length) {
     showStatus('commitStatus', 'warn', 'Nothing selected to commit.');
     return;
@@ -698,6 +701,15 @@ function buildPayload(p) {
     payload.mrp        = 'Cardiology';
     payload.care       = (p._ward === 'CCU' || p._ward === 'CSICU') ? 'ccu' : 'daily';
     payload.newConsult = true;
+    payload.needsSticker = !p._phn;
+    payload.icd        = '';
+  } else if (p._action === 'ignore') {
+    // Manually selected non-Cardiology patient — add as off-service consultant
+    payload.list       = 'off';
+    payload.role       = 'consultant';
+    payload.mrp        = p._mrpRaw || '';
+    payload.care       = 'directive';
+    payload.newConsult = false;
     payload.needsSticker = !p._phn;
     payload.icd        = '';
   } else if (ep) {
