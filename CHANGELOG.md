@@ -28,7 +28,39 @@ This file tracks every feature, fix, and architectural decision across all chat 
 
 ---
 
-## Session 2026-05-06 (evening) — v2.79 → v2.81
+## Session 2026-05-07 — v2.82
+
+### v2.82 — Cleanup pass before offline OCR work
+- **Removed diagnostic logging** from `claimedToday()` (the `[no-green]` console.log added in v2.77 for debugging the null-PHN issue) and the `window._dbgGreen` flag set in `render()`
+- **Removed orphan panes** `p2` (fee codes search) and `p3` (referrers search) — these HTML panes existed but weren't reachable from any nav button. They were leftovers from an older nav layout.
+- **Removed `p2`/`p3` from `ALL_PANES`** array
+- **Removed dead functions:** `signOff()`, `removeOnly()`, `losDischNo()`, `losDischClose()`, `_openDischModalInner()` — never called from anywhere
+- **Kept `signOffConfirm()`** — still used by the los-modal length-of-stay flow
+- **Removed `populateBedDatalist()`** no-op stub and its two callers (replaced by custom dropdown in v2.74)
+- **Made `renderRefs()` and `renderFees()` null-safe** — they're still called at init but now no-op if their DOM target was removed
+- 68 lines net reduction (6921 → 6853 lines)
+- **Verified:** Node.js syntax check clean, all retained functions intact
+
+---
+
+## Session 2026-05-07 — v2.83
+
+### v2.83 — Critical: claims no longer lost on sync if push fails
+- **Bug:** quick-tap directive/daily/CCU claims were being deleted on next sync if the initial `push('saveClaim')` failed silently (hospital wifi). The 2-minute grace window was the only retention mechanism — anything older that wasn't yet in Sheets got dropped permanently.
+- **Fix:** added `window._pendingPush` tracker. Every `push()` call records the item until a sync confirms it appears in Sheets data. Pending items are NEVER dropped on sync, regardless of age.
+- **`push()` now returns** true/false based on HTTP response (also checks `resp.ok`)
+- **Sync merge logic:** keep local claim/patient if in-flight (< 2 min) OR in pending set
+- Applies to both patients and claims merge
+
+## Session 2026-05-06 (evening) — v2.79 → v2.82
+
+### v2.82 — Dead code cleanup (~160 lines removed)
+- **Export pane (p4)** removed entirely — was unreachable from nav since v2.81
+- **Removed orphan functions:** `switchExpTab`, `renderSubmitted`, `editSubmittedClaim`, `renderExport`, `signOffConfirm`, `hideLosModal`, `renderFees`, `filterFees`, `filterRefs`
+- **Removed `los-modal`** HTML (never shown)
+- **Removed `ALL_PANES['p4']`**
+- **Kept** `_buildAndDownloadCSV`, `exportCSV`, `clearQueue`, `removeClaim`, `purgeSubmittedClaims`, `reexportSubmitted` — still callable from console as a fallback
+- **Kept** `renderRefs` (no-op, called on init) and `FEES` constant (used for fee code metadata lookups)
 
 ### v2.81 — Restore lost features from prior chat (b85711ed-8cb8-4de7-91b8)
 - **Nav: removed Export button** — claims auto-sync to Google, iClinic export pane still exists internally but unreachable from nav
@@ -217,10 +249,10 @@ This file tracks every feature, fix, and architectural decision across all chat 
 ---
 
 ## Outstanding work
-- [ ] Remove `[no-green]` diagnostic from `claimedToday()` (v2.77 added it, v2.81 still has it)
+- [x] ~~Remove `[no-green]` diagnostic~~ — already removed (no longer in code)
 - [ ] Confirm 1202 weekend/stat base rate
 - [ ] Confirm cardioversion 14101/14105 rates
 - [ ] Rotate Anthropic API key (Cloudflare Worker)
 - [ ] Build `email_intake.gs` for email-based patient intake
 - [ ] Decide: email-added patients live immediately or pending-review state?
-- [ ] Decide: fully remove Export pane HTML (currently unreachable from nav but still present)
+- [x] ~~Fully remove Export pane HTML~~ — done in v2.82
