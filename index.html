@@ -2537,10 +2537,9 @@ function offRow(p) {
   // Row 2: room number (prominent) + last-seen chip
   var roomStr  = p.bed ? esc(p.bed) : (wardLabel(p.ward) || '—');
   var lastSeen = lastSeenByGroup(p);
-  // Row 3: DOB · Age (Sex) · MRP
-  var dobStr   = p.dob ? esc(dispDate(p.dob)) : '';
+  // Row 3: Age (Sex) · MRP
   var ageSex   = ageGenderShort(p);
-  var row3     = (dobStr ? dobStr + ' &bull; ' : '') + esc(ageSex) + ' &bull; ' + mrpLabel(p) + lastBilledChip(p);
+  var row3     = esc(ageSex || '—') + ' &bull; ' + mrpLabel(p) + lastBilledChip(p);
   return '<div class="alpha-row' + (dn ? ' done' : '') + '">' +
     '<div class="alpha-av av-off" style="font-size:9px;font-weight:800;letter-spacing:-.3px" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(wardAbbr) + '</div>' +
     '<div class="wp-main">' +
@@ -2551,7 +2550,7 @@ function offRow(p) {
         '</button>' +
       '</div>' +
       '<div style="display:flex;align-items:baseline;gap:7px;margin-top:1px;margin-bottom:2px">' +
-        '<span style="font-size:14px;font-weight:700;color:var(--text)">' + roomStr + '</span>' +
+        '<span style="font-size:12px;font-weight:700;color:var(--text)">' + roomStr + '</span>' +
         lastSeen +
       '</div>' +
       '<div class="wp-meta">' + row3 + '</div>' +
@@ -2588,11 +2587,9 @@ function calcAgeGender(p) {
       if (!isNaN(yr) && yr >= 0 && yr < 130) age = String(yr);
     }
   }
-  // Format: DOB · AgeGender  e.g. "15/03/1948 · 77M"
+  // Format: AgeGender only  e.g. "77M"  (DOB removed from rounds list view)
   var ageGender = (age + (p.sex || '')) || '';
-  if (p.dob && ageGender) return esc(dispDate(dobClean)) + ' &bull; ' + ageGender;
-  if (p.dob)              return esc(dispDate(dobClean));
-  if (ageGender)          return ageGender;
+  if (ageGender) return ageGender;
   return '—';
 }
 
@@ -3360,7 +3357,7 @@ function renderAddClaimResults(query) {
   // Discharged patients — within last 21 days for the default list,
   // but search covers ALL discharged patients regardless of age
   var cutoff21 = Date.now() - (21 * 24 * 60 * 60 * 1000);
-  var allDischarged = st.patients.filter(function(p) { return p.discharged; })
+  var allDischarged = st.patients.filter(function(p) { return p.discharged && p.trueDischarge; })
     .sort(function(a, b) { return (parseDischargedAt(b.dischargedAt)||0) - (parseDischargedAt(a.dischargedAt)||0); });
   var recent = q ? allDischarged : allDischarged.filter(function(p) {
     var ms = parseDischargedAt(p.dischargedAt);
@@ -3495,6 +3492,7 @@ function _doRestore(pid, list) {
   p.discharged    = false;
   p.dischargedAt  = null;
   p.dischargeDate = null;
+  p.trueDischarge = false;
   p.roundedToday  = null;
   p.list          = list;
   if (list === 'on' && !p.ward) p.ward = 'OTHER';
@@ -5687,6 +5685,7 @@ function dischConfirmRemove(btn) {
     if (dp.length === 3) dcDate = dp[2] + '/' + dp[1] + '/' + dp[0];
   }
   p.dischargeDate = dcDate;   // DD/MM/YYYY — human-readable, pushed to Sheets
+  p.trueDischarge = true;     // marks as a real patient discharge (not sign-off or remove)
   logChange(p, 'Discharged', 'D/C ' + dcDate);
   removePatient(pid);
   hideModal('disch-modal');
