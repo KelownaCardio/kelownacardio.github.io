@@ -43,6 +43,14 @@ This file tracks every feature, fix, and architectural decision across all chat 
 
 ---
 
+## Session 2026-05-07 — v2.83 → v2.86
+
+### v2.86 — Add last+first to Claims tab for visual reconciliation
+- Schema: claim columns now `id, alias, last, first, phn, fee, ...` (16 cols)
+- `addClaim` writes `c.last = p.last` and `c.first = p.first` from patient at creation
+- CSV export still derives from `st.patients[phn]` lookup at export time (always current)
+- CLEAN.xlsx Claims tab updated with names populated from PHN lookup
+
 ## Session 2026-05-07 — v2.83 → v2.85
 
 ### v2.85 — batchRound writes real CCU codes
