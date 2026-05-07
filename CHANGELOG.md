@@ -43,7 +43,24 @@ This file tracks every feature, fix, and architectural decision across all chat 
 
 ---
 
-## Session 2026-05-07 — v2.83
+## Session 2026-05-07 — v2.83 → v2.85
+
+### v2.85 — batchRound writes real CCU codes
+- **Bug:** "Round all" / batchRound on CCU was writing `CCU_DAILY` as a placeholder fee code to Sheets, expecting consolidation at CSV export. Result: Sheets showed `CCU_DAILY` instead of 1411/1421/1431.
+- **Fix:** `batchRound` now calls `ccuFeeForToday(p)` per patient, same logic as the individual quick-tap button. Real fee codes (1411/1421/1431) write directly to Sheets.
+
+## Session 2026-05-07 — v2.83 → v2.84
+
+### v2.84 — Off-service ward order + complete clear-button coverage
+- **Off-service location view sort:** clinical priority order — ED → ICUA/B/D → CSICU → numbered floors. Within numbered floors: A/B together (single rooms) before E/W together (E/W blocks). Implemented via `_wardSortKey()` returning `[groupNum, subKey, suffix]`.
+- **× clear buttons added to all remaining search inputs:**
+  - Add Patient form: `f-ref-search`, `f-icd-search`
+  - Consult form: `cb-ref-search`, `cb-icd-search` (via `buildIcdRefCard`)
+  - Claim Edit modal: `ce-ref-search`, `ce-icd-search`
+  - Other Claim form: `oc-ref-search`, `oc-icd-search`
+  - (Edit Patient form `pe-*` already had them since v2.66)
+- All use the existing `clearSearchField()` helper from v2.66
+- Confirmed `trueDischarge` filter still in place for Recently Discharged (no changes needed — already correct from v2.81)
 
 ### v2.83 — Critical: claims no longer lost on sync if push fails
 - **Bug:** quick-tap directive/daily/CCU claims were being deleted on next sync if the initial `push('saveClaim')` failed silently (hospital wifi). The 2-minute grace window was the only retention mechanism — anything older that wasn't yet in Sheets got dropped permanently.

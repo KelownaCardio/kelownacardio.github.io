@@ -537,7 +537,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.83</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.85</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -727,17 +727,23 @@ input[type=file] { display:none; }
   <div class="card">
     <div class="card-title">Consult info</div>
     <label>Referred by</label>
-    <input id="f-ref-search" placeholder="Type name or doctor #..." autocorrect="off"
-      data-dd="f-ref-dd" data-hidden="f-refby" data-name="f-refby-name"
-      oninput="refSearchEl(this);this.style.cssText='';this.placeholder='Type name or doctor #...'" onfocus="refSearchEl(this)">
+    <div style="position:relative">
+      <input id="f-ref-search" placeholder="Type name or doctor #..." autocorrect="off" style="padding-right:32px"
+        data-dd="f-ref-dd" data-hidden="f-refby" data-name="f-refby-name"
+        oninput="refSearchEl(this);this.style.cssText='padding-right:32px';this.placeholder='Type name or doctor #...'" onfocus="refSearchEl(this)">
+      <button type="button" tabindex="-1" onclick="clearSearchField(\'f-ref-search\',\'f-refby\','f-refby-name',\'f-ref-dd\')" style="position:absolute;right:8px;top:9px;background:none;border:none;font-size:18px;line-height:1;color:var(--text3);cursor:pointer;padding:2px 4px;z-index:5">&times;</button>
+    </div>
     <div class="ref-dd" id="f-ref-dd"></div>
     <input id="f-refby"      type="hidden">
     <input id="f-refby-name" type="hidden">
     <input id="f-refby-num"  type="hidden">
     <label style="margin-top:4px">Diagnosis</label>
-    <input id="f-icd-search" placeholder="Type diagnosis or code..." autocorrect="off" autocomplete="off"
-      data-dd="f-icd-dd" data-hidden="f-icd"
-      oninput="icdSearchEl(this);this.style.cssText='';this.placeholder='Type diagnosis or code...'" onfocus="icdSearchEl(this)">
+    <div style="position:relative">
+      <input id="f-icd-search" placeholder="Type diagnosis or code..." autocorrect="off" autocomplete="off" style="padding-right:32px"
+        data-dd="f-icd-dd" data-hidden="f-icd"
+        oninput="icdSearchEl(this);this.style.cssText='padding-right:32px';this.placeholder='Type diagnosis or code...'" onfocus="icdSearchEl(this)">
+      <button type="button" tabindex="-1" onclick="clearSearchField(\'f-icd-search\',\'f-icd\',null,\'f-icd-dd\')" style="position:absolute;right:8px;top:9px;background:none;border:none;font-size:18px;line-height:1;color:var(--text3);cursor:pointer;padding:2px 4px;z-index:5">&times;</button>
+    </div>
     <input id="f-icd" type="hidden" value="410">
     <div class="ref-dd" id="f-icd-dd"></div>
   </div>
@@ -2404,10 +2410,28 @@ function renderOff() {
     var sorted = off.slice().sort(function(a, b) { return a.last.localeCompare(b.last); });
     h += sorted.map(offRow).join('');
   } else {
-    // By location: sort by ward label then last name within same ward
+    // By location: clinical priority — ED, ICU, CSICU, then numbered wards.
+    // Within numbered wards: A/B together, then E/W together.
+    function _wardSortKey(w) {
+      if (!w) return [99, '', ''];
+      if (w === 'ED') return [0, '', ''];
+      if (w === 'ICUA' || w === 'ICUB' || w === 'ICUD') return [1, w.slice(3), ''];
+      if (w === 'CSICU') return [2, '', ''];
+      var m = w.match(/^(\d+)([A-Z]+)?$/);
+      if (m) {
+        var floor = parseInt(m[1], 10);
+        var suffix = m[2] || '';
+        var grp = (suffix === 'A' || suffix === 'B') ? 0
+                : (suffix === 'E' || suffix === 'W') ? 1 : 2;
+        return [10 + floor, grp, suffix];
+      }
+      return [90, w, ''];
+    }
     var sorted = off.slice().sort(function(a, b) {
-      var wa = wardLabel(a.ward), wb = wardLabel(b.ward);
-      if (wa !== wb) return wa.localeCompare(wb);
+      var ka = _wardSortKey(a.ward), kb = _wardSortKey(b.ward);
+      if (ka[0] !== kb[0]) return ka[0] - kb[0];
+      if (ka[1] !== kb[1]) return ka[1] < kb[1] ? -1 : 1;
+      if (ka[2] !== kb[2]) return ka[2] < kb[2] ? -1 : 1;
       return a.last.localeCompare(b.last);
     });
     var curWard = null;
@@ -2639,7 +2663,7 @@ function batchRound(ward) {
   });
   if (!pts.length) { showToast('All ' + wardLabel(ward) + ' patients already rounded'); return; }
   pts.forEach(function(p) {
-    var fee = ward === 'CCU' ? 'CCU_DAILY' : '33008';
+    var fee = ward === 'CCU' ? ccuFeeForToday(p) : '33008';
     addClaim(p, fee, fee, 1, TODAY, 'I');
     p.roundedToday = TODAY;
   });
@@ -3114,19 +3138,27 @@ function buildOtherClaimForm(p) {
   // ICD — pre-filled but editable
   h += '<div class="card">';
   h += '<label>Diagnosis (ICD-9)</label>';
-  h += '<input id="oc-icd-search" placeholder="Type diagnosis or code..." autocorrect="off" autocomplete="off" ' +
+  h += '<div style="position:relative">' +
+       '<input id="oc-icd-search" placeholder="Type diagnosis or code..." autocorrect="off" autocomplete="off" style="padding-right:32px" ' +
        'value="' + esc(icdVal) + '" ' +
        'data-dd="oc-icd-dd" data-hidden="oc-icd" ' +
-       'oninput="icdSearchEl(this)" onfocus="icdSearchEl(this)">';
+       'oninput="icdSearchEl(this)" onfocus="icdSearchEl(this)">' +
+       '<button type="button" tabindex="-1" onclick="clearSearchField(\'oc-icd-search\',\'oc-icd\',null,\'oc-icd-dd\')" ' +
+       'style="position:absolute;right:8px;top:9px;background:none;border:none;font-size:18px;line-height:1;color:var(--text3);cursor:pointer;padding:2px 4px;z-index:5">&times;</button>' +
+       '</div>';
   h += '<div class="ref-dd" id="oc-icd-dd"></div>';
   h += '<input id="oc-icd" type="hidden" value="' + esc(p.icd || '') + '">';
 
   // Referring MD — pre-filled but editable
   h += '<label style="margin-top:4px">Referring MD</label>';
-  h += '<input id="oc-ref-search" placeholder="Type name or doctor #..." autocorrect="off" ' +
+  h += '<div style="position:relative">' +
+       '<input id="oc-ref-search" placeholder="Type name or doctor #..." autocorrect="off" style="padding-right:32px" ' +
        'value="' + esc(refVal) + '" ' +
        'data-dd="oc-ref-dd" data-hidden="oc-refby" data-name="oc-refby-name" ' +
-       'oninput="refSearchEl(this)" onfocus="refSearchEl(this)">';
+       'oninput="refSearchEl(this)" onfocus="refSearchEl(this)">' +
+       '<button type="button" tabindex="-1" onclick="clearSearchField(\'oc-ref-search\',\'oc-refby\',\'oc-refby-name\',\'oc-ref-dd\')" ' +
+       'style="position:absolute;right:8px;top:9px;background:none;border:none;font-size:18px;line-height:1;color:var(--text3);cursor:pointer;padding:2px 4px;z-index:5">&times;</button>' +
+       '</div>';
   h += '<div class="ref-dd" id="oc-ref-dd"></div>';
   h += '<input id="oc-refby"      type="hidden" value="' + esc(refNum) + '">';
   h += '<input id="oc-refby-name" type="hidden" value="' + esc(refVal) + '">';
@@ -3817,17 +3849,25 @@ function openClaimEdit(btn) {
       '<select id="ce-alias" style="margin-bottom:7px">' + docOptions + '</select>' +
       '<label>Fee code</label>' + feeSelect +
       '<label style="margin-top:10px">Referring MD</label>' +
-      '<input id="ce-ref-search" value="' + esc(refLabel) + '" ' +
+      '<div style="position:relative">' +
+      '<input id="ce-ref-search" value="' + esc(refLabel) + '" style="padding-right:32px" ' +
       'placeholder="Type name or doctor #..." autocorrect="off" autocomplete="off" ' +
       'data-dd="ce-ref-dd" data-hidden="ce-refby" data-name="ce-refby-name" ' +
       'oninput="refSearchEl(this)" onfocus="refSearchEl(this)">' +
+      '<button type="button" tabindex="-1" onclick="clearSearchField(\'ce-ref-search\',\'ce-refby\',\'ce-refby-name\',\'ce-ref-dd\')" ' +
+      'style="position:absolute;right:8px;top:9px;background:none;border:none;font-size:18px;line-height:1;color:var(--text3);cursor:pointer;padding:2px 4px;z-index:5">&times;</button>' +
+      '</div>' +
       '<input id="ce-refby"      type="hidden" value="' + esc(c.refby || '') + '">' +
       '<input id="ce-refby-name" type="hidden" value="' + esc(c.refbyName || '') + '">' +
       '<div class="ref-dd" id="ce-ref-dd"></div>' +
       '<label style="margin-top:10px">Diagnosis</label>' +
-      '<input id="ce-icd-search" value="' + esc(curDx ? curDx.label : (c.icd || '')) + '" ' +
+      '<div style="position:relative">' +
+      '<input id="ce-icd-search" value="' + esc(curDx ? curDx.label : (c.icd || '')) + '" style="padding-right:32px" ' +
       'placeholder="Type diagnosis or code..." autocorrect="off" autocomplete="off" ' +
       'data-dd="ce-icd-dd" data-hidden="ce-icd" oninput="icdSearchEl(this)" onfocus="icdSearchEl(this)">' +
+      '<button type="button" tabindex="-1" onclick="clearSearchField(\'ce-icd-search\',\'ce-icd\',null,\'ce-icd-dd\')" ' +
+      'style="position:absolute;right:8px;top:9px;background:none;border:none;font-size:18px;line-height:1;color:var(--text3);cursor:pointer;padding:2px 4px;z-index:5">&times;</button>' +
+      '</div>' +
       '<input id="ce-icd" type="hidden" value="' + esc(c.icd || '') + '">' +
       '<div class="ref-dd" id="ce-icd-dd"></div>' +
       '<label style="margin-top:10px">Notes</label>' +
@@ -4409,19 +4449,27 @@ function buildIcdRefCard(p) {
 
   // Diagnosis search input
   h += '<label>Diagnosis</label>' +
-       '<input id="cb-icd-search" value="' + esc(curLabel) + '" ' +
+       '<div style="position:relative">' +
+       '<input id="cb-icd-search" value="' + esc(curLabel) + '" style="padding-right:32px" ' +
              'placeholder="Type diagnosis or code..." autocorrect="off" autocomplete="off" ' +
              'data-dd="cb-icd-dd" data-hidden="cb-icd" ' +
              'oninput="icdSearchEl(this)" onfocus="icdSearchEl(this)">' +
+       '<button type="button" tabindex="-1" onclick="clearSearchField(\'cb-icd-search\',\'cb-icd\',null,\'cb-icd-dd\')" ' +
+       'style="position:absolute;right:8px;top:9px;background:none;border:none;font-size:18px;line-height:1;color:var(--text3);cursor:pointer;padding:2px 4px;z-index:5">&times;</button>' +
+       '</div>' +
        '<input id="cb-icd" type="hidden" value="' + esc(p.icd || '3062') + '">' +
        '<div class="ref-dd" id="cb-icd-dd"></div>';
 
   // Referring MD search input
   h += '<label style="margin-top:4px">Referred by</label>' +
-       '<input id="cb-ref-search" value="' + esc(p.refbyName || p.refby || '') + '" ' +
+       '<div style="position:relative">' +
+       '<input id="cb-ref-search" value="' + esc(p.refbyName || p.refby || '') + '" style="padding-right:32px" ' +
              'placeholder="Type name or doctor #..." autocorrect="off" ' +
              'data-dd="cb-ref-dd" data-hidden="cb-refby" data-name="cb-refby-name" ' +
              'oninput="refSearchEl(this)" onfocus="refSearchEl(this)">' +
+       '<button type="button" tabindex="-1" onclick="clearSearchField(\'cb-ref-search\',\'cb-refby\',\'cb-refby-name\',\'cb-ref-dd\')" ' +
+       'style="position:absolute;right:8px;top:9px;background:none;border:none;font-size:18px;line-height:1;color:var(--text3);cursor:pointer;padding:2px 4px;z-index:5">&times;</button>' +
+       '</div>' +
        '<div class="ref-dd" id="cb-ref-dd"></div>' +
        '<input id="cb-refby"      type="hidden" value="' + esc(p.refby || '') + '">' +
        '<input id="cb-refby-name" type="hidden" value="' + esc(p.refbyName || '') + '">';
