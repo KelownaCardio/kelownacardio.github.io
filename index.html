@@ -537,7 +537,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.94</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.95</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1494,7 +1494,7 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID = 'v2.94-2026-05-07';
+var BUILD_ID = 'v2.95-2026-05-07';
 
 (function purgeIfBuildChanged() {
   try {
@@ -3367,7 +3367,9 @@ function renderAddClaimResults(query) {
     .sort(function(a, b) { return (parseDischargedAt(b.dischargedAt)||0) - (parseDischargedAt(a.dischargedAt)||0); });
   var recent = q ? allDischarged : allDischarged.filter(function(p) {
     var ms = parseDischargedAt(p.dischargedAt);
-    return ms > cutoff21 || !ms;
+    // Strict: require a valid dischargedAt within the 21-day window.
+    // Patients with no dischargedAt can't be proved recent, so they're hidden.
+    return ms && ms > cutoff21;
   });
 
   var allPatients = active.concat(recent);
