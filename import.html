@@ -3,333 +3,281 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>KGH Cardio · Meditech Bulk Import</title>
+<title>KGH Cardiology · Meditech Import</title>
 <style>
   :root {
-    --bg: #f4f4f1;
+    --bg: #f0f0ed;
     --panel: #ffffff;
-    --ink: #15171a;
-    --ink-soft: #5b6068;
-    --line: #d8d6cf;
-    --line-soft: #e8e6df;
-    --accent: #1f4d3f;
-    --accent-soft: #e3ede9;
-    --warn: #8a5a00;
-    --warn-soft: #fbf0d6;
-    --new: #1f4d3f;
-    --new-soft: #e3ede9;
-    --update: #2a4a7f;
-    --update-soft: #e1e8f4;
-    --error: #9c2424;
-    --error-soft: #f8e3e3;
-    --on: #1a5fa8;
-    --on-soft: #d9e7f5;
-    --mono: ui-monospace, 'SF Mono', 'Menlo', 'Consolas', monospace;
-    --sans: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    --ink: #18191c;
+    --ink2: #52555c;
+    --ink3: #8e9099;
+    --line: #e0dfd8;
+    --blue: #1a5fa8;
+    --blue-bg: #e8f0fb;
+    --green: #1a7a35;
+    --green-bg: #d4f0dd;
+    --amber: #8a5a00;
+    --amber-bg: #fdf0d4;
+    --red: #b32018;
+    --red-bg: #fde8e6;
+    --r: 10px;
   }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; }
-  body {
-    font-family: var(--sans);
-    background: var(--bg);
-    color: var(--ink);
-    font-size: 14px;
-    line-height: 1.5;
-    min-height: 100vh;
-  }
-  .wrap { max-width: 1320px; margin: 0 auto; padding: 32px 24px 80px; }
-  header {
-    display: flex; justify-content: space-between; align-items: baseline;
-    border-bottom: 1px solid var(--line);
-    padding-bottom: 16px; margin-bottom: 24px;
-  }
-  h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
-  h1 .sub { color: var(--ink-soft); font-weight: 400; margin-left: 8px; }
-  .meta {
-    font-family: var(--mono); font-size: 11px; color: var(--ink-soft);
-    text-transform: uppercase; letter-spacing: 0.05em;
-  }
-  .panel {
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: 4px; padding: 20px; margin-bottom: 16px;
-  }
-  .step-label {
-    font-family: var(--mono); font-size: 11px; text-transform: uppercase;
-    letter-spacing: 0.08em; color: var(--ink-soft); margin-bottom: 12px;
-  }
-  .step-label .num {
-    display: inline-block; width: 18px; height: 18px; line-height: 18px;
-    text-align: center; background: var(--ink); color: var(--bg);
-    border-radius: 50%; margin-right: 6px;
-  }
-  .drop {
-    border: 2px dashed var(--line); border-radius: 4px;
-    padding: 40px 20px; text-align: center; cursor: pointer;
-    transition: border-color 0.15s, background 0.15s;
-    display: block;
-  }
-  .drop:hover, .drop.drag {
-    border-color: var(--accent); background: var(--accent-soft);
-  }
-  .drop input { display: none; }
-  .drop .big { font-size: 16px; margin-bottom: 4px; }
-  .drop .small { color: var(--ink-soft); font-size: 13px; }
-  .file-info {
-    display: none; align-items: center; justify-content: space-between;
-    padding: 12px 16px; background: var(--accent-soft);
-    border: 1px solid var(--accent); border-radius: 4px;
-    font-family: var(--mono); font-size: 13px; margin-top: 12px;
-  }
-  .file-info.shown { display: flex; }
-  .file-info .clear {
-    background: none; border: none; color: var(--accent); cursor: pointer;
-    font-family: var(--mono); font-size: 12px; text-decoration: underline;
-  }
-  .actions { display: flex; gap: 8px; margin-top: 16px; }
-  button.primary, button.secondary {
-    font-family: var(--sans); font-size: 14px; font-weight: 500;
-    padding: 10px 18px; border-radius: 4px; cursor: pointer;
-    transition: background 0.15s, border-color 0.15s;
-  }
-  button.primary {
-    background: var(--accent); color: white; border: 1px solid var(--accent);
-  }
-  button.primary:hover:not(:disabled) { background: #163a30; }
-  button.primary:disabled {
-    background: var(--line); color: var(--ink-soft);
-    border-color: var(--line); cursor: not-allowed;
-  }
-  button.secondary {
-    background: white; color: var(--ink); border: 1px solid var(--line);
-  }
-  button.secondary:hover { background: var(--bg); }
-  .status {
-    display: none; padding: 12px 16px; border-radius: 4px;
-    margin-top: 12px; font-size: 13px; font-family: var(--mono);
-  }
-  .status.shown { display: block; }
-  .status.info { background: var(--update-soft); color: var(--update); border: 1px solid var(--update); }
-  .status.error { background: var(--error-soft); color: var(--error); border: 1px solid var(--error); }
-  .status.success { background: var(--new-soft); color: var(--new); border: 1px solid var(--new); }
-  .table-wrap { overflow-x: auto; margin-top: 8px; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th {
-    text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line);
-    font-weight: 600; font-family: var(--mono); font-size: 10px;
-    text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-soft);
-    background: var(--bg); position: sticky; top: 0;
-  }
-  td {
-    padding: 8px 10px; border-bottom: 1px solid var(--line-soft);
-    vertical-align: middle;
-  }
-  tr.skipped td { opacity: 0.4; }
-  tr:hover td { background: var(--bg); }
-  td input[type="checkbox"] { cursor: pointer; transform: scale(1.1); }
-  td.name { font-weight: 500; }
-  td.mono { font-family: var(--mono); font-size: 12px; }
-  .badge {
-    display: inline-block; padding: 2px 8px; border-radius: 3px;
-    font-family: var(--mono); font-size: 10px; text-transform: uppercase;
-    letter-spacing: 0.05em; font-weight: 600; white-space: nowrap;
-  }
-  .badge.new { background: var(--new-soft); color: var(--new); }
-  .badge.update { background: var(--update-soft); color: var(--update); }
-  .badge.on { background: var(--on-soft); color: var(--on); }
-  .badge.off { background: var(--bg); color: var(--ink-soft); border: 1px solid var(--line); }
-  .badge.warn { background: var(--warn-soft); color: var(--warn); }
-  .summary {
-    display: flex; gap: 24px; padding: 16px 20px;
-    background: var(--bg); border-radius: 4px; margin-bottom: 16px;
-    font-family: var(--mono); font-size: 12px;
-  }
-  .summary .stat { display: flex; flex-direction: column; gap: 2px; }
-  .summary .stat .n { font-size: 22px; font-weight: 600; color: var(--ink); }
-  .summary .stat .l {
-    color: var(--ink-soft); text-transform: uppercase;
-    letter-spacing: 0.05em; font-size: 10px;
-  }
-  .preview-section { display: none; }
-  .preview-section.shown { display: block; }
-  .log {
-    font-family: var(--mono); font-size: 11px;
-    background: var(--ink); color: #c4d4cc;
-    padding: 14px 16px; border-radius: 4px; margin-top: 12px;
-    max-height: 200px; overflow-y: auto;
-    white-space: pre-wrap; line-height: 1.6;
-  }
-  .log .ok { color: #7fc69e; }
-  .log .err { color: #ff8888; }
-  .log .info { color: #88aacc; }
-  .hint { color: var(--ink-soft); font-size: 12px; margin-top: 8px; }
-  .spinner {
-    display: inline-block; width: 12px; height: 12px;
-    border: 2px solid currentColor; border-top-color: transparent;
-    border-radius: 50%; animation: spin 0.8s linear infinite;
-    margin-right: 6px; vertical-align: -1px;
-  }
-  .cell-sel {
-    font-family: var(--mono); font-size: 11px;
-    padding: 3px 4px; border: 1px solid var(--line);
-    border-radius: 3px; background: white; color: var(--ink);
-    cursor: pointer;
-  }
-  .cell-sel:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
-  tr.skipped .cell-sel { opacity: 0.4; pointer-events: none; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         background: var(--bg); color: var(--ink); font-size: 14px; min-height: 100vh; }
+
+  .hdr { background: #1a1f2e; color: #fff; padding: 14px 20px;
+         display: flex; align-items: center; gap: 12px; }
+  .hdr-title { font-size: 15px; font-weight: 700; }
+  .hdr-sub { font-size: 11px; color: rgba(255,255,255,.55); margin-top: 1px; }
+
+  .wrap { max-width: 860px; margin: 0 auto; padding: 20px 16px 60px; }
+
+  .card { background: var(--panel); border-radius: var(--r);
+          border: 1px solid var(--line); padding: 16px; margin-bottom: 14px; }
+  .card-title { font-size: 11px; font-weight: 700; color: var(--ink3);
+                text-transform: uppercase; letter-spacing: .5px; margin-bottom: 12px; }
+
+  /* Drop zone */
+  .drop-zone { border: 2px dashed var(--line); border-radius: var(--r);
+               background: var(--bg); padding: 32px 20px; text-align: center;
+               cursor: pointer; transition: all .2s; }
+  .drop-zone.over { border-color: var(--blue); background: var(--blue-bg); }
+  .drop-zone.has-file { border-color: var(--green); background: var(--green-bg); }
+  .drop-zone svg { width: 32px; height: 32px; stroke: var(--ink3); fill: none;
+                   stroke-width: 1.5; margin-bottom: 8px; }
+  .drop-zone.has-file svg { stroke: var(--green); }
+  .drop-big { font-size: 15px; font-weight: 600; color: var(--ink2); margin-bottom: 4px; }
+  .drop-sub { font-size: 12px; color: var(--ink3); }
+  input[type=file] { display: none; }
+
+  .btn { display: inline-flex; align-items: center; gap: 7px; padding: 10px 18px;
+         border: none; border-radius: 8px; font-size: 14px; font-weight: 700;
+         font-family: inherit; cursor: pointer; transition: opacity .15s; }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-p { background: var(--blue); color: #fff; width: 100%; justify-content: center; margin-top: 10px; }
+  .btn-g { background: var(--green); color: #fff; width: 100%; justify-content: center; }
+  .btn-s { background: var(--line); color: var(--ink); }
+
+  .status { padding: 10px 12px; border-radius: 8px; font-size: 13px;
+            font-weight: 600; margin-top: 10px; display: none; }
+  .status.info   { background: var(--blue-bg);  color: var(--blue); }
+  .status.ok     { background: var(--green-bg); color: var(--green); }
+  .status.warn   { background: var(--amber-bg); color: var(--amber); }
+  .status.err    { background: var(--red-bg);   color: var(--red); }
+
+  /* Summary pills */
+  .pills { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .pill { padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+  .pill-blue  { background: var(--blue-bg);  color: var(--blue); }
+  .pill-green { background: var(--green-bg); color: var(--green); }
+  .pill-amber { background: var(--amber-bg); color: var(--amber); }
+  .pill-grey  { background: var(--line);     color: var(--ink2); }
+
+  /* Patient rows */
+  .patient-list { display: flex; flex-direction: column; gap: 8px; }
+  .pat-row { border: 1px solid var(--line); border-radius: 8px; padding: 12px;
+             display: flex; gap: 10px; align-items: flex-start; }
+  .pat-row.new-consult { border-color: #e8a0a0; background: #fff8f8; }
+  .pat-row.location-update { border-color: #a8c4e8; background: #f4f8fd; }
+  .pat-row.demo-update { border-color: #a8c4e8; background: #f4f8fd; }
+  .pat-row.ignored { opacity: .45; }
+  .pat-check { margin-top: 2px; flex-shrink: 0; width: 18px; height: 18px; cursor: pointer; }
+  .pat-body { flex: 1; min-width: 0; }
+  .pat-name { font-size: 14px; font-weight: 700; }
+  .pat-meta { font-size: 12px; color: var(--ink2); margin-top: 3px; }
+  .pat-dx   { font-size: 12px; color: var(--ink);  margin-top: 3px; }
+  .pat-tags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; }
+  .tag { padding: 2px 8px; border-radius: 12px; font-size: 10px; font-weight: 700; }
+  .tag-red   { background: var(--red-bg);   color: var(--red); }
+  .tag-blue  { background: var(--blue-bg);  color: var(--blue); }
+  .tag-green { background: var(--green-bg); color: var(--green); }
+  .tag-amber { background: var(--amber-bg); color: var(--amber); }
+  .tag-grey  { background: var(--line);     color: var(--ink2); }
+
+  .sec-label { font-size: 11px; font-weight: 700; color: var(--ink3);
+               text-transform: uppercase; letter-spacing: .5px;
+               margin: 16px 0 6px; }
+
+  .log { font-family: ui-monospace, "SF Mono", monospace; font-size: 11px;
+         background: #1a1f2e; color: #c8d0e0; padding: 12px; border-radius: 8px;
+         max-height: 160px; overflow-y: auto; margin-top: 10px; display: none; }
+  .log .ok  { color: #6ee7a0; }
+  .log .err { color: #f08080; }
+  .log .inf { color: #80b4f0; }
+
+  .spinner { display: inline-block; width: 12px; height: 12px;
+             border: 2px solid currentColor; border-top-color: transparent;
+             border-radius: 50%; animation: spin .7s linear infinite;
+             vertical-align: middle; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .conf-badge { font-size: 10px; font-weight: 600; }
+  .conf-high { color: var(--green); }
+  .conf-low  { color: var(--amber); }
+
+  #preview-section { display: none; }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <h1>Meditech Bulk Import <span class="sub">/ SB Rounds List</span></h1>
-    <div class="meta">KGH CARDIO · v1</div>
-  </header>
 
-  <div class="panel">
-    <div class="step-label"><span class="num">1</span>Upload SB Rounds List PDF</div>
-    <label class="drop" id="drop">
-      <input type="file" id="file" accept="application/pdf,image/png,image/jpeg">
-      <div class="big">Drop PDF here or click to browse</div>
-      <div class="small">Meditech &rarr; SB Rounds List &rarr; Print to PDF &rarr; upload here.</div>
-    </label>
-    <div class="file-info" id="fileInfo">
-      <span id="fileName"></span>
-      <button class="clear" id="clearFile">Remove</button>
-    </div>
-    <div class="actions">
-      <button class="primary" id="parseBtn" disabled>Parse with AI</button>
-    </div>
-    <div class="status" id="parseStatus"></div>
-  </div>
-
-  <div class="panel preview-section" id="previewPanel">
-    <div class="step-label"><span class="num">2</span>Review parsed patients</div>
-    <div class="summary" id="summary"></div>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th style="width: 30px;"><input type="checkbox" id="selectAll" checked></th>
-            <th>Action</th>
-            <th>Name</th>
-            <th>PHN</th>
-            <th>DOB</th>
-            <th>Sex</th>
-            <th>Ward</th>
-            <th>Bed</th>
-            <th>Admitted</th>
-            <th>Role</th>
-            <th>List</th>
-            <th>MRP</th>
-            <th>Meditech MRP (refbyName)</th>
-          </tr>
-        </thead>
-        <tbody id="rows"></tbody>
-      </table>
-    </div>
-    <div class="actions">
-      <button class="primary" id="commitBtn">Commit to Google Sheet</button>
-      <button class="secondary" id="cancelBtn">Cancel</button>
-    </div>
-    <div class="hint">
-      ✓ = included on commit. Uncheck to skip a patient. Edit Ward, Role, List, or MRP inline before committing.
-      Existing patients (↻ Update) will have <strong>all editable fields updated</strong> — not just location.
-    </div>
-    <div class="status" id="commitStatus"></div>
-    <div class="log" id="log" style="display:none;"></div>
+<div class="hdr">
+  <div>
+    <div class="hdr-title">KGH Cardiology · Meditech Import</div>
+    <div class="hdr-sub">Routes through Apps Script → Anthropic · No Cloudflare needed</div>
   </div>
 </div>
 
+<div class="wrap">
+
+  <!-- Step 1: Upload -->
+  <div class="card">
+    <div class="card-title">Step 1 — Upload Meditech SB Rounds List PDF</div>
+    <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+      <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="12" x2="12" y2="18"/><polyline points="9 15 12 12 15 15"/></svg>
+      <div class="drop-big" id="dropLabel">Drop PDF here or tap to browse</div>
+      <div class="drop-sub">Meditech → SB Rounds List → Print to PDF</div>
+    </div>
+    <input type="file" id="fileInput" accept="application/pdf,image/png,image/jpeg,image/jpg">
+    <button class="btn btn-p" id="parseBtn" disabled>
+      <span id="parseBtnLabel">Parse with AI</span>
+    </button>
+    <div class="status" id="parseStatus"></div>
+  </div>
+
+  <!-- Step 2: Preview & Commit -->
+  <div id="preview-section">
+    <div class="card">
+      <div class="card-title">Step 2 — Review &amp; Confirm</div>
+      <div class="pills" id="pills"></div>
+      <div class="patient-list" id="patientList"></div>
+      <div style="margin-top:14px;display:flex;gap:8px">
+        <button class="btn btn-g" id="commitBtn">Commit selected to Google Sheet</button>
+        <button class="btn btn-s" id="cancelBtn">Clear</button>
+      </div>
+      <div class="status" id="commitStatus"></div>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+
+</div>
+
 <script>
-// ───────── CONFIG ─────────
-const WORKER_URL       = 'https://kgh-ocr.kathrynb77.workers.dev';
-const APPS_SCRIPT_URL  = 'https://script.google.com/macros/s/AKfycbzQOQa6dZCCyXu15jvkyUTFghtnhGzZFj4NZ4uyczxLov72zj8qNZIgk9pzL4i8Dfuy5Q/exec';
-const SHARED_KEY       = 'kgh2026';
-const DEFAULT_DOCTOR   = 'KBrown';
+// ── Config ────────────────────────────────────────────────────────
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzQOQa6dZCCyXu15jvkyUTFghtnhGzZFj4NZ4uyczxLov72zj8qNZIgk9pzL4i8Dfuy5Q/exec';
+const SHARED_KEY      = 'kgh2026';
 
-// ───────── STATE ─────────
-let selectedFile = null;
-let parsedPatients = [];
+// KGH location code decoder (mirrors app logic)
+const LOC_MAP = {
+  SCCU: 'CCU', CCU: 'CCU',
+  S2W: '2W', S2S: '2S',
+  CSICU: 'CSICU', ICSI: 'CSICU',
+  ICUA: 'ICUA', ICUB: 'ICUB',
+  R4A: '4A', R4B: '4B', R5B: '5B',
+  C6W: '6W', C1C: 'C1C',
+  CEOF: 'ED', CMT: 'ED',
+  AREH: 'REH', SHAH: 'HAH',
+  S3E: '3E', S3W: '3W', S3MU: '3MU',
+  S4E: '4E', S4W: '4W',
+};
 
-// ───────── DOM ─────────
-const dropEl         = document.getElementById('drop');
-const fileInput      = document.getElementById('file');
-const fileInfoEl     = document.getElementById('fileInfo');
-const fileNameEl     = document.getElementById('fileName');
-const clearFileBtn   = document.getElementById('clearFile');
-const parseBtn       = document.getElementById('parseBtn');
-const parseStatusEl  = document.getElementById('parseStatus');
-const previewPanel   = document.getElementById('previewPanel');
-const summaryEl      = document.getElementById('summary');
-const rowsEl         = document.getElementById('rows');
-const selectAllEl    = document.getElementById('selectAll');
-const commitBtn      = document.getElementById('commitBtn');
-const cancelBtn      = document.getElementById('cancelBtn');
-const commitStatusEl = document.getElementById('commitStatus');
-const logEl          = document.getElementById('log');
-
-// ───────── FILE HANDLING ─────────
-function setFile(file) {
-  if (!file) return;
-  selectedFile = file;
-  fileNameEl.textContent =
-    `${file.name}  ·  ${(file.size/1024).toFixed(0)} KB  ·  ${file.type || 'unknown'}`;
-  fileInfoEl.classList.add('shown');
-  parseBtn.disabled = false;
-  hideStatus(parseStatusEl);
+function parseLocCode(locCode, roomBed) {
+  var ward = 'OTHER';
+  var room = '';
+  var loc = (locCode || '').toUpperCase();
+  for (var key in LOC_MAP) {
+    if (loc.indexOf(key) !== -1) { ward = LOC_MAP[key]; break; }
+  }
+  var rb = (roomBed || '').replace(/-/g,'').toUpperCase()
+    .replace(/^KGHS/,'').replace(/^KGHR/,'').replace(/^KGHC/,'').replace(/^KGHAC/,'');
+  if (ward === 'CCU') {
+    var n = parseInt(rb, 10);
+    if (!isNaN(n)) room = String(n % 100 || n);
+  } else {
+    var m = rb.match(/^0*(\d+)([A-Z]?)$/);
+    if (m) room = m[1] + m[2];
+    else if (rb.match(/^(3MU|C1C|EDOF|HAH|REH)/i)) room = rb;
+  }
+  return { ward, room };
 }
+
+function fmtDate(d) {
+  if (!d) return '';
+  d = String(d).trim();
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(d)) return d;
+  if (/^\d{2}\/\d{2}\/\d{2}$/.test(d)) {
+    var p = d.split('/'); return p[0]+'/'+p[1]+'/'+(parseInt(p[2]) > 30 ? '19'+p[2] : '20'+p[2]);
+  }
+  return d;
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── State ─────────────────────────────────────────────────────────
+let selectedFile   = null;
+let parsedPatients = [];   // enriched with _action, _existingId, _highConf etc
+let existingPats   = [];
+
+// ── File input ────────────────────────────────────────────────────
+const dropZone  = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const parseBtn  = document.getElementById('parseBtn');
+
 fileInput.addEventListener('change', e => setFile(e.target.files[0]));
-dropEl.addEventListener('dragover', e => { e.preventDefault(); dropEl.classList.add('drag'); });
-dropEl.addEventListener('dragleave', () => dropEl.classList.remove('drag'));
-dropEl.addEventListener('drop', e => {
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('over'));
+dropZone.addEventListener('drop', e => {
   e.preventDefault();
-  dropEl.classList.remove('drag');
+  dropZone.classList.remove('over');
   setFile(e.dataTransfer.files[0]);
 });
-clearFileBtn.addEventListener('click', e => {
-  e.preventDefault();
-  selectedFile = null;
-  fileInput.value = '';
-  fileInfoEl.classList.remove('shown');
-  parseBtn.disabled = true;
-});
 
-// ───────── PARSE ─────────
+function setFile(f) {
+  if (!f) return;
+  selectedFile = f;
+  dropZone.classList.add('has-file');
+  document.getElementById('dropLabel').textContent = f.name + ' (' + (f.size/1024).toFixed(0) + ' KB)';
+  parseBtn.disabled = false;
+}
+
+// ── Parse ─────────────────────────────────────────────────────────
 parseBtn.addEventListener('click', async () => {
   if (!selectedFile) return;
   parseBtn.disabled = true;
-  showStatus(parseStatusEl, 'info', '<span class="spinner"></span>Reading file…');
+  document.getElementById('parseBtnLabel').innerHTML = '<span class="spinner"></span>Parsing…';
+  showStatus('parseStatus', 'info', '<span class="spinner"></span>Sending to Apps Script → Anthropic (10–30 sec)…');
 
   try {
-    const base64 = await fileToBase64(selectedFile);
+    const b64 = await fileToBase64(selectedFile);
     const mediaType = selectedFile.type || 'application/pdf';
+    const isPDF = mediaType === 'application/pdf' || selectedFile.name.toLowerCase().endsWith('.pdf');
 
-    showStatus(parseStatusEl, 'info', '<span class="spinner"></span>AI parsing patient list (~15–30 seconds)…');
-
-    const resp = await fetch(WORKER_URL, {
+    const resp = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: base64, mediaType, mode: 'sbrounds' })
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        key: SHARED_KEY,
+        action: 'parseMediteachPDF',
+        b64: b64,
+        mediaType: mediaType,
+        isPDF: isPDF
+      })
     });
 
-    if (!resp.ok) {
-      const txt = await resp.text();
-      throw new Error(`Worker error ${resp.status}: ${txt.slice(0, 200)}`);
-    }
     const data = await resp.json();
-    if (!data.patients || !Array.isArray(data.patients)) {
-      throw new Error('Unexpected response: ' + JSON.stringify(data).slice(0, 200));
-    }
+    if (!data.ok) throw new Error(data.error || 'Parse failed');
 
-    parsedPatients = data.patients;
-    showStatus(parseStatusEl, 'success',
-      `Parsed ${parsedPatients.length} patients. Review below before committing.`);
+    showStatus('parseStatus', 'ok', `Parsed ${data.patients.length} patients from PDF. Review below.`);
+    await buildPreview(data.patients);
+
+  } catch(err) {
+    showStatus('parseStatus', 'err', 'Error: ' + err.message);
+  } finally {
     parseBtn.disabled = false;
-    await renderPreview();
-  } catch (err) {
-    console.error(err);
-    showStatus(parseStatusEl, 'error', 'Parse failed: ' + err.message);
-    parseBtn.disabled = false;
+    document.getElementById('parseBtnLabel').textContent = 'Parse with AI';
   }
 });
 
@@ -342,242 +290,306 @@ function fileToBase64(file) {
   });
 }
 
-// ───────── DROPDOWN OPTIONS ─────────
-const WARD_OPTS = [
-  'CCU','2S','2W','CSICU','ICUA','ICUB','ICUD',
-  '3E','3MU','3W','4E','4W','4A','4B','5B','6W','C1C','ED','REH','HAH','OTHER'
-];
-const MRP_OPTS  = ['Cardiology','Hospitalist','CTU','ICU','Cardiac Surgery','Other'];
-
-function selOpts(opts, current) {
-  return opts.map(o =>
-    `<option value="${escapeHTML(o)}"${o === current ? ' selected' : ''}>${escapeHTML(o)}</option>`
-  ).join('');
-}
-
-// ───────── PREVIEW ─────────
-async function renderPreview() {
-  // Fetch existing patients for client-side dedup preview
-  let existing = [];
+// ── Preview ───────────────────────────────────────────────────────
+async function buildPreview(patients) {
+  // Fetch current patients from Sheet for matching
+  showStatus('parseStatus', 'info', '<span class="spinner"></span>Fetching current patient list…');
   try {
     const r = await fetch(`${APPS_SCRIPT_URL}?key=${SHARED_KEY}&action=listPatients`);
-    if (r.ok) {
-      const j = await r.json();
-      existing = j.patients || [];
-    }
-  } catch (e) {
-    console.warn('Could not fetch existing patients for dedup:', e);
+    const j = await r.json();
+    existingPats = j.patients || [];
+  } catch(e) {
+    existingPats = [];
+    console.warn('Could not fetch existing patients:', e);
   }
 
-  // Match by PHN
-  const phnMap = new Map();
-  existing.forEach(p => {
-    const phn = String(p.phn || '').trim();
-    if (phn) phnMap.set(phn, p);
+  // Build lookup maps
+  const phnMap  = new Map();
+  const nameMap = new Map();
+  existingPats.forEach(ep => {
+    const phn = String(ep.phn || '').replace(/\D/g,'');
+    if (phn.length >= 9) phnMap.set(phn, ep);
+    const nk = nameKey(ep.last, ep.first);
+    if (nk) nameMap.set(nk, ep);
   });
 
-  let newCount = 0, updateCount = 0;
-  rowsEl.innerHTML = '';
+  // Enrich each parsed patient
+  parsedPatients = patients.map((p, i) => {
+    const loc = parseLocCode(p.locationCode, p.roomBed);
+    const mitPHN  = String(p.phn  || '').replace(/\D/g,'');
+    const mitLast = (p.last  || '').toLowerCase().trim();
+    const mitDOB  = fmtDate(p.dob);
+    const mrpRaw  = (p.mrp  || '').trim();
+    const isCardiologyMRP = /cardiologymrp/i.test(mrpRaw);
 
-  parsedPatients.forEach((p, i) => {
-    const phn    = String(p.phn || '').trim();
-    const match  = phn ? phnMap.get(phn) : null;
-    p._action    = match ? 'update' : 'new';
-    p._selected  = true;
-    if (match) updateCount++; else newCount++;
+    // Match existing patient
+    let existing = null;
+    if (mitPHN.length >= 9) existing = phnMap.get(mitPHN);
+    if (!existing) existing = nameMap.get(nameKey(p.last, p.first));
 
-    // For existing patients, start editable fields from current sheet values
-    // so the doctor can see what's there and change if needed.
-    const ward = p.ward  || (match && match.ward)  || 'OTHER';
-    const role = p.role  || (match && match.role)  || 'consultant';
-    const list = p.list  || (match && match.list)  || 'off';
-    const mrp  = p.mrp   || (match && match.mrp)   || 'Other';
+    // 2-of-3 confidence check
+    let highConf = false, matchScore = 0;
+    if (existing) {
+      const epPHN  = String(existing.phn  || '').replace(/\D/g,'');
+      const epLast = (existing.last || '').toLowerCase().trim();
+      const epDOB  = fmtDate(existing.dob);
+      const phnMatch  = mitPHN && epPHN && mitPHN === epPHN;
+      const lastMatch = mitLast && epLast && mitLast === epLast;
+      const dobMatch  = mitDOB && epDOB && mitDOB === epDOB;
+      matchScore = (phnMatch?1:0) + (lastMatch?1:0) + (dobMatch?1:0);
+      highConf = matchScore >= 2;
+    }
 
-    const tr = document.createElement('tr');
-    tr.dataset.idx = i;
-    tr.innerHTML = `
-      <td><input type="checkbox" class="row-cb" data-idx="${i}" checked></td>
-      <td><span class="badge ${p._action}">${p._action === 'new' ? '+ New' : '↻ Update'}</span></td>
-      <td class="name">${escapeHTML(p.last || '?')}, ${escapeHTML(p.first || '?')}</td>
-      <td class="mono">${escapeHTML(phn || '—')}</td>
-      <td class="mono">${escapeHTML(p.dob || '—')}</td>
-      <td>${escapeHTML(p.sex || '—')}</td>
-      <td>
-        <select class="cell-sel" data-field="ward" data-idx="${i}" style="min-width:72px">
-          ${selOpts(WARD_OPTS, ward)}
-        </select>
-      </td>
-      <td class="mono">${escapeHTML(p.bed || '?')}</td>
-      <td class="mono">${escapeHTML(p.admitDate || '—')}</td>
-      <td>
-        <select class="cell-sel" data-field="role" data-idx="${i}" style="min-width:90px">
-          <option value="mrp"${role === 'mrp' ? ' selected' : ''}>mrp</option>
-          <option value="consultant"${role === 'consultant' ? ' selected' : ''}>consultant</option>
-        </select>
-      </td>
-      <td>
-        <select class="cell-sel" data-field="list" data-idx="${i}" style="min-width:60px">
-          <option value="on"${list === 'on' ? ' selected' : ''}>on</option>
-          <option value="off"${list === 'off' ? ' selected' : ''}>off</option>
-        </select>
-      </td>
-      <td>
-        <select class="cell-sel" data-field="mrp" data-idx="${i}" style="min-width:110px">
-          ${selOpts(MRP_OPTS, mrp)}
-        </select>
-      </td>
-      <td class="mono">${escapeHTML(p.refbyName || '—')}</td>
-    `;
-    rowsEl.appendChild(tr);
-  });
+    // Determine action
+    let action;
+    if (existing) {
+      action = 'update';
+    } else if (isCardiologyMRP) {
+      action = 'new-consult';
+    } else {
+      action = 'ignore';
+    }
 
-  // Checkbox toggles row opacity
-  rowsEl.querySelectorAll('.row-cb').forEach(cb => {
-    cb.addEventListener('change', e => {
-      const idx = parseInt(e.target.dataset.idx, 10);
-      parsedPatients[idx]._selected = e.target.checked;
-      e.target.closest('tr').classList.toggle('skipped', !e.target.checked);
+    return Object.assign({}, p, {
+      _idx: i,
+      _ward: loc.ward,
+      _room: loc.room,
+      _dob: mitDOB,
+      _phn: mitPHN,
+      _mrpRaw: mrpRaw,
+      _isCardiologyMRP: isCardiologyMRP,
+      _action: action,
+      _existingId: existing ? existing.id : null,
+      _existing: existing,
+      _highConf: highConf,
+      _matchScore: matchScore,
+      _selected: action !== 'ignore',
+      _locationChanged: existing ? (existing.ward !== loc.ward || existing.bed !== loc.room) : true
     });
   });
 
-  // Live-write select changes back to parsedPatients so buildSheetPayload
-  // always reads current values regardless of how the user edits.
-  rowsEl.querySelectorAll('.cell-sel').forEach(sel => {
-    sel.addEventListener('change', e => {
-      const idx   = parseInt(e.target.dataset.idx, 10);
-      const field = e.target.dataset.field;
-      parsedPatients[idx][field] = e.target.value;
-    });
-  });
-
-  summaryEl.innerHTML = `
-    <div class="stat"><span class="n">${parsedPatients.length}</span><span class="l">Parsed</span></div>
-    <div class="stat"><span class="n">${newCount}</span><span class="l">New</span></div>
-    <div class="stat"><span class="n">${updateCount}</span><span class="l">Update</span></div>
-    <div class="stat"><span class="n">${existing.length}</span><span class="l">In sheet</span></div>
-  `;
-  previewPanel.classList.add('shown');
-  previewPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  renderPreview();
 }
 
-selectAllEl.addEventListener('change', e => {
-  const checked = e.target.checked;
-  rowsEl.querySelectorAll('.row-cb').forEach(cb => {
-    cb.checked = checked;
-    cb.dispatchEvent(new Event('change'));
+function nameKey(last, first) {
+  return (last||'').toLowerCase().trim() + ',' + (first||'').toLowerCase().trim().split(/\s+/)[0];
+}
+
+function renderPreview() {
+  const updates    = parsedPatients.filter(p => p._action === 'update');
+  const newConsult = parsedPatients.filter(p => p._action === 'new-consult');
+  const ignored    = parsedPatients.filter(p => p._action === 'ignore');
+  const locChanged = updates.filter(p => p._locationChanged);
+
+  // Pills
+  document.getElementById('pills').innerHTML = [
+    `<div class="pill pill-blue">${updates.length} matched</div>`,
+    `<div class="pill pill-green">${locChanged.length} location change${locChanged.length!==1?'s':''}</div>`,
+    newConsult.length ? `<div class="pill pill-red" style="background:var(--red-bg);color:var(--red)">${newConsult.length} new Cardiology MRP</div>` : '',
+    `<div class="pill pill-grey">${ignored.length} ignored</div>`
+  ].join('');
+
+  let html = '';
+
+  // Location updates
+  if (locChanged.length) {
+    html += `<div class="sec-label">Location updates</div>`;
+    html += locChanged.map(p => patRow(p)).join('');
+  }
+
+  // Unchanged matches (demographics may still be corrected)
+  const unchanged = updates.filter(p => !p._locationChanged);
+  if (unchanged.length) {
+    html += `<div class="sec-label">Matched — location unchanged${unchanged.filter(p=>p._highConf).length ? ', demographics verified' : ''}</div>`;
+    html += unchanged.map(p => patRow(p)).join('');
+  }
+
+  // New Cardiology MRP
+  if (newConsult.length) {
+    html += `<div class="sec-label">New Cardiology MRP — will be added as New Consult</div>`;
+    html += newConsult.map(p => patRow(p)).join('');
+  }
+
+  // Ignored
+  if (ignored.length) {
+    html += `<div class="sec-label">Ignored (not Cardiology MRP, not in app)</div>`;
+    html += ignored.map(p => patRow(p)).join('');
+  }
+
+  document.getElementById('patientList').innerHTML = html;
+
+  // Checkbox listeners
+  document.querySelectorAll('.pat-check').forEach(cb => {
+    cb.addEventListener('change', e => {
+      const idx = parseInt(e.target.dataset.idx);
+      parsedPatients[idx]._selected = e.target.checked;
+    });
   });
-});
 
-cancelBtn.addEventListener('click', () => {
-  previewPanel.classList.remove('shown');
-  parsedPatients = [];
-  hideStatus(commitStatusEl);
-  logEl.style.display = 'none';
-  logEl.innerHTML = '';
-});
+  document.getElementById('preview-section').style.display = 'block';
+  document.getElementById('preview-section').scrollIntoView({ behavior:'smooth', block:'start' });
+  showStatus('parseStatus', 'ok', `Parsed ${parsedPatients.length} patients — ${updates.length} matched, ${newConsult.length} new Cardiology MRP, ${ignored.length} ignored.`);
+}
 
-// ───────── COMMIT ─────────
-commitBtn.addEventListener('click', async () => {
-  const selected = parsedPatients
-    .filter(p => p._selected)
-    .map(p => buildSheetPayload(p));
+function patRow(p) {
+  const ep = p._existing;
+  const rowClass = p._action === 'new-consult' ? 'new-consult'
+                 : p._action === 'update' && p._locationChanged ? 'location-update'
+                 : p._action === 'update' ? 'demo-update'
+                 : 'ignored';
 
+  const locStr = p._ward + (p._room ? ' Rm ' + p._room : '');
+  const oldLoc = ep ? (ep.ward + (ep.bed ? ' Rm ' + ep.bed : '')) : '';
+
+  let tags = '';
+  if (p._action === 'new-consult') {
+    tags += `<span class="tag tag-red">New Consult — Not yet seen</span>`;
+    tags += `<span class="tag tag-blue">${esc(p._ward)}</span>`;
+    if (!p._phn) tags += `<span class="tag tag-amber">⚠ No PHN — scan sticker</span>`;
+  } else if (p._action === 'update') {
+    if (p._locationChanged) tags += `<span class="tag tag-blue">${esc(oldLoc)} → ${esc(locStr)}</span>`;
+    else tags += `<span class="tag tag-grey">Location confirmed: ${esc(locStr)}</span>`;
+    if (p._highConf) tags += `<span class="tag tag-green conf-high">✓ 2/3 match — demographics will update</span>`;
+    else tags += `<span class="tag tag-amber conf-low">⚠ Low confidence — location only</span>`;
+  }
+
+  const metaParts = [];
+  if (p._phn) metaParts.push('PHN ' + p._phn);
+  if (p._dob) metaParts.push('DOB ' + p._dob);
+  if (p.sex)  metaParts.push(p.sex);
+  if (p.age)  metaParts.push(p.age + 'y');
+  if (p.los)  metaParts.push('LOS ' + p.los + 'd');
+
+  const canSelect = p._action !== 'ignore';
+
+  return `<div class="pat-row ${rowClass}">
+    <input type="checkbox" class="pat-check" data-idx="${p._idx}"
+      ${p._selected ? 'checked' : ''} ${canSelect ? '' : 'disabled'}>
+    <div class="pat-body">
+      <div class="pat-name">${esc(p.last)}, ${esc(p.first)}</div>
+      <div class="pat-meta">${esc(metaParts.join(' · '))}</div>
+      ${p.reason ? `<div class="pat-dx">Dx: ${esc(p.reason)}</div>` : ''}
+      <div class="pat-tags">${tags}</div>
+    </div>
+  </div>`;
+}
+
+// ── Commit ────────────────────────────────────────────────────────
+document.getElementById('commitBtn').addEventListener('click', async () => {
+  const selected = parsedPatients.filter(p => p._selected && p._action !== 'ignore');
   if (!selected.length) {
-    showStatus(commitStatusEl, 'error', 'Nothing selected.');
+    showStatus('commitStatus', 'warn', 'Nothing selected to commit.');
     return;
   }
 
-  commitBtn.disabled = true;
-  cancelBtn.disabled = true;
-  logEl.style.display = 'block';
-  logEl.innerHTML = '';
-  showStatus(commitStatusEl, 'info',
-    `<span class="spinner"></span>Writing ${selected.length} patients to Google Sheet…`);
+  document.getElementById('commitBtn').disabled = true;
+  document.getElementById('cancelBtn').disabled = true;
+  showStatus('commitStatus', 'info', `<span class="spinner"></span>Writing ${selected.length} patients to Google Sheet…`);
 
-  log(`Sending ${selected.length} patients to Apps Script…`, 'info');
+  const log = document.getElementById('log');
+  log.style.display = 'block';
+  log.innerHTML = '';
+
+  const toSend = selected.map(p => buildPayload(p));
+
+  addLog(`Sending ${toSend.length} patients…`, 'inf');
 
   try {
-    // Apps Script doPost reads e.postData.contents, but Google's redirect
-    // path strips Content-Type for cross-origin POSTs; use text/plain to
-    // preserve the body (App Script will JSON.parse it).
     const resp = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({
         key: SHARED_KEY,
         action: 'bulkUpsertPatients',
-        patients: selected
+        patients: toSend
       })
     });
-
-    if (!resp.ok) {
-      const txt = await resp.text();
-      throw new Error(`Apps Script ${resp.status}: ${txt.slice(0, 300)}`);
-    }
     const result = await resp.json();
     if (!result.ok) throw new Error(result.error || 'Unknown error');
 
-    log(`✓ Inserted: ${result.inserted}`, 'ok');
-    log(`✓ Updated:  ${result.updated}`, 'ok');
-    if (result.skipped) log(`· Skipped:  ${result.skipped}`, 'info');
-    if (result.errors && result.errors.length) {
-      result.errors.forEach(e => log(`✗ ${e}`, 'err'));
-    }
+    addLog(`✓ Inserted: ${result.inserted}`, 'ok');
+    addLog(`✓ Updated:  ${result.updated}`, 'ok');
+    if (result.skipped) addLog(`· Skipped:  ${result.skipped}`, 'inf');
+    (result.errors || []).forEach(e => addLog('✗ ' + e, 'err'));
 
-    showStatus(commitStatusEl, 'success',
-      `Done. ${result.inserted} inserted, ${result.updated} updated. The mobile app will pick these up on next sync.`);
-    commitBtn.disabled = false;
-    cancelBtn.disabled = false;
-  } catch (err) {
-    console.error(err);
-    log(`✗ ${err.message}`, 'err');
-    showStatus(commitStatusEl, 'error', 'Commit failed: ' + err.message);
-    commitBtn.disabled = false;
-    cancelBtn.disabled = false;
+    showStatus('commitStatus', 'ok',
+      `Done — ${result.inserted} new, ${result.updated} updated. App will pick up on next sync.`);
+  } catch(err) {
+    addLog('✗ ' + err.message, 'err');
+    showStatus('commitStatus', 'err', 'Commit failed: ' + err.message);
+  } finally {
+    document.getElementById('commitBtn').disabled = false;
+    document.getElementById('cancelBtn').disabled = false;
   }
 });
 
-// Build the patient object that goes into the sheet, matching the
-// exact shape the mobile app's addPatient() produces.
-function buildSheetPayload(p) {
-  return {
-    id:        'p' + Date.now() + Math.floor(Math.random() * 1000),
-    last:      p.last      || '',
-    first:     p.first     || '',
-    phn:       String(p.phn || '').trim(),
-    dob:       p.dob       || '',
-    sex:       p.sex       || '',
-    ward:      p.ward      || 'OTHER',
-    bed:       p.bed       || '',
-    fac:       'OA040',
-    refby:     '',                                 // numeric MSC blank — to be filled later
-    refbyName: p.refbyName || '',                  // raw Meditech MRP string
-    role:      p.role      || 'consultant',
-    mrp:       p.mrp       || 'Other',
-    list:      p.list      || 'off',
-    care:      '',                                 // app infers from role+ward
-    icd:       '',                                 // doctor sets when seen
-    admitDate: p.admitDate || '',
-    updatedBy: DEFAULT_DOCTOR
+document.getElementById('cancelBtn').addEventListener('click', () => {
+  document.getElementById('preview-section').style.display = 'none';
+  parsedPatients = [];
+  document.getElementById('log').style.display = 'none';
+  hideStatus('commitStatus');
+});
+
+function buildPayload(p) {
+  // For updates: only send demographic fields if high confidence
+  const ep = p._existing;
+  const payload = {
+    phn:       p._phn || (ep ? ep.phn : ''),
+    last:      p._highConf ? (p.last || '') : (ep ? ep.last : p.last || ''),
+    first:     p._highConf ? (p.first || '') : (ep ? ep.first : p.first || ''),
+    dob:       p._highConf ? (p._dob || '') : (ep ? ep.dob : p._dob || ''),
+    sex:       p._highConf ? (p.sex || '') : (ep ? ep.sex : p.sex || ''),
+    ward:      p._ward,
+    bed:       p._room,
+    admitDate: p.admitDate ? fmtDate(p.admitDate) : (ep ? ep.admitDate : ''),
+    addedVia:  'meditech',
   };
+
+  if (p._action === 'new-consult') {
+    payload.list       = 'on';
+    payload.role       = 'mrp';
+    payload.mrp        = 'Cardiology';
+    payload.care       = (p._ward === 'CCU' || p._ward === 'CSICU') ? 'ccu' : 'daily';
+    payload.newConsult = true;
+    payload.needsSticker = !p._phn;
+    payload.icd        = '';
+  } else if (ep) {
+    // Preserve existing service fields
+    payload.id         = ep.id;
+    payload.list       = ep.list;
+    payload.role       = ep.role;
+    payload.mrp        = ep.mrp;
+    payload.care       = ep.care;
+    payload.icd        = ep.icd;
+    payload.refby      = ep.refby;
+    payload.refbyName  = ep.refbyName;
+    payload.roundedToday = ep.roundedToday;
+    payload.discharged = ep.discharged;
+    payload.newConsult = ep.newConsult;
+    payload.needsSticker = !payload.phn;
+  }
+
+  return payload;
 }
 
-// ───────── HELPERS ─────────
-function showStatus(el, kind, html) {
-  el.className = `status shown ${kind}`;
-  el.innerHTML = html;
+// ── Helpers ───────────────────────────────────────────────────────
+function showStatus(id, type, msg) {
+  const el = document.getElementById(id);
+  el.className = 'status ' + type;
+  el.innerHTML = msg;
+  el.style.display = 'block';
 }
-function hideStatus(el) { el.className = 'status'; }
-function escapeHTML(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c =>
-    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function hideStatus(id) {
+  const el = document.getElementById(id);
+  el.style.display = 'none';
 }
-function log(msg, kind) {
-  const span = document.createElement('div');
-  if (kind) span.className = kind;
-  span.textContent = msg;
-  logEl.appendChild(span);
-  logEl.scrollTop = logEl.scrollHeight;
+function addLog(msg, cls) {
+  const log = document.getElementById('log');
+  const line = document.createElement('div');
+  line.className = cls;
+  line.textContent = msg;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
 }
 </script>
 </body>
