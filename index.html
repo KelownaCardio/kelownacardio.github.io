@@ -537,7 +537,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.79</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.81</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -578,8 +578,7 @@ input[type=file] { display:none; }
 <div class="nav">
   <button class="nb on" onclick="nav(0,this)">Rounds</button>
   <button class="nb" onclick="nav(1,this)">Add patient</button>
-  <button class="nb" onclick="nav(2,this)">Recent patients</button>
-  <button class="nb" onclick="nav(3,this)">Export</button>
+  <button class="nb" onclick="nav(2,this)">Recently discharged</button>
 </div>
 
 <!-- ═══ ROUNDS PANE ═══ -->
@@ -3357,14 +3356,14 @@ function renderAddClaimResults(query) {
   // Active patients (on rounds list)
   var active = st.patients.filter(function(p) { return !p.discharged; });
 
-  // Discharged patients — within last 21 days for the default list,
-  // but search covers ALL discharged patients regardless of age
+  // Discharged patients — only TRUE discharges (not "remove from list - added in error")
+  // Default list: last 21 days. Search covers all true-discharged patients regardless of age.
   var cutoff21 = Date.now() - (21 * 24 * 60 * 60 * 1000);
-  var allDischarged = st.patients.filter(function(p) { return p.discharged; })
+  var allDischarged = st.patients.filter(function(p) { return p.discharged && p.trueDischarge; })
     .sort(function(a, b) { return (parseDischargedAt(b.dischargedAt)||0) - (parseDischargedAt(a.dischargedAt)||0); });
   var recent = q ? allDischarged : allDischarged.filter(function(p) {
     var ms = parseDischargedAt(p.dischargedAt);
-    return ms > cutoff21 || !ms; // show if within 21 days or no timestamp
+    return ms > cutoff21 || !ms;
   });
 
   var allPatients = active.concat(recent);
@@ -3495,6 +3494,7 @@ function _doRestore(pid, list) {
   p.discharged    = false;
   p.dischargedAt  = null;
   p.dischargeDate = null;
+  p.trueDischarge = false;
   p.roundedToday  = null;
   p.list          = list;
   if (list === 'on' && !p.ward) p.ward = 'OTHER';
@@ -5695,6 +5695,7 @@ function dischConfirmRemove(btn) {
     if (dp.length === 3) dcDate = dp[2] + '/' + dp[1] + '/' + dp[0];
   }
   p.dischargeDate = dcDate;   // DD/MM/YYYY — human-readable, pushed to Sheets
+  p.trueDischarge = true;     // marks as a real patient discharge (not sign-off or remove-in-error)
   logChange(p, 'Discharged', 'D/C ' + dcDate);
   removePatient(pid);
   hideModal('disch-modal');
@@ -6662,13 +6663,12 @@ function showPane(id) {
 function nav(n, el) {
   document.querySelectorAll('.nb').forEach(function(b, i) { b.classList.toggle('on', i === n); });
   // Tab map: 0=Rounds, 1=Add patient, 2=Recent patients
-  var paneMap = { 0:'p0', 1:'p1', 2:'p-addclaim', 3:'p4' };
+  var paneMap = { 0:'p0', 1:'p1', 2:'p-addclaim' };
   showPane(paneMap[n] || 'p0');
   var listSel = document.getElementById('list-sel-bar');
   if (listSel) listSel.classList.toggle('hidden', n !== 0);
   if (n === 0) render();
   if (n === 2) initAddClaim();
-  if (n === 3) { renderExport(); switchExpTab('pending'); }
 }
 
 function setList(v) {
