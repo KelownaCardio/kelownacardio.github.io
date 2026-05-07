@@ -537,7 +537,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.91</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.92</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1647,11 +1647,9 @@ async function syncFromSheets() {
       var merged = d.patients.map(function(rp) {
         var lp = st.patients.find(function(p) { return p.id === rp.id; });
         if (!lp) return rp;
-        // Remote wins for all fields; preserve local roundedToday only if it's today
+        // Remote wins for all fields. roundedToday is now derived from claims via
+        // claimedToday(p) at render time, so no merge logic needed.
         var out = Object.assign({}, rp);
-        if (lp.roundedToday === TODAY && rp.roundedToday !== TODAY) {
-          out.roundedToday = TODAY;
-        }
         return out;
       });
 
@@ -2363,7 +2361,7 @@ function wardHtml(ward) {
     h += '</div>';
   }
 
-  var notYet = pts.filter(function(p) { return p.roundedToday !== TODAY; }).length;
+  var notYet = pts.filter(function(p) { return !claimedToday(p); }).length;
   h += '<button class="batch-btn" style="margin-top:8px" onclick="batchRoundWard(this)" data-ward="' + ward + '">' +
        '<span>Round all ' + wdef.label + (notYet ? ' (' + notYet + ' pending)' : ' \u2713 all done') + '</span>' +
        '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>' +
@@ -2665,13 +2663,12 @@ function quickActBtns(p) {
 function batchRound(ward) {
   if (!checkDoc()) return;
   var pts = st.patients.filter(function(p) {
-    return p.ward === ward && p.list === 'on' && p.roundedToday !== TODAY;
+    return p.ward === ward && p.list === 'on' && !claimedToday(p);
   });
   if (!pts.length) { showToast('All ' + wardLabel(ward) + ' patients already rounded'); return; }
   pts.forEach(function(p) {
     var fee = ward === 'CCU' ? ccuFeeForToday(p) : '33008';
     addClaim(p, fee, fee, 1, TODAY, 'I');
-    p.roundedToday = TODAY;
   });
   sv('patients', st.patients);
   sv('claims', st.claims);
@@ -2733,12 +2730,10 @@ function unbillToday(pid, feeTypes) {
   if (idx === -1) return false;
   var removed = st.claims.splice(idx, 1)[0];
   if (SHEETS_URL) push('deleteClaim', { id: removed.id });
-  // Clear roundedToday only if no other claims today
   var stillHasClaims = st.claims.some(function(c) {
     return c.phn === p.phn && c.alias === st.doc.alias && c.date === TODAY;
   });
   if (!stillHasClaims) {
-    p.roundedToday = null;
     p.lastBilled   = null;
   } else {
     p.lastBilled = null;
@@ -2848,7 +2843,6 @@ function quickDailyBtn(btn) {
   var label = p.care === 'combined' ? 'Combined daily' : 'Daily';
   bbDone(btn, label);
   addClaim(p, '33008', '33008', 1, TODAY, 'I');
-  p.roundedToday = TODAY;
   p.lastBilled   = label;
   sv('patients', st.patients);
   sv('claims', st.claims);
@@ -2882,7 +2876,6 @@ function quickDirectiveBtn(btn) {
   var p = getP(pid);
   bbDone(btn, 'Directive');
   addClaim(p, '33006', '33006', 1, TODAY, 'I');
-  p.roundedToday = TODAY;
   p.lastBilled   = 'Directive';
   sv('patients', st.patients);
   sv('claims', st.claims);
@@ -2915,7 +2908,6 @@ function quickCCUBtn(btn) {
   var feeLabels = { '1411':'CCU day 1 (1411)', '1421':'CCU days 2–7 (1421)', '1431':'CCU days 8+ (1431)' };
   bbDone(btn, feeLabels[fee] || fee);
   addClaim(p, fee, fee, 1, TODAY, 'I');
-  p.roundedToday = TODAY;
   p.lastBilled   = feeLabels[fee] || fee;
   sv('patients', st.patients);
   sv('claims', st.claims);
@@ -2925,7 +2917,7 @@ function quickCCUBtn(btn) {
 
 // Show what was last billed as a chip on the done card
 function lastBilledChip(p) {
-  if (!p.lastBilled || p.roundedToday !== TODAY) return '';
+  if (!p.lastBilled || !claimedToday(p)) return '';
   return '<span class="chip chip-green" style="font-size:9px;padding:1px 6px">' + esc(p.lastBilled) + '</span>';
 }
 
@@ -3249,7 +3241,6 @@ function submitOtherClaim() {
   var pClone = Object.assign({}, p, { icd: icd, refby: refby, refbyName: refName });
 
   var c = addClaim(pClone, fee, fee, units, dateFmt, loc, start, notes, endTime || '');
-  p.roundedToday = TODAY;
   sv('patients', st.patients);
   sv('claims',   st.claims);
   if (patientUpdated && SHEETS_URL) push('savePatient', p);
@@ -3381,8 +3372,8 @@ function renderAddClaimResults(query) {
 
   if (!q) {
     // Active patients — split pending / rounded
-    var pending = active.filter(function(p) { return p.roundedToday !== TODAY; });
-    var done    = active.filter(function(p) { return p.roundedToday === TODAY; });
+    var pending = active.filter(function(p) { return !claimedToday(p); });
+    var done    = active.filter(function(p) { return claimedToday(p); });
 
     if (pending.length) {
       html += '<div class="sec-lbl">On rounds — not yet seen today</div>';
@@ -3419,7 +3410,7 @@ function addClaimRow(p) {
     var daysAgo = _dat ? Math.floor((Date.now() - _dat) / (24 * 60 * 60 * 1000)) : null;
     var daysLabel = daysAgo === null ? '' : daysAgo === 0 ? 'today' : daysAgo === 1 ? '1 day ago' : daysAgo + ' days ago';
     statusChip = '<span class="chip chip-grey">Discharged' + (daysLabel ? ' ' + daysLabel : '') + '</span>';
-  } else if (p.roundedToday === TODAY) {
+  } else if (claimedToday(p)) {
     statusChip = '<span class="chip chip-green">Seen today</span>';
   }
 
@@ -3480,7 +3471,6 @@ function _doRestore(pid, list) {
   p.dischargedAt  = null;
   p.dischargeDate = null;
   p.trueDischarge = false;
-  p.roundedToday  = null;
   p.list          = list;
   if (list === 'on' && !p.ward) p.ward = 'OTHER';
   sv('patients', st.patients);
@@ -4432,8 +4422,6 @@ function submitConsult() {
       addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, fullNote);
     }
   }
-
-  p.roundedToday = TODAY;
   sv('patients', st.patients);
   sv('claims', st.claims);
   showToast('Consult claims added for ' + p.last);
@@ -4527,7 +4515,6 @@ function submitDaily() {
   updatePatientFromClaimForm(p);
   if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
   addClaim(p, '33008', '33008', days, fmtD(parseISODate(ds)), 'I');
-  p.roundedToday = TODAY;
   sv('patients', st.patients); sv('claims', st.claims);
   showToast('33008 ×' + days + ' — ' + p.last);
   closeClaimScreen();
@@ -4571,7 +4558,6 @@ function submitCombined() {
   if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
   addClaim(p, '33008', '33008', 1, fmtD(parseISODate(ds)), 'I');
   if (v === 2) addClaim(p, '33008', '33008', 1, fmtD(parseISODate(ds)), 'I', null, note2 || 'Second visit — patient unstable');
-  p.roundedToday = TODAY;
   sv('patients', st.patients); sv('claims', st.claims);
   showToast('Combined daily ×' + v + ' — ' + p.last);
   closeClaimScreen();
@@ -4606,7 +4592,6 @@ function submitDirective() {
   updatePatientFromClaimForm(p);
   if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
   addClaim(p, '33006', '33006', 1, fmtD(parseISODate(ds)), 'I', null, note);
-  p.roundedToday = TODAY;
   sv('patients', st.patients); sv('claims', st.claims);
   showToast('33006 directive — ' + p.last);
   closeClaimScreen();
@@ -4637,7 +4622,6 @@ function submitCCU(isDuplicate) {
   updatePatientFromClaimForm(p);
   if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
   addClaim(p, 'CCU_DAILY', 'CCU_DAILY', 1, TODAY, 'I');
-  p.roundedToday = TODAY;
   sv('patients', st.patients); sv('claims', st.claims);
   showToast('CCU daily recorded' + (isDuplicate ? ' (duplicate)' : '') + ' — ' + p.last);
   closeClaimScreen();
@@ -4720,7 +4704,6 @@ function mergePatient(action) {
     existing.ward         = gv('f-ward') || existing.ward;
     existing.bed          = gv('f-bed')  || existing.bed;
     existing.list         = gv('f-list') || 'on';
-    existing.roundedToday = null;
     // Update refby/icd if new values provided
     var newRefby = gv('f-refby-num') || gv('f-refby');
     var newIcd   = gv('f-icd');
@@ -5623,7 +5606,6 @@ function dischAddVisit(btn) {
   var p = getP(pid);
   if (!checkDoc()) return;
   addClaim(p, fee, feeCode, 1, TODAY, 'I');
-  p.roundedToday = TODAY;
   sv('patients', st.patients);
   sv('claims', st.claims);
   _dischStep2(pid);
