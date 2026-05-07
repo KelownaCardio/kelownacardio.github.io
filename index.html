@@ -545,7 +545,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.04</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.05</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1508,7 +1508,7 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID = 'v3.04-2026-05-07';
+var BUILD_ID = 'v3.05-2026-05-07';
 
 (function purgeIfBuildChanged() {
   try {
@@ -1644,6 +1644,7 @@ async function syncFromSheets() {
   if (!SHEETS_URL) return;
   setSyncState('syncing');
   window._lastSyncError = null;
+  window._lastSyncResponse = null;
   try {
     var r = await fetch(SHEETS_URL + '?action=getAll&key=' + SHARED_KEY);
     if (!r.ok) {
@@ -1652,6 +1653,18 @@ async function syncFromSheets() {
       return;
     }
     var d = await r.json();
+    // Capture response shape for diagnostics — even on success
+    window._lastSyncResponse = {
+      hasError: !!d.error,
+      error: d.error || null,
+      patientsType: Array.isArray(d.patients) ? 'array' : (d.patients === null ? 'null' : typeof d.patients),
+      patientsLength: Array.isArray(d.patients) ? d.patients.length : 'n/a',
+      claimsType: Array.isArray(d.claims) ? 'array' : (d.claims === null ? 'null' : typeof d.claims),
+      claimsLength: Array.isArray(d.claims) ? d.claims.length : 'n/a',
+      keys: Object.keys(d || {}),
+      ts: new Date().toISOString()
+    };
+    console.log('[sync] response shape:', window._lastSyncResponse);
     if (d.error) {
       window._lastSyncError = 'Apps Script: ' + d.error;
       setSyncState('error');
@@ -3515,6 +3528,7 @@ function renderDischargedList(query) {
   if (!recent.length) {
     // Build visible diagnostic so the user can see exactly what's going on without console
     var syncErr = window._lastSyncError;
+    var lastResp = window._lastSyncResponse;
     var diag = '<details style="margin-top:12px;padding:10px;background:var(--surface2);border-radius:var(--rsm);font-size:11px;color:var(--text2)" open>' +
       '<summary style="cursor:pointer;font-weight:700">Diagnostic info</summary>' +
       '<div style="margin-top:8px;font-family:ui-monospace,monospace;line-height:1.6">' +
@@ -3523,7 +3537,15 @@ function renderDischargedList(query) {
         'With dischargedAt timestamp: <b>' + withDischargedAt + '</b><br>' +
         'Passed pool filter: <b>' + pool.length + '</b><br>' +
         'Passed 21-day filter: <b>' + recent.length + '</b><br>' +
-        (syncErr ? '<br><span style="color:var(--red-t);font-weight:700">Last sync error:</span><br>' +
+        '<br>' +
+        (lastResp
+          ? '<b>Last sync response:</b><br>' +
+            '&nbsp;&nbsp;d.patients: ' + lastResp.patientsType + ' (length ' + lastResp.patientsLength + ')<br>' +
+            '&nbsp;&nbsp;d.claims: ' + lastResp.claimsType + ' (length ' + lastResp.claimsLength + ')<br>' +
+            '&nbsp;&nbsp;keys: [' + lastResp.keys.join(', ') + ']<br>' +
+            '&nbsp;&nbsp;at: ' + lastResp.ts + '<br>'
+          : '<b>No sync has run yet</b><br>') +
+        (syncErr ? '<br><span style="color:var(--red-t);font-weight:700">Sync error:</span> ' +
                    '<span style="color:var(--red-t)">' + esc(syncErr) + '</span><br>' : '') +
       '</div>' +
       '<button class="btn btn-p" style="margin-top:10px;font-size:12px" ' +
