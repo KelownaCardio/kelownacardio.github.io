@@ -1681,17 +1681,30 @@ async function syncFromSheets() {
       var merged = d.patients.map(function(rp) {
         var lp = st.patients.find(function(p) { return p.id === rp.id; });
         if (!lp) return rp;
-        // Remote wins for all fields. roundedToday is now derived from claims via
-        // claimedToday(p) at render time, so no merge logic needed.
-        var out = Object.assign({}, rp);
-        return out;
+        // If a push for this patient is still pending (not yet confirmed by Sheets),
+        // the local version reflects an unconfirmed update — prefer local.
+        // This prevents discharge / restore / field updates from being clobbered
+        // by a stale remote row when sync runs before the push completes.
+        var isPending = window._pendingPush && window._pendingPush[lp.id];
+        if (isPending) return Object.assign({}, lp);
+        // Otherwise remote wins.
+        return Object.assign({}, rp);
       });
 
-      // Keep local-only patients only within the grace window
-      // Load confirmed patients set
-      // Clear pending entries that now appear in Sheets
-      d.patients.forEach(function(p) {
-        if (window._pendingPush && window._pendingPush[p.id]) delete window._pendingPush[p.id];
+      // Clear pending entries ONLY if the remote row reflects the pending update.
+      // We compare a few key fields that update-style pushes touch.
+      d.patients.forEach(function(rp) {
+        if (!window._pendingPush || !window._pendingPush[rp.id]) return;
+        var pending = window._pendingPush[rp.id].body;
+        // Confirm by checking the discharged flag (most common update) and dischargedAt timestamp
+        var dischMatch = parseBool(rp.discharged) === parseBool(pending.discharged);
+        var dischAtMatch = !pending.dischargedAt ||
+          (parseDischargedAt(rp.dischargedAt) === parseDischargedAt(pending.dischargedAt));
+        // Generous timeout fallback: clear pending after 60s regardless
+        var stale = (Date.now() - (window._pendingPush[rp.id].ts || 0)) > 60000;
+        if ((dischMatch && dischAtMatch) || stale) {
+          delete window._pendingPush[rp.id];
+        }
       });
 
       // Keep local patients that are either in-flight OR pending unconfirmed push.
@@ -1791,6 +1804,12 @@ async function syncFromSheets() {
     ['patients','claims','doctors','changelog'].forEach(function(k) { sv(k, st[k]); });
     setSyncState('synced');
     render();
+    // If user is currently viewing the Recently Discharged pane, refresh it too
+    var dischPane = document.getElementById('p-discharged');
+    if (dischPane && dischPane.classList.contains('on')) {
+      var searchEl = document.getElementById('discharged-search');
+      renderDischargedList(searchEl ? searchEl.value : '');
+    }
   } catch(e) { setSyncState('error'); }
 }
 
