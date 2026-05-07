@@ -545,7 +545,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.05</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.06</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1508,7 +1508,7 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID = 'v3.05-2026-05-07';
+var BUILD_ID = 'v3.06-2026-05-07';
 
 (function purgeIfBuildChanged() {
   try {
@@ -1643,8 +1643,10 @@ function setSyncState(s) {
 async function syncFromSheets() {
   if (!SHEETS_URL) return;
   setSyncState('syncing');
+  window._syncAttempts = (window._syncAttempts || 0) + 1;
   window._lastSyncError = null;
-  window._lastSyncResponse = null;
+  // Note: don't reset _lastSyncResponse — keep the most recent capture even if
+  // this sync fails, so diagnostic always shows the last successful response shape.
   try {
     var r = await fetch(SHEETS_URL + '?action=getAll&key=' + SHARED_KEY);
     if (!r.ok) {
@@ -1679,6 +1681,7 @@ async function syncFromSheets() {
     // if they were created within the last 2 min (push still in flight).
     // Anything older that isn't on Sheets was deliberately removed — drop it.
     if (d.patients && Array.isArray(d.patients)) {
+      window._lastSyncResponse.patientsMergeRan = true;
       d.patients.forEach(function(p) {
         // Normalise DOB from Sheets ISO timestamp
         if (p.dob) p.dob = fmtClaimDate(p.dob);
@@ -1750,6 +1753,12 @@ async function syncFromSheets() {
       });
 
       st.patients = merged;
+      window._lastSyncResponse.patientsAfterMerge = st.patients.length;
+    } else {
+      window._lastSyncResponse = window._lastSyncResponse || {};
+      window._lastSyncResponse.patientsMergeRan = false;
+      window._lastSyncResponse.patientsMergeSkipReason =
+        !d.patients ? 'd.patients is falsy' : 'd.patients is not an array';
     }
 
     // ── Merge claims ──────────────────────────────────────
@@ -3529,23 +3538,30 @@ function renderDischargedList(query) {
     // Build visible diagnostic so the user can see exactly what's going on without console
     var syncErr = window._lastSyncError;
     var lastResp = window._lastSyncResponse;
+    var attempts = window._syncAttempts || 0;
     var diag = '<details style="margin-top:12px;padding:10px;background:var(--surface2);border-radius:var(--rsm);font-size:11px;color:var(--text2)" open>' +
       '<summary style="cursor:pointer;font-weight:700">Diagnostic info</summary>' +
       '<div style="margin-top:8px;font-family:ui-monospace,monospace;line-height:1.6">' +
-        'Total patients in memory: <b>' + totalP + '</b><br>' +
-        'With discharged=true: <b>' + withDischargedFlag + '</b><br>' +
-        'With dischargedAt timestamp: <b>' + withDischargedAt + '</b><br>' +
-        'Passed pool filter: <b>' + pool.length + '</b><br>' +
-        'Passed 21-day filter: <b>' + recent.length + '</b><br>' +
+        '<b>Local state:</b><br>' +
+        '&nbsp;&nbsp;Total patients: <b>' + totalP + '</b><br>' +
+        '&nbsp;&nbsp;discharged=true: <b>' + withDischargedFlag + '</b><br>' +
+        '&nbsp;&nbsp;dischargedAt set: <b>' + withDischargedAt + '</b><br>' +
+        '&nbsp;&nbsp;In pool: <b>' + pool.length + '</b><br>' +
+        '&nbsp;&nbsp;In recent (21d): <b>' + recent.length + '</b><br>' +
         '<br>' +
+        '<b>Sync history:</b><br>' +
+        '&nbsp;&nbsp;Attempts so far: <b>' + attempts + '</b><br>' +
         (lastResp
-          ? '<b>Last sync response:</b><br>' +
-            '&nbsp;&nbsp;d.patients: ' + lastResp.patientsType + ' (length ' + lastResp.patientsLength + ')<br>' +
-            '&nbsp;&nbsp;d.claims: ' + lastResp.claimsType + ' (length ' + lastResp.claimsLength + ')<br>' +
-            '&nbsp;&nbsp;keys: [' + lastResp.keys.join(', ') + ']<br>' +
-            '&nbsp;&nbsp;at: ' + lastResp.ts + '<br>'
-          : '<b>No sync has run yet</b><br>') +
-        (syncErr ? '<br><span style="color:var(--red-t);font-weight:700">Sync error:</span> ' +
+          ? '&nbsp;&nbsp;d.patients: <b>' + lastResp.patientsType + '</b> (length ' + lastResp.patientsLength + ')<br>' +
+            '&nbsp;&nbsp;d.claims: <b>' + lastResp.claimsType + '</b> (length ' + lastResp.claimsLength + ')<br>' +
+            '&nbsp;&nbsp;keys: [' + (lastResp.keys || []).join(', ') + ']<br>' +
+            '&nbsp;&nbsp;merge ran: <b>' + (lastResp.patientsMergeRan === undefined ? 'pending' : lastResp.patientsMergeRan) + '</b>' +
+            (lastResp.patientsMergeSkipReason ? ' (' + lastResp.patientsMergeSkipReason + ')' : '') + '<br>' +
+            (lastResp.patientsAfterMerge !== undefined
+              ? '&nbsp;&nbsp;st.patients after merge: <b>' + lastResp.patientsAfterMerge + '</b><br>' : '') +
+            '&nbsp;&nbsp;captured at: ' + lastResp.ts + '<br>'
+          : '&nbsp;&nbsp;No response captured yet<br>') +
+        (syncErr ? '<br><span style="color:var(--red-t);font-weight:700">Last sync error:</span> ' +
                    '<span style="color:var(--red-t)">' + esc(syncErr) + '</span><br>' : '') +
       '</div>' +
       '<button class="btn btn-p" style="margin-top:10px;font-size:12px" ' +
