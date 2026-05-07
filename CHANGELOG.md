@@ -43,6 +43,26 @@ This file tracks every feature, fix, and architectural decision across all chat 
 
 ---
 
+## Session 2026-05-07 — v2.83 → v2.87 + Apps Script v2
+
+### v2.87 — Fix dropdown selection on iOS/mobile
+- **Bug:** Tapping a referrer/diagnosis/fee dropdown row didn't populate the field. v2.84 added the × clear button wrapper which somehow interferes with `onclick` event ordering on iOS Safari.
+- **Fix:** Changed all dropdown row handlers from `onclick` to `onmousedown` with `event.preventDefault()`. This fires before the input's blur and before the global click-outside-closes-dropdown listener, ensuring the selection completes. Same pattern as the bed dropdown which has always worked.
+- Applied to: `selectIcdRow`, `selectRefRow`, `openAddPhysicianForm`, `selectFeeFromDd`
+
+## Session 2026-05-07 — v2.83 → v2.86 + Apps Script v2
+
+### Apps Script — text-format enforcement on writes
+- **Bug:** Sheets was reinterpreting DD/MM/YYYY date strings as US-locale dates (MM/DD) on write, even with column formatted as Plain text. Cause: `setValues()` reinterprets values according to spreadsheet locale.
+- **Fix:** `saveRow` now calls `setNumberFormat('@')` on the row range BEFORE `setValues()`, forcing text storage that bypasses any reinterpretation. Same fix applied to `saveAll`.
+- **Hardening:** `sheetToObjects` now converts any `Date` object back to DD/MM/YYYY string via `Utilities.formatDate(v,'America/Vancouver','dd/MM/yyyy')` — protects against legacy data that slipped through as a date type.
+
+### Fresh start workbook
+- `KGH_Cardiology_Billing_FRESH.xlsx` provided for clean rebuild
+- Patients tab: 42 patients, all PHNs filled
+- Claims tab: empty (headers only)
+- Doctors, Referrers, ChangeLog tabs: empty (headers only)
+
 ## Session 2026-05-07 — v2.83 → v2.86
 
 ### v2.86 — Add last+first to Claims tab for visual reconciliation
