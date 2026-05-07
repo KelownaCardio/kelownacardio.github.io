@@ -48,16 +48,21 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 .sync-dot.error { background:var(--red); }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
-/* LIST SELECTOR */
-.list-sel { display:flex; background:var(--surface2); border-bottom:1px solid var(--border2); position:sticky; top:54px; z-index:48; padding:4px 6px; gap:4px; }
-.list-sel.hidden { display:none; }
-.ls-btn { flex:1; padding:7px 8px; font-size:12px; font-weight:600; text-align:center; cursor:pointer; border:none; border-radius:var(--rsm); color:var(--text2); background:none; font-family:inherit; transition:background .15s,color .15s; }
-.ls-btn.on { color:var(--kca-navy); background:var(--surface); box-shadow:0 1px 3px rgba(0,0,0,.1); }
-
-/* NAV */
-.nav { display:flex; background:var(--surface2); border-bottom:1px solid var(--border2); position:sticky; top:88px; z-index:49; padding:4px 6px; gap:4px; }
+/* NAV (directly below header) */
+.nav { display:flex; background:var(--surface2); border-bottom:1px solid var(--border2); position:sticky; top:54px; z-index:49; padding:4px 6px; gap:4px; }
 .nb { flex:1; padding:7px 3px; font-size:11px; text-align:center; color:var(--text2); cursor:pointer; border:none; border-radius:var(--rsm); font-family:inherit; background:none; transition:background .15s,color .15s; }
 .nb.on { color:var(--kca-navy); font-weight:700; background:var(--surface); box-shadow:0 1px 3px rgba(0,0,0,.1); }
+
+/* LIST SELECTOR + ROUNDS SEARCH (below nav, only on Rounds tab) */
+.list-sel { display:flex; flex-direction:column; background:var(--surface); border-bottom:1px solid var(--border2); position:sticky; top:88px; z-index:48; padding:6px 8px; gap:5px; }
+.list-sel.hidden { display:none; }
+.list-sel-btns { display:flex; gap:4px; }
+.ls-btn { flex:1; padding:7px 8px; font-size:12px; font-weight:600; text-align:center; cursor:pointer; border:none; border-radius:var(--rsm); color:var(--text2); background:none; font-family:inherit; transition:background .15s,color .15s; }
+.ls-btn.on { color:var(--kca-navy); background:var(--surface2); box-shadow:0 1px 3px rgba(0,0,0,.1); }
+.rounds-search-wrap { position:relative; }
+.rounds-search-wrap input { width:100%; padding:7px 10px 7px 28px; border:.5px solid var(--border2); border-radius:var(--rsm); font-size:13px; background:var(--surface2); font-family:inherit; outline:none; }
+.rounds-search-wrap input:focus { border-color:#a8a0c8; background:var(--surface); }
+.rounds-search-ico { position:absolute; left:8px; top:50%; transform:translateY(-50%); width:13px; height:13px; stroke:var(--text3); fill:none; stroke-width:2; pointer-events:none; }
 
 /* PANES */
 .pane { display:none; padding:10px 11px 30px; }
@@ -75,7 +80,7 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 .stat-l { font-size:9px; color:var(--text2); margin-top:1px; text-transform:uppercase; letter-spacing:.3px; }
 
 /* VIEW TOGGLE */
-.view-tog { display:flex; background:var(--surface2); border-radius:var(--rsm); padding:3px; margin-bottom:10px; }
+.view-tog { display:flex; background:var(--surface2); border-radius:var(--rsm); padding:3px; }
 .vt { flex:1; padding:6px; font-size:11px; font-weight:500; text-align:center; cursor:pointer; border-radius:5px; border:none; background:none; color:var(--text2); font-family:inherit; display:flex; align-items:center; justify-content:center; gap:4px; }
 .vt svg { width:12px; height:12px; stroke:currentColor; fill:none; stroke-width:2; }
 .vt.on { background:var(--surface); color:var(--blue); font-weight:700; box-shadow:0 1px 3px rgba(0,0,0,.1); }
@@ -558,7 +563,7 @@ input[type=file] { display:none; }
 
 <div id="wifi-banner" style="display:none;align-items:center;justify-content:center;gap:8px;
   background:#c42828;color:#fff;font-size:12px;font-weight:600;padding:8px 14px;
-  position:sticky;top:54px;z-index:47;">
+  position:sticky;top:88px;z-index:47;">
   <svg style="width:14px;height:14px;stroke:#fff;fill:none;stroke-width:2;flex-shrink:0" viewBox="0 0 24 24">
     <line x1="1" y1="1" x2="23" y2="23"/>
     <path d="M16.72 11.06A10.94 10.94 0 0119 12.55M5 12.55a10.94 10.94 0 015.17-2.39M10.71 5.05A16 16 0 0122.56 9M1.42 9a15.91 15.91 0 014.7-2.88M8.53 16.11a6 6 0 016.95 0M12 20h.01"/>
@@ -570,28 +575,34 @@ input[type=file] { display:none; }
   </button>
 </div>
 
-<div class="list-sel" id="list-sel-bar">
-  <button class="ls-btn on" id="ls-on" onclick="setList('on')">On Service <span id="ls-on-count"></span></button>
-  <button class="ls-btn" id="ls-off" onclick="setList('off')">Off Service <span id="ls-off-count"></span></button>
-</div>
-
 <div class="nav">
   <button class="nb on" onclick="nav(0,this)">Rounds</button>
   <button class="nb" onclick="nav(1,this)">Add patient</button>
   <button class="nb" onclick="nav(2,this)">Recently discharged</button>
 </div>
 
+<div class="list-sel" id="list-sel-bar">
+  <div class="list-sel-btns">
+    <button class="ls-btn on" id="ls-on" onclick="setList('on')">On Service <span id="ls-on-count"></span></button>
+    <button class="ls-btn" id="ls-off" onclick="setList('off')">Off Service <span id="ls-off-count"></span></button>
+  </div>
+  <div class="rounds-search-wrap">
+    <svg class="rounds-search-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input id="rounds-search" placeholder="Search patients…" oninput="roundsSearch(this.value)" autocorrect="off" autocomplete="off">
+  </div>
+  <div class="view-tog" id="view-tog-bar">
+    <button class="vt on" id="vt-geo" onclick="setView('geo')">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Geographic
+    </button>
+    <button class="vt" id="vt-alpha" onclick="setView('alpha')">
+      <svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/></svg>Alphabetical
+    </button>
+  </div>
+</div>
+
 <!-- ═══ ROUNDS PANE ═══ -->
 <div class="pane on" id="p0">
   <div id="on-view">
-    <div class="view-tog">
-      <button class="vt on" id="vt-geo" onclick="setView('geo')">
-        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Geographic
-      </button>
-      <button class="vt" id="vt-alpha" onclick="setView('alpha')">
-        <svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/></svg>Alphabetical
-      </button>
-    </div>
     <div id="geo-view"></div>
     <div id="alpha-view" style="display:none"></div>
   </div>
@@ -752,18 +763,14 @@ input[type=file] { display:none; }
   <button class="btn btn-s" onclick="clearAddForm()">Clear</button>
 </div>
 
-<!-- ═══ CODES PANE ═══ -->
-<!-- p2 (fees) and p3 (referrers) panes removed v2.82 — orphaned, not reachable from nav -->
-
-<!-- ═══ EXPORT PANE ═══ -->
-<!-- ═══ ADD CLAIM PANE ═══ -->
-<div class="pane" id="p-addclaim" style="padding-top:52px">
+<!-- ═══ RECENTLY DISCHARGED PANE ═══ -->
+<div class="pane" id="p-discharged">
   <div class="search-wrap">
     <svg class="search-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-    <input id="addclaim-search" placeholder="Search name or PHN…"
-      oninput="addClaimSearch(this.value)" autocorrect="off" autocomplete="off">
+    <input id="discharged-search" placeholder="Search discharged patients…"
+      oninput="dischargedSearch(this.value)" autocorrect="off" autocomplete="off">
   </div>
-  <div id="addclaim-results"></div>
+  <div id="discharged-results"></div>
 </div>
 
 <!-- ═══ CLAIM SCREEN (full pane) ═══ -->
@@ -1468,6 +1475,7 @@ var st = {
 // UI state
 var _listView = 'on';   // 'on' | 'off'
 var _geoView  = 'geo';  // 'geo' | 'alpha'
+var _roundsQuery = '';  // active search filter on rounds pane
 var _claimPid = null;   // patient id open in claim screen
 var _locPid   = null;   // patient id open in location screen
 var _locWard  = null;   // selected ward in location screen
@@ -1568,7 +1576,6 @@ async function loadLocal() {
       if (p.roundedToday) p.roundedToday = fmtClaimDate(p.roundedToday);
       if (p.dischargedAt) p.dischargedAt = parseDischargedAt(p.dischargedAt);
       p.discharged   = parseBool(p.discharged);
-      p.needsSticker = parseBool(p.needsSticker);
       var hadBadRef = looksLikeMRPService(p.refbyName);
       sanitizeReferrer(p);
       if (hadBadRef && SHEETS_URL) push('savePatient', p);  // push the clean version back to Sheets
@@ -1648,7 +1655,6 @@ async function syncFromSheets() {
         if (p.roundedToday) p.roundedToday = fmtClaimDate(p.roundedToday);
         if (p.dischargedAt) p.dischargedAt = parseDischargedAt(p.dischargedAt);
         p.discharged   = parseBool(p.discharged);
-        p.needsSticker = parseBool(p.needsSticker);
         var hadBadRef = looksLikeMRPService(p.refbyName);
         sanitizeReferrer(p);
         if (hadBadRef && SHEETS_URL) push('savePatient', p);  // overwrite stale bad data on Sheets
@@ -2313,6 +2319,13 @@ function renderGeo() {
 
 function wardHtml(ward) {
   var pts   = st.patients.filter(function(p) { return p.ward === ward && p.list === 'on' && !p.discharged; });
+  // Apply rounds search filter if active
+  if (_roundsQuery) {
+    pts = pts.filter(function(p) {
+      return ((p.last + ' ' + p.first).toLowerCase().indexOf(_roundsQuery) !== -1) ||
+             (p.phn || '').indexOf(_roundsQuery) !== -1;
+    });
+  }
   var wdef  = WARDS[ward] || {};
   var isCCU = ward === 'CCU';
   var isWard = ward === '2S' || ward === '2W';
@@ -2401,8 +2414,14 @@ function wardHtml(ward) {
 // ── Alphabetical view ──────────────────────────────────
 function renderAlpha() {
   var on = st.patients
-    .filter(function(p) { return p.list === 'on' && !p.discharged; })
-    .sort(function(a, b) { return a.last.localeCompare(b.last); });
+    .filter(function(p) { return p.list === 'on' && !p.discharged; });
+  if (_roundsQuery) {
+    on = on.filter(function(p) {
+      return ((p.last + ' ' + p.first).toLowerCase().indexOf(_roundsQuery) !== -1) ||
+             (p.phn || '').indexOf(_roundsQuery) !== -1;
+    });
+  }
+  on = on.sort(function(a, b) { return a.last.localeCompare(b.last); });
   document.getElementById('alpha-view').innerHTML =
     on.length ? on.map(alphaRow).join('') : '<div class="empty">No on-service patients.</div>';
 }
@@ -2417,6 +2436,12 @@ function setOffView(v) {
 
 function renderOff() {
   var off = st.patients.filter(function(p) { return p.list === 'off' && !p.discharged; });
+  if (_roundsQuery) {
+    off = off.filter(function(p) {
+      return ((p.last + ' ' + p.first).toLowerCase().indexOf(_roundsQuery) !== -1) ||
+             (p.phn || '').indexOf(_roundsQuery) !== -1;
+    });
+  }
 
   var h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">' +
     '<div class="ward-lbl">Off Service</div>' +
@@ -2680,6 +2705,7 @@ function showsCCUDaily(p) {
 function bbDone(btn, label) {
   btn.className = 'bb bb-done';
   btn.textContent = '✓ ' + label;
+  btn.disabled = true;
 }
 
 function quickActBtns(p) {
@@ -3314,7 +3340,7 @@ function openClaimScreen(pid) {
     var el = document.getElementById(id);
     if (el && el.classList.contains('on')) {
       _claimOriginPane   = id;
-      _claimOriginNavIdx = ['p0','p1','p-addclaim'].indexOf(id);
+      _claimOriginNavIdx = ['p0','p1','p-discharged'].indexOf(id);
       if (_claimOriginNavIdx < 0) _claimOriginNavIdx = 0;
     }
   });
@@ -3328,102 +3354,66 @@ function closeClaimScreen() {
     b.classList.toggle('on', i === _claimOriginNavIdx);
   });
   if (_claimOriginPane === 'p0') render();
-  if (_claimOriginPane === 'p-addclaim') renderAddClaimResults(document.getElementById('addclaim-search').value || '');
+  if (_claimOriginPane === 'p-discharged') renderDischargedList(document.getElementById('discharged-search').value || '');
 }
 
-// ── 06b_add_claim.js ──
+// ── 06b_discharged.js ──
 // ═══════════════════════════════════════════════════════
-// 06b_add_claim.js — Recent patients pane
-// Shows active rounds patients + recently discharged (last 21 days)
-// Tap any to open the claim screen
+// Recently Discharged pane + rounds search filter
+// Pane shows discharged patients (last 21 days, or all when searching)
+// Each row offers: tap to add a missed claim, restore (to On/Off Service)
 // ═══════════════════════════════════════════════════════
 
-function initAddClaim() {
-  document.getElementById('addclaim-search').value = '';
-  renderAddClaimResults('');
+function roundsSearch(query) {
+  _roundsQuery = (query || '').toLowerCase().trim();
+  render();
 }
 
-function addClaimSearch(query) {
-  renderAddClaimResults(query);
+function initDischarged() {
+  document.getElementById('discharged-search').value = '';
+  renderDischargedList('');
 }
 
-function renderAddClaimResults(query) {
-  var container = document.getElementById('addclaim-results');
+function dischargedSearch(query) {
+  renderDischargedList(query);
+}
+
+function renderDischargedList(query) {
+  var container = document.getElementById('discharged-results');
   var q = (query || '').toLowerCase().trim();
 
-  // Normalise discharged flag inline in case Sheets returned 'True'/'False' strings
-  st.patients.forEach(function(p) {
-    p.discharged = parseBool(p.discharged);
-  });
+  // Normalise discharged flag
+  st.patients.forEach(function(p) { p.discharged = parseBool(p.discharged); });
 
-  // Active patients (on rounds list)
-  var active = st.patients.filter(function(p) { return !p.discharged; });
-
-  // Discharged patients — only TRUE discharges (not "remove from list - added in error")
-  // Default list: last 21 days. Search covers all true-discharged patients regardless of age.
+  // Discharged patients within last 21 days (or all when searching)
   var cutoff21 = Date.now() - (21 * 24 * 60 * 60 * 1000);
-  var allDischarged = st.patients.filter(function(p) { return p.discharged && p.trueDischarge; })
+  var pool = st.patients
+    .filter(function(p) { return p.discharged; })
     .sort(function(a, b) { return (parseDischargedAt(b.dischargedAt)||0) - (parseDischargedAt(a.dischargedAt)||0); });
-  var recent = q ? allDischarged : allDischarged.filter(function(p) {
+
+  var recent = q ? pool : pool.filter(function(p) {
     var ms = parseDischargedAt(p.dischargedAt);
-    // Strict: require a valid dischargedAt within the 21-day window.
-    // Patients with no dischargedAt can't be proved recent, so they're hidden.
     return ms && ms > cutoff21;
   });
 
-  var allPatients = active.concat(recent);
-
-  if (!allPatients.length) {
-    container.innerHTML =
-      '<div class="empty">No patients found.</div>' +
-      '<button class="btn btn-p" style="margin-top:8px" ' +
-        'onclick="nav(1,document.querySelectorAll(\'.nb\')[1])">Go to Add Patient</button>';
-    return;
-  }
-
-  // Filter by query if provided
   if (q) {
-    allPatients = allPatients.filter(function(p) {
-      var name = (p.last + ' ' + p.first).toLowerCase();
-      return name.indexOf(q) !== -1 || (p.phn || '').indexOf(q) !== -1;
+    recent = recent.filter(function(p) {
+      return ((p.last + ' ' + p.first).toLowerCase().indexOf(q) !== -1) ||
+             (p.phn || '').indexOf(q) !== -1;
     });
   }
 
-  if (!allPatients.length) {
-    container.innerHTML =
-      '<div class="empty" style="padding:18px 0 10px">No patient matching &ldquo;' + esc(query) + '&rdquo;</div>' +
-      '<div style="font-size:12px;color:var(--text2);text-align:center;margin-bottom:12px">Patient may not be on the list yet.</div>' +
-      '<button class="btn btn-p" onclick="nav(1,document.querySelectorAll(\'.nb\')[1])">Add patient first</button>';
+  if (!recent.length) {
+    container.innerHTML = q
+      ? '<div class="empty" style="padding:18px 0 10px">No match for &ldquo;' + esc(query) + '&rdquo;</div>'
+      : '<div class="empty">No patients discharged in the last 21 days.</div>';
     return;
   }
 
-  var html = '';
-
-  if (!q) {
-    // Active patients — split pending / rounded
-    var pending = active.filter(function(p) { return !claimedToday(p); });
-    var done    = active.filter(function(p) { return claimedToday(p); });
-
-    if (pending.length) {
-      html += '<div class="sec-lbl">On rounds — not yet seen today</div>';
-      html += pending.map(function(p) { return addClaimRow(p); }).join('');
-    }
-    if (done.length) {
-      html += '<div class="sec-lbl" style="margin-top:10px">On rounds — already seen today</div>';
-      html += done.map(function(p) { return addClaimRow(p); }).join('');
-    }
-    if (recent.length) {
-      html += '<div class="sec-lbl" style="margin-top:10px">Recently discharged</div>';
-      html += recent.map(function(p) { return addClaimRow(p); }).join('');
-    }
-  } else {
-    html += allPatients.map(function(p) { return addClaimRow(p); }).join('');
-  }
-
-  container.innerHTML = html;
+  container.innerHTML = recent.map(function(p) { return dischargedRow(p); }).join('');
 }
 
-function addClaimRow(p) {
+function dischargedRow(p) {
   var isCCU  = p.ward === 'CCU';
   var avCls  = isCCU ? 'av-ccu' : p.list === 'off' ? 'av-off' : 'av-on';
   var ini    = (p.first ? p.first[0] : '') + (p.last ? p.last[0] : '');
@@ -3450,7 +3440,7 @@ function addClaimRow(p) {
         '↩ Restore</button>'
     : '';
 
-  return '<div class="alpha-row" onclick="openClaimFromSearch(\'' + p.id + '\')">' +
+  return '<div class="alpha-row" onclick="openClaimFromDischarged(\'' + p.id + '\')">' +
     '<div class="alpha-av ' + avCls + '">' + ini.toUpperCase() + '</div>' +
     '<div style="flex:1;min-width:0">' +
       '<div class="wp-name">' + esc(p.last) + ', ' + esc(p.first) + '</div>' +
@@ -3499,19 +3489,18 @@ function _doRestore(pid, list) {
   p.discharged    = false;
   p.dischargedAt  = null;
   p.dischargeDate = null;
-  p.trueDischarge = false;
   p.list          = list;
   if (list === 'on' && !p.ward) p.ward = 'OTHER';
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
   logChange(p, 'Restored', 'Returned to ' + (list === 'on' ? 'On Service' : 'Off Service'));
   showToast(p.last + ' restored to ' + (list === 'on' ? 'on-service' : 'off-service') + ' list');
-  renderAddClaimResults(document.getElementById('addclaim-search').value || '');
+  renderDischargedList(document.getElementById('discharged-search').value || '');
   render();
 }
 
-function openClaimFromSearch(pid) {
-  _claimOriginPane   = 'p-addclaim';
+function openClaimFromDischarged(pid) {
+  _claimOriginPane   = 'p-discharged';
   _claimOriginNavIdx = 2;
   _openClaimScreen(pid);
 }
@@ -3583,7 +3572,7 @@ function openPatientSummary(pid) {
 
   // ── Claims section — Add claim button first ───────────
   // Add claim button at top
-  var addClaimFn2 = p.discharged ? 'openClaimFromSearch' : 'openClaimScreen';
+  var addClaimFn2 = p.discharged ? 'openClaimFromDischarged' : 'openClaimScreen';
   html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px">';
   html +=   '<div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">' +
             claims.length + ' claim' + (claims.length !== 1 ? 's' : '') + ' on record</div>';
@@ -3771,7 +3760,7 @@ function ptSummaryAddClaim(btn) {
   var pid = btn.getAttribute('data-pid2');
   var fn  = btn.getAttribute('data-fn2');
   hideModal('pt-summary-modal');
-  if (fn === 'openClaimFromSearch') openClaimFromSearch(pid);
+  if (fn === 'openClaimFromDischarged') openClaimFromDischarged(pid);
   else openClaimScreen(pid);
 }
 
@@ -4203,7 +4192,6 @@ function savePatientEdit(pid) {
   p.mrp       = (document.getElementById('pe-mrp')  || {}).value || '';
   p.list      = (document.getElementById('pe-list') || {}).value || p.list;
   p.care      = (document.getElementById('pe-care') || {}).value || p.care;
-  p.needsSticker = !p.phn;
 
   // Referring MD
   var refby = document.getElementById('pe-refby');
@@ -4812,8 +4800,7 @@ function addPatient() {
     list:         gv('f-list')   || 'on',
     care:         gv('f-care')   || (gv('f-role') === 'mrp' ? 'daily' : 'directive'),
     icd:          icd,
-    roundedToday: null,
-    needsSticker: !phn
+    roundedToday: null
   };
 
   saveCustomRoom(ward, p.bed);
@@ -5561,7 +5548,7 @@ function closeLocScreen() {
 // Flow:
 //   Step 1 — if no visit billed today: offer visit type buttons (default by ward/role)
 //   Step 2 — if Cardiology MRP, non-CCU ward, LOS > 4: complex discharge prompt
-//   Step 3 — Confirm & remove  OR  Remove from list (error)
+//   Step 3 — Confirm discharge & remove (single action, no error-removal path)
 //
 function openDischModal(pid) {
   _claimPid = pid;
@@ -5683,8 +5670,7 @@ function _dischStep3(pid) {
     '<div style="display:flex;flex-direction:column;gap:8px">' +
     '<button class="btn btn-p" style="margin:0" data-pid="' + pid + '" ' +
     'onclick="dischConfirmRemove(this)">Confirm discharge &amp; remove</button>' +
-    '<button class="btn btn-r" style="margin:0" data-pid="' + pid + '" ' +
-    'onclick="dischRemoveError(this)">Remove from list (added in error)</button>' +
+    '<button class="btn btn-s" style="margin:0" onclick="hideModal(\'disch-modal\')">Cancel</button>' +
     '</div>';
   document.getElementById('disch-body').innerHTML = h;
 }
@@ -5699,21 +5685,11 @@ function dischConfirmRemove(btn) {
     if (dp.length === 3) dcDate = dp[2] + '/' + dp[1] + '/' + dp[0];
   }
   p.dischargeDate = dcDate;   // DD/MM/YYYY — human-readable, pushed to Sheets
-  p.trueDischarge = true;     // marks as a real patient discharge (not sign-off or remove-in-error)
   logChange(p, 'Discharged', 'D/C ' + dcDate);
   removePatient(pid);
   hideModal('disch-modal');
   closeClaimScreen();
   showToast(p.last + ' discharged');
-}
-
-function dischRemoveError(btn) {
-  var pid = btn.getAttribute('data-pid');
-  var p   = getP(pid);
-  removePatient(pid);
-  hideModal('disch-modal');
-  closeClaimScreen();
-  showToast(p.last + ' removed from list');
 }
 
 function dopt(color, label, sub, fn) {
@@ -6430,7 +6406,6 @@ function confirmMediteachImport() {
       list:        p._list,
       icd:         p._icd,
       roundedToday:null,
-      needsSticker:true,
       mrp:         p._mrp || ''
     };
     st.patients.push(newPt);
@@ -6545,7 +6520,7 @@ async function resetLocalData() {
 }
 
 // ── Navigation ─────────────────────────────────────────
-var ALL_PANES = ['p0','p1','p-addclaim','p-claim','p-loc'];
+var ALL_PANES = ['p0','p1','p-discharged','p-claim','p-loc'];
 
 function showPane(id) {
   ALL_PANES.forEach(function(pid) { document.getElementById(pid).classList.remove('on'); });
@@ -6554,13 +6529,12 @@ function showPane(id) {
 
 function nav(n, el) {
   document.querySelectorAll('.nb').forEach(function(b, i) { b.classList.toggle('on', i === n); });
-  // Tab map: 0=Rounds, 1=Add patient, 2=Recent patients
-  var paneMap = { 0:'p0', 1:'p1', 2:'p-addclaim' };
+  var paneMap = { 0:'p0', 1:'p1', 2:'p-discharged' };
   showPane(paneMap[n] || 'p0');
   var listSel = document.getElementById('list-sel-bar');
   if (listSel) listSel.classList.toggle('hidden', n !== 0);
   if (n === 0) render();
-  if (n === 2) initAddClaim();
+  if (n === 2) initDischarged();
 }
 
 function setList(v) {
@@ -6569,6 +6543,13 @@ function setList(v) {
   document.getElementById('ls-off').classList.toggle('on', v === 'off');
   document.getElementById('on-view').style.display  = v === 'on'  ? 'block' : 'none';
   document.getElementById('off-view').style.display = v === 'off' ? 'block' : 'none';
+  // Show geo/alpha toggle only on On Service; hide on Off Service
+  var vtBar = document.getElementById('view-tog-bar');
+  if (vtBar) vtBar.style.display = v === 'on' ? 'flex' : 'none';
+  // Clear rounds search when switching lists
+  var rs = document.getElementById('rounds-search');
+  if (rs) rs.value = '';
+  _roundsQuery = '';
   render();
 }
 
