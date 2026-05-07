@@ -537,7 +537,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.87</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.89</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -731,7 +731,7 @@ input[type=file] { display:none; }
       <input id="f-ref-search" placeholder="Type name or doctor #..." autocorrect="off" style="padding-right:32px"
         data-dd="f-ref-dd" data-hidden="f-refby" data-name="f-refby-name"
         oninput="refSearchEl(this);this.style.cssText='padding-right:32px';this.placeholder='Type name or doctor #...'" onfocus="refSearchEl(this)">
-      <button type="button" tabindex="-1" onclick="clearSearchField(\'f-ref-search\',\'f-refby\','f-refby-name',\'f-ref-dd\')" style="position:absolute;right:8px;top:9px;background:none;border:none;font-size:18px;line-height:1;color:var(--text3);cursor:pointer;padding:2px 4px;z-index:5">&times;</button>
+      <button type="button" tabindex="-1" onclick="clearSearchField('f-ref-search','f-refby','f-refby-name','f-ref-dd')" style="position:absolute;right:8px;top:9px;background:none;border:none;font-size:18px;line-height:1;color:var(--text3);cursor:pointer;padding:2px 4px;z-index:5">&times;</button>
     </div>
     <div class="ref-dd" id="f-ref-dd"></div>
     <input id="f-refby"      type="hidden">
@@ -742,7 +742,7 @@ input[type=file] { display:none; }
       <input id="f-icd-search" placeholder="Type diagnosis or code..." autocorrect="off" autocomplete="off" style="padding-right:32px"
         data-dd="f-icd-dd" data-hidden="f-icd"
         oninput="icdSearchEl(this);this.style.cssText='padding-right:32px';this.placeholder='Type diagnosis or code...'" onfocus="icdSearchEl(this)">
-      <button type="button" tabindex="-1" onclick="clearSearchField(\'f-icd-search\',\'f-icd\',null,\'f-icd-dd\')" style="position:absolute;right:8px;top:9px;background:none;border:none;font-size:18px;line-height:1;color:var(--text3);cursor:pointer;padding:2px 4px;z-index:5">&times;</button>
+      <button type="button" tabindex="-1" onclick="clearSearchField('f-icd-search','f-icd',null,'f-icd-dd')" style="position:absolute;right:8px;top:9px;background:none;border:none;font-size:18px;line-height:1;color:var(--text3);cursor:pointer;padding:2px 4px;z-index:5">&times;</button>
     </div>
     <input id="f-icd" type="hidden" value="410">
     <div class="ref-dd" id="f-icd-dd"></div>
@@ -6106,11 +6106,11 @@ function selectRef(num, displayName, dropdownId, hiddenId, nameId) {
 
   // Fill visible search input with selected name
   var dd = document.getElementById(dropdownId);
-  if (dd) {
-    var inp = dd.previousElementSibling;
-    if (inp && inp.tagName === 'INPUT') inp.value = displayName;
-    dd.style.display = 'none';
-  }
+  if (dd) dd.style.display = 'none';
+  // Derive search input ID from dropdown ID (e.g. 'f-ref-dd' -> 'f-ref-search')
+  var searchId = dropdownId.replace(/-dd$/, '-search');
+  var inp = document.getElementById(searchId);
+  if (inp && inp.tagName === 'INPUT') inp.value = displayName;
 
   // Track recently used
   if (!st.recentRefs) st.recentRefs = [];
