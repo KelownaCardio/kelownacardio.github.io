@@ -537,7 +537,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.92</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.94</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1485,13 +1485,35 @@ var LS = window.storage || {
   },
   set: async function(k, v) {
     try { localStorage.setItem(k, v); return { ok: true }; } catch(e) { return null; }
+  },
+  delete: async function(k) {
+    try { localStorage.removeItem(k); return { ok: true }; } catch(e) { return null; }
   }
 };
 
+// Bump this any time you need to force-wipe every device's localStorage cache.
+// On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
+// loadLocal runs. This is the central kill-switch for stuck stale data.
+var BUILD_ID = 'v2.94-2026-05-07';
+
+(function purgeIfBuildChanged() {
+  try {
+    var stored = localStorage.getItem('kgh5:buildId');
+    if (stored !== BUILD_ID) {
+      // Wipe every kgh5:* key
+      var toWipe = [];
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && k.indexOf('kgh5:') === 0) toWipe.push(k);
+      }
+      toWipe.forEach(function(k) { localStorage.removeItem(k); });
+      localStorage.setItem('kgh5:buildId', BUILD_ID);
+      console.log('[kgh] Build changed → wiped', toWipe.length, 'localStorage keys');
+    }
+  } catch(e) {}
+})();
+
 async function loadLocal() {
-  // Only load non-clinical state from localStorage.
-  // patients/claims/doctors/changelog always come from Sheets — never from local cache.
-  // This ensures all devices see the same data regardless of which device last wrote.
   var localOnlyKeys = ['doc','recentIcds','recentRefs'];
   for (var i = 0; i < localOnlyKeys.length; i++) {
     var k = localOnlyKeys[i];
@@ -1503,10 +1525,16 @@ async function loadLocal() {
       }
     } catch(e) {}
   }
-  // Clear any stale clinical data from localStorage to avoid confusion
-  ['patients','claims','doctors','changelog'].forEach(function(k) {
-    try { LS.delete && LS.delete(STORAGE_PREFIX + k); } catch(e) {}
+  // Clear any stale clinical data from localStorage to avoid confusion.
+  // Use direct localStorage.removeItem since it's synchronous and always available.
+  ['patients','claims','doctors','changelog','refs'].forEach(function(k) {
+    try { localStorage.removeItem(STORAGE_PREFIX + k); } catch(e) {}
   });
+  // Legacy confirmed-tracking keys (replaced by window._pendingPush in v2.83) — purge.
+  try {
+    localStorage.removeItem(STORAGE_PREFIX + 'confirmedClaims');
+    localStorage.removeItem(STORAGE_PREFIX + 'confirmedPatients');
+  } catch(e) {}
   // Normalise and patch locally-saved claims
   if (Array.isArray(st.claims)) {
     var _localByPhn = {};
