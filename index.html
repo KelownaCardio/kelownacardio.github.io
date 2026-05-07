@@ -537,7 +537,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.81</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v2.83</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -747,66 +747,9 @@ input[type=file] { display:none; }
 </div>
 
 <!-- ═══ CODES PANE ═══ -->
-<div class="pane" id="p2">
-  <div class="search-wrap">
-    <svg class="search-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-    <input placeholder="Search fee codes…" oninput="filterFees(this.value)">
-  </div>
-  <div id="fee-list"></div>
-</div>
-
-<!-- ═══ REFERRERS PANE ═══ -->
-<div class="pane" id="p3">
-  <div class="search-wrap">
-    <svg class="search-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-    <input placeholder="Search referrers…" oninput="filterRefs(this.value)">
-  </div>
-  <div id="ref-list"></div>
-  <div class="divider"></div>
-  <div class="card">
-    <div class="card-title">Add referrer</div>
-    <div class="fl">
-      <div class="f1"><label>Last name</label><input id="r-last" autocorrect="off" autocapitalize="words"></div>
-      <div class="f1"><label>First name</label><input id="r-first" autocorrect="off" autocapitalize="words"></div>
-    </div>
-    <div class="fl">
-      <div class="f1"><label>MSP doctor #</label><input id="r-num" inputmode="numeric" autocorrect="off"></div>
-      <div class="f1"><label>Specialty</label><input id="r-spec" autocorrect="off" placeholder="GP, Hospitalist…"></div>
-    </div>
-    <button class="btn btn-p" onclick="addRef()">Save referrer</button>
-  </div>
-</div>
+<!-- p2 (fees) and p3 (referrers) panes removed v2.82 — orphaned, not reachable from nav -->
 
 <!-- ═══ EXPORT PANE ═══ -->
-<div class="pane" id="p4">
-  <div style="display:flex;gap:4px;padding:8px 8px 0;background:var(--surface2);border-bottom:1px solid var(--border2)">
-    <button id="exp-tab-pending" class="nb on" style="flex:1;font-size:11px" onclick="switchExpTab('pending')">Pending</button>
-    <button id="exp-tab-submitted" class="nb" style="flex:1;font-size:11px" onclick="switchExpTab('submitted')">Submitted</button>
-    <button id="exp-tab-log" class="nb" style="flex:1;font-size:11px" onclick="switchExpTab('log')">Log</button>
-  </div>
-  <div id="exp-pane-pending">
-    <div class="stats" id="exp-stats" style="grid-template-columns:1fr 1fr 1fr;margin-top:8px"></div>
-    <div class="sec-lbl">Pending claims</div>
-    <div id="export-q"></div>
-    <button class="btn btn-g" onclick="exportCSV()" style="margin-top:8px">Export iClinic CSV</button>
-    <button class="btn btn-s" onclick="clearQueue()">Clear queue</button>
-    <div style="font-size:10px;color:var(--text3);text-align:center;padding:4px 0 0">OA040 · I/E location · iClinic format · CCU codes auto-consolidated</div>
-  </div>
-  <div id="exp-pane-submitted" style="display:none">
-    <div id="submitted-stats" class="stats" style="grid-template-columns:1fr 1fr;margin-top:8px"></div>
-    <div style="display:flex;align-items:center;justify-content:space-between;margin:4px 0 2px">
-      <div class="sec-lbl" style="margin:0">Submitted claims</div>
-      <button class="bb" style="font-size:10px" onclick="reexportSubmitted()">&#8595; Re-export CSV</button>
-    </div>
-    <div style="font-size:10px;color:var(--text3);padding:0 0 6px">Tap any row to edit. Purged after 90 days.</div>
-    <div id="submitted-q"></div>
-  </div>
-  <div id="exp-pane-log" style="display:none">
-    <div class="sec-lbl" style="margin-top:8px">Change log</div>
-    <div id="change-log"></div>
-  </div>
-</div>
-
 <!-- ═══ ADD CLAIM PANE ═══ -->
 <div class="pane" id="p-addclaim" style="padding-top:52px">
   <div class="search-wrap">
@@ -922,14 +865,6 @@ input[type=file] { display:none; }
   <div class="modal">
     <div class="modal-handle"></div>
     <div id="pt-edit-content"></div>
-  </div>
-</div>
-
-<!-- ═══ LOS DISCHARGE MODAL ═══ -->
-<div class="overlay" id="los-modal">
-  <div class="modal" style="max-width:340px;margin:auto">
-    <div class="modal-handle"></div>
-    <div id="los-modal-content"></div>
   </div>
 </div>
 
@@ -1712,16 +1647,20 @@ async function syncFromSheets() {
 
       // Keep local-only patients only within the grace window
       // Load confirmed patients set
-      // Keep only in-flight local patients (created < 2 min ago, not yet on Sheets).
-      // Everything else comes from Sheets. No localStorage tracking needed.
+      // Clear pending entries that now appear in Sheets
+      d.patients.forEach(function(p) {
+        if (window._pendingPush && window._pendingPush[p.id]) delete window._pendingPush[p.id];
+      });
+
+      // Keep local patients that are either in-flight OR pending unconfirmed push.
       st.patients.forEach(function(lp) {
         if (!remoteById[lp.id]) {
           var age = NOW_MS - (parseInt(String(lp.id).replace('p','').slice(0,13)) || 0);
-          if (age < GRACE_MS) {
-            merged.push(lp); // push still in flight — keep temporarily
-            if (SHEETS_URL) push('savePatient', lp);
+          var isPending = window._pendingPush && window._pendingPush[lp.id];
+          if (age < GRACE_MS || isPending) {
+            merged.push(lp);
+            if (SHEETS_URL) push('savePatient', lp); // retry
           }
-          // else: not on Sheets and not in flight — drop it
         }
       });
 
@@ -1751,15 +1690,22 @@ async function syncFromSheets() {
 
       var mergedClaims = d.claims.slice();
 
-      // Keep only in-flight local claims (created < 2 min ago, not yet on Sheets).
+      // Clear pending entries that now appear in Sheets (push succeeded)
+      d.claims.forEach(function(c) {
+        if (window._pendingPush && window._pendingPush[c.id]) delete window._pendingPush[c.id];
+      });
+
+      // Keep local claims that are either in-flight (< 2 min) OR pending unconfirmed push.
+      // Never drop a claim that hasn't been confirmed on Sheets yet — retry instead.
       st.claims.forEach(function(lc) {
         if (!remoteClaimIds[lc.id]) {
           var age = NOW_MS - (parseInt(String(lc.id).replace('c','').slice(0,13)) || 0);
-          if (age < GRACE_MS) {
+          var isPending = window._pendingPush && window._pendingPush[lc.id];
+          if (age < GRACE_MS || isPending) {
             mergedClaims.push(lc);
-            if (SHEETS_URL) push('saveClaim', lc);
+            if (SHEETS_URL) push('saveClaim', lc); // retry
           }
-          // else: not on Sheets and not in flight — drop it
+          // else: not on Sheets, not in flight, not pending — safe to drop (was deleted remotely)
         }
       });
 
@@ -1835,30 +1781,43 @@ async function logoutAndRefresh() {
   }, 1200);
 }
 
+// Track items that haven't yet been confirmed on Sheets — never dropped on sync.
+// Cleared once the item appears in a sync response.
+if (!window._pendingPush) window._pendingPush = {};
+
 async function push(action, body) {
-  if (!SHEETS_URL) return;
+  if (!SHEETS_URL) return false;
   // Guard: never push a patient or claim with no id — prevents blank row creation
   if ((action === 'savePatient' || action === 'saveClaim') && (!body || !body.id)) {
     console.warn('push blocked — no id on', action, body);
-    return;
+    return false;
   }
   // Guard: never push a structurally empty patient
   if (action === 'savePatient' && body && !body.last && !body.first && !body.phn) {
     console.warn('push blocked — empty patient record', body);
-    return;
+    return false;
   }
   // Guard: never push a structurally empty claim
   if (action === 'saveClaim' && body && (!body.phn || !body.fee || !body.date)) {
     console.warn('push blocked — empty claim record', body);
-    return;
+    return false;
+  }
+  // Mark as pending until next successful sync confirms it
+  if (action === 'savePatient' || action === 'saveClaim') {
+    window._pendingPush[body.id] = { action: action, body: body, ts: Date.now() };
   }
   setSyncState('syncing');
   try {
-    await fetch(SHEETS_URL + '?action=' + action + '&key=' + SHARED_KEY, {
+    var resp = await fetch(SHEETS_URL + '?action=' + action + '&key=' + SHARED_KEY, {
       method: 'POST', body: JSON.stringify(body)
     });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
     setSyncState('synced');
-  } catch(e) { setSyncState('error'); }
+    return true;
+  } catch(e) {
+    setSyncState('error');
+    return false;
+  }
 }
 
 // ── 04_billing.js ──
@@ -2208,20 +2167,9 @@ function parseDischargedAt(v) {
 // Drives the green card tint — claim-based, syncs across all devices.
 function claimedToday(p) {
   if (!p || !p.phn) return false;
-  var match = st.claims.some(function(c) {
+  return st.claims.some(function(c) {
     return c.phn === p.phn && fmtClaimDate(c.date) === TODAY;
   });
-  // Diagnostic: log when patient HAS claims but none match TODAY
-  if (!match && window._dbgGreen) {
-    var phnClaims = st.claims.filter(function(c) { return c.phn === p.phn; });
-    if (phnClaims.length) {
-      console.log('[no-green]', p.last, 'phn=' + p.phn, 'TODAY=' + TODAY,
-        'claims:', phnClaims.map(function(c) {
-          return { rawDate: c.date, fmtDate: fmtClaimDate(c.date), phn: c.phn, fee: c.fee };
-        }));
-    }
-  }
-  return match;
 }
 
 // Returns true if any claim of the given fee types exists today from ANY doctor.
@@ -2296,7 +2244,6 @@ function roleChip(p) {
 
 function render() {
   TODAY = todayStr(); // refresh in case app was open past midnight
-  window._dbgGreen = true;
   if (!st.loaded) return;
   updateDailyTotal();
   var all = st.patients.filter(function(p) { return !p.discharged; });
@@ -3311,7 +3258,7 @@ function openClaimScreen(pid) {
     var el = document.getElementById(id);
     if (el && el.classList.contains('on')) {
       _claimOriginPane   = id;
-      _claimOriginNavIdx = ['p0','p1','p-addclaim','p4'].indexOf(id);
+      _claimOriginNavIdx = ['p0','p1','p-addclaim'].indexOf(id);
       if (_claimOriginNavIdx < 0) _claimOriginNavIdx = 0;
     }
   });
@@ -4110,7 +4057,6 @@ function peWardChange() {
   var rooms = (wdef.rooms || []).slice();
   var bedSel = document.getElementById('pe-bed');
   if (!bedSel) return;
-  populateBedDatalist('pe-bed-list', ward);
   // Re-apply role rules so MRP daily/CCU care type tracks the new ward
   var roleSel = document.getElementById('pe-role');
   if (roleSel && roleSel.value === 'mrp') {
@@ -4892,10 +4838,6 @@ function saveCustomRoom(ward, room) {
   try { localStorage.setItem('kgh5:rooms:' + ward, JSON.stringify(saved)); } catch(e) {}
 }
 
-function populateBedDatalist(listId, ward) {
-  // Legacy no-op — custom dropdown now handles bed search
-}
-
 function getBedRooms(ward) {
   var wdef = WARDS[ward] || {};
   var preset = (wdef.rooms || []).slice();
@@ -4947,9 +4889,6 @@ function wardChange() {
   // Show/hide Other ward text field
   var otherWrap = document.getElementById('f-ward-other-wrap');
   if (otherWrap) otherWrap.style.display = w === 'OTHER' ? 'block' : 'none';
-
-  // Populate bed datalist with preset + saved custom rooms
-  populateBedDatalist('f-bed-list', w);
 
   // Clear bed input when ward changes
   var bedInp = document.getElementById('f-bed');
@@ -5712,12 +5651,6 @@ function dischRemoveError(btn) {
   showToast(p.last + ' removed from list');
 }
 
-// Legacy stubs
-function losDischNo(btn)    { var pid = btn.getAttribute('data-pid'); hideModal('los-modal'); removePatient(pid); render(); }
-function losDischClose(btn) { var pid = btn.getAttribute('data-pid'); hideModal('los-modal'); removePatient(pid); render(); }
-function signOffConfirm(btn){ var pid = btn.getAttribute('data-pid'); var p = getP(pid); hideModal('los-modal'); logChange(p,'Signed off','No billing'); removePatient(pid); closeClaimScreen(); showToast('Signed off — ' + p.last); }
-function _openDischModalInner(pid) {} // kept for compatibility
-
 function dopt(color, label, sub, fn) {
   var bg = { green:'var(--green-bg)', blue:'var(--blue-bg)', amber:'var(--amber-bg)', teal:'var(--teal-bg)', red:'var(--red-bg)' };
   var tc = { green:'var(--green-t)',  blue:'var(--blue-t)',  amber:'var(--amber-t)',  teal:'var(--teal-t)',  red:'var(--red-t)'  };
@@ -5761,23 +5694,6 @@ function transferToDir() {
   showToast(p.last + ' now on directive care');
 }
 
-function signOff() {
-  var p = getP(_claimPid);
-  logChange(p, 'Signed off (off-service)', 'No billing');
-  removePatient(_claimPid);
-  hideModal('disch-modal');
-  closeClaimScreen();
-  showToast('Signed off — ' + p.last);
-}
-
-function removeOnly() {
-  var p = getP(_claimPid);
-  logChange(p, 'Removed from list', 'No billing');
-  removePatient(_claimPid);
-  hideModal('disch-modal');
-  closeClaimScreen();
-  showToast(p.last + ' removed from list');
-}
 
 function removePatient(pid) {
   var p = st.patients.find(function(p) { return p.id === pid; });
@@ -5809,60 +5725,6 @@ function purgeOldPatients() {
 // ═══════════════════════════════════════════════════════
 // 11_export.js — iClinic CSV export, export queue render
 // ═══════════════════════════════════════════════════════
-
-function switchExpTab(tab) {
-  ['pending','submitted','log'].forEach(function(t) {
-    var pane = document.getElementById('exp-pane-' + t);
-    var btn  = document.getElementById('exp-tab-' + t);
-    if (pane) pane.style.display = t === tab ? 'block' : 'none';
-    if (btn)  btn.classList.toggle('on', t === tab);
-  });
-  if (tab === 'submitted') renderSubmitted();
-}
-
-function renderSubmitted() {
-  var subClaims = (st.claims || []).filter(function(c) { return parseBool(c.submitted); });
-  subClaims.sort(function(a,b){ return (b.submittedAt||'').localeCompare(a.submittedAt||''); });
-  var statsEl = document.getElementById('submitted-stats');
-  var qEl     = document.getElementById('submitted-q');
-  if (!statsEl || !qEl) return;
-  var docs = [];
-  subClaims.forEach(function(c){ if(c.alias && docs.indexOf(c.alias)===-1) docs.push(c.alias); });
-  statsEl.innerHTML =
-    '<div class="stat"><div class="stat-n">' + subClaims.length + '</div><div class="stat-l">Submitted</div></div>' +
-    '<div class="stat"><div class="stat-n">' + docs.length + '</div><div class="stat-l">Doctors</div></div>';
-  if (!subClaims.length) { qEl.innerHTML = '<div class="empty">No submitted claims yet.</div>'; return; }
-  var byDate = {}, dateOrder = [];
-  subClaims.forEach(function(c) {
-    var dk = c.submittedAt ? c.submittedAt.slice(0,10) : 'Unknown';
-    if (!byDate[dk]) { byDate[dk]=[]; dateOrder.push(dk); }
-    byDate[dk].push(c);
-  });
-  var _patByPhn = {};
-  (st.patients||[]).forEach(function(p) { if (p.phn) _patByPhn[p.phn] = p; });
-  qEl.innerHTML = dateOrder.map(function(dk) {
-    return '<div class="sec-lbl" style="margin-top:10px">Exported ' + esc(dk) + '</div>' +
-      byDate[dk].map(function(c) {
-        var _p = _patByPhn[c.phn] || {};
-        var _last  = _p.last  || '';
-        var _first = _p.first || '';
-        return '<div class="q-row" style="cursor:pointer" data-cid="' + esc(c.id) + '" onclick="editSubmittedClaim(this.dataset.cid)">' +
-          '<div class="q-info"><div class="q-name">' + esc(_last) + ', ' + esc(_first) + '</div>' +
-          '<div class="q-sub">' + esc(dispDate(c.date)) + ' &bull; ' + esc(c.fee||'') + ' &times;' + (c.units||1) + ' &bull; ' + esc(c.alias||'') + '</div></div>' +
-          '<div style="font-size:11px;color:var(--blue-t);flex-shrink:0;padding-left:8px">&#9998;</div></div>';
-      }).join('');
-  }).join('');
-}
-
-function editSubmittedClaim(cid) {
-  var c = st.claims.find(function(x){ return x.id===cid; });
-  if (!c) return;
-  var p = st.patients.find(function(x){ return x.phn===c.phn; });
-  if (!p) p = { id:'stub_'+cid, phn:c.phn, last:'', first:'', dob:'', sex:'' };
-  _claimOriginPane='p4'; _claimOriginNavIdx=3;
-  var fakeBtn = { getAttribute: function(k){ return k==='data-cid' ? cid : p.id; } };
-  openClaimEdit(fakeBtn);
-}
 
 function reexportSubmitted() {
   var sub = (st.claims||[]).filter(function(c){ return parseBool(c.submitted); });
@@ -5916,55 +5778,14 @@ function _buildAndDownloadCSV(claims, filename) {
   a.href=url; a.download=filename; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
 }
 
-function renderExport() {
-  purgeSubmittedClaims();
-  var raw = st.claims.filter(function(c) { return c.fee !== 'CCU_DAILY' && !parseBool(c.submitted); });
-  var ccu = ccuConsolidate();
-  var all = raw.concat(ccu);
-
-  var docs = [];
-  all.forEach(function(c) { if (c.alias && docs.indexOf(c.alias) === -1) docs.push(c.alias); });
-
-  var ccuTaps = st.claims.filter(function(c) { return c.fee === 'CCU_DAILY'; }).length;
-
-  document.getElementById('exp-stats').innerHTML =
-    '<div class="stat"><div class="stat-n">' + all.length + '</div><div class="stat-l">Claims</div></div>' +
-    '<div class="stat"><div class="stat-n">' + docs.length + '</div><div class="stat-l">Doctors</div></div>' +
-    '<div class="stat"><div class="stat-n" style="color:var(--amber)">' + ccuTaps + '</div><div class="stat-l">CCU taps</div></div>';
-
-  document.getElementById('export-q').innerHTML = all.length
-    ? all.map(function(c) {
-        return '<div class="q-row">' +
-          '<div class="q-info">' +
-            '<div class="q-name">' + esc(c.last) + ', ' + esc(c.first) + '</div>' +
-            '<div class="q-sub">' + dispDate(c.date) + ' &bull; ' + c.fee + ' &times;' + c.units + ' &bull; ' + (c.alias || '—') + '</div>' +
-          '</div>' +
-          '<button class="del-btn" onclick="removeClaim(\'' + c.id + '\')">✕</button>' +
-          '</div>';
-      }).join('')
-    : '<div class="empty">No claims queued.</div>';
-
-  // Change log
-  document.getElementById('change-log').innerHTML = st.changelog.length
-    ? st.changelog.slice(0, 25).map(function(l) {
-        return '<div class="log-row">' +
-          '<div class="log-action">' + esc(l.action) + ' — ' + esc(l.patName) + '</div>' +
-          '<div class="log-meta">' + esc(l.doctor) + ' &bull; ' + esc(l.ts) + (l.detail ? ' &bull; ' + esc(l.detail) : '') + '</div>' +
-          '</div>';
-      }).join('')
-    : '<div class="empty">No changes logged yet.</div>';
-}
-
 function removeClaim(id) {
   st.claims = st.claims.filter(function(c) { return c.id !== id; });
   sv('claims', st.claims);
-  renderExport();
 }
 
 function clearQueue() {
   st.claims = [];
   sv('claims', st.claims);
-  renderExport();
   showToast('Queue cleared');
 }
 
@@ -5988,7 +5809,6 @@ function exportCSV() {
   });
   sv('claims', st.claims);
   showToast('Exported ' + all.length + ' claims — marked as submitted');
-  renderExport();
 }
 
 // ── 12_referrers.js ──
@@ -6254,6 +6074,8 @@ function selectRef(num, displayName, dropdownId, hiddenId, nameId) {
 
 // ── Referrers pane ─────────────────────────────────────
 function renderRefs(q) {
+  var refList = document.getElementById('ref-list');
+  if (!refList) return; // pane removed in v2.82, no-op
   var list = st.refs.filter(function(r) {
     var s = (q || '').toLowerCase();
     return !s ||
@@ -6261,7 +6083,7 @@ function renderRefs(q) {
       (r.first||'').toLowerCase().includes(s) ||
       r.num.includes(s);
   });
-  document.getElementById('ref-list').innerHTML = list.length
+  refList.innerHTML = list.length
     ? list.map(function(r) {
         var ini = (r.first ? r.first[0] : '') + (r.last ? r.last[0] : '');
         var display = 'Dr. ' + r.last + (r.first ? ', ' + r.first : '');
@@ -6276,8 +6098,6 @@ function renderRefs(q) {
       }).join('')
     : '<div class="empty">No referrers saved yet.</div>';
 }
-
-function filterRefs(q) { renderRefs(q); }
 
 function useRef(num, displayName) {
   document.getElementById('f-refby-num').value  = num;
@@ -6653,7 +6473,7 @@ async function resetLocalData() {
 }
 
 // ── Navigation ─────────────────────────────────────────
-var ALL_PANES = ['p0','p1','p2','p3','p4','p-addclaim','p-claim','p-loc'];
+var ALL_PANES = ['p0','p1','p-addclaim','p-claim','p-loc'];
 
 function showPane(id) {
   ALL_PANES.forEach(function(pid) { document.getElementById(pid).classList.remove('on'); });
@@ -6688,25 +6508,6 @@ function setView(v) {
   document.getElementById('alpha-view').style.display = v === 'alpha' ? 'block' : 'none';
   render();
 }
-
-// ── Fee Codes Pane ─────────────────────────────────────
-function renderFees(q) {
-  var list = FEES.filter(function(f) {
-    var s = (q || '').toLowerCase();
-    return !s || f.code.includes(s) || f.desc.toLowerCase().includes(s) || f.cat.toLowerCase().includes(s);
-  });
-  document.getElementById('fee-list').innerHTML = list.length
-    ? list.map(function(f) {
-        return '<div class="fee-row">' +
-          '<span class="fee-code">' + f.code + '</span>' +
-          '<div class="fee-desc">' + f.desc + '</div>' +
-          '<span class="fee-chip ' + f.clr + '">' + f.cat + '</span>' +
-          '</div>';
-      }).join('')
-    : '<div class="empty">No codes found</div>';
-}
-
-function filterFees(q) { renderFees(q); }
 
 // ── Doctor Modal ───────────────────────────────────────
 function showModal(id) {
@@ -6912,8 +6713,6 @@ function reorderBtn(btn) {
 function ctxEditBtn(btn) { openPatientEdit(btn.getAttribute("data-pid")); }
 
 function openSummaryEl(el) { openPatientSummary(el.getAttribute("data-pid") || el.closest("[data-pid]").getAttribute("data-pid")); }
-
-function hideLosModal() { hideModal("los-modal"); }
 
 </script>
 
