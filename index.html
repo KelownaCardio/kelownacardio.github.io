@@ -545,7 +545,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.02</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.03</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1508,7 +1508,7 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID = 'v3.02-2026-05-07';
+var BUILD_ID = 'v3.03-2026-05-07';
 
 (function purgeIfBuildChanged() {
   try {
@@ -3459,17 +3459,31 @@ function renderDischargedList(query) {
     .filter(function(p) { return p.discharged; })
     .sort(function(a, b) { return (parseDischargedAt(b.dischargedAt)||0) - (parseDischargedAt(a.dischargedAt)||0); });
 
-  // Diagnostic: log a snapshot of discharge state
-  console.log('[discharged-list] total patients:', st.patients.length,
-              '| discharged:', pool.length,
-              '| sample:', pool.slice(0,3).map(function(p) {
-                return { name: p.last+', '+p.first, discharged: p.discharged,
-                         dischargedAt: p.dischargedAt, parsed: parseDischargedAt(p.dischargedAt) };
-              }));
+  // Diagnostic logging (also visible in UI when list is empty)
+  var totalP = st.patients.length;
+  var withDischargedAt = st.patients.filter(function(p) { return parseDischargedAt(p.dischargedAt) > 0; }).length;
+  var withDischargedFlag = st.patients.filter(function(p) { return p.discharged; }).length;
+  console.log('[discharged-list] total:', totalP,
+              '| flag-true:', withDischargedFlag,
+              '| has-dischargedAt:', withDischargedAt,
+              '| pool (passed filter):', pool.length);
+  if (pool.length === 0 && withDischargedAt > 0) {
+    // Anomaly: there ARE patients with dischargedAt timestamps but no discharged flag
+    console.warn('[discharged-list] ANOMALY: patients with dischargedAt but discharged != true. Sample:',
+      st.patients.filter(function(p) { return parseDischargedAt(p.dischargedAt) > 0; }).slice(0,3).map(function(p) {
+        return { name: p.last+', '+p.first, discharged: p.discharged, type: typeof p.discharged,
+                 dischargedAt: p.dischargedAt };
+      }));
+  }
+  if (pool.length > 0) {
+    console.log('[discharged-list] sample:', pool.slice(0,3).map(function(p) {
+      return { name: p.last+', '+p.first, discharged: p.discharged,
+               dischargedAt: p.dischargedAt, parsed: parseDischargedAt(p.dischargedAt) };
+    }));
+  }
 
   // Within last 21 days (or all when searching)
   // LENIENT: if dischargedAt is missing/invalid, still show the patient at the top
-  // (better than silently hiding them — likely a sync/timestamp glitch we'd want to see)
   var cutoff21 = Date.now() - (21 * 24 * 60 * 60 * 1000);
   var recent = q ? pool : pool.filter(function(p) {
     var ms = parseDischargedAt(p.dischargedAt);
@@ -3485,19 +3499,20 @@ function renderDischargedList(query) {
   }
 
   if (!recent.length) {
-    // Diagnostic: show what's in the pool to help debug
-    var debugInfo = '';
-    if (!q && pool.length) {
-      // Pool has discharged patients but none passed the date filter
-      debugInfo = '<div style="font-size:11px;color:var(--text3);margin-top:8px">' +
-        pool.length + ' discharged patient' + (pool.length === 1 ? '' : 's') +
-        ' in storage but none have a recent timestamp. Try searching for the name.</div>';
-    } else if (!q && !st.patients.length) {
-      debugInfo = '<div style="font-size:11px;color:var(--text3);margin-top:8px">No patients in storage. Sync may not have completed.</div>';
-    }
+    // Build visible diagnostic so the user can see exactly what's going on without console
+    var diag = '<details style="margin-top:12px;padding:10px;background:var(--surface2);border-radius:var(--rsm);font-size:11px;color:var(--text2)">' +
+      '<summary style="cursor:pointer;font-weight:700">Diagnostic info (tap to expand)</summary>' +
+      '<div style="margin-top:8px;font-family:ui-monospace,monospace;line-height:1.6">' +
+        'Total patients in memory: <b>' + totalP + '</b><br>' +
+        'With discharged=true: <b>' + withDischargedFlag + '</b><br>' +
+        'With dischargedAt timestamp: <b>' + withDischargedAt + '</b><br>' +
+        'Passed pool filter: <b>' + pool.length + '</b><br>' +
+        'Passed 21-day filter: <b>' + recent.length + '</b><br>' +
+      '</div></details>';
+
     container.innerHTML = q
-      ? '<div class="empty" style="padding:18px 0 10px">No match for &ldquo;' + esc(query) + '&rdquo;</div>'
-      : '<div class="empty">No patients discharged in the last 21 days.</div>' + debugInfo;
+      ? '<div class="empty" style="padding:18px 0 10px">No match for &ldquo;' + esc(query) + '&rdquo;</div>' + diag
+      : '<div class="empty">No patients discharged in the last 21 days.</div>' + diag;
     return;
   }
 
