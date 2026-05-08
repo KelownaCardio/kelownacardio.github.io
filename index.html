@@ -555,7 +555,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span id="hdr-version" style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.18</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span id="hdr-version" style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.19</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -749,76 +749,81 @@ input[type=file] { display:none; }
     <input id="f-care" type="hidden" value="daily">
   </div>
 
-  <!-- Consult info: referred by + diagnosis + optional consult claim -->
+  <!-- Consult (mirrors claim screen consult form) -->
   <div class="card">
-    <div class="card-title">Consult info</div>
-    <label>Referred by</label>
+    <div class="card-title">Consult</div>
+
+    <!-- 33010 / 33012 -->
+    <div class="fl" style="margin-bottom:9px">
+      <button id="f-c-33010" class="ct-btn ct-on-consult" style="flex:1" onclick="toggleApConsultCode('33010')">33010 — Full</button>
+      <button id="f-c-33012" class="ct-btn" style="flex:1" onclick="toggleApConsultCode('33012')">33012 — Limited</button>
+    </div>
+
+    <!-- MOST -->
+    <button class="most-btn on" id="f-c-most" onclick="toggleApMost()">
+      <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
+      + MOST (78720)
+    </button>
+
+    <!-- Date + Start time -->
+    <div class="fl" style="margin-top:8px">
+      <div class="f1"><label>Date</label>
+        <input type="date" id="f-c-date"></div>
+      <div class="f1"><label>Start time</label>
+        <input type="time" id="f-c-start"></div>
+    </div>
+
+    <!-- End time -->
+    <div class="fl">
+      <div class="f1"><label>End time <span style="font-size:10px;color:var(--text3)">— adjust if &lt; 45 min</span></label>
+        <input type="time" id="f-c-end"></div>
+    </div>
+
+    <!-- Notes -->
+    <label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(optional)</span></label>
+    <textarea id="f-c-notes" rows="2" placeholder="Optional" autocorrect="off"
+      style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:6px"></textarea>
+
+    <!-- Separator -->
+    <div style="border-top:.5px solid var(--border);margin:4px 0 10px"></div>
+
+    <!-- Diagnosis -->
+    <label>Diagnosis</label>
+    <div style="position:relative">
+      <input id="f-icd-search" placeholder="Type diagnosis or code..." autocorrect="off" autocomplete="off" style="padding-right:32px"
+        data-dd="f-icd-dd" data-hidden="f-icd"
+        oninput="icdSearchEl(this)" onfocus="icdSearchEl(this)">
+      <button type="button" tabindex="-1"
+        onclick="clearSearchField('f-icd-search','f-icd',null,'f-icd-dd')"
+        onpointerdown="event.preventDefault();clearSearchField('f-icd-search','f-icd',null,'f-icd-dd')"
+        style="position:absolute;right:8px;top:9px;background:none;border:none;font-size:18px;line-height:1;color:var(--text3);cursor:pointer;padding:2px 4px;z-index:5">&times;</button>
+    </div>
+    <input id="f-icd" type="hidden" value="410">
+    <div class="ref-dd" id="f-icd-dd"></div>
+
+    <!-- Referred by -->
+    <label style="margin-top:4px">Referred by</label>
     <div style="position:relative">
       <input id="f-ref-search" placeholder="Type name or doctor #..." autocorrect="off" style="padding-right:32px"
         data-dd="f-ref-dd" data-hidden="f-refby" data-name="f-refby-name"
-        oninput="refSearchEl(this);this.style.cssText='padding-right:32px';this.placeholder='Type name or doctor #...'" onfocus="refSearchEl(this)">
-      <button type="button" tabindex="-1" onclick="clearSearchField('f-ref-search','f-refby','f-refby-name','f-ref-dd')" onpointerdown="event.preventDefault();clearSearchField('f-ref-search','f-refby','f-refby-name','f-ref-dd')" style="position:absolute;right:8px;top:9px;background:none;border:none;font-size:18px;line-height:1;color:var(--text3);cursor:pointer;padding:2px 4px;z-index:5">&times;</button>
+        oninput="refSearchEl(this)" onfocus="refSearchEl(this)">
+      <button type="button" tabindex="-1"
+        onclick="clearSearchField('f-ref-search','f-refby','f-refby-name','f-ref-dd')"
+        onpointerdown="event.preventDefault();clearSearchField('f-ref-search','f-refby','f-refby-name','f-ref-dd')"
+        style="position:absolute;right:8px;top:9px;background:none;border:none;font-size:18px;line-height:1;color:var(--text3);cursor:pointer;padding:2px 4px;z-index:5">&times;</button>
     </div>
     <div class="ref-dd" id="f-ref-dd"></div>
     <input id="f-refby"      type="hidden">
     <input id="f-refby-name" type="hidden">
     <input id="f-refby-num"  type="hidden">
-    <label style="margin-top:4px">Diagnosis</label>
-    <div style="position:relative">
-      <input id="f-icd-search" placeholder="Type diagnosis or code..." autocorrect="off" autocomplete="off" style="padding-right:32px"
-        data-dd="f-icd-dd" data-hidden="f-icd"
-        oninput="icdSearchEl(this);this.style.cssText='padding-right:32px';this.placeholder='Type diagnosis or code...'" onfocus="icdSearchEl(this)">
-      <button type="button" tabindex="-1" onclick="clearSearchField('f-icd-search','f-icd',null,'f-icd-dd')" onpointerdown="event.preventDefault();clearSearchField('f-icd-search','f-icd',null,'f-icd-dd')" style="position:absolute;right:8px;top:9px;background:none;border:none;font-size:18px;line-height:1;color:var(--text3);cursor:pointer;padding:2px 4px;z-index:5">&times;</button>
-    </div>
-    <input id="f-icd" type="hidden" value="410">
-    <div class="ref-dd" id="f-icd-dd"></div>
 
-    <!-- Consult claim toggle -->
-    <div style="margin-top:12px;padding-top:10px;border-top:.5px solid var(--border)">
-      <button id="f-consult-toggle" class="ct-btn" style="width:100%;text-align:left;font-weight:600"
-        onclick="toggleAddConsult()">+ Create consult claim on admission</button>
-    </div>
+    <!-- Performing physician (injected on pane open) -->
+    <div id="f-c-performing-wrap"></div>
 
-    <!-- Collapsible consult claim fields -->
-    <div id="f-consult-claim-wrap" style="display:none;margin-top:10px">
-
-      <!-- 33010 / 33012 -->
-      <div class="fl" style="margin-bottom:9px">
-        <button id="f-c-33010" class="ct-btn ct-on-consult" style="flex:1" onclick="toggleApConsultCode('33010')">33010 — Full</button>
-        <button id="f-c-33012" class="ct-btn" style="flex:1" onclick="toggleApConsultCode('33012')">33012 — Limited</button>
-      </div>
-
-      <!-- MOST -->
-      <button class="most-btn on" id="f-c-most" onclick="toggleApMost()">
-        <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
-        + MOST (78720)
-      </button>
-
-      <!-- Date + Start time -->
-      <div class="fl" style="margin-top:8px">
-        <div class="f1"><label>Date</label>
-          <input type="date" id="f-c-date"></div>
-        <div class="f1"><label>Start time</label>
-          <input type="time" id="f-c-start"></div>
-      </div>
-
-      <!-- End time -->
-      <div class="fl">
-        <div class="f1"><label>End time <span style="font-size:10px;color:var(--text3)">— adjust if &lt; 45 min</span></label>
-          <input type="time" id="f-c-end"></div>
-      </div>
-
-      <!-- Notes -->
-      <label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(optional)</span></label>
-      <input id="f-c-notes" placeholder="Optional" autocorrect="off">
-
-      <!-- Performing physician (injected dynamically) -->
-      <div id="f-c-performing-wrap"></div>
-
-    </div>
   </div>
 
-  <button class="btn btn-p" onclick="addPatient()">Add to rounds list</button>
+  <button class="btn btn-p" onclick="addPatientWithConsult()">Add consult claim</button>
+  <button class="btn btn-s" style="margin-top:6px" onclick="addPatientOnly()">No claim — add to list</button>
   <button class="btn btn-s" onclick="clearAddForm()">Clear</button>
 </div>
 
@@ -1682,11 +1687,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.18-2026-05-08-directive-fix+performing-doc+ap-consult';
+var BUILD_ID    = 'v3.19-2026-05-08-ap-consult-redesign';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.18';
+var APP_VERSION = 'v3.19';
 var APP_BUILT   = '2026-05-08 (session 2)';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -5175,7 +5180,20 @@ function mergePatient(action) {
   }
 }
 
-function addPatient() {
+// ── Add patient — entry points ────────────────────────────
+function addPatientWithConsult() {
+  // Validate consult date before proceeding
+  var cDateISO = (document.getElementById('f-c-date') || {}).value || '';
+  if (!cDateISO) { showToast('Enter consult date'); return; }
+  _addPatientCore(true);
+}
+
+function addPatientOnly() {
+  _addPatientCore(false);
+}
+
+// Shared patient validation, creation and optional consult claim.
+function _addPatientCore(withClaim) {
   var last = gv('f-last');
   var phn  = gv('f-phn');
   if (!last) { showToast('Enter patient last name'); return; }
@@ -5207,7 +5225,6 @@ function addPatient() {
     showToast('Required: ' + msgs.join(', '));
     return;
   }
-  // No ICD default — must be explicitly entered (icd is confirmed non-empty above)
 
   // PHN duplicate check — offer merge if last name and/or DOB match
   var existing = st.patients.find(function(x) { return x.phn === phn && !x.discharged; });
@@ -5249,8 +5266,7 @@ function addPatient() {
   logChange(p, 'Admitted', ward + (p.bed ? ' Bed/Rm ' + p.bed : ''));
 
   // Optionally create a consult claim at the same time
-  var consultWrap = document.getElementById('f-consult-claim-wrap');
-  if (consultWrap && consultWrap.style.display !== 'none' && st.doc) {
+  if (withClaim && st.doc) {
     var cCode    = document.getElementById('f-c-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
     var cDateISO = (document.getElementById('f-c-date')  || {}).value || '';
     var cStart   = (document.getElementById('f-c-start') || {}).value || '';
@@ -5277,7 +5293,8 @@ function addPatient() {
     }
   }
 
-  showToast(last + ' added to ' + (p.list === 'on' ? 'On' : 'Off') + ' Service');
+  var claimMsg = withClaim ? ' + consult claim' : '';
+  showToast(last + ' added to ' + (p.list === 'on' ? 'On' : 'Off') + ' Service' + claimMsg);
   clearAddForm();
   nav(0, document.querySelectorAll('.nb')[0]);
 }
@@ -5460,40 +5477,34 @@ function saveCustomWard() {
 // ── Add-patient inline consult claim ─────────────────────
 var _apMostOn = true;
 
-function toggleAddConsult() {
-  var wrap   = document.getElementById('f-consult-claim-wrap');
-  var toggle = document.getElementById('f-consult-toggle');
-  var isOpen = wrap.style.display !== 'none';
-  if (isOpen) {
-    wrap.style.display = 'none';
-    toggle.className   = 'ct-btn';
-    toggle.textContent = '+ Create consult claim on admission';
-  } else {
-    wrap.style.display = 'block';
-    toggle.className   = 'ct-btn ct-on-consult';
-    toggle.textContent = '− Remove consult claim';
-    // Pre-fill date and times
-    var now = new Date();
-    document.getElementById('f-c-date').value  = localISODate(now);
-    document.getElementById('f-c-start').value = pad(now.getHours()) + ':' + pad(now.getMinutes());
-    document.getElementById('f-c-end').value   = minsToTime(now.getHours() * 60 + now.getMinutes() + 50);
-    // Reset MOST to on
-    _apMostOn = true;
-    document.getElementById('f-c-most').className = 'most-btn on';
-    // Reset to 33010
-    document.getElementById('f-c-33010').className = 'ct-btn ct-on-consult';
-    document.getElementById('f-c-33012').className = 'ct-btn';
-    // Inject performing physician selector
-    var perfWrap = document.getElementById('f-c-performing-wrap');
-    if (perfWrap && st.doctors && st.doctors.length) {
-      var curAlias = st.doc ? st.doc.alias : '';
-      var opts = st.doctors.map(function(d) {
-        return '<option value="' + esc(d.alias) + '"' + (d.alias === curAlias ? ' selected' : '') + '>' +
-               esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
-      }).join('');
-      perfWrap.innerHTML = '<label style="margin-top:6px">Performing physician</label>' +
-                           '<select id="f-c-performing-doc">' + opts + '</select>';
-    }
+// Called when the Add Patient pane opens and after clearAddForm.
+// Pre-fills date/time and injects the performing physician selector.
+function initAddPatientConsult() {
+  var now = new Date();
+  var dateEl  = document.getElementById('f-c-date');
+  var startEl = document.getElementById('f-c-start');
+  var endEl   = document.getElementById('f-c-end');
+  if (dateEl)  dateEl.value  = localISODate(now);
+  if (startEl) startEl.value = pad(now.getHours()) + ':' + pad(now.getMinutes());
+  if (endEl)   endEl.value   = minsToTime(now.getHours() * 60 + now.getMinutes() + 50);
+  // Reset toggles
+  _apMostOn = true;
+  var mostEl = document.getElementById('f-c-most');
+  if (mostEl) mostEl.className = 'most-btn on';
+  var el10 = document.getElementById('f-c-33010');
+  var el12 = document.getElementById('f-c-33012');
+  if (el10) el10.className = 'ct-btn ct-on-consult';
+  if (el12) el12.className = 'ct-btn';
+  // Inject performing physician selector
+  var perfWrap = document.getElementById('f-c-performing-wrap');
+  if (perfWrap && st.doctors && st.doctors.length) {
+    var curAlias = st.doc ? st.doc.alias : '';
+    var opts = st.doctors.map(function(d) {
+      return '<option value="' + esc(d.alias) + '"' + (d.alias === curAlias ? ' selected' : '') + '>' +
+             esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
+    }).join('');
+    perfWrap.innerHTML = '<label style="margin-top:6px">Performing physician</label>' +
+                         '<select id="f-c-performing-doc">' + opts + '</select>';
   }
 }
 
@@ -5523,12 +5534,8 @@ function clearAddForm() {
   var careEl = document.getElementById('f-care'); if (careEl) careEl.value = 'daily';
   document.getElementById('f-ref-dd').style.display = 'none';
   document.getElementById('ocr-bar').style.display  = 'none';
-  // Reset inline consult claim toggle
-  var cWrap   = document.getElementById('f-consult-claim-wrap');
-  var cToggle = document.getElementById('f-consult-toggle');
-  if (cWrap)   { cWrap.style.display = 'none'; }
-  if (cToggle) { cToggle.className = 'ct-btn'; cToggle.textContent = '+ Create consult claim on admission'; }
-  _apMostOn = true;
+  // Re-initialise the consult card (date/time, toggles, performing physician)
+  initAddPatientConsult();
   resetPhotoZone();
 }
 
@@ -7108,6 +7115,7 @@ function nav(n, el) {
   var listSel = document.getElementById('list-sel-bar');
   if (listSel) listSel.classList.toggle('hidden', n !== 0);
   if (n === 0) render();
+  if (n === 1) initAddPatientConsult();
   if (n === 2) initDischarged();
 }
 
