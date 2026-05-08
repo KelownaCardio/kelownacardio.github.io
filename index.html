@@ -2231,12 +2231,15 @@ function consultIncUnits(startTimeStr, endTimeStr) {
 }
 
 // ── Directive Weekly Limit (Sun–Sat) ───────────────────
-// Returns number of 33006 claims already billed this week for a patient PHN
-function dirCountThisWeek(phn) {
-  var now = new Date();
-  var dayOfWeek = now.getDay(); // 0=Sun
-  var weekStart = new Date(now);
-  weekStart.setDate(now.getDate() - dayOfWeek);
+// Returns number of 33006 claims already billed in the Sun–Sat week that
+// contains isoDate (YYYY-MM-DD). If isoDate is omitted, uses today.
+// Pass the claim's own date so historical entries are checked against the
+// correct week instead of the current week.
+function dirCountThisWeek(phn, isoDate) {
+  var ref = (isoDate ? parseISODate(isoDate) : null) || new Date();
+  var dayOfWeek = ref.getDay(); // 0=Sun
+  var weekStart = new Date(ref);
+  weekStart.setDate(ref.getDate() - dayOfWeek);
   weekStart.setHours(0, 0, 0, 0);
   var weekEnd = new Date(weekStart);
   weekEnd.setDate(weekStart.getDate() + 6);
@@ -2358,7 +2361,7 @@ function ccuFeeForToday(p) {
 }
 
 // ── Add Claim Helper ───────────────────────────────────
-function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime) {
+function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, performingAlias) {
   // Guard: never write an MRP service string into refby/refbyName
   if (looksLikeMRPService(p.refbyName)) {
     p.refbyName = '';
@@ -2377,7 +2380,7 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime) 
   var _start = startTime || (pad(_now.getHours()) + ':' + pad(_now.getMinutes()));
   var c = {
     id:        'c' + Date.now() + Math.floor(Math.random() * 9999),
-    alias:     st.doc.alias,
+    alias:     performingAlias || st.doc.alias,
     last:      p.last  || '',
     first:     p.first || '',
     phn:       p.phn,
@@ -3524,6 +3527,8 @@ function buildOtherClaimForm(p) {
   // Notes
   h += '<label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(CCFPP, etc.)</span></label>';
   h += '<input id="oc-notes" placeholder="Optional" autocorrect="off">';
+
+  h += buildPerformingPhysSelector();
   h += '</div>';
 
   // Preview
@@ -3600,7 +3605,8 @@ function submitOtherClaim() {
 
   var pClone = Object.assign({}, p, { icd: icd, refby: refby, refbyName: refName });
 
-  var c = addClaim(pClone, fee, fee, units, dateFmt, loc, start, notes, endTime || '');
+  var alias = getPerformingAlias();
+  var c = addClaim(pClone, fee, fee, units, dateFmt, loc, start, notes, endTime || '', alias);
   sv('patients', st.patients);
   sv('claims',   st.claims);
   if (patientUpdated && SHEETS_URL) push('savePatient', p);
@@ -4742,6 +4748,7 @@ function submitConsult() {
   var p = getP(_claimPid);
   if (!checkDoc()) return;
 
+  var alias   = getPerformingAlias();
   var code    = document.getElementById('cb-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
   var dateISO = gv('cb-date');
   var start   = gv('cb-start');
@@ -4761,9 +4768,9 @@ function submitConsult() {
   if (start) {
     var thisStartM = t2m(start);
     st.claims.forEach(function(c) {
-      if (c.alias !== st.doc.alias) return;
-      if (c.date  !== dateFmt)      return;
-      if (c.phn   === p.phn)        return; // same patient
+      if (c.alias !== alias)    return;  // compare against performing doc
+      if (c.date  !== dateFmt)  return;
+      if (c.phn   === p.phn)    return; // same patient
       if (c.fee !== '33010' && c.fee !== '33012') return;
       if (!c.startTime) return;
       var prevStartM = t2m(c.startTime);
@@ -4781,10 +4788,10 @@ function submitConsult() {
   var fullNote = [userNote, ccfppNote].filter(function(s) { return s; }).join(' | ');
 
   // Base consult — combined note on consult itself
-  addClaim(p, code, code, 1, dateFmt, loc, start, fullNote, gv('cb-end'));
+  addClaim(p, code, code, 1, dateFmt, loc, start, fullNote, gv('cb-end'), alias);
 
   // MOST — standalone item, no CCFPP
-  if (_mostOn) addClaim(p, '78720', '78720', 1, dateFmt, loc);
+  if (_mostOn) addClaim(p, '78720', '78720', 1, dateFmt, loc, null, null, null, alias);
 
   var end      = gv('cb-end');
   var modBase  = getModifier(start, dateISO);
@@ -4794,12 +4801,12 @@ function submitConsult() {
 
   if (modBase) {
     // Base modifier — CCFPP note here too
-    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start, fullNote, end);
+    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start, fullNote, end, alias);
 
     if (modInc) {
       // Increment modifier — CCFPP note on all parts
       var incStart = minsToTime((t2m(start) + 30) % (24 * 60));
-      addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, fullNote);
+      addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, fullNote, null, alias);
     }
   }
   sv('patients', st.patients);
@@ -4848,8 +4855,28 @@ function buildIcdRefCard(p) {
        '<input id="cb-refby"      type="hidden" value="' + esc(p.refby || '') + '">' +
        '<input id="cb-refby-name" type="hidden" value="' + esc(p.refbyName || '') + '">';
 
+  h += buildPerformingPhysSelector();
   h += '</div>';
   return h;
+}
+
+// Returns HTML for the performing physician dropdown.
+// Pre-selects the currently signed-in doc; user can change before submitting.
+function buildPerformingPhysSelector() {
+  if (!st.doctors || !st.doctors.length) return '';
+  var curAlias = st.doc ? st.doc.alias : '';
+  var opts = st.doctors.map(function(d) {
+    return '<option value="' + esc(d.alias) + '"' + (d.alias === curAlias ? ' selected' : '') + '>' +
+           esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
+  }).join('');
+  return '<label style="margin-top:6px">Performing physician</label>' +
+         '<select id="cb-performing-doc">' + opts + '</select>';
+}
+
+// Read the performing physician dropdown; falls back to signed-in doc if absent.
+function getPerformingAlias() {
+  var sel = document.getElementById('cb-performing-doc');
+  return (sel && sel.value) ? sel.value : (st.doc ? st.doc.alias : '');
 }
 
 function getClaimIcd(p) {
@@ -4894,7 +4921,8 @@ function submitDaily() {
   if (!ds) { showToast('Enter start date'); return; }
   updatePatientFromClaimForm(p);
   if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
-  addClaim(p, '33008', '33008', days, fmtD(parseISODate(ds)), 'I');
+  var alias = getPerformingAlias();
+  addClaim(p, '33008', '33008', days, fmtD(parseISODate(ds)), 'I', null, null, null, alias);
   sv('patients', st.patients); sv('claims', st.claims);
   showToast('33008 ×' + days + ' — ' + p.last);
   closeClaimScreen();
@@ -4936,8 +4964,9 @@ function submitCombined() {
   if (v === 2 && !note2) { showToast('Note required for 2nd visit'); return; }
   updatePatientFromClaimForm(p);
   if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
-  addClaim(p, '33008', '33008', 1, fmtD(parseISODate(ds)), 'I');
-  if (v === 2) addClaim(p, '33008', '33008', 1, fmtD(parseISODate(ds)), 'I', null, note2 || 'Second visit — patient unstable');
+  var alias = getPerformingAlias();
+  addClaim(p, '33008', '33008', 1, fmtD(parseISODate(ds)), 'I', null, null, null, alias);
+  if (v === 2) addClaim(p, '33008', '33008', 1, fmtD(parseISODate(ds)), 'I', null, note2 || 'Second visit — patient unstable', null, alias);
   sv('patients', st.patients); sv('claims', st.claims);
   showToast('Combined daily ×' + v + ' — ' + p.last);
   closeClaimScreen();
@@ -4945,17 +4974,16 @@ function submitCombined() {
 
 // ── Directive visit (33006, max 2/week Sun–Sat) ────────
 function buildDirectiveForm(p) {
-  var cnt = dirCountThisWeek(p.phn);
+  var cnt = dirCountThisWeek(p.phn); // count for current week (default date)
   var iso = localISODate();
   var h   = cnt >= 2
-    ? '<div class="dir-warn">⚠ ' + cnt + ' directive visits already billed this Sun–Sat week. Note required if proceeding.</div>'
+    ? '<div class="dir-warn">⚠ ' + cnt + ' directive visits already billed this Sun–Sat week. A note is required if the claim date falls in the same week.</div>'
     : '';
   h += '<div class="card"><div class="card-title">Directive visit (33006)</div>' +
        '<label>Date</label><input type="date" id="cb-dir-date" value="' + iso + '">';
-  if (cnt >= 2) {
-    h += '<label>Reason for additional visit this week</label>' +
-         '<textarea id="cb-dir-note" placeholder="Reason additional directive visit beyond 2/week was required…"></textarea>';
-  }
+  // Always render note field — required on submit if ≥2 directives exist in the claim date's week
+  h += '<label>Note (required if 3rd directive in same Sun–Sat week)</label>' +
+       '<textarea id="cb-dir-note" placeholder="Leave blank if this is the 1st or 2nd directive this week, or enter reason if exceeding 2/week…"></textarea>';
   h += '</div>';
   h += buildIcdRefCard(p);
   h += '<button class="btn btn-p" onclick="claimSubmitOnce(submitDirective)">Add directive claim</button>';
@@ -4966,12 +4994,15 @@ function submitDirective() {
   var p = getP(_claimPid); if (!checkDoc()) return;
   var ds  = gv('cb-dir-date');
   if (!ds) { showToast('Enter date'); return; }
-  var cnt  = dirCountThisWeek(p.phn);
-  var note = cnt >= 2 ? (document.getElementById('cb-dir-note') ? gv('cb-dir-note') : '') : '';
-  if (cnt >= 2 && !note) { showToast('Note required for additional directive visit this week'); return; }
+  // Count directives in the week that contains the entered claim date, not today's week.
+  // This allows historical entries from prior weeks even if current week is full.
+  var cnt  = dirCountThisWeek(p.phn, ds);
+  var note = (document.getElementById('cb-dir-note') ? gv('cb-dir-note') : '').trim();
+  if (cnt >= 2 && !note) { showToast('Note required for 3rd directive in the same Sun–Sat week'); return; }
   updatePatientFromClaimForm(p);
   if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
-  addClaim(p, '33006', '33006', 1, fmtD(parseISODate(ds)), 'I', null, note);
+  var alias = getPerformingAlias();
+  addClaim(p, '33006', '33006', 1, fmtD(parseISODate(ds)), 'I', null, note, null, alias);
   sv('patients', st.patients); sv('claims', st.claims);
   showToast('33006 directive — ' + p.last);
   closeClaimScreen();
@@ -5001,7 +5032,8 @@ function submitCCU(isDuplicate) {
   var p = getP(_claimPid); if (!checkDoc()) return;
   updatePatientFromClaimForm(p);
   if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
-  addClaim(p, 'CCU_DAILY', 'CCU_DAILY', 1, TODAY, 'I');
+  var alias = getPerformingAlias();
+  addClaim(p, 'CCU_DAILY', 'CCU_DAILY', 1, TODAY, 'I', null, null, null, alias);
   sv('patients', st.patients); sv('claims', st.claims);
   showToast('CCU daily recorded' + (isDuplicate ? ' (duplicate)' : '') + ' — ' + p.last);
   closeClaimScreen();
