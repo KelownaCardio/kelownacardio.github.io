@@ -487,9 +487,12 @@ function renderRefSuggestions(results) {
               + (r.num  ? ' [' + r.num + ']'  : '');
     chip.textContent = label;
     chip.addEventListener('click', function(){
-      var refVal = 'Dr. ' + r.last + (r.first ? ', ' + r.first : '');
-      document.getElementById('c-ref').value = refVal;
-      document.getElementById('c-ref').dataset.docnum = r.num || '';
+      // Display: "Dr. LastName, FirstName" — matches iClinic refbyName format
+      var refName = 'Dr. ' + r.last + (r.first ? ', ' + r.first : '');
+      var el = document.getElementById('c-ref');
+      el.value = refName;
+      el.dataset.docnum  = r.num  || '';   // billing number → refby in export
+      el.dataset.refname = refName;        // formatted name  → refbyName in export
       box.innerHTML = '';
       chip.className = 'ref-chip matched';
       box.appendChild(chip);
@@ -628,8 +631,9 @@ function buildClaims() {
   var alias = getAlias();
   var dx    = (document.getElementById('c-dx').value||'').trim();
   var refEl  = document.getElementById('c-ref');
-  var ref    = (refEl.value||'').trim();
-  var refNum = (refEl.dataset.docnum||'').trim();
+  var refName = (refEl.value||'').trim();            // display name e.g. "Dr. Dyck, Frank"
+  var refNum  = (refEl.dataset.docnum||'').trim();   // billing number e.g. "12345"
+  // If no directory match yet, refName is whatever was typed (used as-is for both fields)
   var base  = { last:last, first:first, phn:phn, dob:dob, sex:sex, ward:ward, room:room, alias:alias };
   var claims = [];
   var cDate = consultDateISO();
@@ -644,28 +648,28 @@ function buildClaims() {
       var fpp = (document.getElementById('c-ccfpp-ph').value||'').trim();
       cnotes = 'CCFPP '+fpn+(fpp?' '+fpp:'');
     }
-    claims.push(Object.assign({},base,{ id:uid(), claimType:st.consultType, date:cDate, fee:fee, icd:dx, refby:ref, refbyNum:refNum, startTime:start, endTime:end, notes:cnotes, _sortDate:cDate, _sortSub:0 }));
+    claims.push(Object.assign({},base,{ id:uid(), claimType:st.consultType, date:cDate, fee:fee, icd:dx, refby:refNum, refbyName:refName, startTime:start, endTime:end, notes:cnotes, _sortDate:cDate, _sortSub:0 }));
     if (document.getElementById('c-most').checked)
-      claims.push(Object.assign({},base,{ id:uid(), claimType:'most', date:cDate, fee:'03701', icd:dx, refby:ref, startTime:'', endTime:'', notes:'MOST add-on', _sortDate:cDate, _sortSub:1 }));
+      claims.push(Object.assign({},base,{ id:uid(), claimType:'most', date:cDate, fee:'03701', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:'MOST add-on', _sortDate:cDate, _sortSub:1 }));
   }
 
   st.dailyDates.slice().sort().forEach(function(iso){
-    claims.push(Object.assign({},base,{ id:uid(), claimType:'daily', date:iso, fee:'', icd:dx, refby:ref, startTime:'', endTime:'', notes:'', _sortDate:iso, _sortSub:3 }));
+    claims.push(Object.assign({},base,{ id:uid(), claimType:'daily', date:iso, fee:'', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:'', _sortDate:iso, _sortSub:3 }));
   });
 
   var cbReason = (document.getElementById('combined-reason').value||'').trim();
   var cbNote = cbReason ? 'Combined daily care for '+cbReason : 'Combined daily';
   st.combinedDates.slice().sort().forEach(function(iso){
-    claims.push(Object.assign({},base,{ id:uid(), claimType:'combined', date:iso, fee:'', icd:dx, refby:ref, startTime:'', endTime:'', notes:cbNote, _sortDate:iso, _sortSub:4 }));
+    claims.push(Object.assign({},base,{ id:uid(), claimType:'combined', date:iso, fee:'', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:cbNote, _sortDate:iso, _sortSub:4 }));
   });
 
   st.directiveDates.slice().sort().forEach(function(iso){
-    claims.push(Object.assign({},base,{ id:uid(), claimType:'directive', date:iso, fee:'', icd:dx, refby:ref, startTime:'', endTime:'', notes:'', _sortDate:iso, _sortSub:5 }));
+    claims.push(Object.assign({},base,{ id:uid(), claimType:'directive', date:iso, fee:'', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:'', _sortDate:iso, _sortSub:5 }));
   });
 
   st.ccuDates.slice().sort().forEach(function(iso, i){
     var dn=i+1, fee=dn===1?'1411':dn===2?'1421':'1431';
-    claims.push(Object.assign({},base,{ id:uid(), claimType:'ccu', date:iso, fee:fee, icd:dx, refby:ref, startTime:'', endTime:'', notes:'CCU day '+dn, _sortDate:iso, _sortSub:6 }));
+    claims.push(Object.assign({},base,{ id:uid(), claimType:'ccu', date:iso, fee:fee, icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:'CCU day '+dn, _sortDate:iso, _sortSub:6 }));
   });
 
   claims.sort(function(a,b){ return a._sortDate<b._sortDate?-1:a._sortDate>b._sortDate?1:a._sortSub-b._sortSub; });
@@ -695,7 +699,7 @@ function refreshPreview() {
     var ds=document.createElement('div'); ds.className='claim-date-str'; ds.textContent=isoToDisp(c.date); info.appendChild(ds);
     var det=[];
     if (c.startTime&&c.endTime) det.push(c.startTime+'–'+c.endTime);
-    if (c.icd) det.push(c.icd); if (c.refby) det.push(c.refby); if (c.notes) det.push(c.notes);
+    if (c.icd) det.push(c.icd); if (c.refbyName||c.refby) det.push(c.refbyName||c.refby); if (c.notes) det.push(c.notes);
     if (det.length) { var dv=document.createElement('div'); dv.className='claim-detail-str'; dv.textContent=det.join(' · '); info.appendChild(dv); }
     row.appendChild(info);
     var fi=document.createElement('input'); fi.type='text'; fi.className='fee-inp'; fi.value=c.fee; fi.placeholder='fee'; fi.dataset.id=c.id;
@@ -979,16 +983,43 @@ function claimsToPayload(claims) {
              dob:c.dob, sex:c.sex, ward:c.ward||'', room:c.room||'',
              claimType:c.claimType, fee:c.fee, icd:c.icd||'',
              date:isoToBc(c.date), startTime:c.startTime||'', endTime:c.endTime||'',
-             refby:c.refby||'', refbyNum:c.refbyNum||'', notes:c.notes||'', source:'historical' };
+             refby:c.refby||'', refbyName:c.refbyName||'', notes:c.notes||'', source:'historical' };
   });
+}
+
+function sortClaimsForExport(claims) {
+  // Group by patient (last+phn), sort patients by last name,
+  // then within each patient sort claims oldest date first.
+  return claims.slice().sort(function(a, b) {
+    var lastA = (a.last||'').toLowerCase();
+    var lastB = (b.last||'').toLowerCase();
+    if (lastA < lastB) return -1;
+    if (lastA > lastB) return 1;
+    // Same last name — sort by PHN to keep patients together
+    if ((a.phn||'') < (b.phn||'')) return -1;
+    if ((a.phn||'') > (b.phn||'')) return 1;
+    // Same patient — sort by date oldest first (YYYY-MM-DD ISO for correct string compare)
+    var da = bcToISO(a.date||'');
+    var db = bcToISO(b.date||'');
+    if (da < db) return -1;
+    if (da > db) return 1;
+    return 0;
+  });
+}
+
+function bcToISO(bc) {
+  // Convert DD/MM/YYYY to YYYY-MM-DD for date comparison
+  var p = bc.split('/');
+  if (p.length !== 3) return bc;
+  return p[2] + '-' + p[1].padStart(2,'0') + '-' + p[0].padStart(2,'0');
 }
 
 function exportCSV() {
   var claims=getExportClaims();
   if (!claims.length){ setStatus('export-status','st-warn','No claims with fee codes to export.'); return; }
-  var headers=['id','alias','last','first','phn','dob','sex','ward','room','claimType','fee','icd','date','startTime','endTime','refby','refbyNum','notes','source'];
+  var headers=['id','alias','last','first','phn','dob','sex','ward','room','claimType','fee','icd','date','startTime','endTime','refby','refbyName','notes','source'];
   var rows=[headers.join(',')];
-  claimsToPayload(claims).forEach(function(c){
+  claimsToPayload(sortClaimsForExport(claims)).forEach(function(c){
     rows.push(headers.map(function(k){ return '"'+(c[k]||'').replace(/"/g,'""')+'"'; }).join(','));
   });
   var a=document.createElement('a');
@@ -1024,7 +1055,7 @@ function exportSheets() {
   };
   xhr.onerror=function(){ setStatus('export-status','st-warn','Network error'); };
   xhr.ontimeout=function(){ setStatus('export-status','st-warn','Request timed out'); };
-  xhr.send(JSON.stringify({action:'saveHistorical', key:getScriptKey(), claims:claimsToPayload(claims)}));
+  xhr.send(JSON.stringify({action:'saveHistorical', key:getScriptKey(), claims:claimsToPayload(sortClaimsForExport(claims))}));
 }
 
 // ─── Crop modal ───────────────────────────────────────────────────────────────
