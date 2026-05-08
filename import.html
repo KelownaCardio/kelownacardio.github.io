@@ -344,7 +344,7 @@ parseBtn.addEventListener('click', async () => {
     dbgStep('Step 3 — calling Anthropic API directly from browser');
     showStatus('parseStatus', 'info', '<span class="spinner"></span>Step 3/3 — AI reading PDF (20–40 sec)…');
     dbg('POST https://api.anthropic.com/v1/messages');
-    dbg('Model: claude-sonnet-4-5-20250929 | max_tokens: 8000');
+    dbg('Model: claude-sonnet-4-5-20250929 | max_tokens: 16000');
     dbgWarn('If this hangs >60 sec, Anthropic may be unreachable from this network');
 
     const PROMPT =
