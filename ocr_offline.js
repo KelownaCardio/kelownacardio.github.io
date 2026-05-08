@@ -1,6 +1,10 @@
 // ===================================================================
 // ocr_offline.js  —  KGH offline OCR engine
 // -------------------------------------------------------------------
+// Version:    v1.0
+// Built:      2026-05-08 13:30 UTC
+// Repo:       github.com/KelownaCardio/kelownacardio.github.io
+// -------------------------------------------------------------------
 // Standalone module. Lifts the v0.3 parser from the test app and
 // wraps it in a single Promise-returning entry point.
 //
@@ -17,6 +21,8 @@
 //   window.OCROffline.detectEngine()            -> Promise<'mlkit'|'tesseract'>
 //   window.OCROffline.preload()                 -> Promise<void>
 //   window.OCROffline.isReady()                 -> bool
+//   window.OCROffline.VERSION                   -> 'v1.0'
+//   window.OCROffline.BUILT                     -> '2026-05-08 13:30 UTC'
 //
 // opts (optional):
 //   { mode: 'auto' | 'sticker' | 'labvial' | 'meditech' }
@@ -25,6 +31,14 @@
 
 (function (root) {
   'use strict';
+
+  var VERSION = 'v1.0';
+  var BUILT   = '2026-05-08 13:30 UTC';
+
+  try {
+    console.log('%c[KGH OCR offline] ' + VERSION + ' · built ' + BUILT,
+                'color:#1a5fa8;font-weight:600');
+  } catch (e) {}
 
   // ------------------------------------------------------------------
   // State
@@ -741,6 +755,8 @@
   // Export
   // ------------------------------------------------------------------
   root.OCROffline = {
+    VERSION: VERSION,
+    BUILT:   BUILT,
     run: run,
     detectEngine: detectEngine,
     preload: preload,

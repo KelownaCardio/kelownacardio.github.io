@@ -1,4 +1,16 @@
 <!DOCTYPE html>
+<!--
+  KGH Cardiology · Meditech Import (standalone)
+  Version:    v1.4
+  Built:      2026-05-08 13:30 UTC
+  Repo:       github.com/KelownaCardio/kelownacardio.github.io
+  Path:       Apps Script → Anthropic (no Cloudflare needed — works on hospital WiFi)
+  Features:
+    - Drop SB Rounds List PDF or screenshot
+    - AI extracts patient list, categorises by MRP
+    - All rows have checkboxes; ignored rows can be added manually
+    - Commit selected directly to Google Sheet
+-->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -178,6 +190,12 @@
 </div>
 
 <script>
+// ── Version ───────────────────────────────────────────────────────
+const APP_VERSION = 'v1.4';
+const APP_BUILT   = '2026-05-08 13:30 UTC';
+console.log('%c[KGH Meditech Import] ' + APP_VERSION + ' · built ' + APP_BUILT,
+            'color:#1a5fa8;font-weight:600');
+
 // ── Config ────────────────────────────────────────────────────────
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzQOQa6dZCCyXu15jvkyUTFghtnhGzZFj4NZ4uyczxLov72zj8qNZIgk9pzL4i8Dfuy5Q/exec';
 const SHARED_KEY      = 'kgh2026';
@@ -782,5 +800,24 @@ function copyDebug() {
   navigator.clipboard.writeText(text).then(() => alert('Debug log copied!'));
 }
 </script>
+
+<!-- Build stamp — visible footer for support/debugging -->
+<div id="kgh-build-stamp" style="
+    text-align:center; padding:12px 8px 18px;
+    font-size:10px; color:#8e9099; font-family:ui-monospace,'SF Mono',monospace;
+    user-select:text; -webkit-user-select:text; opacity:.7;">
+  KGH Meditech Import · <span id="kgh-build-stamp-text"></span>
+</div>
+<script>
+(function () {
+  try {
+    var el = document.getElementById('kgh-build-stamp-text');
+    if (el && typeof APP_VERSION !== 'undefined') {
+      el.textContent = APP_VERSION + ' · built ' + APP_BUILT;
+    }
+  } catch (e) {}
+})();
+</script>
+
 </body>
 </html>

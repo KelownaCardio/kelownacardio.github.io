@@ -1,4 +1,14 @@
 <!DOCTYPE html>
+<!--
+  KGH Cardiology Billing — main app
+  Version:    v3.17
+  Built:      2026-05-08 13:30 UTC
+  Repo:       github.com/KelownaCardio/kelownacardio.github.io
+  Changes in this build:
+    - Silent offline OCR fallback (uses ocr_offline.js when Cloudflare blocked)
+    - Engine indicator on extracted bar (☁️ cloud / 📱 device)
+    - Meditech import button restored — opens import.html (Apps Script path)
+-->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -545,7 +555,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.15</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span id="hdr-version" style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.17</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -613,11 +623,10 @@ input[type=file] { display:none; }
     <div id="alpha-view" style="display:none"></div>
   </div>
   <div id="off-view" style="display:none"><div id="off-list"></div></div>
-  <!-- Meditech list import hidden in v1.10.0 - kept for future use, unhide by removing style="display:none" -->
-  <input type="file" id="mit-photo" accept="image/*" onchange="handleMediteachPhoto(this)">
-  <button class="mit-btn" style="margin-top:16px;display:none" onclick="document.getElementById('mit-photo').click()">
+  <!-- Meditech list import — opens standalone import.html (Apps Script path, works on hospital WiFi) -->
+  <a href="import.html" target="_blank" rel="noopener" class="mit-btn" style="margin-top:16px;text-decoration:none">
     <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Import from Meditech list
-  </button>
+  </a>
 </div>
 
 <!-- ═══ ADD PATIENT PANE ═══ -->
@@ -905,6 +914,9 @@ input[type=file] { display:none; }
     <div id="claim-edit-content"></div>
   </div>
 </div>
+
+<!-- Offline OCR module (Tesseract.js + KGH parser) — used as silent fallback when Cloudflare worker is unreachable -->
+<script src="ocr_offline.js"></script>
 
 <script>
 // ── 00_physicians.js ──
@@ -1626,7 +1638,15 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID = 'v3.15-2026-05-07';
+var BUILD_ID    = 'v3.17-2026-05-08-offline-ocr+meditech-link';
+
+// Human-readable version strings used by the visible footer and startup log.
+// Bump these together with BUILD_ID on every meaningful change.
+var APP_VERSION = 'v3.17';
+var APP_BUILT   = '2026-05-08 13:30 UTC';
+
+console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
+            'color:#1a5fa8;font-weight:600');
 
 (function purgeIfBuildChanged() {
   try {
@@ -5497,27 +5517,67 @@ function processStickerOCR(croppedDataUrl, bar) {
 function sendToOCR(b64, mediaType, bar) {
   if (bar) bar.textContent = 'Extracting (' + Math.round(b64.length / 1024) + ' KB)…';
 
+  // Cloud-reachability cache for this session.
+  // Reset to null on every page load — re-probed on first scan.
+  if (typeof window._cloudOCRReachable === 'undefined') {
+    window._cloudOCRReachable = null;
+  }
+
+  // If we already know cloud is unreachable this session, skip straight to offline.
+  if (window._cloudOCRReachable === false) {
+    if (bar) bar.textContent = 'Extracting (offline)…';
+    return runOfflineOCR(b64, mediaType, bar);
+  }
+
+  // Try cloud with a 10s timeout. On hospital WiFi this fails fast and we fall through.
   var xhr = new XMLHttpRequest();
   xhr.open('POST', OCR_WORKER_URL, true);
   xhr.setRequestHeader('Content-Type', 'application/json');
-  xhr.timeout = 60000;
+  xhr.timeout = 10000;
+
+  var fellBack = false;
+  function fallback(reason) {
+    if (fellBack) return;
+    fellBack = true;
+    window._cloudOCRReachable = false;
+    if (bar) bar.textContent = 'Extracting (offline)…';
+    runOfflineOCR(b64, mediaType, bar);
+  }
 
   xhr.onload = function() {
+    if (xhr.status < 200 || xhr.status >= 300) { fallback('http ' + xhr.status); return; }
     var data;
     try { data = JSON.parse(xhr.responseText); }
-    catch (err) {
-      if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'Bad response: ' + (xhr.responseText || '').slice(0, 80); }
-      return;
-    }
+    catch (e) { fallback('bad json'); return; }
+    if (data && data.error) { fallback('worker error'); return; }
+    window._cloudOCRReachable = true;
+    if (data) data._engine = 'cloud';
     handleOCRResult(data, bar);
   };
-  xhr.onerror = function() {
-    if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'Network error reaching OCR (status ' + xhr.status + ')'; }
-  };
-  xhr.ontimeout = function() {
-    if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'OCR timed out after 60s'; }
-  };
+  xhr.onerror   = function() { fallback('network'); };
+  xhr.ontimeout = function() { fallback('timeout'); };
   xhr.send(JSON.stringify({ image: b64, mediaType: mediaType }));
+}
+
+// Run the offline OCR engine (Tesseract.js on iOS, ML Kit on Android).
+// Result shape matches the Cloudflare worker output, so handleOCRResult
+// consumes it unchanged.
+function runOfflineOCR(b64, mediaType, bar) {
+  if (!window.OCROffline) {
+    if (bar) {
+      bar.className = 'ocr-bar ocr-warn';
+      bar.textContent = 'Offline OCR module not loaded — refresh the page';
+    }
+    return;
+  }
+  window.OCROffline.run(b64, mediaType).then(function(data) {
+    handleOCRResult(data, bar);
+  }).catch(function(err) {
+    if (bar) {
+      bar.className = 'ocr-bar ocr-warn';
+      bar.textContent = 'Offline OCR failed: ' + (err && err.message || err);
+    }
+  });
 }
 
 // ── Crop modal ─────────────────────────────────────────
@@ -5760,7 +5820,11 @@ function handleOCRResult(data, bar) {
   }
   if (bar) {
     bar.className = 'ocr-bar ocr-ok';
-    bar.textContent = '✓ Extracted: ' + (p.last||'?') + ', ' + (p.first||'?') + (p.phn ? ' · ' + p.phn : '');
+    var engineTag = '';
+    if (p._engine === 'cloud')          engineTag = '☁️ ';
+    else if (p._engine === 'tesseract') engineTag = '📱 ';
+    else if (p._engine === 'mlkit')     engineTag = '📱 ';
+    bar.textContent = engineTag + '✓ Extracted: ' + (p.last||'?') + ', ' + (p.first||'?') + (p.phn ? ' · ' + p.phn : '');
   }
 }
 
@@ -7134,6 +7198,26 @@ function ctxEditBtn(btn) { openPatientEdit(btn.getAttribute("data-pid")); }
 
 function openSummaryEl(el) { openPatientSummary(el.getAttribute("data-pid") || el.closest("[data-pid]").getAttribute("data-pid")); }
 
+</script>
+
+<!-- Build stamp — visible footer for support/debugging -->
+<div id="kgh-build-stamp" style="
+    text-align:center; padding:12px 8px 18px;
+    font-size:10px; color:#8e8e93; font-family:ui-monospace,'SF Mono',monospace;
+    user-select:text; -webkit-user-select:text; opacity:.7;">
+  KGH Cardiology Billing · <span id="kgh-build-stamp-text"></span>
+</div>
+<script>
+(function () {
+  try {
+    if (typeof APP_VERSION === 'undefined') return;
+    var foot = document.getElementById('kgh-build-stamp-text');
+    if (foot) foot.textContent = APP_VERSION + ' · built ' + APP_BUILT;
+    // Keep header badge in sync — single source of truth (APP_VERSION).
+    var hdr = document.getElementById('hdr-version');
+    if (hdr) hdr.textContent = APP_VERSION;
+  } catch (e) {}
+})();
 </script>
 
 </body>
