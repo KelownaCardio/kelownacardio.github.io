@@ -545,7 +545,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.07</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.08</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1508,7 +1508,7 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID = 'v3.07-2026-05-07';
+var BUILD_ID = 'v3.08-2026-05-07';
 
 (function purgeIfBuildChanged() {
   try {
@@ -1651,7 +1651,27 @@ async function syncFromSheets() {
   window._lastSyncResponse.checkpoint = 'fetch-start';
   window._lastSyncResponse.startedAt = new Date().toISOString();
   try {
-    var r = await fetch(SHEETS_URL + '?action=getAll&key=' + SHARED_KEY);
+    // Wrap fetch in a 45s timeout so a stalled request is detectable instead of hanging forever
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var timeoutId = setTimeout(function() {
+      if (ctrl) ctrl.abort();
+    }, 45000);
+    var fetchOpts = ctrl ? { signal: ctrl.signal } : {};
+    var r;
+    try {
+      r = await fetch(SHEETS_URL + '?action=getAll&key=' + SHARED_KEY, fetchOpts);
+    } catch (fetchErr) {
+      clearTimeout(timeoutId);
+      var errMsg = fetchErr.name === 'AbortError'
+        ? 'Fetch aborted after 45s timeout — Apps Script may be slow or unreachable'
+        : 'Fetch failed: ' + (fetchErr.message || fetchErr);
+      window._lastSyncError = errMsg;
+      window._lastSyncResponse.checkpoint = 'fetch-failed';
+      window._lastSyncResponse.fetchError = errMsg;
+      setSyncState('error');
+      return;
+    }
+    clearTimeout(timeoutId);
     window._lastSyncResponse.checkpoint = 'fetch-returned';
     window._lastSyncResponse.httpStatus = r.status;
     window._lastSyncResponse.httpOk = r.ok;
@@ -3584,6 +3604,9 @@ function renderDischargedList(query) {
         diagInner += '&nbsp;&nbsp;Completed: ' + lastResp.completedAt + '<br>';
         diagInner += '&nbsp;&nbsp;Final st.patients: <b>' + lastResp.stPatientsFinal + '</b><br>';
         diagInner += '&nbsp;&nbsp;Final st.claims: <b>' + lastResp.stClaimsFinal + '</b><br>';
+      }
+      if (lastResp.fetchError) {
+        diagInner += '&nbsp;&nbsp;<span style="color:var(--red-t)">Fetch error: ' + esc(lastResp.fetchError) + '</span><br>';
       }
       if (lastResp.exception) {
         diagInner += '&nbsp;&nbsp;<span style="color:var(--red-t)">EXCEPTION: ' + esc(lastResp.exception) + '</span><br>';
@@ -6950,6 +6973,15 @@ function showToast(msg) {
 // Re-sync whenever the user switches back to this tab/app
 document.addEventListener('visibilitychange', function() {
   if (document.visibilityState === 'visible' && st.loaded && SHEETS_URL) {
+    syncFromSheets();
+  }
+});
+
+// iOS Safari BFCache: when the page is restored from cache (back/forward, sometimes refresh),
+// a fresh sync is essential — the in-memory state may be from an old session.
+window.addEventListener('pageshow', function(e) {
+  if (e.persisted && st.loaded && SHEETS_URL) {
+    console.log('[kgh] pageshow restored from BFCache — re-syncing');
     syncFromSheets();
   }
 });
