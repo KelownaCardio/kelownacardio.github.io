@@ -545,7 +545,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.14</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.15</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -857,6 +857,17 @@ input[type=file] { display:none; }
   </div>
 </div>
 
+<!-- Daily claims list — opened by tapping $X (N claims) in header -->
+<div class="overlay" id="daily-claims-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="daily-claims-title">Today's claims</div>
+    <div id="daily-claims-body" style="max-height:60vh;overflow-y:auto"></div>
+    <div class="divider"></div>
+    <button class="btn btn-s" onclick="hideModal('daily-claims-modal')" style="margin-bottom:0">Close</button>
+  </div>
+</div>
+
 <div class="overlay" id="mit-modal">
   <div class="modal">
     <div class="modal-handle"></div>
@@ -1002,19 +1013,126 @@ function calcDailyTotal() {
   return count > 0 ? { total: total, count: count } : null;
 }
 
+// Format a DD/MM/YYYY string as "MMM DD, YYYY" (e.g. "May 07, 2026")
+// Used in the header for a more readable date.
+function dispDateMdy(d) {
+  if (!d) return '';
+  var s = fmtClaimDate(d);
+  var p = s.split('/');
+  if (p.length !== 3) return s;
+  var mon = _MONTHS[parseInt(p[1], 10) - 1];
+  if (!mon) return s;
+  return mon + ' ' + p[0] + ', ' + p[2];
+}
+
+// Open the daily claims modal — shows Last,First — fee description for every claim
+// the signed-in doctor has billed today. Quick visual check that nothing was missed.
+function openDailyClaimsList() {
+  if (!st.doc) { showToast('Sign in first'); return; }
+  // Build fee-code → description lookup
+  var feeDesc = {};
+  FEES.forEach(function(f) { feeDesc[f.code] = f.desc; });
+  // CCU rollups not in FEES
+  feeDesc['CCU_DAILY'] = 'CCU daily (pre-rollup tap)';
+  feeDesc['1411']      = 'CCU critical care — Day 1';
+  feeDesc['1421']      = 'CCU critical care — Days 2-7';
+  feeDesc['1431']      = 'CCU critical care — Day 8+';
+
+  // Filter for today + this doctor
+  var todays = (st.claims || []).filter(function(c) {
+    return c.alias === st.doc.alias && c.date === TODAY;
+  });
+
+  // Sort: by last name, then by start time
+  todays.sort(function(a, b) {
+    var ln = String(a.last || '').localeCompare(String(b.last || ''));
+    if (ln !== 0) return ln;
+    return String(a.startTime || '').localeCompare(String(b.startTime || ''));
+  });
+
+  var titleEl = document.getElementById('daily-claims-title');
+  var body    = document.getElementById('daily-claims-body');
+  if (!titleEl || !body) return;
+
+  if (!todays.length) {
+    titleEl.textContent = "Today's claims (0)";
+    body.innerHTML = '<div class="empty" style="padding:18px 0">No claims billed today.</div>';
+    showModal('daily-claims-modal');
+    return;
+  }
+
+  // Total $ for the visible claims (excluding CCU_DAILY which rolls up)
+  var total = 0;
+  todays.forEach(function(c) {
+    if (c.fee === 'CCU_DAILY') return;
+    var rate = FEE_RATES[c.fee] || 0;
+    total += rate * (c.units || 1);
+  });
+
+  titleEl.innerHTML = "Today's claims " +
+    '<span style="font-weight:400;color:var(--text2);font-size:13px">(' +
+    todays.length + ' &middot; $' + total.toFixed(0) + ')</span>';
+
+  body.innerHTML = todays.map(function(c) {
+    try {
+      var last  = String(c.last  || '?');
+      var first = String(c.first || '?');
+      var fee   = String(c.fee   || '');
+      var desc  = feeDesc[fee] || fee;
+      var rate  = FEE_RATES[fee] || 0;
+      var amt   = (rate * (c.units || 1));
+      var time  = c.startTime ? String(c.startTime) : '';
+      var isCCUTap = fee === 'CCU_DAILY';
+      return '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:8px 4px;border-bottom:.5px solid var(--border)">' +
+        '<div style="flex:1;min-width:0">' +
+          '<div style="font-size:13px;font-weight:600;color:var(--text)">' +
+            esc(last) + ', ' + esc(first) +
+          '</div>' +
+          '<div style="font-size:11px;color:var(--text2);margin-top:2px">' +
+            esc(desc) +
+            (time ? ' &middot; ' + esc(time) : '') +
+            (isCCUTap ? ' <span style="color:var(--amber-t)">(rolls up at export)</span>' : '') +
+          '</div>' +
+        '</div>' +
+        '<div style="font-size:12px;font-weight:700;color:' + (amt > 0 ? 'var(--green)' : 'var(--text3)') + ';flex-shrink:0">' +
+          (amt > 0 ? '$' + amt.toFixed(0) : '—') +
+        '</div>' +
+      '</div>';
+    } catch (e) {
+      console.error('[dailyClaims] row render failed for', c, e);
+      return '<div class="empty" style="padding:6px 4px;font-size:11px">⚠ Could not render claim ' + esc(c && c.id) + '</div>';
+    }
+  }).join('');
+
+  showModal('daily-claims-modal');
+}
+
 function updateDailyTotal() {
   var result = calcDailyTotal();
   var dateEl = document.getElementById('hdr-date');
   if (!dateEl) return;
+  var dateStr = dispDateMdy(TODAY);
   if (!result) {
-    dateEl.textContent = TODAY;
+    dateEl.innerHTML = '<span>' + dateStr + '</span>';
     return;
   }
-  dateEl.innerHTML = TODAY +
-    ' &nbsp;<span style="color:var(--green);font-weight:700">$' +
-    result.total.toFixed(0) +
-    '</span><span style="color:var(--text3);font-size:9px"> (' + result.count + ' claim' +
-    (result.count !== 1 ? 's' : '') + ')</span>';
+  // Wrap the entire claims chip in a clickable button-like span so the whole
+  // pill is tappable. font-size 12px (vs the old 9-13px mix) gives a comfortable
+  // touch target. min-height ensures vertical hit area.
+  dateEl.innerHTML =
+    '<span>' + dateStr + '</span>' +
+    '&nbsp; ' +
+    '<span role="button" tabindex="0" onclick="openDailyClaimsList()" ' +
+      'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();openDailyClaimsList();}" ' +
+      'style="display:inline-block;cursor:pointer;padding:2px 8px;border-radius:10px;' +
+      'background:var(--green-bg);color:var(--green-t);font-weight:700;font-size:12px;' +
+      'line-height:1.4;min-height:18px;-webkit-tap-highlight-color:rgba(52,199,89,.2);' +
+      'user-select:none">' +
+      '$' + result.total.toFixed(0) +
+      ' <span style="font-weight:500;opacity:.7">&middot; ' +
+      result.count + ' claim' + (result.count !== 1 ? 's' : '') +
+      '</span>' +
+    '</span>';
 }
 
 var FEES = [
@@ -1508,7 +1626,7 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID = 'v3.14-2026-05-07';
+var BUILD_ID = 'v3.15-2026-05-07';
 
 (function purgeIfBuildChanged() {
   try {
