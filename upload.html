@@ -1,0 +1,1156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>KGH Historical Billing</title>
+<style>
+:root {
+  --bg:#f5f5f7;--surface:#fff;--surface2:#f0f0f3;
+  --text:#1c1c1e;--text2:#636366;--text3:#8e8e93;
+  --border:rgba(0,0,0,.06);--border2:rgba(0,0,0,.12);
+  --blue:#007aff;--blue-bg:#e3f0ff;--blue-t:#0050a0;
+  --green:#34c759;--green-bg:#d4f4dd;--green-t:#1a7a35;
+  --teal:#30b0c7;--teal-bg:#d6f4f9;--teal-t:#1a6070;
+  --purple:#af52de;--purple-bg:#f0e4ff;--purple-t:#6e2a9a;
+  --amber:#ff9500;--amber-bg:#fff0d6;--amber-t:#a55c00;
+  --red:#ff3b30;--red-bg:#ffe5e3;--red-t:#b3201a;
+  --r:12px;--rsm:8px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);font-size:14px}
+.hdr{background:var(--surface);border-bottom:.5px solid var(--border);padding:12px 16px;position:sticky;top:0;z-index:50}
+.hdr-title{font-size:16px;font-weight:700}
+.hdr-sub{font-size:11px;color:var(--text2);margin-top:2px}
+.container{padding:16px;max-width:680px;margin:0 auto;padding-bottom:60px}
+.card{background:var(--surface);border-radius:var(--r);padding:14px;margin-bottom:12px;border:.5px solid var(--border)}
+.card-title{font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
+label{display:block;font-size:11px;color:var(--text2);margin:8px 0 4px;font-weight:600}
+input,select{width:100%;padding:10px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;background:var(--surface);font-family:inherit;color:var(--text);-webkit-appearance:none}
+input[type=checkbox]{width:auto;margin-right:6px;accent-color:var(--blue)}
+.btn{width:100%;padding:12px;border:none;border-radius:var(--rsm);font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;margin-top:8px}
+.btn-p{background:var(--blue);color:#fff}
+.btn-s{background:var(--surface2);color:var(--text)}
+.btn-g{background:var(--green);color:#fff}
+.btn-sm{padding:7px 12px;font-size:12px;font-weight:600;border:none;border-radius:var(--rsm);cursor:pointer;font-family:inherit}
+.btn-sm-p{background:var(--blue);color:#fff}
+.btn-sm-s{background:var(--surface2);color:var(--text)}
+.btn-sm-r{background:var(--red-bg);color:var(--red-t)}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+/* mode tabs */
+.mode-bar{display:flex;background:var(--surface);border-bottom:.5px solid var(--border);padding:0 16px;position:sticky;top:52px;z-index:49}
+.mode-tab{flex:1;padding:11px 8px;text-align:center;font-size:13px;font-weight:600;cursor:pointer;color:var(--text3);border-bottom:2px solid transparent;transition:all .15s}
+.mode-tab.active{color:var(--blue);border-bottom-color:var(--blue)}
+/* photo */
+.photo-zone{border:1.5px dashed var(--border2);border-radius:var(--r);min-height:80px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;cursor:pointer;overflow:hidden;background:var(--surface2);margin-bottom:8px}
+.photo-zone img{width:100%;object-fit:cover;border-radius:9px;display:block}
+.status-bar{font-size:11px;padding:6px 10px;border-radius:var(--rsm);margin-bottom:8px;min-height:28px;display:none}
+.st-ok{background:var(--green-bg);color:var(--green-t);display:block}
+.st-warn{background:var(--amber-bg);color:var(--amber-t);display:block}
+.st-info{background:var(--blue-bg);color:var(--blue-t);display:block}
+.file-input{display:none}
+/* seg */
+.seg{display:flex;background:var(--surface2);border-radius:var(--rsm);padding:3px;gap:2px;margin-bottom:10px}
+.seg button{flex:1;padding:7px 4px;font-size:11px;font-weight:600;border:none;border-radius:6px;cursor:pointer;font-family:inherit;background:transparent;color:var(--text2);transition:all .15s}
+.seg button.act{background:var(--surface);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.15)}
+/* toggle */
+.tgl-row{display:flex;align-items:center;justify-content:space-between;padding:6px 0}
+.tgl-lbl{font-size:13px;font-weight:500}
+.tgl-sub{font-size:11px;color:var(--text2);margin-top:1px}
+.tgl{position:relative;width:44px;height:26px;flex-shrink:0}
+.tgl input{display:none}
+.tgl-track{position:absolute;inset:0;border-radius:13px;background:var(--border2);transition:.2s;cursor:pointer}
+.tgl input:checked+.tgl-track{background:var(--green)}
+.tgl-thumb{position:absolute;width:22px;height:22px;left:2px;top:2px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:.2s;pointer-events:none}
+.tgl input:checked~.tgl-thumb{left:20px}
+/* calendar */
+.cal-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.cal-nav{background:none;border:none;font-size:20px;cursor:pointer;padding:4px 8px;color:var(--blue)}
+.cal-month{font-size:15px;font-weight:700}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.cal-dow{text-align:center;font-size:10px;font-weight:700;color:var(--text3);padding:3px 0}
+.cal-day{aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500;position:relative;min-height:34px;user-select:none;transition:background .1s}
+.cal-day:not(.empty):hover{opacity:.85}
+.cal-day.empty{pointer-events:none}
+.cal-day.other-m{color:var(--text3);background:none!important}
+.cal-day.today-dot::after{content:'';position:absolute;bottom:3px;left:50%;transform:translateX(-50%);width:4px;height:4px;border-radius:50%;background:var(--blue)}
+.cal-day.d-daily{background:var(--green-bg);color:var(--green-t)}
+.cal-day.d-combined{background:var(--teal-bg);color:var(--teal-t)}
+.cal-day.d-directive{background:var(--blue-bg);color:var(--blue-t)}
+.cal-day.d-ccu{background:var(--purple-bg);color:var(--purple-t)}
+.cal-day.d-consult{background:var(--amber-bg);color:var(--amber-t);font-weight:800;pointer-events:none}
+.cal-day-lbl{font-size:8px;font-weight:700;line-height:1;margin-top:1px}
+/* mode chips */
+.mode-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.mchip{font-size:11px;font-weight:700;padding:5px 10px;border-radius:20px;cursor:pointer;border:2px solid transparent}
+.mchip.daily{background:var(--green-bg);color:var(--green-t)}
+.mchip.combined{background:var(--teal-bg);color:var(--teal-t)}
+.mchip.directive{background:var(--blue-bg);color:var(--blue-t)}
+.mchip.ccu{background:var(--purple-bg);color:var(--purple-t)}
+.mchip.active{border-color:currentColor}
+.range-row{display:flex;gap:6px;align-items:flex-end;margin-bottom:10px}
+.range-row input{flex:1}
+/* claims preview */
+.claim-row{display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:.5px solid var(--border)}
+.claim-row:last-child{border-bottom:none}
+.ctype{font-size:9px;font-weight:800;padding:3px 7px;border-radius:20px;white-space:nowrap;flex-shrink:0;margin-top:1px;text-transform:uppercase}
+.ct-consult,.ct-limited{background:var(--amber-bg);color:var(--amber-t)}
+.ct-most{background:var(--red-bg);color:var(--red-t)}
+.ct-daily{background:var(--green-bg);color:var(--green-t)}
+.ct-combined{background:var(--teal-bg);color:var(--teal-t)}
+.ct-directive{background:var(--blue-bg);color:var(--blue-t)}
+.ct-ccu{background:var(--purple-bg);color:var(--purple-t)}
+.claim-info{flex:1;min-width:0}
+.claim-date-str{font-size:12px;font-weight:600}
+.claim-detail-str{font-size:11px;color:var(--text2);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fee-inp{width:72px;flex-shrink:0;padding:6px 8px;font-size:13px;border:.5px solid var(--border2);border-radius:6px;font-family:inherit;color:var(--text)}
+.del-btn{background:none;border:none;cursor:pointer;color:var(--text3);font-size:18px;padding:2px 4px;line-height:1;flex-shrink:0}
+.summary-bar{background:var(--surface2);border-radius:var(--rsm);padding:8px 12px;margin-bottom:10px;font-size:12px;color:var(--text2);display:flex;justify-content:space-between;align-items:center}
+/* consult type pills */
+.ctype-pick{display:flex;gap:6px;margin-bottom:6px}
+.ctype-pill{flex:1;padding:9px;text-align:center;font-size:13px;font-weight:600;border-radius:var(--rsm);border:.5px solid var(--border2);cursor:pointer;background:var(--surface2);color:var(--text2)}
+.ctype-pill.sel{background:var(--amber-bg);color:var(--amber-t);border-color:var(--amber)}
+/* referrer suggestions */
+.ref-suggestions{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;min-height:0}
+.ref-chip{font-size:11px;font-weight:600;padding:5px 10px;border-radius:20px;background:var(--surface2);border:.5px solid var(--border2);cursor:pointer;color:var(--text2)}
+.ref-chip:hover{background:var(--blue-bg);color:var(--blue-t)}
+.ref-chip.matched{background:var(--green-bg);color:var(--green-t);border-color:var(--green)}
+/* batch queue */
+.queue-bar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.q-chip{font-size:11px;font-weight:600;padding:5px 10px;border-radius:20px;cursor:pointer;border:2px solid transparent;background:var(--surface2);color:var(--text2);white-space:nowrap}
+.q-chip.current{background:var(--blue-bg);color:var(--blue-t);border-color:var(--blue)}
+.q-chip.confirmed{background:var(--green-bg);color:var(--green-t)}
+.q-chip.skipped{background:var(--surface2);color:var(--text3);text-decoration:line-through}
+.batch-nav{display:flex;gap:8px;margin-top:12px}
+.batch-nav button{flex:1}
+.confirmed-count{font-size:13px;font-weight:600;color:var(--green-t);background:var(--green-bg);padding:8px 12px;border-radius:var(--rsm);text-align:center;margin-bottom:8px}
+/* details */
+details{margin:8px 0}
+summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding:4px 0}
+.code-block{font-family:ui-monospace,"SF Mono",monospace;font-size:11px;background:var(--surface2);padding:12px;border-radius:var(--rsm);white-space:pre-wrap;word-break:break-all;color:var(--text2);margin-top:8px;max-height:300px;overflow-y:auto}
+/* Crop overlay */
+.crop-ov{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:200;display:none;flex-direction:column;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+.crop-ov.on{display:flex}
+.crop-hdr{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;color:#fff}
+.crop-hdr-title{font-size:14px;font-weight:700}
+.crop-hdr-btn{background:none;border:none;color:#fff;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;padding:8px 12px;border-radius:var(--rsm)}
+.crop-hdr-btn:active{background:rgba(255,255,255,.15)}
+.crop-hint{text-align:center;color:rgba(255,255,255,.7);font-size:11px;padding:4px 16px}
+.crop-stage{flex:1;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;touch-action:none}
+.crop-img-wrap{position:relative;max-width:100%;max-height:100%}
+.crop-img{display:block;max-width:100vw;max-height:calc(100vh - 180px);object-fit:contain;user-select:none;-webkit-user-select:none;-webkit-user-drag:none;pointer-events:none}
+.crop-mask{position:absolute;pointer-events:none;background:rgba(0,0,0,.55)}
+.crop-frame{position:absolute;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.4);pointer-events:none}
+.crop-handle{position:absolute;width:44px;height:44px;margin:-22px 0 0 -22px;cursor:grab;touch-action:none;display:flex;align-items:center;justify-content:center}
+.crop-handle::before{content:'';width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 0 0 3px rgba(26,95,168,.6),0 2px 8px rgba(0,0,0,.4)}
+.crop-actions{display:flex;gap:10px;padding:10px 16px 14px;background:rgba(0,0,0,.5)}
+.crop-actions button{flex:1;padding:13px;font-size:14px;font-weight:700;border-radius:var(--r);border:none;cursor:pointer;font-family:inherit}
+.crop-btn-cancel{background:rgba(255,255,255,.18);color:#fff}
+.crop-btn-use{background:var(--blue);color:#fff}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="hdr-title">KGH Historical Billing</div>
+  <div class="hdr-sub" id="hdr-sub">Single card mode</div>
+</div>
+
+<div class="mode-bar">
+  <div class="mode-tab active" id="tab-single" onclick="switchMode('single')">Single card</div>
+  <div class="mode-tab" id="tab-batch" onclick="switchMode('batch')">Batch scan</div>
+</div>
+
+<div class="container">
+
+<!-- Config -->
+<div class="card">
+  <div class="card-title">Configuration</div>
+  <label>Cloudflare Worker URL (OCR)</label>
+  <input id="worker-url" type="url" value="https://kgh-ocr.kathrynb77.workers.dev" autocorrect="off" autocapitalize="none">
+  <label>Google Apps Script URL</label>
+  <input id="script-url" type="url" placeholder="https://script.google.com/macros/s/.../exec" autocorrect="off" autocapitalize="none" onchange="loadReferrers()">
+  <div id="refs-status" style="font-size:11px;color:var(--text3);margin-top:4px"></div>
+  <details style="margin-top:10px">
+    <summary>Apps Script additions required</summary>
+    <div class="code-block" id="apps-script-snippet"></div>
+  </details>
+</div>
+
+<!-- ═══════════════════════════════════════════════════
+     SINGLE MODE
+═══════════════════════════════════════════════════ -->
+<div id="single-mode">
+
+<div class="card">
+  <div class="card-title">1 · Sticker photo</div>
+  <div id="photo-zone" class="photo-zone" onclick="document.getElementById('file-in').click()">
+    <svg style="width:26px;height:26px;stroke:var(--text3);fill:none;stroke-width:1.5" viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+    <span style="font-size:12px;color:var(--text2)">Tap to photo or upload sticker</span>
+  </div>
+  <input id="file-in" class="file-input" type="file" accept="image/*" onchange="handleSinglePhoto(this)">
+  <div id="ocr-status" class="status-bar"></div>
+  <button class="btn btn-s" style="margin-top:0" onclick="clearForm()">Clear / new patient</button>
+</div>
+
+</div><!-- /single-mode -->
+
+<!-- ═══════════════════════════════════════════════════
+     BATCH MODE
+═══════════════════════════════════════════════════ -->
+<div id="batch-mode" style="display:none">
+
+<div class="card">
+  <div class="card-title">Batch scan upload</div>
+  <div id="batch-photo-zone" class="photo-zone" onclick="document.getElementById('batch-file-in').click()">
+    <svg style="width:26px;height:26px;stroke:var(--text3);fill:none;stroke-width:1.5" viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+    <span style="font-size:12px;color:var(--text2)">Upload flatbed scan (multiple cards)</span>
+    <span style="font-size:10px;color:var(--text3)">JPEG/PNG — all cards in one image</span>
+  </div>
+  <input id="batch-file-in" class="file-input" type="file" accept="image/*" onchange="handleBatchPhoto(this)">
+  <div id="batch-ocr-status" class="status-bar"></div>
+</div>
+
+<!-- Queue -->
+<div id="batch-queue-card" class="card" style="display:none">
+  <div class="card-title">Queue — <span id="queue-progress"></span></div>
+  <div id="queue-bar" class="queue-bar"></div>
+  <div class="batch-nav">
+    <button class="btn-sm btn-sm-s" onclick="batchSkip()">Skip →</button>
+    <button class="btn-sm btn-sm-p" onclick="batchConfirm()">✓ Confirm & next</button>
+  </div>
+</div>
+
+</div><!-- /batch-mode -->
+
+<!-- ═══════════════════════════════════════════════════
+     SHARED: Patient + Billing form (used by both modes)
+═══════════════════════════════════════════════════ -->
+
+<!-- Patient -->
+<div class="card">
+  <div class="card-title" id="patient-card-title">Patient</div>
+  <div class="row">
+    <div><label>Last name *</label><input id="f-last" type="text" placeholder="Smith" oninput="refreshPreview()"></div>
+    <div><label>First name *</label><input id="f-first" type="text" placeholder="Jane" oninput="refreshPreview()"></div>
+  </div>
+  <div class="row">
+    <div><label>PHN * (10 digits)</label><input id="f-phn" type="text" inputmode="numeric" placeholder="9123456789" oninput="refreshPreview()"></div>
+    <div><label>DOB (DD/MM/YYYY)</label><input id="f-dob" type="text" placeholder="15/03/1958" oninput="refreshPreview()"></div>
+  </div>
+  <div class="row">
+    <div><label>Sex</label>
+      <select id="f-sex" onchange="refreshPreview()">
+        <option value="">—</option><option value="M">M</option><option value="F">F</option>
+      </select>
+    </div>
+    <div><label>Performing MD alias</label>
+      <select id="f-alias" onchange="onAliasChange()">
+        <option value="JW">JW — Jordan Webber</option>
+        <option value="KBrown">KBrown — Kathryn Brown</option>
+        <option value="FH">FH — Frank Halperin</option>
+        <option value="LH">LH — Laura Halperin</option>
+        <option value="SB">SB — Sandy Baker</option>
+        <option value="ASodhi">ASodhi — Amit Sodhi</option>
+        <option value="EMMassie">EMMassie — Emma Massie</option>
+        <option value="KHoskin">KHoskin — Kurt Hoskin</option>
+        <option value="DPatton">DPatton — Daniel Patton</option>
+        <option value="AKhosla">AKhosla — Amit Khosla</option>
+        <option value="KT">KT — Keith Todd</option>
+        <option value="other">other…</option>
+      </select>
+    </div>
+  </div>
+  <div id="alias-other-wrap" style="display:none">
+    <label>Alias (custom)</label>
+    <input id="f-alias-custom" type="text" placeholder="e.g. DR" oninput="refreshPreview()">
+  </div>
+  <div class="row">
+    <div><label>Ward</label><input id="f-ward" type="text" placeholder="2S" oninput="refreshPreview()"></div>
+    <div><label>Room / Bed</label><input id="f-room" type="text" placeholder="226B" oninput="refreshPreview()"></div>
+  </div>
+</div>
+
+<!-- Consult -->
+<div class="card">
+  <div class="card-title">Consult / first visit</div>
+  <div class="ctype-pick">
+    <div class="ctype-pill sel" id="ct-consult" onclick="setConsultType('consult')">Consult</div>
+    <div class="ctype-pill" id="ct-limited" onclick="setConsultType('limited')">Lmtd consult</div>
+    <div class="ctype-pill" id="ct-none" onclick="setConsultType('none')">No consult</div>
+  </div>
+  <div id="consult-fields">
+    <div class="row">
+      <div><label>Date</label><input id="c-date" type="date" onchange="onConsultDateChange()"></div>
+      <div><label>Diagnosis</label><input id="c-dx" type="text" placeholder="NSTEMI" oninput="refreshPreview()"></div>
+    </div>
+    <div class="row">
+      <div><label>Start time</label><input id="c-start" type="time" oninput="refreshPreview()"></div>
+      <div><label>End time</label><input id="c-end" type="time" oninput="refreshPreview()"></div>
+    </div>
+    <label>Referring MD</label>
+    <input id="c-ref" type="text" placeholder="Dr. Smith" oninput="onRefInput()">
+    <div id="ref-suggestions" class="ref-suggestions"></div>
+    <div class="tgl-row" style="margin-top:10px">
+      <div><div class="tgl-lbl">+MOST</div><div class="tgl-sub">MOST claim same day</div></div>
+      <label class="tgl"><input type="checkbox" id="c-most" onchange="refreshPreview()"><div class="tgl-track"></div><div class="tgl-thumb"></div></label>
+    </div>
+    <div class="tgl-row">
+      <div><div class="tgl-lbl">+CCFPP</div><div class="tgl-sub">Adds FP details to consult notes</div></div>
+      <label class="tgl"><input type="checkbox" id="c-ccfpp" onchange="toggleCcfpp()"><div class="tgl-track"></div><div class="tgl-thumb"></div></label>
+    </div>
+    <div id="ccfpp-fields" style="display:none;margin-top:6px">
+      <div class="row">
+        <div><label>FP name</label><input id="c-ccfpp-name" type="text" placeholder="Dr. Jones" oninput="refreshPreview()"></div>
+        <div><label>FP phone</label><input id="c-ccfpp-ph" type="text" placeholder="9055551234" inputmode="numeric" oninput="refreshPreview()"></div>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px">Added to consult notes as: CCFPP [name] [phone]</div>
+    </div>
+  </div>
+  <div id="consult-fee-row" style="margin-top:10px">
+    <label>Consult fee code</label>
+    <input id="c-fee" type="text" placeholder="e.g. 00100" oninput="refreshPreview()">
+  </div>
+</div>
+
+<!-- Calendar -->
+<div class="card">
+  <div class="card-title">Subsequent visits</div>
+  <div class="mode-chips">
+    <div class="mchip daily active" id="mc-daily" onclick="setCalMode('daily')">Daily</div>
+    <div class="mchip combined" id="mc-combined" onclick="setCalMode('combined')">Combined</div>
+    <div class="mchip directive" id="mc-directive" onclick="setCalMode('directive')">Directive</div>
+    <div class="mchip ccu" id="mc-ccu" onclick="setCalMode('ccu')">CCU</div>
+  </div>
+  <div style="font-size:11px;color:var(--text3);margin-bottom:8px" id="mode-hint">Tap days to toggle. Amber = consult day.</div>
+  <div id="combined-reason-row" style="display:none;margin-bottom:10px">
+    <label>Combined daily reason</label>
+    <input id="combined-reason" type="text" placeholder="e.g. Heart failure management" oninput="refreshPreview()">
+  </div>
+  <div class="range-row">
+    <div style="flex:1"><label>From</label><input id="rng-from" type="date"></div>
+    <div style="flex:1"><label>To</label><input id="rng-to" type="date"></div>
+    <button class="btn-sm btn-sm-p" style="margin-bottom:0" onclick="fillRange()">Fill</button>
+  </div>
+  <button class="btn-sm btn-sm-s" style="width:100%;margin-bottom:10px" onclick="clearCalMode()">Clear current mode</button>
+  <div class="cal-hdr">
+    <button class="cal-nav" onclick="calPrev()">‹</button>
+    <div class="cal-month" id="cal-month-lbl"></div>
+    <button class="cal-nav" onclick="calNext()">›</button>
+  </div>
+  <div class="cal-grid" id="cal-grid">
+    <div class="cal-dow">Su</div><div class="cal-dow">Mo</div><div class="cal-dow">Tu</div>
+    <div class="cal-dow">We</div><div class="cal-dow">Th</div><div class="cal-dow">Fr</div>
+    <div class="cal-dow">Sa</div>
+  </div>
+</div>
+
+<!-- Preview -->
+<div class="card">
+  <div class="card-title">Claims preview</div>
+  <div id="preview-summary" class="summary-bar" style="display:none"></div>
+  <div id="preview-list"></div>
+  <div id="preview-empty" style="font-size:12px;color:var(--text3);text-align:center;padding:20px 0">Fill in patient info and dates — claims appear here.</div>
+</div>
+
+<!-- Export -->
+<div class="card">
+  <div class="card-title">Export</div>
+  <div id="confirmed-count-bar" style="display:none" class="confirmed-count"></div>
+  <div style="font-size:12px;color:var(--text2);margin-bottom:10px">
+    Set fee codes in the preview above. Claims without a fee code are excluded.
+  </div>
+  <button class="btn btn-g" onclick="exportCSV()">⬇ Download CSV</button>
+  <button class="btn btn-p" onclick="exportSheets()">↑ Send to Google Sheets (Historical tab)</button>
+  <div id="export-status" class="status-bar" style="margin-top:8px"></div>
+</div>
+
+</div><!-- /container -->
+
+<!-- Crop overlay -->
+<div class="crop-ov" id="crop-ov">
+  <div class="crop-hdr">
+    <button class="crop-hdr-btn" onclick="cropCancel()">Cancel</button>
+    <div class="crop-hdr-title">Crop image</div>
+    <button class="crop-hdr-btn" onclick="cropReset()">Reset</button>
+  </div>
+  <div class="crop-hint">Drag the corners to fit your selection</div>
+  <div class="crop-stage" id="crop-stage">
+    <div class="crop-img-wrap" id="crop-wrap">
+      <img id="crop-img" class="crop-img" alt="">
+      <div class="crop-mask" id="cm-t"></div><div class="crop-mask" id="cm-b"></div>
+      <div class="crop-mask" id="cm-l"></div><div class="crop-mask" id="cm-r"></div>
+      <div class="crop-frame" id="crop-frame"></div>
+      <div class="crop-handle" id="ch-tl"></div><div class="crop-handle" id="ch-br"></div>
+    </div>
+  </div>
+  <div class="crop-actions">
+    <button class="crop-btn-cancel" onclick="cropCancel()">Cancel</button>
+    <button class="crop-btn-use" onclick="cropUse()">Use this region</button>
+  </div>
+</div>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+var appMode = 'single';
+var st = {
+  consultType: 'consult',
+  calMode: 'daily',
+  calMonth: new Date(),
+  dailyDates: [], combinedDates: [], directiveDates: [], ccuDates: [],
+  claims: [],
+};
+var batch = {
+  items: [], current: 0,
+  status: [],          // 'pending'|'confirmed'|'skipped'
+  confirmed: [],       // accumulated claims from all confirmed cards
+};
+var _refs = [];          // referrer directory loaded from Sheets
+var _feeOverrides = {};
+var _cropPending = null, _cropState = null;
+
+// ─── Apps Script snippet ──────────────────────────────────────────────────────
+document.getElementById('apps-script-snippet').textContent =
+`// Add these two blocks to your existing KGH billing Apps Script.
+
+// 1. In doPost, add these cases:
+//   if (data.action === 'saveHistorical') { return json(saveHistoricalBatch(data.claims)); }
+//   if (data.action === 'getReferrers')   { return json(getReferrerList()); }
+
+// 2. Add these functions:
+
+function saveHistoricalBatch(claims) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName('Historical');
+  if (!sh) {
+    sh = ss.insertSheet('Historical');
+    sh.appendRow(['id','alias','last','first','phn','dob','sex','ward','room',
+                  'claimType','fee','icd','date','startTime','endTime',
+                  'refby','refbyNum','notes','source','savedAt']);
+    sh.getRange(1,1,1,20).setFontWeight('bold');
+  }
+  var now = Utilities.formatDate(new Date(),'America/Vancouver','dd/MM/yyyy HH:mm');
+  claims.forEach(function(c){
+    var row = [c.id,c.alias,c.last,c.first,c.phn,c.dob,c.sex,c.ward||'',c.room||'',
+               c.claimType,c.fee,c.icd||'',c.date,c.startTime||'',c.endTime||'',
+               c.refby||'',c.refbyNum||'',c.notes||'','historical',now];
+    var idx = sh.getLastRow() + 1;
+    sh.getRange(idx,1,1,row.length).setNumberFormat('@').setValues([row]);
+  });
+  return {ok: true, rows: claims.length};
+}
+
+function getReferrerList() {
+  // Reads the Physicians tab: Last Name | Given Names | Msc (billing#) | ... | Specialities & Certifications | ... | City 1
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName('Physicians');
+  if (!sh) return {refs: []};
+  var data = sh.getDataRange().getValues();
+  // Column indices (0-based): A=0 Last Name, B=1 Given Names, C=2 Msc, E=4 Specialities, R=17 City 1
+  var refs = [];
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var last = (row[0] || '').toString().trim();
+    if (!last) continue;
+    var first  = (row[1] || '').toString().trim();
+    var msc    = row[2];
+    // Msc can be float (59243.0) or string ('J2844') — normalise to clean string
+    var docnum = msc !== null && msc !== undefined && msc !== ''
+      ? (typeof msc === 'number' ? Math.round(msc).toString() : msc.toString().trim())
+      : '';
+    var spec   = (row[4]  || '').toString().trim();
+    var city   = (row[17] || '').toString().trim();
+    refs.push({ docnum: docnum, last: last, first: first, spec: spec, city: city });
+  }
+  return {refs: refs};
+}`;
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function uid() { return Math.random().toString(36).slice(2,10); }
+function isoToBc(iso) { if (!iso) return ''; var p=iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
+function monthLabel(d) { return d.toLocaleDateString('en-CA',{month:'long',year:'numeric'}); }
+function todayISO() { var d=new Date(); return d.getFullYear()+'-'+(d.getMonth()+1).toString().padStart(2,'0')+'-'+d.getDate().toString().padStart(2,'0'); }
+function isoToDisp(iso) {
+  if (!iso) return '';
+  var p=iso.split('-'), m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return parseInt(p[2])+' '+m[parseInt(p[1])-1]+' '+p[0];
+}
+function getAlias() {
+  var s=document.getElementById('f-alias').value;
+  return s==='other'?(document.getElementById('f-alias-custom').value||'').trim().toUpperCase():s;
+}
+function consultDateISO() { return document.getElementById('c-date').value||''; }
+function setStatus(id,cls,msg) {
+  var el=document.getElementById(id);
+  el.className='status-bar'+(cls?' '+cls:'');
+  el.textContent=msg;
+}
+
+// ─── Mode switch ──────────────────────────────────────────────────────────────
+function switchMode(m) {
+  appMode = m;
+  document.getElementById('single-mode').style.display = m==='single' ? '' : 'none';
+  document.getElementById('batch-mode').style.display  = m==='batch'  ? '' : 'none';
+  document.getElementById('tab-single').classList.toggle('active', m==='single');
+  document.getElementById('tab-batch').classList.toggle('active', m==='batch');
+  document.getElementById('hdr-sub').textContent = m==='single' ? 'Single card mode' : 'Batch scan mode';
+  updateConfirmedBar();
+}
+
+// ─── Referrer loading & fuzzy match ──────────────────────────────────────────
+function loadReferrers() {
+  var url = document.getElementById('script-url').value.trim();
+  if (!url) return;
+  document.getElementById('refs-status').textContent = 'Loading referrer directory…';
+  var xhr = new XMLHttpRequest();
+  xhr.open('POST', url, true);
+  xhr.setRequestHeader('Content-Type','application/json');
+  xhr.timeout = 15000;
+  xhr.onload = function(){
+    try {
+      var data = JSON.parse(xhr.responseText);
+      if (data.refs && data.refs.length) {
+        _refs = data.refs;
+        document.getElementById('refs-status').textContent = _refs.length + ' referrers loaded ✓';
+      } else {
+        document.getElementById('refs-status').textContent = 'No referrers found in sheet.';
+      }
+    } catch(e) { document.getElementById('refs-status').textContent = 'Could not parse referrers.'; }
+  };
+  xhr.onerror = xhr.ontimeout = function(){ document.getElementById('refs-status').textContent = 'Could not reach script — referrer lookup unavailable.'; };
+  xhr.send(JSON.stringify({ action:'getReferrers' }));
+}
+
+function normRef(s) {
+  return (s||'').toLowerCase().replace(/^dr\.?\s*/,'').replace(/\(.*\)/,'').replace(/[^a-z0-9 ]/g,'').replace(/\s+/g,' ').trim();
+}
+
+function matchRef(raw) {
+  if (!raw || !_refs.length) return [];
+  var q = normRef(raw);
+  var tokens = q.split(' ').filter(function(t){ return t.length > 1; });
+  if (!tokens.length) return [];
+  return _refs.map(function(r){
+    var n = normRef(r.last + ' ' + r.first);
+    var score = 0;
+    tokens.forEach(function(t){ if (n.indexOf(t) >= 0) score += t.length * 2; });
+    // bonus for last-name start match
+    if (n.indexOf(tokens[0]) === 0) score += 5;
+    return { r:r, score:score };
+  }).filter(function(x){ return x.score > 0; })
+    .sort(function(a,b){ return b.score - a.score; })
+    .slice(0, 4).map(function(x){ return x.r; });
+}
+
+function onRefInput() {
+  refreshPreview();
+  renderRefSuggestions(document.getElementById('c-ref').value);
+}
+
+function renderRefSuggestions(raw) {
+  var box = document.getElementById('ref-suggestions');
+  box.innerHTML = '';
+  if (!raw || !_refs.length) return;
+  var matches = matchRef(raw);
+  matches.forEach(function(r){
+    var chip = document.createElement('div');
+    chip.className = 'ref-chip';
+    var label = 'Dr. ' + r.last + (r.first ? ', ' + r.first : '') + (r.spec ? ' · ' + r.spec : '') + (r.city ? ' (' + r.city + ')' : '') + (r.docnum ? ' [' + r.docnum + ']' : '');
+    chip.textContent = label;
+    chip.addEventListener('click', function(){
+      // Store "Dr. Last, First [docnum]" so the billing export has the number
+      var refVal = 'Dr. ' + r.last + (r.first ? ', ' + r.first : '');
+      document.getElementById('c-ref').value = refVal;
+      document.getElementById('c-ref').dataset.docnum = r.docnum || '';
+      box.innerHTML = '';
+      // mark selected
+      chip.className = 'ref-chip matched';
+      box.appendChild(chip);
+      refreshPreview();
+    });
+    box.appendChild(chip);
+  });
+}
+
+// ─── Consult type / CCFPP ────────────────────────────────────────────────────
+function setConsultType(t) {
+  st.consultType = t;
+  ['consult','limited','none'].forEach(function(x){
+    document.getElementById('ct-'+x).classList.toggle('sel', x===t);
+  });
+  var show = t !== 'none';
+  document.getElementById('consult-fields').style.display = show ? '' : 'none';
+  document.getElementById('consult-fee-row').style.display = show ? '' : 'none';
+  refreshPreview();
+}
+
+function toggleCcfpp() {
+  document.getElementById('ccfpp-fields').style.display = document.getElementById('c-ccfpp').checked ? '' : 'none';
+  refreshPreview();
+}
+
+function onAliasChange() {
+  document.getElementById('alias-other-wrap').style.display = document.getElementById('f-alias').value === 'other' ? '' : 'none';
+  refreshPreview();
+}
+
+// ─── Calendar ────────────────────────────────────────────────────────────────
+var modeHints = {
+  daily:    'Tap days to toggle Daily visits. Amber = consult day.',
+  combined: 'Tap days to toggle Combined daily visits.',
+  directive:'Tap days to toggle Directive visits.',
+  ccu:      'Tap days to toggle CCU visits. Day number is assigned by chronological order.',
+};
+
+function setCalMode(m) {
+  st.calMode = m;
+  document.querySelectorAll('.mchip').forEach(function(el){
+    el.classList.toggle('active', el.id === 'mc-'+m);
+  });
+  document.getElementById('mode-hint').textContent = modeHints[m];
+  document.getElementById('combined-reason-row').style.display = m === 'combined' ? '' : 'none';
+  renderCal();
+}
+
+function calPrev() { st.calMonth.setMonth(st.calMonth.getMonth()-1); renderCal(); }
+function calNext() { st.calMonth.setMonth(st.calMonth.getMonth()+1); renderCal(); }
+
+function clearCalMode() {
+  st[st.calMode+'Dates'] = [];
+  renderCal(); refreshPreview();
+}
+
+function fillRange() {
+  var from = document.getElementById('rng-from').value;
+  var to   = document.getElementById('rng-to').value;
+  if (!from || !to || from > to) return;
+  var cur = new Date(from+'T12:00:00'), end = new Date(to+'T12:00:00');
+  var arr = st[st.calMode+'Dates'];
+  while (cur <= end) {
+    var iso = cur.getFullYear()+'-'+(cur.getMonth()+1).toString().padStart(2,'0')+'-'+cur.getDate().toString().padStart(2,'0');
+    if (arr.indexOf(iso) < 0) arr.push(iso);
+    cur.setDate(cur.getDate()+1);
+  }
+  renderCal(); refreshPreview();
+}
+
+function toggleDay(iso) {
+  var arr = st[st.calMode+'Dates'];
+  var i = arr.indexOf(iso);
+  if (i >= 0) arr.splice(i,1); else arr.push(iso);
+  renderCal(); refreshPreview();
+}
+
+function dayClass(iso) {
+  if (st.dailyDates.indexOf(iso) >= 0)     return 'd-daily';
+  if (st.combinedDates.indexOf(iso) >= 0)  return 'd-combined';
+  if (st.directiveDates.indexOf(iso) >= 0) return 'd-directive';
+  if (st.ccuDates.indexOf(iso) >= 0)       return 'd-ccu';
+  var cd = consultDateISO();
+  if (cd && iso === cd) return 'd-consult';
+  return '';
+}
+
+function renderCal() {
+  var grid = document.getElementById('cal-grid');
+  while (grid.children.length > 7) grid.removeChild(grid.lastChild);
+  var y=st.calMonth.getFullYear(), m=st.calMonth.getMonth();
+  document.getElementById('cal-month-lbl').textContent = monthLabel(st.calMonth);
+  var first=new Date(y,m,1).getDay(), days=new Date(y,m+1,0).getDate(), today=todayISO();
+  var ccuSorted = st.ccuDates.slice().sort();
+  for (var i=0;i<first;i++) { var e=document.createElement('div'); e.className='cal-day empty'; grid.appendChild(e); }
+  for (var d=1;d<=days;d++) {
+    var iso=y+'-'+(m+1).toString().padStart(2,'0')+'-'+d.toString().padStart(2,'0');
+    var el=document.createElement('div');
+    var dc=dayClass(iso);
+    el.className='cal-day '+dc;
+    if (iso===today) el.classList.add('today-dot');
+    var ns=document.createElement('span'); ns.textContent=d; el.appendChild(ns);
+    if (dc==='d-ccu') { var dn=ccuSorted.indexOf(iso)+1; var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='day '+dn;el.appendChild(l); }
+    else if (dc==='d-daily')    { var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='daily';el.appendChild(l); }
+    else if (dc==='d-combined') { var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='comb';el.appendChild(l); }
+    else if (dc==='d-directive'){ var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='dir';el.appendChild(l); }
+    else if (dc==='d-consult')  { var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='cnslt';el.appendChild(l); }
+    (function(isoDate){ el.addEventListener('click', function(){ toggleDay(isoDate); }); })(iso);
+    grid.appendChild(el);
+  }
+}
+
+function onConsultDateChange() {
+  var iso = document.getElementById('c-date').value;
+  if (iso) { var d=new Date(iso+'T12:00:00'); st.calMonth=new Date(d.getFullYear(),d.getMonth(),1); renderCal(); }
+  refreshPreview();
+}
+
+// ─── Build claims ─────────────────────────────────────────────────────────────
+function buildClaims() {
+  var last  = (document.getElementById('f-last').value||'').trim();
+  var first = (document.getElementById('f-first').value||'').trim();
+  var phn   = (document.getElementById('f-phn').value||'').replace(/\D/g,'');
+  var dob   = (document.getElementById('f-dob').value||'').trim();
+  var sex   = document.getElementById('f-sex').value;
+  var ward  = (document.getElementById('f-ward').value||'').trim();
+  var room  = (document.getElementById('f-room').value||'').trim();
+  var alias = getAlias();
+  var dx    = (document.getElementById('c-dx').value||'').trim();
+  var refEl  = document.getElementById('c-ref');
+  var ref    = (refEl.value||'').trim();
+  var refNum = (refEl.dataset.docnum||'').trim();
+  var base  = { last:last, first:first, phn:phn, dob:dob, sex:sex, ward:ward, room:room, alias:alias };
+  var claims = [];
+  var cDate = consultDateISO();
+
+  if (st.consultType !== 'none' && cDate) {
+    var start = document.getElementById('c-start').value;
+    var end   = document.getElementById('c-end').value;
+    var fee   = (document.getElementById('c-fee').value||'').trim();
+    var cnotes = '';
+    if (document.getElementById('c-ccfpp').checked) {
+      var fpn = (document.getElementById('c-ccfpp-name').value||'').trim();
+      var fpp = (document.getElementById('c-ccfpp-ph').value||'').trim();
+      cnotes = 'CCFPP '+fpn+(fpp?' '+fpp:'');
+    }
+    claims.push(Object.assign({},base,{ id:uid(), claimType:st.consultType, date:cDate, fee:fee, icd:dx, refby:ref, refbyNum:refNum, startTime:start, endTime:end, notes:cnotes, _sortDate:cDate, _sortSub:0 }));
+    if (document.getElementById('c-most').checked)
+      claims.push(Object.assign({},base,{ id:uid(), claimType:'most', date:cDate, fee:'03701', icd:dx, refby:ref, startTime:'', endTime:'', notes:'MOST add-on', _sortDate:cDate, _sortSub:1 }));
+  }
+
+  st.dailyDates.slice().sort().forEach(function(iso){
+    claims.push(Object.assign({},base,{ id:uid(), claimType:'daily', date:iso, fee:'', icd:dx, refby:ref, startTime:'', endTime:'', notes:'', _sortDate:iso, _sortSub:3 }));
+  });
+
+  var cbReason = (document.getElementById('combined-reason').value||'').trim();
+  var cbNote = cbReason ? 'Combined daily care for '+cbReason : 'Combined daily';
+  st.combinedDates.slice().sort().forEach(function(iso){
+    claims.push(Object.assign({},base,{ id:uid(), claimType:'combined', date:iso, fee:'', icd:dx, refby:ref, startTime:'', endTime:'', notes:cbNote, _sortDate:iso, _sortSub:4 }));
+  });
+
+  st.directiveDates.slice().sort().forEach(function(iso){
+    claims.push(Object.assign({},base,{ id:uid(), claimType:'directive', date:iso, fee:'', icd:dx, refby:ref, startTime:'', endTime:'', notes:'', _sortDate:iso, _sortSub:5 }));
+  });
+
+  st.ccuDates.slice().sort().forEach(function(iso, i){
+    var dn=i+1, fee=dn===1?'1411':dn===2?'1421':'1431';
+    claims.push(Object.assign({},base,{ id:uid(), claimType:'ccu', date:iso, fee:fee, icd:dx, refby:ref, startTime:'', endTime:'', notes:'CCU day '+dn, _sortDate:iso, _sortSub:6 }));
+  });
+
+  claims.sort(function(a,b){ return a._sortDate<b._sortDate?-1:a._sortDate>b._sortDate?1:a._sortSub-b._sortSub; });
+  st.claims = claims;
+  return claims;
+}
+
+// ─── Preview ─────────────────────────────────────────────────────────────────
+function refreshPreview() {
+  var claims = buildClaims();
+  var list = document.getElementById('preview-list');
+  var empty = document.getElementById('preview-empty');
+  var summary = document.getElementById('preview-summary');
+  // capture overrides before rebuild
+  list.querySelectorAll('.fee-inp').forEach(function(inp){ if (inp.dataset.id && inp.value) _feeOverrides[inp.dataset.id]=inp.value; });
+  claims.forEach(function(c){ if (_feeOverrides[c.id]) c.fee=_feeOverrides[c.id]; });
+  list.innerHTML = '';
+  if (!claims.length) { empty.style.display=''; summary.style.display='none'; return; }
+  empty.style.display='none'; summary.style.display='flex';
+  var missing = claims.filter(function(c){ return !c.fee; }).length;
+  summary.textContent = claims.length+' claim'+(claims.length===1?'':'s')+' · '+(missing?missing+' need fee code':'all fee codes set ✓');
+  var frag = document.createDocumentFragment();
+  claims.forEach(function(c){
+    var row=document.createElement('div'); row.className='claim-row';
+    var chip=document.createElement('span'); chip.className='ctype ct-'+c.claimType; chip.textContent=c.claimType.toUpperCase(); row.appendChild(chip);
+    var info=document.createElement('div'); info.className='claim-info';
+    var ds=document.createElement('div'); ds.className='claim-date-str'; ds.textContent=isoToDisp(c.date); info.appendChild(ds);
+    var det=[];
+    if (c.startTime&&c.endTime) det.push(c.startTime+'–'+c.endTime);
+    if (c.icd) det.push(c.icd); if (c.refby) det.push(c.refby); if (c.notes) det.push(c.notes);
+    if (det.length) { var dv=document.createElement('div'); dv.className='claim-detail-str'; dv.textContent=det.join(' · '); info.appendChild(dv); }
+    row.appendChild(info);
+    var fi=document.createElement('input'); fi.type='text'; fi.className='fee-inp'; fi.value=c.fee; fi.placeholder='fee'; fi.dataset.id=c.id;
+    fi.addEventListener('input',function(){ _feeOverrides[this.dataset.id]=this.value; c.fee=this.value; updateSummaryBar(); });
+    row.appendChild(fi);
+    var db=document.createElement('button'); db.className='del-btn'; db.textContent='×';
+    (function(claim){ db.addEventListener('click',function(){ deleteClaim(claim); }); })(c);
+    row.appendChild(db);
+    frag.appendChild(row);
+  });
+  list.appendChild(frag);
+}
+
+function updateSummaryBar() {
+  var missing=st.claims.filter(function(c){ return !c.fee; }).length;
+  var s=document.getElementById('preview-summary');
+  s.textContent=st.claims.length+' claim'+(st.claims.length===1?'':'s')+' · '+(missing?missing+' need fee code':'all fee codes set ✓');
+}
+
+function deleteClaim(c) {
+  ['dailyDates','combinedDates','directiveDates','ccuDates'].forEach(function(k){
+    var type=k.replace('Dates','');
+    if (c.claimType===type) { var i=st[k].indexOf(c.date); if (i>=0) st[k].splice(i,1); }
+  });
+  refreshPreview(); renderCal();
+}
+
+// ─── Clear form ───────────────────────────────────────────────────────────────
+function clearForm() {
+  ['f-last','f-first','f-phn','f-dob','f-ward','f-room','c-date','c-dx','c-ref','c-start','c-end','c-fee','c-ccfpp-name','c-ccfpp-ph','combined-reason'].forEach(function(id){ document.getElementById(id).value=''; });
+  document.getElementById('f-sex').value='';
+  document.getElementById('c-most').checked=false;
+  document.getElementById('c-ccfpp').checked=false;
+  document.getElementById('ccfpp-fields').style.display='none';
+  document.getElementById('ref-suggestions').innerHTML='';
+  st.dailyDates=[]; st.combinedDates=[]; st.directiveDates=[]; st.ccuDates=[];
+  _feeOverrides={};
+  setConsultType('consult');
+  var pz=document.getElementById('photo-zone');
+  pz.innerHTML='<svg style="width:26px;height:26px;stroke:var(--text3);fill:none;stroke-width:1.5" viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg><span style="font-size:12px;color:var(--text2)">Tap to photo or upload sticker</span>';
+  pz.style.padding='';
+  setStatus('ocr-status','','');
+  renderCal(); refreshPreview();
+}
+
+// ─── Batch: load OCR item into form ──────────────────────────────────────────
+function loadBatchItem(idx) {
+  clearForm();
+  var item = batch.items[idx];
+  if (!item) return;
+  batch.current = idx;
+  // Patient
+  if (item.last)  document.getElementById('f-last').value  = item.last;
+  if (item.first) document.getElementById('f-first').value = item.first;
+  if (item.phn)   document.getElementById('f-phn').value   = item.phn;
+  if (item.dob)   document.getElementById('f-dob').value   = item.dob;
+  if (item.sex)   document.getElementById('f-sex').value   = item.sex;
+  if (item.ward)  document.getElementById('f-ward').value  = item.ward;
+  if (item.room)  document.getElementById('f-room').value  = item.room;
+  // Alias
+  var knownAliases = ['JW','KBrown','FH','LH','SB','ASodhi','EMMassie','KHoskin','DPatton','AKhosla','KT'];
+  if (item.alias) {
+    if (knownAliases.indexOf(item.alias) >= 0) {
+      document.getElementById('f-alias').value = item.alias;
+    } else {
+      document.getElementById('f-alias').value = 'other';
+      document.getElementById('alias-other-wrap').style.display = '';
+      document.getElementById('f-alias-custom').value = item.alias;
+    }
+  }
+  // Consult
+  setConsultType(item.consultType || 'consult');
+  if (item.consultDate) document.getElementById('c-date').value = item.consultDate;
+  if (item.consultStart) document.getElementById('c-start').value = item.consultStart;
+  if (item.consultEnd)   document.getElementById('c-end').value   = item.consultEnd;
+  if (item.dx)           document.getElementById('c-dx').value    = item.dx;
+  if (item.refbyRaw) {
+    document.getElementById('c-ref').value = item.refbyRaw;
+    renderRefSuggestions(item.refbyRaw);
+  }
+  if (item.most) document.getElementById('c-most').checked = true;
+  if (item.ccfppName) {
+    document.getElementById('c-ccfpp').checked = true;
+    document.getElementById('ccfpp-fields').style.display = '';
+    document.getElementById('c-ccfpp-name').value = item.ccfppName;
+    if (item.ccfppPhone) document.getElementById('c-ccfpp-ph').value = item.ccfppPhone;
+  }
+  if (item.combinedReason) document.getElementById('combined-reason').value = item.combinedReason;
+  // Calendar dates
+  st.dailyDates    = (item.dailyDates    || []).slice();
+  st.combinedDates = (item.combinedDates || []).slice();
+  st.directiveDates= (item.directiveDates|| []).slice();
+  st.ccuDates      = (item.ccuDates      || []).slice();
+  // Notes in consult fee placeholder / notes field (nothing to do here — notes shown in preview)
+  // Jump calendar to consult date or first date
+  var anchor = item.consultDate || (st.dailyDates[0]) || (st.ccuDates[0]) || todayISO();
+  if (anchor) { var d=new Date(anchor+'T12:00:00'); st.calMonth=new Date(d.getFullYear(),d.getMonth(),1); }
+  renderCal(); refreshPreview();
+  renderQueueBar();
+  document.getElementById('patient-card-title').textContent = 'Patient — card '+(idx+1)+' of '+batch.items.length;
+  // Scroll to patient card
+  document.getElementById('f-last').scrollIntoView({behavior:'smooth',block:'center'});
+}
+
+function renderQueueBar() {
+  var bar = document.getElementById('queue-bar');
+  bar.innerHTML = '';
+  batch.items.forEach(function(item, i){
+    var chip = document.createElement('div');
+    var name = (item.last||'?')+(item.first?', '+item.first:'');
+    chip.className = 'q-chip' + (i===batch.current?' current':'') + (batch.status[i]==='confirmed'?' confirmed':'') + (batch.status[i]==='skipped'?' skipped':'');
+    chip.textContent = (i+1)+'. '+name;
+    (function(idx){ chip.addEventListener('click', function(){ loadBatchItem(idx); }); })(i);
+    bar.appendChild(chip);
+  });
+  document.getElementById('queue-progress').textContent = 'Card '+(batch.current+1)+' of '+batch.items.length;
+}
+
+function batchConfirm() {
+  // Collect current preview claims into confirmed list
+  document.querySelectorAll('.fee-inp').forEach(function(inp){ if (inp.dataset.id&&inp.value) _feeOverrides[inp.dataset.id]=inp.value; });
+  st.claims.forEach(function(c){ if (_feeOverrides[c.id]) c.fee=_feeOverrides[c.id]; });
+  var toSave = st.claims.filter(function(c){ return c.fee&&c.fee.trim(); });
+  if (!toSave.length) {
+    // allow confirming even without fees — just save all
+    toSave = st.claims.slice();
+  }
+  batch.confirmed = batch.confirmed.concat(toSave);
+  batch.status[batch.current] = 'confirmed';
+  updateConfirmedBar();
+  batchAdvance();
+}
+
+function batchSkip() {
+  batch.status[batch.current] = 'skipped';
+  batchAdvance();
+}
+
+function batchAdvance() {
+  var next = batch.current + 1;
+  if (next < batch.items.length) {
+    loadBatchItem(next);
+  } else {
+    renderQueueBar();
+    setStatus('batch-ocr-status','st-ok','All cards reviewed. '+batch.confirmed.length+' claims confirmed — export below.');
+  }
+}
+
+function updateConfirmedBar() {
+  var bar = document.getElementById('confirmed-count-bar');
+  if (appMode === 'batch' && batch.confirmed.length) {
+    bar.style.display = '';
+    bar.textContent = batch.confirmed.length + ' claims confirmed across '+ batch.items.filter(function(_,i){ return batch.status[i]==='confirmed'; }).length + ' cards';
+  } else {
+    bar.style.display = 'none';
+  }
+}
+
+// ─── OCR: single ─────────────────────────────────────────────────────────────
+function handleSinglePhoto(inp) {
+  var file=inp&&inp.files&&inp.files[0]; if (!file) return;
+  inp.value='';
+  setStatus('ocr-status','st-info','Reading photo…');
+  var reader=new FileReader();
+  reader.onerror=function(){ setStatus('ocr-status','st-warn','Could not read file'); };
+  reader.onload=function(e){
+    openCropModal(e.target.result, function(cropped){ processSingleOCR(cropped); }, function(){ setStatus('ocr-status','',''); });
+  };
+  reader.readAsDataURL(file);
+}
+
+function processSingleOCR(dataUrl) {
+  var pz=document.getElementById('photo-zone');
+  pz.innerHTML='<img src="'+dataUrl+'" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;display:block">';
+  pz.style.padding='0';
+  setStatus('ocr-status','st-info','Compressing…');
+  var img=new Image();
+  img.onerror=function(){ setStatus('ocr-status','st-warn','Could not decode image'); };
+  img.onload=function(){
+    var MAX=1600,w=img.width,h=img.height;
+    if (w>h&&w>MAX){h=Math.round(h*MAX/w);w=MAX;}else if (h>MAX){w=Math.round(w*MAX/h);h=MAX;}
+    var c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);
+    var b64=c.toDataURL('image/jpeg',0.88).split(',')[1];
+    setTimeout(function(){ sendSingleOCR(b64); },0);
+  };
+  img.src=dataUrl;
+}
+
+function sendSingleOCR(b64) {
+  var url=document.getElementById('worker-url').value.trim();
+  if (!url){ setStatus('ocr-status','st-warn','No Worker URL set'); return; }
+  setStatus('ocr-status','st-info','Extracting…');
+  var xhr=new XMLHttpRequest();
+  xhr.open('POST',url,true); xhr.setRequestHeader('Content-Type','application/json'); xhr.timeout=60000;
+  xhr.onload=function(){
+    var data; try{data=JSON.parse(xhr.responseText);}catch(e){setStatus('ocr-status','st-warn','Bad response');return;}
+    if (data.error){setStatus('ocr-status','st-warn','OCR: '+data.error);return;}
+    if (data.last) document.getElementById('f-last').value=data.last;
+    if (data.first) document.getElementById('f-first').value=data.first;
+    if (data.phn) document.getElementById('f-phn').value=data.phn;
+    if (data.dob) document.getElementById('f-dob').value=data.dob;
+    if (data.sex) document.getElementById('f-sex').value=data.sex;
+    if (data.ward) document.getElementById('f-ward').value=data.ward;
+    if (data.room) document.getElementById('f-room').value=data.room;
+    setStatus('ocr-status','st-ok','Extracted: '+(data.last||'?')+', '+(data.first||'?')+(data.phn?' · PHN: '+data.phn:''));
+    refreshPreview();
+  };
+  xhr.onerror=function(){ setStatus('ocr-status','st-warn','Network error'); };
+  xhr.ontimeout=function(){ setStatus('ocr-status','st-warn','Timed out'); };
+  xhr.send(JSON.stringify({image:b64,mediaType:'image/jpeg'}));
+}
+
+// ─── OCR: batch ──────────────────────────────────────────────────────────────
+function handleBatchPhoto(inp) {
+  var file=inp&&inp.files&&inp.files[0]; if (!file) return;
+  inp.value='';
+  setStatus('batch-ocr-status','st-info','Reading scan…');
+  var reader=new FileReader();
+  reader.onerror=function(){ setStatus('batch-ocr-status','st-warn','Could not read file'); };
+  reader.onload=function(e){
+    var pz=document.getElementById('batch-photo-zone');
+    pz.innerHTML='<img src="'+e.target.result+'" style="width:100%;max-height:220px;object-fit:contain;border-radius:8px;display:block">';
+    pz.style.padding='0';
+    sendBatchOCR(e.target.result);
+  };
+  reader.readAsDataURL(file);
+}
+
+function sendBatchOCR(dataUrl) {
+  setStatus('batch-ocr-status','st-info','Compressing and sending to worker…');
+  var img=new Image();
+  img.onerror=function(){ setStatus('batch-ocr-status','st-warn','Could not decode image'); };
+  img.onload=function(){
+    // Batch scans can be large; allow up to 2400px
+    var MAX=2400,w=img.width,h=img.height;
+    if (w>h&&w>MAX){h=Math.round(h*MAX/w);w=MAX;}else if (h>MAX){w=Math.round(w*MAX/h);h=MAX;}
+    var c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);
+    var b64=c.toDataURL('image/jpeg',0.92).split(',')[1];
+    var url=document.getElementById('worker-url').value.trim();
+    if (!url){ setStatus('batch-ocr-status','st-warn','No Worker URL set'); return; }
+    setStatus('batch-ocr-status','st-info','Extracting all cards ('+Math.round(b64.length/1024)+' KB)… this may take ~15s');
+    var xhr=new XMLHttpRequest();
+    xhr.open('POST',url,true); xhr.setRequestHeader('Content-Type','application/json'); xhr.timeout=90000;
+    xhr.onload=function(){
+      var data; try{data=JSON.parse(xhr.responseText);}catch(e){setStatus('batch-ocr-status','st-warn','Bad response');return;}
+      if (data.error){setStatus('batch-ocr-status','st-warn','OCR error: '+data.error);return;}
+      if (!data.cards||!data.cards.length){setStatus('batch-ocr-status','st-warn','No cards found in response');return;}
+      batch.items=data.cards;
+      batch.status=data.cards.map(function(){ return 'pending'; });
+      batch.confirmed=[];
+      document.getElementById('batch-queue-card').style.display='';
+      setStatus('batch-ocr-status','st-ok',data.cards.length+' card'+(data.cards.length===1?'':'s')+' extracted — reviewing card 1');
+      loadBatchItem(0);
+    };
+    xhr.onerror=function(){ setStatus('batch-ocr-status','st-warn','Network error'); };
+    xhr.ontimeout=function(){ setStatus('batch-ocr-status','st-warn','Timed out after 90s'); };
+    xhr.send(JSON.stringify({image:b64,mediaType:'image/jpeg',mode:'card-batch'}));
+  };
+  img.src=dataUrl;
+}
+
+// ─── Export ───────────────────────────────────────────────────────────────────
+function getExportClaims() {
+  document.querySelectorAll('.fee-inp').forEach(function(inp){ if (inp.dataset.id) _feeOverrides[inp.dataset.id]=inp.value; });
+  st.claims.forEach(function(c){ if (_feeOverrides[c.id]) c.fee=_feeOverrides[c.id]; });
+  // In batch mode: export all confirmed claims + current form (if any fee codes set)
+  if (appMode === 'batch') {
+    var current = st.claims.filter(function(c){ return c.fee&&c.fee.trim(); });
+    // deduplicate against already-confirmed
+    var confirmedIds = {};
+    batch.confirmed.forEach(function(c){ confirmedIds[c.id]=true; });
+    current = current.filter(function(c){ return !confirmedIds[c.id]; });
+    return batch.confirmed.concat(current);
+  }
+  return st.claims.filter(function(c){ return c.fee&&c.fee.trim(); });
+}
+
+function claimsToPayload(claims) {
+  return claims.map(function(c){
+    return { id:c.id, alias:c.alias, last:c.last, first:c.first, phn:c.phn,
+             dob:c.dob, sex:c.sex, ward:c.ward||'', room:c.room||'',
+             claimType:c.claimType, fee:c.fee, icd:c.icd||'',
+             date:isoToBc(c.date), startTime:c.startTime||'', endTime:c.endTime||'',
+             refby:c.refby||'', refbyNum:c.refbyNum||'', notes:c.notes||'', source:'historical' };
+  });
+}
+
+function exportCSV() {
+  var claims=getExportClaims();
+  if (!claims.length){ setStatus('export-status','st-warn','No claims with fee codes to export.'); return; }
+  var headers=['id','alias','last','first','phn','dob','sex','ward','room','claimType','fee','icd','date','startTime','endTime','refby','refbyNum','notes','source'];
+  var rows=[headers.join(',')];
+  claimsToPayload(claims).forEach(function(c){
+    rows.push(headers.map(function(k){ return '"'+(c[k]||'').replace(/"/g,'""')+'"'; }).join(','));
+  });
+  var a=document.createElement('a');
+  a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(rows.join('\r\n'));
+  a.download='kgh_historical_'+todayISO()+'.csv'; a.click();
+  setStatus('export-status','st-ok','Downloaded '+claims.length+' claims.');
+}
+
+function exportSheets() {
+  var url=document.getElementById('script-url').value.trim();
+  if (!url){ setStatus('export-status','st-warn','No Apps Script URL configured.'); return; }
+  var claims=getExportClaims();
+  if (!claims.length){ setStatus('export-status','st-warn','No claims to export.'); return; }
+  setStatus('export-status','st-info','Sending to Sheets…');
+  var xhr=new XMLHttpRequest();
+  xhr.open('POST',url,true); xhr.setRequestHeader('Content-Type','application/json'); xhr.timeout=30000;
+  xhr.onload=function(){
+    var data; try{data=JSON.parse(xhr.responseText);}catch(e){data={};}
+    if (data.ok||xhr.status===200) setStatus('export-status','st-ok','Saved '+claims.length+' claims to Historical tab ✓');
+    else setStatus('export-status','st-warn','Sheets error: '+JSON.stringify(data).slice(0,80));
+  };
+  xhr.onerror=function(){ setStatus('export-status','st-warn','Network error'); };
+  xhr.ontimeout=function(){ setStatus('export-status','st-warn','Request timed out'); };
+  xhr.send(JSON.stringify({action:'saveHistorical', claims:claimsToPayload(claims)}));
+}
+
+// ─── Crop modal ───────────────────────────────────────────────────────────────
+function openCropModal(dataUrl,onUse,onCancel) {
+  _cropPending={dataUrl:dataUrl,onUse:onUse,onCancel:onCancel};
+  var img=document.getElementById('crop-img');
+  img.onload=function(){ initCropFrame(); };
+  img.src=dataUrl;
+  document.getElementById('crop-ov').classList.add('on');
+}
+function initCropFrame() {
+  var img=document.getElementById('crop-img');
+  var iw=img.clientWidth,ih=img.clientHeight,pad=0.08;
+  _cropState={imgW:iw,imgH:ih,x1:Math.round(iw*pad),y1:Math.round(ih*pad),x2:Math.round(iw*(1-pad)),y2:Math.round(ih*(1-pad)),naturalW:img.naturalWidth,naturalH:img.naturalHeight};
+  attachCropHandlers(); updateCropFrame();
+}
+function attachCropHandlers() {
+  var stage=document.getElementById('crop-stage');
+  if (stage._ha) return; stage._ha=true;
+  var dragging=null;
+  var tl=document.getElementById('ch-tl'),br=document.getElementById('ch-br');
+  function pToImg(e){ var img=document.getElementById('crop-img'),r=img.getBoundingClientRect(),t=e.touches?e.touches[0]:e;return{x:t.clientX-r.left,y:t.clientY-r.top}; }
+  function onStart(h){ return function(e){ e.preventDefault();dragging=h; }; }
+  function onMove(e){ if(!dragging||!_cropState)return;e.preventDefault();var p=pToImg(e),s=_cropState,min=40;
+    if(dragging==='tl'){s.x1=Math.max(0,Math.min(s.x2-min,p.x));s.y1=Math.max(0,Math.min(s.y2-min,p.y));}
+    else{s.x2=Math.min(s.imgW,Math.max(s.x1+min,p.x));s.y2=Math.min(s.imgH,Math.max(s.y1+min,p.y));}updateCropFrame(); }
+  function onEnd(){ dragging=null; }
+  tl.addEventListener('touchstart',onStart('tl'),{passive:false});br.addEventListener('touchstart',onStart('br'),{passive:false});
+  tl.addEventListener('mousedown',onStart('tl'));br.addEventListener('mousedown',onStart('br'));
+  document.addEventListener('touchmove',onMove,{passive:false});document.addEventListener('mousemove',onMove);
+  document.addEventListener('touchend',onEnd);document.addEventListener('mouseup',onEnd);
+}
+function updateCropFrame() {
+  var s=_cropState;if(!s)return;
+  var frame=document.getElementById('crop-frame');
+  var tl=document.getElementById('ch-tl'),br=document.getElementById('ch-br');
+  ['cm-t','cm-b','cm-l','cm-r'].forEach(function(id){ document.getElementById(id).style.cssText='position:absolute;background:rgba(0,0,0,.55);pointer-events:none'; });
+  frame.style.cssText='left:'+s.x1+'px;top:'+s.y1+'px;width:'+(s.x2-s.x1)+'px;height:'+(s.y2-s.y1)+'px;position:absolute;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.4);pointer-events:none';
+  tl.style.left=s.x1+'px';tl.style.top=s.y1+'px';
+  br.style.left=s.x2+'px';br.style.top=s.y2+'px';
+  document.getElementById('cm-t').style.cssText+='left:0;top:0;width:'+s.imgW+'px;height:'+s.y1+'px';
+  document.getElementById('cm-b').style.cssText+='left:0;top:'+s.y2+'px;width:'+s.imgW+'px;height:'+(s.imgH-s.y2)+'px';
+  document.getElementById('cm-l').style.cssText+='left:0;top:'+s.y1+'px;width:'+s.x1+'px;height:'+(s.y2-s.y1)+'px';
+  document.getElementById('cm-r').style.cssText+='left:'+s.x2+'px;top:'+s.y1+'px;width:'+(s.imgW-s.x2)+'px;height:'+(s.y2-s.y1)+'px';
+}
+function cropReset() {
+  if(!_cropState)return;var s=_cropState,p=0.08;
+  s.x1=Math.round(s.imgW*p);s.y1=Math.round(s.imgH*p);s.x2=Math.round(s.imgW*(1-p));s.y2=Math.round(s.imgH*(1-p));updateCropFrame();
+}
+function cropCancel() {
+  document.getElementById('crop-ov').classList.remove('on');
+  var p=_cropPending;_cropPending=null;_cropState=null;if(p&&p.onCancel)p.onCancel();
+}
+function cropUse() {
+  if(!_cropPending||!_cropState)return;
+  var s=_cropState,sx=s.naturalW/s.imgW,sy=s.naturalH/s.imgH;
+  var nx1=Math.round(s.x1*sx),ny1=Math.round(s.y1*sy),nx2=Math.round(s.x2*sx),ny2=Math.round(s.y2*sy);
+  var cw=nx2-nx1,ch=ny2-ny1;
+  var img=document.getElementById('crop-img');
+  var cv=document.createElement('canvas');cv.width=cw;cv.height=ch;
+  cv.getContext('2d').drawImage(img,nx1,ny1,cw,ch,0,0,cw,ch);
+  var dataUrl=cv.toDataURL('image/jpeg',0.92);
+  document.getElementById('crop-ov').classList.remove('on');
+  var p=_cropPending;_cropPending=null;_cropState=null;if(p&&p.onUse)p.onUse(dataUrl);
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+renderCal();
+refreshPreview();
+// Auto-load referrers if URL already set
+if (document.getElementById('script-url').value.trim()) loadReferrers();
+</script>
+</body>
+</html>
