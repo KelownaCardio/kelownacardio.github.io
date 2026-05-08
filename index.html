@@ -545,7 +545,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.08</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.09</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1508,7 +1508,7 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID = 'v3.08-2026-05-07';
+var BUILD_ID = 'v3.09-2026-05-07';
 
 (function purgeIfBuildChanged() {
   try {
@@ -1656,10 +1656,17 @@ async function syncFromSheets() {
     var timeoutId = setTimeout(function() {
       if (ctrl) ctrl.abort();
     }, 45000);
-    var fetchOpts = ctrl ? { signal: ctrl.signal } : {};
+    var fetchOpts = ctrl ? {
+      signal: ctrl.signal,
+      redirect: 'follow',
+      cache: 'no-store',
+      credentials: 'omit'
+    } : { redirect: 'follow', cache: 'no-store', credentials: 'omit' };
     var r;
     try {
-      r = await fetch(SHEETS_URL + '?action=getAll&key=' + SHARED_KEY, fetchOpts);
+      // Cache-bust URL with timestamp to defeat any iOS BFCache fetch interception
+      var url = SHEETS_URL + '?action=getAll&key=' + SHARED_KEY + '&_t=' + Date.now();
+      r = await fetch(url, fetchOpts);
     } catch (fetchErr) {
       clearTimeout(timeoutId);
       var errMsg = fetchErr.name === 'AbortError'
@@ -6978,13 +6985,23 @@ document.addEventListener('visibilitychange', function() {
 });
 
 // iOS Safari BFCache: when the page is restored from cache (back/forward, sometimes refresh),
-// a fresh sync is essential — the in-memory state may be from an old session.
+// in-flight fetch promises are NOT resumed but the JS heap IS preserved — leading to stale
+// st.* variables and a hung await fetch. Force a fresh sync on EVERY pageshow to recover.
 window.addEventListener('pageshow', function(e) {
-  if (e.persisted && st.loaded && SHEETS_URL) {
-    console.log('[kgh] pageshow restored from BFCache — re-syncing');
+  if (st.loaded && SHEETS_URL) {
+    if (e.persisted) {
+      console.log('[kgh] pageshow restored from BFCache — re-syncing');
+    }
+    // Always trigger a fresh sync on pageshow — defensive against iOS Safari restoring
+    // a hung fetch promise from cache
     syncFromSheets();
   }
 });
+
+// Disable BFCache: an empty unload listener is enough to prevent Safari/Firefox from
+// freezing the page state. This avoids the "in-flight fetch never resumes" pathology
+// where iOS Safari restores st.* variables but the await fetch hangs forever.
+window.addEventListener('unload', function() {});
 
 // Boot the app
 init();
