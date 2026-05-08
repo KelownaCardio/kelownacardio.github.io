@@ -545,7 +545,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.06</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.07</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1508,7 +1508,7 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID = 'v3.06-2026-05-07';
+var BUILD_ID = 'v3.07-2026-05-07';
 
 (function purgeIfBuildChanged() {
   try {
@@ -1645,27 +1645,32 @@ async function syncFromSheets() {
   setSyncState('syncing');
   window._syncAttempts = (window._syncAttempts || 0) + 1;
   window._lastSyncError = null;
-  // Note: don't reset _lastSyncResponse — keep the most recent capture even if
-  // this sync fails, so diagnostic always shows the last successful response shape.
+  // Initialize/update with checkpoint tracking — overwrites prior to show latest attempt's progress
+  window._lastSyncResponse = window._lastSyncResponse || {};
+  window._lastSyncResponse.attemptN = window._syncAttempts;
+  window._lastSyncResponse.checkpoint = 'fetch-start';
+  window._lastSyncResponse.startedAt = new Date().toISOString();
   try {
     var r = await fetch(SHEETS_URL + '?action=getAll&key=' + SHARED_KEY);
+    window._lastSyncResponse.checkpoint = 'fetch-returned';
+    window._lastSyncResponse.httpStatus = r.status;
+    window._lastSyncResponse.httpOk = r.ok;
     if (!r.ok) {
       window._lastSyncError = 'HTTP ' + r.status + ' ' + r.statusText;
       setSyncState('error');
       return;
     }
+    window._lastSyncResponse.checkpoint = 'parsing-json';
     var d = await r.json();
-    // Capture response shape for diagnostics — even on success
-    window._lastSyncResponse = {
-      hasError: !!d.error,
-      error: d.error || null,
-      patientsType: Array.isArray(d.patients) ? 'array' : (d.patients === null ? 'null' : typeof d.patients),
-      patientsLength: Array.isArray(d.patients) ? d.patients.length : 'n/a',
-      claimsType: Array.isArray(d.claims) ? 'array' : (d.claims === null ? 'null' : typeof d.claims),
-      claimsLength: Array.isArray(d.claims) ? d.claims.length : 'n/a',
-      keys: Object.keys(d || {}),
-      ts: new Date().toISOString()
-    };
+    window._lastSyncResponse.checkpoint = 'json-parsed';
+    window._lastSyncResponse.hasError = !!d.error;
+    window._lastSyncResponse.error = d.error || null;
+    window._lastSyncResponse.patientsType = Array.isArray(d.patients) ? 'array' : (d.patients === null ? 'null' : typeof d.patients);
+    window._lastSyncResponse.patientsLength = Array.isArray(d.patients) ? d.patients.length : 'n/a';
+    window._lastSyncResponse.claimsType = Array.isArray(d.claims) ? 'array' : (d.claims === null ? 'null' : typeof d.claims);
+    window._lastSyncResponse.claimsLength = Array.isArray(d.claims) ? d.claims.length : 'n/a';
+    window._lastSyncResponse.keys = Object.keys(d || {});
+    window._lastSyncResponse.ts = new Date().toISOString();
     console.log('[sync] response shape:', window._lastSyncResponse);
     if (d.error) {
       window._lastSyncError = 'Apps Script: ' + d.error;
@@ -1841,6 +1846,10 @@ async function syncFromSheets() {
     if (d.changelog) st.changelog = d.changelog;
 
     ['patients','claims','doctors','changelog'].forEach(function(k) { sv(k, st[k]); });
+    window._lastSyncResponse.checkpoint = 'completed';
+    window._lastSyncResponse.completedAt = new Date().toISOString();
+    window._lastSyncResponse.stPatientsFinal = st.patients.length;
+    window._lastSyncResponse.stClaimsFinal = st.claims.length;
     setSyncState('synced');
     render();
     // If user is currently viewing the Recently Discharged pane, refresh it too
@@ -1851,6 +1860,10 @@ async function syncFromSheets() {
     }
   } catch(e) {
     window._lastSyncError = e.message || String(e);
+    if (window._lastSyncResponse) {
+      window._lastSyncResponse.checkpoint = 'EXCEPTION at ' + (window._lastSyncResponse.checkpoint || 'unknown');
+      window._lastSyncResponse.exception = e.message || String(e);
+    }
     setSyncState('error');
   }
 }
@@ -3539,31 +3552,52 @@ function renderDischargedList(query) {
     var syncErr = window._lastSyncError;
     var lastResp = window._lastSyncResponse;
     var attempts = window._syncAttempts || 0;
+    var diagInner = '<b>Local state:</b><br>' +
+      '&nbsp;&nbsp;Total patients: <b>' + totalP + '</b><br>' +
+      '&nbsp;&nbsp;discharged=true: <b>' + withDischargedFlag + '</b><br>' +
+      '&nbsp;&nbsp;dischargedAt set: <b>' + withDischargedAt + '</b><br>' +
+      '&nbsp;&nbsp;In pool: <b>' + pool.length + '</b><br>' +
+      '&nbsp;&nbsp;In recent (21d): <b>' + recent.length + '</b><br>' +
+      '<br><b>Sync history:</b><br>' +
+      '&nbsp;&nbsp;Total attempts: <b>' + attempts + '</b><br>';
+    if (lastResp) {
+      diagInner += '&nbsp;&nbsp;Last attempt #: <b>' + (lastResp.attemptN || '?') + '</b><br>';
+      diagInner += '&nbsp;&nbsp;Started: ' + (lastResp.startedAt || '?') + '<br>';
+      diagInner += '&nbsp;&nbsp;Checkpoint: <b>' + (lastResp.checkpoint || '?') + '</b><br>';
+      if (lastResp.httpStatus !== undefined) {
+        diagInner += '&nbsp;&nbsp;HTTP status: ' + lastResp.httpStatus + ' (ok=' + lastResp.httpOk + ')<br>';
+      }
+      if (lastResp.patientsType) {
+        diagInner += '&nbsp;&nbsp;d.patients: <b>' + lastResp.patientsType + '</b> (length ' + lastResp.patientsLength + ')<br>';
+        diagInner += '&nbsp;&nbsp;d.claims: <b>' + lastResp.claimsType + '</b> (length ' + lastResp.claimsLength + ')<br>';
+        diagInner += '&nbsp;&nbsp;keys: [' + (lastResp.keys || []).join(', ') + ']<br>';
+      }
+      if (lastResp.patientsMergeRan !== undefined) {
+        diagInner += '&nbsp;&nbsp;Patient merge ran: <b>' + lastResp.patientsMergeRan + '</b>';
+        if (lastResp.patientsMergeSkipReason) diagInner += ' (' + lastResp.patientsMergeSkipReason + ')';
+        diagInner += '<br>';
+      }
+      if (lastResp.patientsAfterMerge !== undefined) {
+        diagInner += '&nbsp;&nbsp;st.patients after merge: <b>' + lastResp.patientsAfterMerge + '</b><br>';
+      }
+      if (lastResp.completedAt) {
+        diagInner += '&nbsp;&nbsp;Completed: ' + lastResp.completedAt + '<br>';
+        diagInner += '&nbsp;&nbsp;Final st.patients: <b>' + lastResp.stPatientsFinal + '</b><br>';
+        diagInner += '&nbsp;&nbsp;Final st.claims: <b>' + lastResp.stClaimsFinal + '</b><br>';
+      }
+      if (lastResp.exception) {
+        diagInner += '&nbsp;&nbsp;<span style="color:var(--red-t)">EXCEPTION: ' + esc(lastResp.exception) + '</span><br>';
+      }
+    } else {
+      diagInner += '&nbsp;&nbsp;No checkpoint data captured<br>';
+    }
+    if (syncErr) {
+      diagInner += '<br><span style="color:var(--red-t);font-weight:700">Last error:</span> ' +
+                   '<span style="color:var(--red-t)">' + esc(syncErr) + '</span><br>';
+    }
     var diag = '<details style="margin-top:12px;padding:10px;background:var(--surface2);border-radius:var(--rsm);font-size:11px;color:var(--text2)" open>' +
       '<summary style="cursor:pointer;font-weight:700">Diagnostic info</summary>' +
-      '<div style="margin-top:8px;font-family:ui-monospace,monospace;line-height:1.6">' +
-        '<b>Local state:</b><br>' +
-        '&nbsp;&nbsp;Total patients: <b>' + totalP + '</b><br>' +
-        '&nbsp;&nbsp;discharged=true: <b>' + withDischargedFlag + '</b><br>' +
-        '&nbsp;&nbsp;dischargedAt set: <b>' + withDischargedAt + '</b><br>' +
-        '&nbsp;&nbsp;In pool: <b>' + pool.length + '</b><br>' +
-        '&nbsp;&nbsp;In recent (21d): <b>' + recent.length + '</b><br>' +
-        '<br>' +
-        '<b>Sync history:</b><br>' +
-        '&nbsp;&nbsp;Attempts so far: <b>' + attempts + '</b><br>' +
-        (lastResp
-          ? '&nbsp;&nbsp;d.patients: <b>' + lastResp.patientsType + '</b> (length ' + lastResp.patientsLength + ')<br>' +
-            '&nbsp;&nbsp;d.claims: <b>' + lastResp.claimsType + '</b> (length ' + lastResp.claimsLength + ')<br>' +
-            '&nbsp;&nbsp;keys: [' + (lastResp.keys || []).join(', ') + ']<br>' +
-            '&nbsp;&nbsp;merge ran: <b>' + (lastResp.patientsMergeRan === undefined ? 'pending' : lastResp.patientsMergeRan) + '</b>' +
-            (lastResp.patientsMergeSkipReason ? ' (' + lastResp.patientsMergeSkipReason + ')' : '') + '<br>' +
-            (lastResp.patientsAfterMerge !== undefined
-              ? '&nbsp;&nbsp;st.patients after merge: <b>' + lastResp.patientsAfterMerge + '</b><br>' : '') +
-            '&nbsp;&nbsp;captured at: ' + lastResp.ts + '<br>'
-          : '&nbsp;&nbsp;No response captured yet<br>') +
-        (syncErr ? '<br><span style="color:var(--red-t);font-weight:700">Last sync error:</span> ' +
-                   '<span style="color:var(--red-t)">' + esc(syncErr) + '</span><br>' : '') +
-      '</div>' +
+      '<div style="margin-top:8px;font-family:ui-monospace,monospace;line-height:1.6">' + diagInner + '</div>' +
       '<button class="btn btn-p" style="margin-top:10px;font-size:12px" ' +
         'onclick="setSyncState(\'syncing\');syncFromSheets().then(function(){renderDischargedList(document.getElementById(\'discharged-search\').value||\'\')})">' +
         'Retry sync</button>' +
