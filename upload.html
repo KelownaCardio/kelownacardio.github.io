@@ -170,9 +170,11 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
   <label>Cloudflare Worker URL (OCR)</label>
   <input id="worker-url" type="url" value="https://kgh-ocr.kathrynb77.workers.dev" autocorrect="off" autocapitalize="none">
   <label>Google Apps Script URL</label>
-  <input id="script-url" type="url" placeholder="https://script.google.com/macros/s/.../exec" autocorrect="off" autocapitalize="none" onchange="loadReferrers()">
+  <input id="script-url" type="url" placeholder="https://script.google.com/macros/s/.../exec" autocorrect="off" autocapitalize="none">
   <label>Shared key</label>
   <input id="shared-key" type="password" placeholder="kgh2026" autocomplete="off">
+  <button class="btn btn-s" style="margin-top:8px;font-size:13px;padding:9px" onclick="testConnection()">Test connection</button>
+  <div id="conn-status" class="status-bar"></div>
 </div>
 
 <!-- ═══════════════════════════════════════════════════
@@ -443,7 +445,26 @@ function switchMode(m) {
 }
 
 // ─── Referrer search (server-side via searchPhysicians) ──────────────────────
-function getScriptKey() { return (document.getElementById('shared-key').value||'').trim() || 'kgh2026'; }
+function testConnection() {
+  var url = document.getElementById('script-url').value.trim();
+  if (!url) { setStatus('conn-status','st-warn','Paste your Apps Script URL above first.'); return; }
+  setStatus('conn-status','st-info','Testing…');
+  var xhr = new XMLHttpRequest();
+  xhr.open('POST', url, true);
+  xhr.setRequestHeader('Content-Type','application/json');
+  xhr.timeout = 10000;
+  xhr.onload = function(){
+    var data; try { data = JSON.parse(xhr.responseText); } catch(e) { data = {}; }
+    if (data.ok) setStatus('conn-status','st-ok','Connected ✓ — physician search and Sheets export ready.');
+    else if (data.error === 'unauthorized') setStatus('conn-status','st-warn','Reached script but key is wrong — check Shared key field.');
+    else setStatus('conn-status','st-warn','Unexpected response: '+JSON.stringify(data).slice(0,80));
+  };
+  xhr.onerror = function(){ setStatus('conn-status','st-warn','Could not reach the Apps Script URL — check it is deployed as "Anyone".'); };
+  xhr.ontimeout = function(){ setStatus('conn-status','st-warn','Timed out — script may not be deployed yet.'); };
+  xhr.send(JSON.stringify({ action:'ping', key:getScriptKey() }));
+}
+
+
 
 function callSearchPhysicians(q, callback) {
   var url = document.getElementById('script-url').value.trim();
@@ -470,7 +491,12 @@ function onRefInput() {
   refreshPreview();
   var raw = document.getElementById('c-ref').value;
   var q = normQuery(raw);
-  if (q.length < 2) { document.getElementById('ref-suggestions').innerHTML = ''; return; }
+  var box = document.getElementById('ref-suggestions');
+  if (!document.getElementById('script-url').value.trim()) {
+    box.innerHTML = '<div style="font-size:11px;color:var(--amber-t);padding:4px 0">Configure Apps Script URL in settings to enable physician search</div>';
+    return;
+  }
+  if (q.length < 2) { box.innerHTML = ''; return; }
   callSearchPhysicians(q, function(results){ renderRefSuggestions(results); });
 }
 
@@ -1095,14 +1121,25 @@ function cropUse() {
 // ─── Init ─────────────────────────────────────────────────────────────────────
 renderCal();
 refreshPreview();
-// Save shared key to localStorage on change for convenience
-document.getElementById('shared-key').addEventListener('change', function(){
-  try { localStorage.setItem('kgh_hist_key', this.value); } catch(e){}
-});
+
+// Persist both config fields across sessions
+function saveConfig() {
+  try {
+    localStorage.setItem('kgh_hist_key', document.getElementById('shared-key').value);
+    localStorage.setItem('kgh_hist_url', document.getElementById('script-url').value);
+  } catch(e){}
+}
+document.getElementById('shared-key').addEventListener('change', saveConfig);
+document.getElementById('script-url').addEventListener('change', saveConfig);
+
+// Restore on load
 try {
   var savedKey = localStorage.getItem('kgh_hist_key');
+  var savedUrl = localStorage.getItem('kgh_hist_url');
   if (savedKey) document.getElementById('shared-key').value = savedKey;
+  if (savedUrl) document.getElementById('script-url').value = savedUrl;
 } catch(e){}
+
 </script>
 </body>
 </html>
