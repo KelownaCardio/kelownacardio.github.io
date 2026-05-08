@@ -45,7 +45,7 @@ input[type=checkbox]{width:auto;margin-right:6px;accent-color:var(--blue)}
 /* photo */
 .photo-zone{border:1.5px dashed var(--border2);border-radius:var(--r);min-height:80px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;cursor:pointer;overflow:hidden;background:var(--surface2);margin-bottom:8px}
 .photo-zone img{width:100%;object-fit:cover;border-radius:9px;display:block}
-.status-bar{font-size:11px;padding:6px 10px;border-radius:var(--rsm);margin-bottom:8px;min-height:28px;display:none}
+.status-bar{font-size:11px;padding:6px 10px;border-radius:var(--rsm);margin-bottom:8px;min-height:28px;display:none;white-space:pre-line}
 .st-ok{background:var(--green-bg);color:var(--green-t);display:block}
 .st-warn{background:var(--amber-bg);color:var(--amber-t);display:block}
 .st-info{background:var(--blue-bg);color:var(--blue-t);display:block}
@@ -171,11 +171,8 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
   <input id="worker-url" type="url" value="https://kgh-ocr.kathrynb77.workers.dev" autocorrect="off" autocapitalize="none">
   <label>Google Apps Script URL</label>
   <input id="script-url" type="url" placeholder="https://script.google.com/macros/s/.../exec" autocorrect="off" autocapitalize="none" onchange="loadReferrers()">
-  <div id="refs-status" style="font-size:11px;color:var(--text3);margin-top:4px"></div>
-  <details style="margin-top:10px">
-    <summary>Apps Script additions required</summary>
-    <div class="code-block" id="apps-script-snippet"></div>
-  </details>
+  <label>Shared key</label>
+  <input id="shared-key" type="password" placeholder="kgh2026" autocomplete="off">
 </div>
 
 <!-- ═══════════════════════════════════════════════════
@@ -406,65 +403,12 @@ var batch = {
   status: [],          // 'pending'|'confirmed'|'skipped'
   confirmed: [],       // accumulated claims from all confirmed cards
 };
-var _refs = [];          // referrer directory loaded from Sheets
+// Referrer lookup uses existing searchPhysicians endpoint (server-side)
 var _feeOverrides = {};
 var _cropPending = null, _cropState = null;
 
 // ─── Apps Script snippet ──────────────────────────────────────────────────────
-document.getElementById('apps-script-snippet').textContent =
-`// Add these two blocks to your existing KGH billing Apps Script.
 
-// 1. In doPost, add these cases:
-//   if (data.action === 'saveHistorical') { return json(saveHistoricalBatch(data.claims)); }
-//   if (data.action === 'getReferrers')   { return json(getReferrerList()); }
-
-// 2. Add these functions:
-
-function saveHistoricalBatch(claims) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheetByName('Historical');
-  if (!sh) {
-    sh = ss.insertSheet('Historical');
-    sh.appendRow(['id','alias','last','first','phn','dob','sex','ward','room',
-                  'claimType','fee','icd','date','startTime','endTime',
-                  'refby','refbyNum','notes','source','savedAt']);
-    sh.getRange(1,1,1,20).setFontWeight('bold');
-  }
-  var now = Utilities.formatDate(new Date(),'America/Vancouver','dd/MM/yyyy HH:mm');
-  claims.forEach(function(c){
-    var row = [c.id,c.alias,c.last,c.first,c.phn,c.dob,c.sex,c.ward||'',c.room||'',
-               c.claimType,c.fee,c.icd||'',c.date,c.startTime||'',c.endTime||'',
-               c.refby||'',c.refbyNum||'',c.notes||'','historical',now];
-    var idx = sh.getLastRow() + 1;
-    sh.getRange(idx,1,1,row.length).setNumberFormat('@').setValues([row]);
-  });
-  return {ok: true, rows: claims.length};
-}
-
-function getReferrerList() {
-  // Reads the Physicians tab: Last Name | Given Names | Msc (billing#) | ... | Specialities & Certifications | ... | City 1
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheetByName('Physicians');
-  if (!sh) return {refs: []};
-  var data = sh.getDataRange().getValues();
-  // Column indices (0-based): A=0 Last Name, B=1 Given Names, C=2 Msc, E=4 Specialities, R=17 City 1
-  var refs = [];
-  for (var i = 1; i < data.length; i++) {
-    var row = data[i];
-    var last = (row[0] || '').toString().trim();
-    if (!last) continue;
-    var first  = (row[1] || '').toString().trim();
-    var msc    = row[2];
-    // Msc can be float (59243.0) or string ('J2844') — normalise to clean string
-    var docnum = msc !== null && msc !== undefined && msc !== ''
-      ? (typeof msc === 'number' ? Math.round(msc).toString() : msc.toString().trim())
-      : '';
-    var spec   = (row[4]  || '').toString().trim();
-    var city   = (row[17] || '').toString().trim();
-    refs.push({ docnum: docnum, last: last, first: first, spec: spec, city: city });
-  }
-  return {refs: refs};
-}`;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function uid() { return Math.random().toString(36).slice(2,10); }
@@ -498,79 +442,69 @@ function switchMode(m) {
   updateConfirmedBar();
 }
 
-// ─── Referrer loading & fuzzy match ──────────────────────────────────────────
-function loadReferrers() {
+// ─── Referrer search (server-side via searchPhysicians) ──────────────────────
+function getScriptKey() { return (document.getElementById('shared-key').value||'').trim() || 'kgh2026'; }
+
+function callSearchPhysicians(q, callback) {
   var url = document.getElementById('script-url').value.trim();
-  if (!url) return;
-  document.getElementById('refs-status').textContent = 'Loading referrer directory…';
+  if (!url || q.length < 2) { callback([]); return; }
   var xhr = new XMLHttpRequest();
   xhr.open('POST', url, true);
   xhr.setRequestHeader('Content-Type','application/json');
-  xhr.timeout = 15000;
+  xhr.timeout = 8000;
   xhr.onload = function(){
-    try {
-      var data = JSON.parse(xhr.responseText);
-      if (data.refs && data.refs.length) {
-        _refs = data.refs;
-        document.getElementById('refs-status').textContent = _refs.length + ' referrers loaded ✓';
-      } else {
-        document.getElementById('refs-status').textContent = 'No referrers found in sheet.';
-      }
-    } catch(e) { document.getElementById('refs-status').textContent = 'Could not parse referrers.'; }
+    var data; try { data = JSON.parse(xhr.responseText); } catch(e) { callback([]); return; }
+    if (Array.isArray(data)) callback(data);
+    else callback([]);
   };
-  xhr.onerror = xhr.ontimeout = function(){ document.getElementById('refs-status').textContent = 'Could not reach script — referrer lookup unavailable.'; };
-  xhr.send(JSON.stringify({ action:'getReferrers' }));
+  xhr.onerror = xhr.ontimeout = function(){ callback([]); };
+  xhr.send(JSON.stringify({ action:'searchPhysicians', key:getScriptKey(), q:q }));
 }
 
-function normRef(s) {
-  return (s||'').toLowerCase().replace(/^dr\.?\s*/,'').replace(/\(.*\)/,'').replace(/[^a-z0-9 ]/g,'').replace(/\s+/g,' ').trim();
-}
-
-function matchRef(raw) {
-  if (!raw || !_refs.length) return [];
-  var q = normRef(raw);
-  var tokens = q.split(' ').filter(function(t){ return t.length > 1; });
-  if (!tokens.length) return [];
-  return _refs.map(function(r){
-    var n = normRef(r.last + ' ' + r.first);
-    var score = 0;
-    tokens.forEach(function(t){ if (n.indexOf(t) >= 0) score += t.length * 2; });
-    // bonus for last-name start match
-    if (n.indexOf(tokens[0]) === 0) score += 5;
-    return { r:r, score:score };
-  }).filter(function(x){ return x.score > 0; })
-    .sort(function(a,b){ return b.score - a.score; })
-    .slice(0, 4).map(function(x){ return x.r; });
+function normQuery(raw) {
+  // Strip "Dr." prefix and location suffixes like "(Salmon Arm)"
+  return (raw||'').replace(/^dr\.?\s*/i,'').replace(/\(.*\)/,'').replace(/[^a-z0-9 ]/gi,'').trim();
 }
 
 function onRefInput() {
   refreshPreview();
-  renderRefSuggestions(document.getElementById('c-ref').value);
+  var raw = document.getElementById('c-ref').value;
+  var q = normQuery(raw);
+  if (q.length < 2) { document.getElementById('ref-suggestions').innerHTML = ''; return; }
+  callSearchPhysicians(q, function(results){ renderRefSuggestions(results); });
 }
 
-function renderRefSuggestions(raw) {
+function renderRefSuggestions(results) {
   var box = document.getElementById('ref-suggestions');
   box.innerHTML = '';
-  if (!raw || !_refs.length) return;
-  var matches = matchRef(raw);
-  matches.forEach(function(r){
+  if (!results || !results.length) return;
+  results.forEach(function(r){
     var chip = document.createElement('div');
     chip.className = 'ref-chip';
-    var label = 'Dr. ' + r.last + (r.first ? ', ' + r.first : '') + (r.spec ? ' · ' + r.spec : '') + (r.city ? ' (' + r.city + ')' : '') + (r.docnum ? ' [' + r.docnum + ']' : '');
+    // r is {last, first, num, spec, city} from searchPhysicians
+    var label = 'Dr. ' + r.last + (r.first ? ', ' + r.first : '')
+              + (r.spec ? ' · ' + r.spec.split(' - ')[0] : '')
+              + (r.city ? ' (' + r.city + ')' : '')
+              + (r.num  ? ' [' + r.num + ']'  : '');
     chip.textContent = label;
     chip.addEventListener('click', function(){
-      // Store "Dr. Last, First [docnum]" so the billing export has the number
       var refVal = 'Dr. ' + r.last + (r.first ? ', ' + r.first : '');
       document.getElementById('c-ref').value = refVal;
-      document.getElementById('c-ref').dataset.docnum = r.docnum || '';
+      document.getElementById('c-ref').dataset.docnum = r.num || '';
       box.innerHTML = '';
-      // mark selected
       chip.className = 'ref-chip matched';
       box.appendChild(chip);
       refreshPreview();
     });
     box.appendChild(chip);
   });
+}
+
+// When batch loads a patient with a refbyRaw, auto-search it
+function searchRefFromOCR(raw) {
+  var q = normQuery(raw);
+  if (q.length < 2) return;
+  callSearchPhysicians(q, function(results){ renderRefSuggestions(results); });
 }
 
 // ─── Consult type / CCFPP ────────────────────────────────────────────────────
@@ -841,7 +775,7 @@ function loadBatchItem(idx) {
   if (item.dx)           document.getElementById('c-dx').value    = item.dx;
   if (item.refbyRaw) {
     document.getElementById('c-ref').value = item.refbyRaw;
-    renderRefSuggestions(item.refbyRaw);
+    searchRefFromOCR(item.refbyRaw);
   }
   if (item.most) document.getElementById('c-most').checked = true;
   if (item.ccfppName) {
@@ -1074,12 +1008,24 @@ function exportSheets() {
   xhr.open('POST',url,true); xhr.setRequestHeader('Content-Type','application/json'); xhr.timeout=30000;
   xhr.onload=function(){
     var data; try{data=JSON.parse(xhr.responseText);}catch(e){data={};}
-    if (data.ok||xhr.status===200) setStatus('export-status','st-ok','Saved '+claims.length+' claims to Historical tab ✓');
-    else setStatus('export-status','st-warn','Sheets error: '+JSON.stringify(data).slice(0,80));
+    if (data.ok) {
+      var ins = data.inserted || 0;
+      var dups = data.duplicates || [];
+      var msg = 'Saved '+ins+' claim'+(ins===1?'':'s')+' to Historical tab ✓';
+      if (dups.length) {
+        msg += '\n\n⚠ '+dups.length+' duplicate'+(dups.length===1?'':'s')+' skipped:\n';
+        msg += dups.map(function(d){ return '  '+d.name+' · '+d.fee+' · '+d.date+' ('+d.reason+')'; }).join('\n');
+        setStatus('export-status','st-warn',msg);
+      } else {
+        setStatus('export-status','st-ok',msg);
+      }
+    } else {
+      setStatus('export-status','st-warn','Sheets error: '+JSON.stringify(data).slice(0,120));
+    }
   };
   xhr.onerror=function(){ setStatus('export-status','st-warn','Network error'); };
   xhr.ontimeout=function(){ setStatus('export-status','st-warn','Request timed out'); };
-  xhr.send(JSON.stringify({action:'saveHistorical', claims:claimsToPayload(claims)}));
+  xhr.send(JSON.stringify({action:'saveHistorical', key:getScriptKey(), claims:claimsToPayload(claims)}));
 }
 
 // ─── Crop modal ───────────────────────────────────────────────────────────────
@@ -1149,8 +1095,14 @@ function cropUse() {
 // ─── Init ─────────────────────────────────────────────────────────────────────
 renderCal();
 refreshPreview();
-// Auto-load referrers if URL already set
-if (document.getElementById('script-url').value.trim()) loadReferrers();
+// Save shared key to localStorage on change for convenience
+document.getElementById('shared-key').addEventListener('change', function(){
+  try { localStorage.setItem('kgh_hist_key', this.value); } catch(e){}
+});
+try {
+  var savedKey = localStorage.getItem('kgh_hist_key');
+  if (savedKey) document.getElementById('shared-key').value = savedKey;
+} catch(e){}
 </script>
 </body>
 </html>
