@@ -164,18 +164,10 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 
 <div class="container">
 
-<!-- Config -->
-<div class="card">
-  <div class="card-title">Configuration</div>
-  <label>Cloudflare Worker URL (OCR)</label>
-  <input id="worker-url" type="url" value="https://kgh-ocr.kathrynb77.workers.dev" autocorrect="off" autocapitalize="none">
-  <label>Google Apps Script URL</label>
-  <input id="script-url" type="url" placeholder="https://script.google.com/macros/s/.../exec" autocorrect="off" autocapitalize="none">
-  <label>Shared key</label>
-  <input id="shared-key" type="password" placeholder="kgh2026" autocomplete="off">
-  <button class="btn btn-s" style="margin-top:8px;font-size:13px;padding:9px" onclick="testConnection()">Test connection</button>
-  <div id="conn-status" class="status-bar"></div>
-</div>
+<!-- Config (hardcoded — no UI needed) -->
+<input id="worker-url" type="hidden" value="https://kgh-ocr.kathrynb77.workers.dev">
+<input id="script-url" type="hidden" value="https://script.google.com/macros/s/AKfycbzQOQa6dZCCyXu15jvkyUTFghtnhGzZFj4NZ4uyczxLov72zj8qNZIgk9pzL4i8Dfuy5Q/exec">
+<input id="shared-key" type="hidden" value="kgh2026">
 
 <!-- ═══════════════════════════════════════════════════
      SINGLE MODE
@@ -361,7 +353,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
     Set fee codes in the preview above. Claims without a fee code are excluded.
   </div>
   <button class="btn btn-g" onclick="exportCSV()">⬇ Download CSV</button>
-  <button class="btn btn-p" onclick="exportSheets()">↑ Send to Google Sheets (Historical tab)</button>
+  <button class="btn btn-p" onclick="exportSheets()">↑ Send to Google Sheets (Uploaded Claims tab)</button>
   <div id="export-status" class="status-bar" style="margin-top:8px"></div>
 </div>
 
@@ -445,25 +437,6 @@ function switchMode(m) {
 }
 
 // ─── Referrer search (server-side via searchPhysicians) ──────────────────────
-function testConnection() {
-  var url = document.getElementById('script-url').value.trim();
-  if (!url) { setStatus('conn-status','st-warn','Paste your Apps Script URL above first.'); return; }
-  setStatus('conn-status','st-info','Testing…');
-  var xhr = new XMLHttpRequest();
-  xhr.open('POST', url, true);
-  xhr.setRequestHeader('Content-Type','application/json');
-  xhr.timeout = 10000;
-  xhr.onload = function(){
-    var data; try { data = JSON.parse(xhr.responseText); } catch(e) { data = {}; }
-    if (data.ok) setStatus('conn-status','st-ok','Connected ✓ — physician search and Sheets export ready.');
-    else if (data.error === 'unauthorized') setStatus('conn-status','st-warn','Reached script but key is wrong — check Shared key field.');
-    else setStatus('conn-status','st-warn','Unexpected response: '+JSON.stringify(data).slice(0,80));
-  };
-  xhr.onerror = function(){ setStatus('conn-status','st-warn','Could not reach the Apps Script URL — check it is deployed as "Anyone".'); };
-  xhr.ontimeout = function(){ setStatus('conn-status','st-warn','Timed out — script may not be deployed yet.'); };
-  xhr.send(JSON.stringify({ action:'ping', key:getScriptKey() }));
-}
-
 
 
 function callSearchPhysicians(q, callback) {
@@ -1122,23 +1095,7 @@ function cropUse() {
 renderCal();
 refreshPreview();
 
-// Persist both config fields across sessions
-function saveConfig() {
-  try {
-    localStorage.setItem('kgh_hist_key', document.getElementById('shared-key').value);
-    localStorage.setItem('kgh_hist_url', document.getElementById('script-url').value);
-  } catch(e){}
-}
-document.getElementById('shared-key').addEventListener('change', saveConfig);
-document.getElementById('script-url').addEventListener('change', saveConfig);
 
-// Restore on load
-try {
-  var savedKey = localStorage.getItem('kgh_hist_key');
-  var savedUrl = localStorage.getItem('kgh_hist_url');
-  if (savedKey) document.getElementById('shared-key').value = savedKey;
-  if (savedUrl) document.getElementById('script-url').value = savedUrl;
-} catch(e){}
 
 </script>
 </body>
