@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology · Meditech Import (standalone)
-  Version:    v1.4
-  Built:      2026-05-08 13:30 UTC
+  Version:    v1.5
+  Built:      2026-05-08 15:39 UTC
   Repo:       github.com/KelownaCardio/kelownacardio.github.io
   Path:       Apps Script → Anthropic (no Cloudflare needed — works on hospital WiFi)
   Features:
@@ -10,6 +10,14 @@
     - AI extracts patient list, categorises by MRP
     - All rows have checkboxes; ignored rows can be added manually
     - Commit selected directly to Google Sheet
+  Changes in v1.5:
+    - max_tokens raised to 16000 (was 8000) — fits longer rounds lists
+    - Auto-check location updates and new Cardiology MRP rows
+    - Detect MRP transitions (Cardiology ↔ Other) — flag prominently
+    - Auto-UNCHECK rows where patient moved off Cardiology service
+      so doctor must explicitly confirm before re-importing
+    - Commit handles MRP changes correctly: writes new MRP and switches
+      list/role/care to match the new service designation
 -->
 <html lang="en">
 <head>
@@ -191,8 +199,8 @@
 
 <script>
 // ── Version ───────────────────────────────────────────────────────
-const APP_VERSION = 'v1.4';
-const APP_BUILT   = '2026-05-08 13:30 UTC';
+const APP_VERSION = 'v1.5';
+const APP_BUILT   = '2026-05-08 15:39 UTC';
 console.log('%c[KGH Meditech Import] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
 
@@ -515,6 +523,31 @@ async function buildPreview(patients) {
       action = 'ignore';
     }
 
+    // MRP transition detection (existing patients only)
+    // Compares the existing patient's stored MRP (Cardiology / Hospitalist / Other)
+    // with the new MRP from the Meditech PDF. Only fires when both sides
+    // are non-empty and disagree on the Cardiology classification.
+    let mrpTransition = null;  // null | 'left-cardiology' | 'joined-cardiology'
+    let existingMrpStr = '';
+    if (existing) {
+      existingMrpStr = String(existing.mrp || '').trim();
+      const existingIsCardio = /cardiology/i.test(existingMrpStr);
+      // Both sides must have a value to make a meaningful comparison.
+      // If the existing patient has no MRP recorded, we don't flag anything —
+      // a new MRP being written is the normal case for first-pass enrichment.
+      if (existingMrpStr && mrpRaw) {
+        if (existingIsCardio && !isCardiologyMRP)      mrpTransition = 'left-cardiology';
+        else if (!existingIsCardio && isCardiologyMRP) mrpTransition = 'joined-cardiology';
+      }
+    }
+
+    // Default checkbox state — see categorisation rules below the rendering.
+    // Auto-check location updates + new Cardiology consults by default,
+    // BUT auto-UNCHECK any "left-cardiology" row so the doctor must
+    // deliberately confirm before pulling someone who's moved off service.
+    const autoCheck = (action === 'update' && mrpTransition !== 'left-cardiology')
+                   || (action === 'new-consult');
+
     return Object.assign({}, p, {
       _idx: i,
       _ward: loc.ward,
@@ -528,8 +561,10 @@ async function buildPreview(patients) {
       _existing: existing,
       _highConf: highConf,
       _matchScore: matchScore,
-      _selected: false,  // ignored unchecked by default, but selectable
-      _locationChanged: existing ? (existing.ward !== loc.ward || existing.bed !== loc.room) : true
+      _selected: autoCheck,
+      _locationChanged: existing ? (existing.ward !== loc.ward || existing.bed !== loc.room) : true,
+      _mrpTransition: mrpTransition,
+      _existingMrp: existingMrpStr
     });
   });
 
@@ -544,26 +579,48 @@ function renderPreview() {
   const updates    = parsedPatients.filter(p => p._action === 'update');
   const newConsult = parsedPatients.filter(p => p._action === 'new-consult');
   const ignored    = parsedPatients.filter(p => p._action === 'ignore');
-  const locChanged = updates.filter(p => p._locationChanged);
+
+  // Subdivide updates so MRP-change rows get a dedicated section at the top,
+  // separate from routine location updates and demographic-only matches.
+  const mrpLeft    = updates.filter(p => p._mrpTransition === 'left-cardiology');
+  const mrpJoined  = updates.filter(p => p._mrpTransition === 'joined-cardiology');
+  const remaining  = updates.filter(p => p._mrpTransition === null);
+  const locChanged = remaining.filter(p => p._locationChanged);
+  const unchanged  = remaining.filter(p => !p._locationChanged);
 
   // Pills
   document.getElementById('pills').innerHTML = [
     `<div class="pill pill-blue">${updates.length} matched</div>`,
-    `<div class="pill pill-green">${locChanged.length} location change${locChanged.length!==1?'s':''}</div>`,
-    newConsult.length ? `<div class="pill pill-red" style="background:var(--red-bg);color:var(--red)">${newConsult.length} new Cardiology MRP</div>` : '',
+    locChanged.length ? `<div class="pill pill-green">${locChanged.length} location change${locChanged.length!==1?'s':''}</div>` : '',
+    mrpLeft.length    ? `<div class="pill" style="background:var(--red-bg);color:var(--red)">⚠ ${mrpLeft.length} MRP change${mrpLeft.length!==1?'s':''} — review</div>` : '',
+    mrpJoined.length  ? `<div class="pill pill-amber">${mrpJoined.length} new to Cardiology</div>` : '',
+    newConsult.length ? `<div class="pill" style="background:var(--red-bg);color:var(--red)">${newConsult.length} new Cardiology MRP</div>` : '',
     `<div class="pill pill-grey">${ignored.length} ignored</div>`
-  ].join('');
+  ].filter(Boolean).join('');
 
   let html = '';
 
-  // Location updates
+  // ⚠ MRP changes — most important section, shown FIRST so the doctor sees them
+  // before scrolling. These are auto-UNCHECKED — explicit action required to
+  // pull a patient who has moved off the Cardiology service.
+  if (mrpLeft.length) {
+    html += `<div class="sec-label" style="color:var(--red)">⚠ MRP changed — review before committing (auto-unchecked)</div>`;
+    html += mrpLeft.map(p => patRow(p)).join('');
+  }
+
+  // MRP joined Cardiology — informational, auto-checked (you want these in)
+  if (mrpJoined.length) {
+    html += `<div class="sec-label">MRP changed TO Cardiology</div>`;
+    html += mrpJoined.map(p => patRow(p)).join('');
+  }
+
+  // Location updates (no MRP transition)
   if (locChanged.length) {
     html += `<div class="sec-label">Location updates</div>`;
     html += locChanged.map(p => patRow(p)).join('');
   }
 
   // Unchanged matches (demographics may still be corrected)
-  const unchanged = updates.filter(p => !p._locationChanged);
   if (unchanged.length) {
     html += `<div class="sec-label">Matched — location unchanged${unchanged.filter(p=>p._highConf).length ? ', demographics verified' : ''}</div>`;
     html += unchanged.map(p => patRow(p)).join('');
@@ -593,7 +650,15 @@ function renderPreview() {
 
   document.getElementById('preview-section').style.display = 'block';
   document.getElementById('preview-section').scrollIntoView({ behavior:'smooth', block:'start' });
-  showStatus('parseStatus', 'ok', `Parsed ${parsedPatients.length} patients — ${updates.length} matched, ${newConsult.length} new Cardiology MRP, ${ignored.length} ignored.`);
+
+  const summary = [
+    `${parsedPatients.length} patients`,
+    `${updates.length} matched`,
+    newConsult.length ? `${newConsult.length} new Cardiology MRP` : '',
+    mrpLeft.length    ? `${mrpLeft.length} MRP review` : '',
+    `${ignored.length} ignored`
+  ].filter(Boolean).join(' — ');
+  showStatus('parseStatus', mrpLeft.length ? 'warn' : 'ok', summary);
 }
 
 function patRow(p) {
@@ -617,6 +682,14 @@ function patRow(p) {
   } else if (p._action === 'update') {
     if (p._locationChanged) tags += `<span class="tag tag-blue">${esc(oldLoc)} → ${esc(locStr)}</span>`;
     else tags += `<span class="tag tag-grey">Location confirmed: ${esc(locStr)}</span>`;
+    // MRP transition flag — surfaced PROMINENTLY because this affects which
+    // service is responsible for billing. Most important case: patient moved
+    // from a Cardiology floor to CSICU for surgery and is no longer ours.
+    if (p._mrpTransition === 'left-cardiology') {
+      tags += `<span class="tag tag-red">⚠ Review change in MRP: ${esc(p._existingMrp)} → ${esc(p._mrpRaw)}</span>`;
+    } else if (p._mrpTransition === 'joined-cardiology') {
+      tags += `<span class="tag tag-amber">MRP changed to Cardiology (was ${esc(p._existingMrp)})</span>`;
+    }
     if (p._highConf) tags += `<span class="tag tag-green conf-high">✓ 2/3 match — demographics will update</span>`;
     else tags += `<span class="tag tag-amber conf-low">⚠ Low confidence — location only</span>`;
   }
@@ -731,7 +804,7 @@ function buildPayload(p) {
     payload.needsSticker = !p._phn;
     payload.icd        = '';
   } else if (ep) {
-    // Preserve existing service fields
+    // Preserve existing service fields by default
     payload.id         = ep.id;
     payload.list       = ep.list;
     payload.role       = ep.role;
@@ -744,6 +817,24 @@ function buildPayload(p) {
     payload.discharged = ep.discharged;
     payload.newConsult = ep.newConsult;
     payload.needsSticker = !payload.phn;
+
+    // If the doctor has explicitly checked an MRP-change row (auto-unchecked
+    // by default for "left-cardiology"), they're confirming the patient has
+    // moved off our service. Write the new MRP through and switch them to
+    // off-service / consultant role so daily rounding stops auto-billing.
+    if (p._mrpTransition === 'left-cardiology') {
+      payload.mrp  = p._mrpRaw || ep.mrp;
+      payload.list = 'off';
+      payload.role = 'consultant';
+      payload.care = 'directive';
+    }
+    // If MRP changed TO Cardiology, pull them onto our service.
+    if (p._mrpTransition === 'joined-cardiology') {
+      payload.mrp  = 'Cardiology';
+      payload.list = 'on';
+      payload.role = 'mrp';
+      payload.care = (p._ward === 'CCU' || p._ward === 'CSICU') ? 'ccu' : 'daily';
+    }
   }
 
   return payload;
