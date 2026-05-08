@@ -555,7 +555,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span id="hdr-version" style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.17</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span id="hdr-version" style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.18</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -749,7 +749,7 @@ input[type=file] { display:none; }
     <input id="f-care" type="hidden" value="daily">
   </div>
 
-  <!-- Consult info: referred by + diagnosis -->
+  <!-- Consult info: referred by + diagnosis + optional consult claim -->
   <div class="card">
     <div class="card-title">Consult info</div>
     <label>Referred by</label>
@@ -772,6 +772,50 @@ input[type=file] { display:none; }
     </div>
     <input id="f-icd" type="hidden" value="410">
     <div class="ref-dd" id="f-icd-dd"></div>
+
+    <!-- Consult claim toggle -->
+    <div style="margin-top:12px;padding-top:10px;border-top:.5px solid var(--border)">
+      <button id="f-consult-toggle" class="ct-btn" style="width:100%;text-align:left;font-weight:600"
+        onclick="toggleAddConsult()">+ Create consult claim on admission</button>
+    </div>
+
+    <!-- Collapsible consult claim fields -->
+    <div id="f-consult-claim-wrap" style="display:none;margin-top:10px">
+
+      <!-- 33010 / 33012 -->
+      <div class="fl" style="margin-bottom:9px">
+        <button id="f-c-33010" class="ct-btn ct-on-consult" style="flex:1" onclick="toggleApConsultCode('33010')">33010 — Full</button>
+        <button id="f-c-33012" class="ct-btn" style="flex:1" onclick="toggleApConsultCode('33012')">33012 — Limited</button>
+      </div>
+
+      <!-- MOST -->
+      <button class="most-btn on" id="f-c-most" onclick="toggleApMost()">
+        <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
+        + MOST (78720)
+      </button>
+
+      <!-- Date + Start time -->
+      <div class="fl" style="margin-top:8px">
+        <div class="f1"><label>Date</label>
+          <input type="date" id="f-c-date"></div>
+        <div class="f1"><label>Start time</label>
+          <input type="time" id="f-c-start"></div>
+      </div>
+
+      <!-- End time -->
+      <div class="fl">
+        <div class="f1"><label>End time <span style="font-size:10px;color:var(--text3)">— adjust if &lt; 45 min</span></label>
+          <input type="time" id="f-c-end"></div>
+      </div>
+
+      <!-- Notes -->
+      <label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(optional)</span></label>
+      <input id="f-c-notes" placeholder="Optional" autocorrect="off">
+
+      <!-- Performing physician (injected dynamically) -->
+      <div id="f-c-performing-wrap"></div>
+
+    </div>
   </div>
 
   <button class="btn btn-p" onclick="addPatient()">Add to rounds list</button>
@@ -1638,12 +1682,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.17-2026-05-08-offline-ocr+meditech-link';
+var BUILD_ID    = 'v3.18-2026-05-08-directive-fix+performing-doc+ap-consult';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.17';
-var APP_BUILT   = '2026-05-08 13:30 UTC';
+var APP_VERSION = 'v3.18';
+var APP_BUILT   = '2026-05-08 (session 2)';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -5204,6 +5248,35 @@ function addPatient() {
   if (SHEETS_URL) push('savePatient', p);
   logChange(p, 'Admitted', ward + (p.bed ? ' Bed/Rm ' + p.bed : ''));
 
+  // Optionally create a consult claim at the same time
+  var consultWrap = document.getElementById('f-consult-claim-wrap');
+  if (consultWrap && consultWrap.style.display !== 'none' && st.doc) {
+    var cCode    = document.getElementById('f-c-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
+    var cDateISO = (document.getElementById('f-c-date')  || {}).value || '';
+    var cStart   = (document.getElementById('f-c-start') || {}).value || '';
+    var cEnd     = (document.getElementById('f-c-end')   || {}).value || '';
+    var cNotes   = (document.getElementById('f-c-notes') || {}).value || '';
+    var cPerf    = document.getElementById('f-c-performing-doc');
+    var cAlias   = (cPerf && cPerf.value) ? cPerf.value : st.doc.alias;
+    if (cDateISO) {
+      var cDateFmt = fmtD(parseISODate(cDateISO));
+      var cLoc     = p.ward === 'ED' ? 'E' : 'I';
+      addClaim(p, cCode, cCode, 1, cDateFmt, cLoc, cStart, cNotes, cEnd, cAlias);
+      if (_apMostOn) addClaim(p, '78720', '78720', 1, cDateFmt, cLoc, null, null, null, cAlias);
+      var cModBase  = getModifier(cStart, cDateISO);
+      var cIncUnits = consultIncUnits(cStart, cEnd);
+      var cModInc   = cIncUnits > 0 ? getModifierForIncrement(cStart, cDateISO) : null;
+      if (cModBase) {
+        addClaim(p, cModBase.base, cModBase.base, 1, cDateFmt, cLoc, cStart, cNotes, cEnd, cAlias);
+        if (cModInc) {
+          var cIncStart = minsToTime((t2m(cStart) + 30) % (24 * 60));
+          addClaim(p, cModInc.inc, cModInc.inc, cIncUnits, cDateFmt, cLoc, cIncStart, cNotes, null, cAlias);
+        }
+      }
+      sv('claims', st.claims);
+    }
+  }
+
   showToast(last + ' added to ' + (p.list === 'on' ? 'On' : 'Off') + ' Service');
   clearAddForm();
   nav(0, document.querySelectorAll('.nb')[0]);
@@ -5384,6 +5457,56 @@ function saveCustomWard() {
 }
 
 
+// ── Add-patient inline consult claim ─────────────────────
+var _apMostOn = true;
+
+function toggleAddConsult() {
+  var wrap   = document.getElementById('f-consult-claim-wrap');
+  var toggle = document.getElementById('f-consult-toggle');
+  var isOpen = wrap.style.display !== 'none';
+  if (isOpen) {
+    wrap.style.display = 'none';
+    toggle.className   = 'ct-btn';
+    toggle.textContent = '+ Create consult claim on admission';
+  } else {
+    wrap.style.display = 'block';
+    toggle.className   = 'ct-btn ct-on-consult';
+    toggle.textContent = '− Remove consult claim';
+    // Pre-fill date and times
+    var now = new Date();
+    document.getElementById('f-c-date').value  = localISODate(now);
+    document.getElementById('f-c-start').value = pad(now.getHours()) + ':' + pad(now.getMinutes());
+    document.getElementById('f-c-end').value   = minsToTime(now.getHours() * 60 + now.getMinutes() + 50);
+    // Reset MOST to on
+    _apMostOn = true;
+    document.getElementById('f-c-most').className = 'most-btn on';
+    // Reset to 33010
+    document.getElementById('f-c-33010').className = 'ct-btn ct-on-consult';
+    document.getElementById('f-c-33012').className = 'ct-btn';
+    // Inject performing physician selector
+    var perfWrap = document.getElementById('f-c-performing-wrap');
+    if (perfWrap && st.doctors && st.doctors.length) {
+      var curAlias = st.doc ? st.doc.alias : '';
+      var opts = st.doctors.map(function(d) {
+        return '<option value="' + esc(d.alias) + '"' + (d.alias === curAlias ? ' selected' : '') + '>' +
+               esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
+      }).join('');
+      perfWrap.innerHTML = '<label style="margin-top:6px">Performing physician</label>' +
+                           '<select id="f-c-performing-doc">' + opts + '</select>';
+    }
+  }
+}
+
+function toggleApConsultCode(code) {
+  document.getElementById('f-c-33010').className = 'ct-btn' + (code === '33010' ? ' ct-on-consult' : '');
+  document.getElementById('f-c-33012').className = 'ct-btn' + (code === '33012' ? ' ct-on-consult' : '');
+}
+
+function toggleApMost() {
+  _apMostOn = !_apMostOn;
+  document.getElementById('f-c-most').className = 'most-btn' + (_apMostOn ? ' on' : '');
+}
+
 function clearAddForm() {
   ['f-last','f-first','f-phn','f-dob','f-ref-search','f-icd-search'].forEach(function(id) {
     var el = document.getElementById(id); if (el) el.value = '';
@@ -5400,6 +5523,12 @@ function clearAddForm() {
   var careEl = document.getElementById('f-care'); if (careEl) careEl.value = 'daily';
   document.getElementById('f-ref-dd').style.display = 'none';
   document.getElementById('ocr-bar').style.display  = 'none';
+  // Reset inline consult claim toggle
+  var cWrap   = document.getElementById('f-consult-claim-wrap');
+  var cToggle = document.getElementById('f-consult-toggle');
+  if (cWrap)   { cWrap.style.display = 'none'; }
+  if (cToggle) { cToggle.className = 'ct-btn'; cToggle.textContent = '+ Create consult claim on admission'; }
+  _apMostOn = true;
   resetPhotoZone();
 }
 
