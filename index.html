@@ -545,7 +545,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.10</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.11</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1513,7 +1513,7 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID = 'v3.10-2026-05-07';
+var BUILD_ID = 'v3.11-2026-05-07';
 
 (function purgeIfBuildChanged() {
   try {
@@ -3571,53 +3571,33 @@ async function trialDirectFetch() {
     return false;
   });
 
+  // Normalize and INJECT into st.patients — this isolates whether the bug is in sync's merge logic.
+  // If after this the Recently Discharged list shows the patients, the sync merge is broken.
+  allPatients.forEach(function(p) {
+    if (p.dob)          p.dob          = fmtClaimDate(p.dob);
+    if (p.roundedToday) p.roundedToday = fmtClaimDate(p.roundedToday);
+    if (p.dischargedAt) p.dischargedAt = parseDischargedAt(p.dischargedAt);
+    p.discharged = parseBool(p.discharged);
+  });
+  st.patients = allPatients;
+  if (Array.isArray(d.claims)) st.claims = d.claims;
+
   var html = '<div style="padding:10px;background:var(--green-bg);color:var(--green-t);border-radius:var(--rsm);font-size:11px;margin-bottom:8px;font-family:ui-monospace,monospace">' +
     status + '<br>' +
     'Top-level keys: [' + esc(keys) + ']<br>' +
     'd.patients: ' + pCount + ' | d.claims: ' + cCount + '<br>' +
-    'Filtered discharged=true: <b>' + discharged.length + '</b>' +
-    '</div>';
-
-  if (!discharged.length) {
-    if (allPatients.length) {
-      // Show a sample so we can see what discharged looks like
-      var sample = allPatients.slice(0, 3).map(function(p) {
-        return '&nbsp;&nbsp;' + esc(p.last||'?') + ': discharged=' + JSON.stringify(p.discharged) +
-               ' (type=' + typeof p.discharged + '), dischargedAt=' + JSON.stringify(p.dischargedAt);
-      }).join('<br>');
-      html += '<div style="padding:10px;background:var(--surface2);border-radius:var(--rsm);font-size:11px;font-family:ui-monospace,monospace;color:var(--text2)">' +
-        '<b>No discharged found. Sample of first 3 patients:</b><br>' + sample +
-        '</div>';
-    } else {
-      html += '<div style="padding:10px;background:var(--amber-bg);color:var(--amber-t);border-radius:var(--rsm);font-size:11px">No patients in response at all.</div>';
-    }
-  } else {
-    html += '<div style="font-size:12px;font-weight:700;margin-bottom:6px">Discharged patients from Sheets (raw):</div>';
-    html += discharged.slice(0, 20).map(function(p) {
-      var dateMs = p.dischargedAt;
-      var dateStr = '';
-      if (dateMs) {
-        var n = typeof dateMs === 'number' ? dateMs : Number(String(dateMs).replace(/[^0-9]/g, ''));
-        if (!isNaN(n) && n > 1e12) {
-          var dt = new Date(n);
-          dateStr = dt.toLocaleDateString() + ' ' + dt.toLocaleTimeString();
-        } else {
-          dateStr = String(dateMs);
-        }
-      }
-      return '<div style="padding:6px 10px;background:var(--surface);border:.5px solid var(--border);border-radius:var(--rsm);margin-bottom:4px;font-size:12px">' +
-        '<b>' + esc(p.last || '?') + ', ' + esc(p.first || '?') + '</b>' +
-        ' &middot; PHN ' + esc(String(p.phn || '?').slice(-4)) +
-        '<br><span style="font-size:10px;color:var(--text3)">' +
-        'discharged=' + JSON.stringify(p.discharged) + ' &middot; dischargedAt=' + esc(dateStr || 'none') +
-        '</span></div>';
-    }).join('');
-    if (discharged.length > 20) {
-      html += '<div style="font-size:11px;color:var(--text2);text-align:center">…and ' + (discharged.length - 20) + ' more</div>';
-    }
-  }
+    'Filtered discharged=true: <b>' + discharged.length + '</b><br>' +
+    '<b>✓ Injected into st.patients (now ' + st.patients.length + ').</b>' +
+    '</div>' +
+    '<button class="btn btn-p" style="font-size:12px;margin-bottom:10px" ' +
+    'onclick="renderDischargedList(\'\');render();document.getElementById(\'trial-results\').scrollIntoView()">' +
+    'Re-render discharged list using injected data</button>';
 
   out.innerHTML = html;
+
+  // Auto-rerender immediately so the discharged list below populates without another tap
+  renderDischargedList('');
+  render();
 }
 
 function initDischarged() {
