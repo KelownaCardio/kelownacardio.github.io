@@ -545,7 +545,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.11</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.12</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -771,11 +771,6 @@ input[type=file] { display:none; }
 
 <!-- ═══ RECENTLY DISCHARGED PANE ═══ -->
 <div class="pane" id="p-discharged">
-  <div style="display:flex;gap:6px;margin-bottom:6px">
-    <button class="btn btn-s" style="flex:1;font-size:11px;padding:6px"
-      onclick="trialDirectFetch()">🧪 Trial: direct fetch from Sheets</button>
-  </div>
-  <div id="trial-results"></div>
   <div class="search-wrap">
     <svg class="search-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
     <input id="discharged-search" placeholder="Search discharged patients…"
@@ -1513,7 +1508,7 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID = 'v3.11-2026-05-07';
+var BUILD_ID = 'v3.12-2026-05-07';
 
 (function purgeIfBuildChanged() {
   try {
@@ -1888,7 +1883,7 @@ async function syncFromSheets() {
     var dischPane = document.getElementById('p-discharged');
     if (dischPane && dischPane.classList.contains('on')) {
       var searchEl = document.getElementById('discharged-search');
-      renderDischargedList(searchEl ? searchEl.value : '');
+      renderDischarged(searchEl ? searchEl.value : '');
     }
   } catch(e) {
     window._lastSyncError = e.message || String(e);
@@ -3493,7 +3488,7 @@ function closeClaimScreen() {
     b.classList.toggle('on', i === _claimOriginNavIdx);
   });
   if (_claimOriginPane === 'p0') render();
-  if (_claimOriginPane === 'p-discharged') renderDischargedList(document.getElementById('discharged-search').value || '');
+  if (_claimOriginPane === 'p-discharged') renderDischarged(document.getElementById('discharged-search').value || '');
 }
 
 // ── 06b_discharged.js ──
@@ -3520,265 +3515,151 @@ function clearRoundsSearch() {
 }
 
 // ═══════════════════════════════════════════════════════
-// TRIAL — bypass every sync/merge layer, just hit Sheets directly
-// and show what comes back. Independent of st.patients, _pendingPush, etc.
+// 06b — Recently Discharged pane
+// Single-purpose tab. Reads st.patients (populated by syncFromSheets).
+// Shows: discharged && trueDischarge==irrelevant && < 21 days (or all if searching)
+// Each row: tap to bill missed claim, or restore to On/Off Service.
 // ═══════════════════════════════════════════════════════
-async function trialDirectFetch() {
-  var out = document.getElementById('trial-results');
-  out.innerHTML = '<div style="padding:10px;background:var(--surface2);border-radius:var(--rsm);font-size:12px;color:var(--text2)">Fetching directly from Sheets…</div>';
-
-  var t0 = Date.now();
-  var status = '';
-  var d = null;
-
-  try {
-    var url = SHEETS_URL + '?action=getAll&key=' + SHARED_KEY + '&_t=' + Date.now();
-    var ctrl = new AbortController();
-    var timer = setTimeout(function() { ctrl.abort(); }, 30000);
-    var r = await fetch(url, {
-      signal: ctrl.signal,
-      redirect: 'follow',
-      cache: 'no-store',
-      credentials: 'omit'
-    });
-    clearTimeout(timer);
-    status += 'HTTP ' + r.status + ' (' + (Date.now() - t0) + 'ms)';
-    if (!r.ok) {
-      out.innerHTML = '<div style="padding:10px;background:var(--red-bg);color:var(--red-t);border-radius:var(--rsm);font-size:12px">' + status + ' — fetch failed</div>';
-      return;
-    }
-    d = await r.json();
-    status += ' | parsed in ' + (Date.now() - t0) + 'ms';
-  } catch (e) {
-    out.innerHTML = '<div style="padding:10px;background:var(--red-bg);color:var(--red-t);border-radius:var(--rsm);font-size:12px">Exception: ' + esc(e.message || String(e)) + '</div>';
-    return;
-  }
-
-  // Inspect what we got
-  var pCount = Array.isArray(d.patients) ? d.patients.length : 'N/A';
-  var cCount = Array.isArray(d.claims) ? d.claims.length : 'N/A';
-  var keys = Object.keys(d || {}).join(', ');
-
-  // Filter for discharged = true (any truthy variant)
-  var allPatients = Array.isArray(d.patients) ? d.patients : [];
-  var discharged = allPatients.filter(function(p) {
-    var v = p.discharged;
-    if (v === true || v === 1) return true;
-    if (typeof v === 'string') {
-      var s = v.trim().toLowerCase();
-      return s === 'true' || s === '1' || s === 'yes';
-    }
-    return false;
-  });
-
-  // Normalize and INJECT into st.patients — this isolates whether the bug is in sync's merge logic.
-  // If after this the Recently Discharged list shows the patients, the sync merge is broken.
-  allPatients.forEach(function(p) {
-    if (p.dob)          p.dob          = fmtClaimDate(p.dob);
-    if (p.roundedToday) p.roundedToday = fmtClaimDate(p.roundedToday);
-    if (p.dischargedAt) p.dischargedAt = parseDischargedAt(p.dischargedAt);
-    p.discharged = parseBool(p.discharged);
-  });
-  st.patients = allPatients;
-  if (Array.isArray(d.claims)) st.claims = d.claims;
-
-  var html = '<div style="padding:10px;background:var(--green-bg);color:var(--green-t);border-radius:var(--rsm);font-size:11px;margin-bottom:8px;font-family:ui-monospace,monospace">' +
-    status + '<br>' +
-    'Top-level keys: [' + esc(keys) + ']<br>' +
-    'd.patients: ' + pCount + ' | d.claims: ' + cCount + '<br>' +
-    'Filtered discharged=true: <b>' + discharged.length + '</b><br>' +
-    '<b>✓ Injected into st.patients (now ' + st.patients.length + ').</b>' +
-    '</div>' +
-    '<button class="btn btn-p" style="font-size:12px;margin-bottom:10px" ' +
-    'onclick="renderDischargedList(\'\');render();document.getElementById(\'trial-results\').scrollIntoView()">' +
-    'Re-render discharged list using injected data</button>';
-
-  out.innerHTML = html;
-
-  // Auto-rerender immediately so the discharged list below populates without another tap
-  renderDischargedList('');
-  render();
-}
 
 function initDischarged() {
-  document.getElementById('discharged-search').value = '';
-  renderDischargedList('');
+  var input = document.getElementById('discharged-search');
+  if (input) input.value = '';
+  renderDischarged('');
 }
 
 function dischargedSearch(query) {
-  renderDischargedList(query);
+  renderDischarged(query);
 }
 
-function renderDischargedList(query) {
+// Render the discharged pane. Pure function over st.patients.
+// Defensive about field types — patients arrive from Sheets with mixed types
+// (phn could be string or number, dischargedAt could be number or string, etc.).
+function renderDischarged(query) {
   var container = document.getElementById('discharged-results');
-  var q = (query || '').toLowerCase().trim();
+  if (!container) return;
+  var q = String(query || '').toLowerCase().trim();
 
-  // Normalise discharged flag
-  st.patients.forEach(function(p) { p.discharged = parseBool(p.discharged); });
-
-  // Discharged patients — sorted by most recent first
-  var pool = st.patients
-    .filter(function(p) { return p.discharged; })
-    .sort(function(a, b) { return (parseDischargedAt(b.dischargedAt)||0) - (parseDischargedAt(a.dischargedAt)||0); });
-
-  // Diagnostic logging (also visible in UI when list is empty)
-  var totalP = st.patients.length;
-  var withDischargedAt = st.patients.filter(function(p) { return parseDischargedAt(p.dischargedAt) > 0; }).length;
-  var withDischargedFlag = st.patients.filter(function(p) { return p.discharged; }).length;
-  console.log('[discharged-list] total:', totalP,
-              '| flag-true:', withDischargedFlag,
-              '| has-dischargedAt:', withDischargedAt,
-              '| pool (passed filter):', pool.length);
-  if (pool.length === 0 && withDischargedAt > 0) {
-    // Anomaly: there ARE patients with dischargedAt timestamps but no discharged flag
-    console.warn('[discharged-list] ANOMALY: patients with dischargedAt but discharged != true. Sample:',
-      st.patients.filter(function(p) { return parseDischargedAt(p.dischargedAt) > 0; }).slice(0,3).map(function(p) {
-        return { name: p.last+', '+p.first, discharged: p.discharged, type: typeof p.discharged,
-                 dischargedAt: p.dischargedAt };
-      }));
-  }
-  if (pool.length > 0) {
-    console.log('[discharged-list] sample:', pool.slice(0,3).map(function(p) {
-      return { name: p.last+', '+p.first, discharged: p.discharged,
-               dischargedAt: p.dischargedAt, parsed: parseDischargedAt(p.dischargedAt) };
-    }));
-  }
-
-  // Within last 21 days (or all when searching)
-  // LENIENT: if dischargedAt is missing/invalid, still show the patient at the top
-  var cutoff21 = Date.now() - (21 * 24 * 60 * 60 * 1000);
-  var recent = q ? pool : pool.filter(function(p) {
-    var ms = parseDischargedAt(p.dischargedAt);
-    if (!ms) return true;            // no/invalid timestamp — show anyway
-    return ms > cutoff21;
+  // Filter for discharged patients. Treat any truthy variant as discharged.
+  var pool = (st.patients || []).filter(function(p) {
+    return isDischarged(p);
   });
 
+  // Sort newest-first by dischargedAt
+  pool.sort(function(a, b) {
+    return (toEpochMs(b.dischargedAt) || 0) - (toEpochMs(a.dischargedAt) || 0);
+  });
+
+  // Apply 21-day filter unless searching
+  var cutoff = Date.now() - (21 * 24 * 60 * 60 * 1000);
+  var visible = q ? pool : pool.filter(function(p) {
+    var ms = toEpochMs(p.dischargedAt);
+    return !ms || ms > cutoff;  // missing timestamps still show
+  });
+
+  // Apply search query
   if (q) {
-    recent = recent.filter(function(p) {
-      return ((p.last + ' ' + p.first).toLowerCase().indexOf(q) !== -1) ||
-             (p.phn || '').indexOf(q) !== -1;
+    visible = visible.filter(function(p) {
+      var name = String((p.last || '') + ' ' + (p.first || '')).toLowerCase();
+      var phn  = String(p.phn || '');
+      return name.indexOf(q) !== -1 || phn.indexOf(q) !== -1;
     });
   }
 
-  if (!recent.length) {
-    // Build visible diagnostic so the user can see exactly what's going on without console
-    var syncErr = window._lastSyncError;
-    var lastResp = window._lastSyncResponse;
-    var attempts = window._syncAttempts || 0;
-    var diagInner = '<b>Local state:</b><br>' +
-      '&nbsp;&nbsp;Total patients: <b>' + totalP + '</b><br>' +
-      '&nbsp;&nbsp;discharged=true: <b>' + withDischargedFlag + '</b><br>' +
-      '&nbsp;&nbsp;dischargedAt set: <b>' + withDischargedAt + '</b><br>' +
-      '&nbsp;&nbsp;In pool: <b>' + pool.length + '</b><br>' +
-      '&nbsp;&nbsp;In recent (21d): <b>' + recent.length + '</b><br>' +
-      '<br><b>Sync history:</b><br>' +
-      '&nbsp;&nbsp;Total attempts: <b>' + attempts + '</b><br>';
-    if (lastResp) {
-      diagInner += '&nbsp;&nbsp;Last attempt #: <b>' + (lastResp.attemptN || '?') + '</b><br>';
-      diagInner += '&nbsp;&nbsp;Started: ' + (lastResp.startedAt || '?') + '<br>';
-      diagInner += '&nbsp;&nbsp;Checkpoint: <b>' + (lastResp.checkpoint || '?') + '</b><br>';
-      if (lastResp.httpStatus !== undefined) {
-        diagInner += '&nbsp;&nbsp;HTTP status: ' + lastResp.httpStatus + ' (ok=' + lastResp.httpOk + ')<br>';
-      }
-      if (lastResp.patientsType) {
-        diagInner += '&nbsp;&nbsp;d.patients: <b>' + lastResp.patientsType + '</b> (length ' + lastResp.patientsLength + ')<br>';
-        diagInner += '&nbsp;&nbsp;d.claims: <b>' + lastResp.claimsType + '</b> (length ' + lastResp.claimsLength + ')<br>';
-        diagInner += '&nbsp;&nbsp;keys: [' + (lastResp.keys || []).join(', ') + ']<br>';
-      }
-      if (lastResp.patientsMergeRan !== undefined) {
-        diagInner += '&nbsp;&nbsp;Patient merge ran: <b>' + lastResp.patientsMergeRan + '</b>';
-        if (lastResp.patientsMergeSkipReason) diagInner += ' (' + lastResp.patientsMergeSkipReason + ')';
-        diagInner += '<br>';
-      }
-      if (lastResp.patientsAfterMerge !== undefined) {
-        diagInner += '&nbsp;&nbsp;st.patients after merge: <b>' + lastResp.patientsAfterMerge + '</b><br>';
-      }
-      if (lastResp.completedAt) {
-        diagInner += '&nbsp;&nbsp;Completed: ' + lastResp.completedAt + '<br>';
-        diagInner += '&nbsp;&nbsp;Final st.patients: <b>' + lastResp.stPatientsFinal + '</b><br>';
-        diagInner += '&nbsp;&nbsp;Final st.claims: <b>' + lastResp.stClaimsFinal + '</b><br>';
-      }
-      if (lastResp.fetchError) {
-        diagInner += '&nbsp;&nbsp;<span style="color:var(--red-t)">Fetch error: ' + esc(lastResp.fetchError) + '</span><br>';
-      }
-      if (lastResp.exception) {
-        diagInner += '&nbsp;&nbsp;<span style="color:var(--red-t)">EXCEPTION: ' + esc(lastResp.exception) + '</span><br>';
-      }
-    } else {
-      diagInner += '&nbsp;&nbsp;No checkpoint data captured<br>';
-    }
-    if (syncErr) {
-      diagInner += '<br><span style="color:var(--red-t);font-weight:700">Last error:</span> ' +
-                   '<span style="color:var(--red-t)">' + esc(syncErr) + '</span><br>';
-    }
-    var diag = '<details style="margin-top:12px;padding:10px;background:var(--surface2);border-radius:var(--rsm);font-size:11px;color:var(--text2)" open>' +
-      '<summary style="cursor:pointer;font-weight:700">Diagnostic info</summary>' +
-      '<div style="margin-top:8px;font-family:ui-monospace,monospace;line-height:1.6">' + diagInner + '</div>' +
-      '<button class="btn btn-p" style="margin-top:10px;font-size:12px" ' +
-        'onclick="setSyncState(\'syncing\');syncFromSheets().then(function(){renderDischargedList(document.getElementById(\'discharged-search\').value||\'\')})">' +
-        'Retry sync</button>' +
-      '</details>';
-
+  if (!visible.length) {
     container.innerHTML = q
-      ? '<div class="empty" style="padding:18px 0 10px">No match for &ldquo;' + esc(query) + '&rdquo;</div>' + diag
-      : '<div class="empty">No patients discharged in the last 21 days.</div>' + diag;
+      ? '<div class="empty" style="padding:18px 0">No match for &ldquo;' + esc(query) + '&rdquo;</div>'
+      : '<div class="empty" style="padding:18px 0">No patients discharged in the last 21 days.</div>';
     return;
   }
 
-  container.innerHTML = recent.map(function(p) { return dischargedRow(p); }).join('');
+  // Render each row defensively — wrap in try so one bad row doesn't kill the whole list.
+  var rows = visible.map(function(p) {
+    try { return dischargedRow(p); }
+    catch (e) {
+      console.error('[discharged] row render failed for', p, e);
+      return '<div class="empty" style="padding:6px 10px;font-size:11px">⚠ Could not render ' + esc(p.last || '?') + ', ' + esc(p.first || '?') + '</div>';
+    }
+  });
+
+  container.innerHTML = rows.join('');
 }
 
-function dischargedRow(p) {
-  var isCCU  = p.ward === 'CCU';
-  var avCls  = isCCU ? 'av-ccu' : p.list === 'off' ? 'av-off' : 'av-on';
-  var ini    = (p.first ? p.first[0] : '') + (p.last ? p.last[0] : '');
-
-  var careChip = isCCU             ? '<span class="chip chip-red">CCU</span>'
-               : p.care === 'directive' ? '<span class="chip chip-amber">Directive</span>'
-               : p.care === 'combined'  ? '<span class="chip chip-teal">Combined</span>'
-               :                          '<span class="chip chip-blue">MRP</span>';
-
-  var statusChip = '';
-  if (p.discharged) {
-    var _dat = parseDischargedAt(p.dischargedAt);
-    var daysAgo = _dat ? Math.floor((Date.now() - _dat) / (24 * 60 * 60 * 1000)) : null;
-    var daysLabel = daysAgo === null ? '' : daysAgo === 0 ? 'today' : daysAgo === 1 ? '1 day ago' : daysAgo + ' days ago';
-    statusChip = '<span class="chip chip-grey">Discharged' + (daysLabel ? ' ' + daysLabel : '') + '</span>';
-  } else if (claimedToday(p)) {
-    statusChip = '<span class="chip chip-green">Seen today</span>';
+// Type-safe truthy check on the discharged flag.
+// Sheets returns variants: boolean true, "true", "TRUE", 1, "1", etc.
+function isDischarged(p) {
+  if (!p) return false;
+  var v = p.discharged;
+  if (v === true || v === 1) return true;
+  if (typeof v === 'string') {
+    var s = v.trim().toLowerCase();
+    return s === 'true' || s === '1' || s === 'yes';
   }
+  return false;
+}
 
-  var restoreBtn = p.discharged
-    ? '<button class="bb bb-rnd" style="font-size:10px;padding:5px 9px" ' +
-        'data-pid="' + p.id + '" ' +
-        'onclick="event.stopPropagation();restorePatient(this.getAttribute(\'data-pid\'))">' +
-        '↩ Restore</button>'
-    : '';
+// Type-safe epoch ms parser. Accepts number, numeric string, or ISO string.
+function toEpochMs(v) {
+  if (v == null || v === '') return 0;
+  if (typeof v === 'number') return v > 1e12 ? v : 0;
+  var s = String(v).trim();
+  // Numeric string like "1778182118783"
+  if (/^\d{13,}$/.test(s)) return Number(s);
+  // ISO date string
+  var d = Date.parse(s);
+  return isNaN(d) ? 0 : d;
+}
 
-  return '<div class="alpha-row" onclick="openClaimFromDischarged(\'' + p.id + '\')">' +
-    '<div class="alpha-av ' + avCls + '">' + ini.toUpperCase() + '</div>' +
+// Render one discharged-patient row. Defensive about every field type.
+function dischargedRow(p) {
+  var last  = String(p.last  || '');
+  var first = String(p.first || '');
+  var phn   = String(p.phn   || '');
+  var ward  = String(p.ward  || '');
+  var bed   = String(p.bed   || '');
+  var pid   = String(p.id    || '');
+
+  var isCCU = ward === 'CCU';
+  var avCls = isCCU ? 'av-ccu' : (p.list === 'off' ? 'av-off' : 'av-on');
+  var ini   = (first.charAt(0) || '') + (last.charAt(0) || '');
+
+  var ms = toEpochMs(p.dischargedAt);
+  var daysAgo = ms ? Math.floor((Date.now() - ms) / 86400000) : null;
+  var daysLabel = daysAgo === null ? '' : daysAgo === 0 ? 'today' : daysAgo === 1 ? '1 day ago' : daysAgo + ' days ago';
+  var statusChip = '<span class="chip chip-grey">Discharged' + (daysLabel ? ' ' + daysLabel : '') + '</span>';
+
+  var phnDisplay = phn ? 'PHN …' + phn.slice(-4) : '<span class="warn-tag">⚠ no PHN</span>';
+  var bedDisplay = bed ? ' Rm ' + esc(bed) : '';
+
+  var careChip = isCCU                    ? '<span class="chip chip-red">CCU</span>'
+               : p.care === 'directive'   ? '<span class="chip chip-amber">Directive</span>'
+               : p.care === 'combined'    ? '<span class="chip chip-teal">Combined</span>'
+               :                             '<span class="chip chip-blue">MRP</span>';
+
+  return '<div class="alpha-row" onclick="openClaimFromDischarged(\'' + esc(pid) + '\')">' +
+    '<div class="alpha-av ' + avCls + '">' + esc(ini.toUpperCase()) + '</div>' +
     '<div style="flex:1;min-width:0">' +
-      '<div class="wp-name">' + esc(p.last) + ', ' + esc(p.first) + '</div>' +
-      '<div class="wp-meta">' +
-        wardLabel(p.ward) + (p.bed ? ' Rm ' + esc(p.bed) : '') +
-        ' &bull; ' + (p.phn ? 'PHN …' + p.phn.slice(-4) : '<span class="warn-tag">⚠ no PHN</span>') +
-      '</div>' +
+      '<div class="wp-name">' + esc(last) + ', ' + esc(first) + '</div>' +
+      '<div class="wp-meta">' + esc(wardLabel(ward)) + bedDisplay + ' &bull; ' + phnDisplay + '</div>' +
       '<div class="wp-chips" style="margin-top:4px">' + careChip + ' ' + statusChip + '</div>' +
     '</div>' +
     '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;padding-top:8px">' +
-      restoreBtn +
-      chartBtn(p.id) +
-      (p.discharged ? '' :
-        '<svg style="width:14px;height:14px;stroke:var(--text3);fill:none;stroke-width:2" ' +
-        'viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>') +
+      '<button class="bb bb-rnd" style="font-size:10px;padding:5px 9px" ' +
+        'onclick="event.stopPropagation();restorePatient(\'' + esc(pid) + '\')">↩ Restore</button>' +
+      chartBtn(pid) +
     '</div>' +
-    '</div>';
+  '</div>';
+}
+
+function openClaimFromDischarged(pid) {
+  _claimOriginPane   = 'p-discharged';
+  _claimOriginNavIdx = 2;
+  _openClaimScreen(pid);
 }
 
 // Restore — show on/off service choice using data attributes (no inline quote nesting)
 function restorePatient(pid) {
-  var p = st.patients.find(function(x) { return x.id === pid; });
-  if (!p || !p.discharged) return;
+  var p = (st.patients || []).find(function(x) { return x.id === pid; });
+  if (!p || !isDischarged(p)) return;
   var prevWard = wardLabel(p.ward) || '';
   var prevList = p.list === 'on' ? 'On Service' : 'Off Service';
   var body  = document.getElementById('merge-body');
@@ -3798,7 +3679,7 @@ function restorePatient(pid) {
 }
 
 function _doRestore(pid, list) {
-  var p = st.patients.find(function(x) { return x.id === pid; });
+  var p = (st.patients || []).find(function(x) { return x.id === pid; });
   if (!p) return;
   hideModal('merge-modal');
   p.discharged    = false;
@@ -3810,14 +3691,8 @@ function _doRestore(pid, list) {
   if (SHEETS_URL) push('savePatient', p);
   logChange(p, 'Restored', 'Returned to ' + (list === 'on' ? 'On Service' : 'Off Service'));
   showToast(p.last + ' restored to ' + (list === 'on' ? 'on-service' : 'off-service') + ' list');
-  renderDischargedList(document.getElementById('discharged-search').value || '');
+  renderDischarged(document.getElementById('discharged-search') ? document.getElementById('discharged-search').value : '');
   render();
-}
-
-function openClaimFromDischarged(pid) {
-  _claimOriginPane   = 'p-discharged';
-  _claimOriginNavIdx = 2;
-  _openClaimScreen(pid);
 }
 
 // ── 06c_patient_summary.js ──
@@ -6064,7 +5939,7 @@ function removePatient(pid) {
   var dischPane = document.getElementById('p-discharged');
   if (dischPane && dischPane.classList.contains('on')) {
     var searchEl = document.getElementById('discharged-search');
-    renderDischargedList(searchEl ? searchEl.value : '');
+    renderDischarged(searchEl ? searchEl.value : '');
   }
 }
 
