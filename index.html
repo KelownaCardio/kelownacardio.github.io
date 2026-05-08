@@ -545,7 +545,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.12</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.14</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1508,7 +1508,7 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID = 'v3.12-2026-05-07';
+var BUILD_ID = 'v3.14-2026-05-07';
 
 (function purgeIfBuildChanged() {
   try {
@@ -1554,7 +1554,7 @@ async function loadLocal() {
   if (Array.isArray(st.claims)) {
     var _localByPhn = {};
     if (Array.isArray(st.patients)) {
-      st.patients.forEach(function(p) { if (p.phn) _localByPhn[p.phn] = p; });
+      st.patients.forEach(function(p) { if (p.phn) _localByPhn[String(p.phn)] = p; });
     }
     st.claims.forEach(function(c) {
       if (c.startTime) c.startTime = fmtStartTime(c.startTime);
@@ -1565,7 +1565,7 @@ async function loadLocal() {
       if (c.icd)       c.icd       = String(c.icd).trim();
       sanitizeReferrer(c);
       // Back-fill missing fields from patient record
-      var pat = _localByPhn[c.phn];
+      var pat = _localByPhn[String(c.phn || '')];
       if (pat) {
         if (!c.refby     && pat.refby)     c.refby     = pat.refby;
         if (!c.refbyName && pat.refbyName && !looksLikeMRPService(pat.refbyName)) c.refbyName = pat.refbyName;
@@ -1583,6 +1583,11 @@ async function loadLocal() {
       if (p.roundedToday) p.roundedToday = fmtClaimDate(p.roundedToday);
       if (p.dischargedAt) p.dischargedAt = parseDischargedAt(p.dischargedAt);
       p.discharged   = parseBool(p.discharged);
+      // Coerce string-y fields — see sync block for rationale
+      if (p.phn   != null) p.phn   = String(p.phn);
+      if (p.bed   != null) p.bed   = String(p.bed);
+      if (p.last  != null) p.last  = String(p.last);
+      if (p.first != null) p.first = String(p.first);
       var hadBadRef = looksLikeMRPService(p.refbyName);
       sanitizeReferrer(p);
       if (hadBadRef && SHEETS_URL) push('savePatient', p);  // push the clean version back to Sheets
@@ -1720,6 +1725,12 @@ async function syncFromSheets() {
         if (p.roundedToday) p.roundedToday = fmtClaimDate(p.roundedToday);
         if (p.dischargedAt) p.dischargedAt = parseDischargedAt(p.dischargedAt);
         p.discharged   = parseBool(p.discharged);
+        // Coerce phn/bed/last/first to string — Sheets returns them as numbers when
+        // the cell happens to be all-digits, breaking string ops like .slice and lookup keys.
+        if (p.phn   != null) p.phn   = String(p.phn);
+        if (p.bed   != null) p.bed   = String(p.bed);
+        if (p.last  != null) p.last  = String(p.last);
+        if (p.first != null) p.first = String(p.first);
         var hadBadRef = looksLikeMRPService(p.refbyName);
         sanitizeReferrer(p);
         if (hadBadRef && SHEETS_URL) push('savePatient', p);  // overwrite stale bad data on Sheets
@@ -1729,7 +1740,7 @@ async function syncFromSheets() {
       d.patients.forEach(function(p) {
         if (!p.refby || !p.refbyName) {
           var patClaims = (d.claims || []).filter(function(c) {
-            return c.phn === p.phn && c.refby && c.refbyName && !looksLikeMRPService(c.refbyName);
+            return samePhn(c.phn, p.phn) && c.refby && c.refbyName && !looksLikeMRPService(c.refbyName);
           });
           patClaims.sort(function(a, b) { return (b.id || '').localeCompare(a.id || ''); });
           if (patClaims.length) {
@@ -1805,6 +1816,7 @@ async function syncFromSheets() {
         if (c.fee)       c.fee       = String(c.fee).trim();
         if (c.feeCode)   c.feeCode   = String(c.feeCode).trim();
         if (c.icd)       c.icd       = String(c.icd).trim();
+        if (c.phn != null) c.phn = String(c.phn);
         if (hadBadRef && SHEETS_URL) push('saveClaim', c);
       });
       // Normalise startTime — Sheets returns time-only fields as ISO with 1899 epoch
@@ -1839,7 +1851,7 @@ async function syncFromSheets() {
       // IMPORTANT: Only push back claims that came from Sheets (not local-only new claims).
       // This prevents re-pushing claims that the Apps Script would append as duplicates.
       var _patByPhn = {};
-      st.patients.forEach(function(p) { if (p.phn) _patByPhn[p.phn] = p; });
+      st.patients.forEach(function(p) { if (p.phn) _patByPhn[String(p.phn)] = p; });
       // Build set of claim IDs that exist in Sheets data (d.claims)
       var _sheetsClaimIds = {};
       (d.claims || []).forEach(function(c) { if (c.id) _sheetsClaimIds[c.id] = true; });
@@ -1849,7 +1861,7 @@ async function syncFromSheets() {
         // Only push back if this claim already exists in Sheets — otherwise
         // saveClaim will be called naturally when it's first created.
         if (!_sheetsClaimIds[c.id]) return;
-        var pat = _patByPhn[c.phn];
+        var pat = _patByPhn[String(c.phn || '')];
         var changed = false;
         if (pat) {
           if (!c.refby     && pat.refby)     { c.refby     = pat.refby;     changed = true; }
@@ -2189,7 +2201,7 @@ function ccuFeeForToday(p) {
   var CCU_FEES = ['CCU_DAILY','1411','1421','1431'];
   var DAY_MS   = 86400000;
   var taps = st.claims
-    .filter(function(c) { return c.phn === p.phn && CCU_FEES.indexOf(c.fee) !== -1; })
+    .filter(function(c) { return samePhn(c.phn, p.phn) && CCU_FEES.indexOf(c.fee) !== -1; })
     .sort(function(a, b) { return parseDMYsafe(a.date) - parseDMYsafe(b.date); });
   if (!taps.length) return '1411';
   var todayMs = parseDMYsafe(TODAY);
@@ -2243,7 +2255,7 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime) 
   };
   // Dedup guard: never create two claims with same phn+date+fee+alias
   var _dupCheck = st.claims.some(function(x) {
-    return x.phn === c.phn && x.date === c.date &&
+    return samePhn(x.phn, c.phn) && x.date === c.date &&
            x.fee === c.fee && x.alias === c.alias &&
            x.id  !== c.id;
   });
@@ -2310,10 +2322,18 @@ function parseDischargedAt(v) {
 
 // Returns true if any claim exists for this patient today from any doctor.
 // Drives the green card tint — claim-based, syncs across all devices.
+// Type-safe PHN equality. Sheets returns PHN as either string or number depending
+// on how the row was written, so === would silently fail for cross-type comparisons.
+function samePhn(a, b) {
+  if (a == null || b == null || a === '' || b === '') return false;
+  return String(a) === String(b);
+}
+
 function claimedToday(p) {
   if (!p || !p.phn) return false;
+  var pPhn = String(p.phn);
   return st.claims.some(function(c) {
-    return c.phn === p.phn && fmtClaimDate(c.date) === TODAY;
+    return String(c.phn || '') === pPhn && fmtClaimDate(c.date) === TODAY;
   });
 }
 
@@ -2321,8 +2341,9 @@ function claimedToday(p) {
 // Used to drive quick-tap button done-state across devices.
 function claimedTodayFee(p, feeTypes) {
   if (!p || !p.phn) return false;
+  var pPhn = String(p.phn);
   return st.claims.some(function(c) {
-    return c.phn === p.phn && fmtClaimDate(c.date) === TODAY && feeTypes.indexOf(c.fee) !== -1;
+    return String(c.phn || '') === pPhn && fmtClaimDate(c.date) === TODAY && feeTypes.indexOf(c.fee) !== -1;
   });
 }
 
@@ -2438,7 +2459,7 @@ function renderRoundsSearch() {
       var name = (p.last + ' ' + p.first).toLowerCase();
       return name.indexOf(_roundsQuery) !== -1 || (p.phn || '').indexOf(_roundsQuery) !== -1;
     })
-    .sort(function(a, b) { return a.last.localeCompare(b.last); });
+    .sort(function(a, b) { return String(a.last || "").localeCompare(String(b.last || "")); });
 
   if (!matches.length) {
     searchView.innerHTML = '<div class="empty" style="padding:24px 0">No active patients matching &ldquo;' + esc(_roundsQuery) + '&rdquo;</div>';
@@ -2452,13 +2473,26 @@ function renderRoundsSearch() {
   var html = '';
   if (onMatches.length) {
     html += '<div class="sec-lbl">On Service (' + onMatches.length + ')</div>';
-    html += onMatches.map(alphaRow).join('');
+    html += safeRowMap(onMatches, alphaRow);
   }
   if (offMatches.length) {
     html += '<div class="sec-lbl" style="margin-top:10px">Off Service (' + offMatches.length + ')</div>';
-    html += offMatches.map(alphaRow).join('');
+    html += safeRowMap(offMatches, alphaRow);
   }
   searchView.innerHTML = html;
+}
+
+// Safe row mapper: wraps each renderer in try/catch so one bad row
+// can't kill the whole list. Returns a placeholder for failing rows.
+function safeRowMap(arr, renderFn) {
+  return arr.map(function(p) {
+    try { return renderFn(p); }
+    catch (e) {
+      console.error('[row render] failed for', p, e);
+      return '<div class="empty" style="padding:6px 10px;font-size:11px">⚠ Could not render ' +
+        esc(String(p && p.last || '?')) + ', ' + esc(String(p && p.first || '?')) + '</div>';
+    }
+  }).join('');
 }
 
 // statBox removed — counts now shown in tab labels
@@ -2509,41 +2543,47 @@ function wardHtml(ward) {
   } else {
     h += '<div class="ward-list">';
     pts.forEach(function(p, i) {
-      var dn  = claimedToday(p);
-      // Circle label: bed # for CCU, room # for 2S/2W, index for others
-      var pos = isCCU  ? (p.bed || (i+1))
-              : isWard ? (p.bed || (i+1))
-              :          (i+1);
-      h += '<div class="wp' + (dn ? ' done' : '') + '">' +
-           '<div class="wp-pos-wrap">' +
-             '<div class="wp-pos' + (dn ? ' done' : '') + '" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(String(pos)) + '</div>' +
-           '</div>' +
-           '<div class="wp-main">' +
-             '<div class="wp-name-row">' +
-               '<span class="wp-name" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' +
-                 esc(p.last) + ', ' + esc(p.first) +
-               '</span>' +
-               '<button class="row-pencil-btn" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'edit\')" title="Edit">' +
-                 '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
+      try {
+        var dn  = claimedToday(p);
+        // Circle label: bed # for CCU, room # for 2S/2W, index for others
+        var pos = isCCU  ? (p.bed || (i+1))
+                : isWard ? (p.bed || (i+1))
+                :          (i+1);
+        h += '<div class="wp' + (dn ? ' done' : '') + '">' +
+             '<div class="wp-pos-wrap">' +
+               '<div class="wp-pos' + (dn ? ' done' : '') + '" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(String(pos)) + '</div>' +
+             '</div>' +
+             '<div class="wp-main">' +
+               '<div class="wp-name-row">' +
+                 '<span class="wp-name" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' +
+                   esc(String(p.last || '')) + ', ' + esc(String(p.first || '')) +
+                 '</span>' +
+                 '<button class="row-pencil-btn" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'edit\')" title="Edit">' +
+                   '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
+                 '</button>' +
+               '</div>' +
+               '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + '</div>' +
+               '<div class="wp-acts">' +
+                 wardActBtns(p) +
+                 '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
+               '</div>' +
+             '</div>' +
+             '<div class="wp-side-btns">' +
+               '<button class="side-btn side-btn-hx" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'summary\')">' +
+                 '<svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>' +
+                 '<span>Claim Hx</span>' +
+               '</button>' +
+               '<button class="side-btn side-btn-dc" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'disch\')">' +
+                 '<svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>' +
+                 '<span>D/C</span>' +
                '</button>' +
              '</div>' +
-             '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + '</div>' +
-             '<div class="wp-acts">' +
-               wardActBtns(p) +
-               '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
-             '</div>' +
-           '</div>' +
-           '<div class="wp-side-btns">' +
-             '<button class="side-btn side-btn-hx" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'summary\')">' +
-               '<svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>' +
-               '<span>Claim Hx</span>' +
-             '</button>' +
-             '<button class="side-btn side-btn-dc" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'disch\')">' +
-               '<svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>' +
-               '<span>D/C</span>' +
-             '</button>' +
-           '</div>' +
-           '</div>';
+             '</div>';
+      } catch (e) {
+        console.error('[wardHtml] failed for', p, e);
+        h += '<div class="empty" style="padding:6px 10px;font-size:11px">⚠ Could not render ' +
+             esc(String(p && p.last || '?')) + ', ' + esc(String(p && p.first || '?')) + '</div>';
+      }
     });
     h += '</div>';
   }
@@ -2561,9 +2601,9 @@ function wardHtml(ward) {
 function renderAlpha() {
   var on = st.patients
     .filter(function(p) { return p.list === 'on' && !p.discharged; })
-    .sort(function(a, b) { return a.last.localeCompare(b.last); });
+    .sort(function(a, b) { return String(a.last || "").localeCompare(String(b.last || "")); });
   document.getElementById('alpha-view').innerHTML =
-    on.length ? on.map(alphaRow).join('') : '<div class="empty">No on-service patients.</div>';
+    on.length ? safeRowMap(on, alphaRow) : '<div class="empty">No on-service patients.</div>';
 }
 
 // ── Off service view ───────────────────────────────────
@@ -2598,8 +2638,8 @@ function renderOff() {
   }
 
   if (_offView === 'alpha') {
-    var sorted = off.slice().sort(function(a, b) { return a.last.localeCompare(b.last); });
-    h += sorted.map(offRow).join('');
+    var sorted = off.slice().sort(function(a, b) { return String(a.last || "").localeCompare(String(b.last || "")); });
+    h += safeRowMap(sorted, offRow);
   } else {
     // By location: clinical priority — ED, ICU, CSICU, then numbered wards.
     // Within numbered wards: A/B together, then E/W together.
@@ -2623,7 +2663,7 @@ function renderOff() {
       if (ka[0] !== kb[0]) return ka[0] - kb[0];
       if (ka[1] !== kb[1]) return ka[1] < kb[1] ? -1 : 1;
       if (ka[2] !== kb[2]) return ka[2] < kb[2] ? -1 : 1;
-      return a.last.localeCompare(b.last);
+      return String(a.last || "").localeCompare(String(b.last || ""));
     });
     var curWard = null;
     sorted.forEach(function(p) {
@@ -2694,9 +2734,9 @@ function ageGenderShort(p) {
 function offRow(p) {
   var dn       = claimedToday(p);
   // Circle shows ward abbreviation for off-service
-  var wardAbbr = wardLabel(p.ward).replace('Ward ', '').replace('ICU ', 'IC').slice(0, 5);
+  var wardAbbr = String(wardLabel(p.ward) || '').replace('Ward ', '').replace('ICU ', 'IC').slice(0, 5);
   // Row 2: room number (prominent) + last-seen chip
-  var roomStr  = p.bed ? esc(p.bed) : (wardLabel(p.ward) || '—');
+  var roomStr  = p.bed ? esc(String(p.bed)) : (esc(wardLabel(p.ward) || '—'));
   var lastSeen = lastSeenByGroup(p);
   // Row 3: DOB · Age (Sex) · MRP
   var dobStr   = p.dob ? esc(dispDate(p.dob)) : '';
@@ -2706,7 +2746,7 @@ function offRow(p) {
     '<div class="alpha-av av-off" style="font-size:9px;font-weight:800;letter-spacing:-.3px" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(wardAbbr) + '</div>' +
     '<div class="wp-main">' +
       '<div class="wp-name-row">' +
-        '<span class="wp-name" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(p.last) + ', ' + esc(p.first) + '</span>' +
+        '<span class="wp-name" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(String(p.last || '')) + ', ' + esc(String(p.first || '')) + '</span>' +
         '<button class="row-pencil-btn" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'edit\')">' +
           '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
         '</button>' +
@@ -2761,13 +2801,13 @@ function alphaRow(p) {
   var dn      = claimedToday(p);
   var avCls   = wardAvCls(p.ward);
   // Circle shows ward abbreviation (same as off-service)
-  var wardAbbr = wardLabel(p.ward).replace('Ward ', '').replace('ICU ', 'IC').slice(0, 5);
+  var wardAbbr = String(wardLabel(p.ward) || '').replace('Ward ', '').replace('ICU ', 'IC').slice(0, 5);
   return '<div class="alpha-row' + (dn ? ' done' : '') + '">' +
     '<div class="alpha-av ' + avCls + '" style="font-size:9px;font-weight:800;letter-spacing:-.3px" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(wardAbbr) + '</div>' +
     '<div class="wp-main">' +
       '<div class="wp-name-row">' +
-        '<span class="wp-name" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(p.last) + ', ' + esc(p.first) +
-          (p.bed ? ' <span style="font-size:10px;color:var(--text3)">Rm </span><span style="font-size:10px;font-weight:700;color:var(--text2)">' + esc(p.bed) + '</span>' : '') +
+        '<span class="wp-name" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(String(p.last || '')) + ', ' + esc(String(p.first || '')) +
+          (p.bed ? ' <span style="font-size:10px;color:var(--text3)">Rm </span><span style="font-size:10px;font-weight:700;color:var(--text2)">' + esc(String(p.bed)) + '</span>' : '') +
         '</span>' +
         '<button class="row-pencil-btn" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'edit\')">' +
           '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
@@ -2884,18 +2924,13 @@ function reorder(ward, pid, dir) {
 // quickCCU replaced by data-pid button handlers
 
 
-// ── Helpers ────────────────────────────────────────────
-function phnOrWarn(p) {
-  return p.phn ? '…' + p.phn.slice(-4) : '<span class="warn-tag">⚠ needs sticker</span>';
-}
-
 // ── One-tap billing handlers (use data-pid, no inline quote issues) ──
 
 function alreadyBilledToday(pid, feeTypes) {
   var p = getP(pid);
   if (!st.doc) return false;
   return st.claims.some(function(c) {
-    return c.phn === p.phn &&
+    return samePhn(c.phn, p.phn) &&
            c.alias === st.doc.alias &&
            c.date === TODAY &&
            feeTypes.indexOf(c.fee) !== -1;
@@ -2909,7 +2944,7 @@ function unbillToday(pid, feeTypes) {
   var idx = -1;
   for (var i = 0; i < st.claims.length; i++) {
     var c = st.claims[i];
-    if (c.phn === p.phn && c.alias === st.doc.alias &&
+    if (samePhn(c.phn, p.phn) && c.alias === st.doc.alias &&
         c.date === TODAY && feeTypes.indexOf(c.fee) !== -1) {
       idx = i; break;
     }
@@ -2918,7 +2953,7 @@ function unbillToday(pid, feeTypes) {
   var removed = st.claims.splice(idx, 1)[0];
   if (SHEETS_URL) push('deleteClaim', { id: removed.id });
   var stillHasClaims = st.claims.some(function(c) {
-    return c.phn === p.phn && c.alias === st.doc.alias && c.date === TODAY;
+    return samePhn(c.phn, p.phn) && c.alias === st.doc.alias && c.date === TODAY;
   });
   if (!stillHasClaims) {
     p.lastBilled   = null;
@@ -3708,13 +3743,13 @@ function openPatientSummary(pid) {
 
   // All claims for this patient, sorted oldest → newest
   var claims = st.claims
-    .filter(function(c) { return c.phn && p.phn && c.phn === p.phn; })
+    .filter(function(c) { return c.phn && p.phn && samePhn(c.phn, p.phn); })
     .sort(function(a, b) { return parseDMY(a.date) - parseDMY(b.date); });
 
   // Also check by name if no PHN match (sticker not yet scanned)
   if (!claims.length || !p.phn) {
     var nameClaims = st.claims.filter(function(c) {
-      return c.phn === p.phn;
+      return samePhn(c.phn, p.phn);
     }).sort(function(a, b) { return parseDMY(a.date) - parseDMY(b.date); });
     if (nameClaims.length > claims.length) claims = nameClaims;
   }
@@ -3968,7 +4003,7 @@ function inheritRefAndDxFromHistory(p) {
   var inherited = { refby: p.refby || '', refbyName: p.refbyName || '', icd: p.icd || '' };
   if (!p.phn) return inherited;
   // Walk claims in reverse chronological order
-  var claims = st.claims.filter(function(c) { return c.phn === p.phn; })
+  var claims = st.claims.filter(function(c) { return samePhn(c.phn, p.phn); })
     .sort(function(a, b) {
       var da = parseDMYsafe(a.date), db = parseDMYsafe(b.date);
       return db - da;
@@ -4808,7 +4843,7 @@ function submitDirective() {
 // Records raw tap; 1411/1421/1431 bands calculated at export
 function buildCCUForm(p) {
   var alreadyToday = st.claims.some(function(c) {
-    return c.phn === p.phn && c.fee === 'CCU_DAILY' && c.date === TODAY;
+    return samePhn(c.phn, p.phn) && c.fee === 'CCU_DAILY' && c.date === TODAY;
   });
   var h = '<div class="card"><div class="card-title">CCU daily</div>' +
     '<p style="font-size:12px;color:var(--text2);margin-bottom:9px">' +
@@ -4858,7 +4893,7 @@ function openMergeModal(existing, isReadmit) {
     ? '<div style="color:var(--amber-t);font-weight:700;font-size:12px;margin-top:8px">⚠ Partial match (' + (lastMatch ? 'last name' : 'DOB') + ' only) — review carefully</div>'
     : '<div style="color:var(--red-t);font-weight:700;font-size:12px;margin-top:8px">✗ Neither last name nor DOB match — likely wrong PHN</div>';
 
-  var claimCount = st.claims.filter(function(c) { return c.phn === existing.phn; }).length;
+  var claimCount = st.claims.filter(function(c) { return samePhn(c.phn, existing.phn); }).length;
 
   var h = statusBadge +
     '<div style="margin:10px 0 4px;font-size:13px;font-weight:700">' + esc(existing.last) + ', ' + esc(existing.first) + '</div>' +
@@ -5588,7 +5623,7 @@ function handleOCRResult(data, bar) {
         ['general surg','General Surgery'],['orthop','Orthopedics'],
         ['neurol','Neurology'],['nephr','Nephrology']
       ];
-      var mrpLower = p.mrp.toLowerCase();
+      var mrpLower = String(p.mrp || '').toLowerCase();
       var mrpVal = '';
       for (var mi = 0; mi < mrpMap.length; mi++) {
         if (mrpLower.indexOf(mrpMap[mi][0]) !== -1) { mrpVal = mrpMap[mi][1]; break; }
@@ -5620,7 +5655,7 @@ function handleOCRResult(data, bar) {
 // ═══════════════════════════════════════════════════════
 // LOS helper — days since admission (using first claim date or addedAt)
 function losdays(p) {
-  var patClaims = st.claims.filter(function(c) { return c.phn && c.phn === p.phn; });
+  var patClaims = st.claims.filter(function(c) { return c.phn && samePhn(c.phn, p.phn); });
 
   // Priority 1: explicit admitDate on patient record
   if (p.admitDate) {
@@ -5752,7 +5787,7 @@ function openDischModal(pid) {
 function _visitBilledToday(p) {
   var visitFees = ['33008','33006','CCU_DAILY','33010','33012'];
   return st.claims.some(function(c) {
-    return c.phn === p.phn && c.date === TODAY && visitFees.indexOf(c.fee) !== -1;
+    return samePhn(c.phn, p.phn) && c.date === TODAY && visitFees.indexOf(c.fee) !== -1;
   });
 }
 
@@ -6524,8 +6559,8 @@ function renderMediteachPreview(patients) {
     var care = inferCare(loc.ward, p.attending);
     var icd  = diagToIcd(p.reason);
     var existing = !!st.patients.find(function(ep) {
-      return ep.last.toLowerCase() === (p.last || '').toLowerCase() &&
-             ep.first.toLowerCase().split(' ')[0] === (p.first || '').toLowerCase().split(' ')[0];
+      return String(ep.last || '').toLowerCase() === String(p.last || '').toLowerCase() &&
+             String(ep.first || '').toLowerCase().split(' ')[0] === String(p.first || '').toLowerCase().split(' ')[0];
     });
     var _mrp = care.role === 'consultant' ? inferMRP(p.attending) : '';
     return Object.assign({}, p, {
@@ -6897,7 +6932,7 @@ function parseDMY(s) {
 
 function pad(n) { return String(n).padStart(2, '0'); }
 
-function wardLabel(w) { return (WARDS[w] && WARDS[w].label) || w || ''; }
+function wardLabel(w) { return String((WARDS[w] && WARDS[w].label) || w || ''); }
 
 // time string "HH:MM" → total minutes
 function t2m(t) {
