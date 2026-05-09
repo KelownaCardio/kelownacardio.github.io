@@ -341,6 +341,10 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
       </div>
       <div style="font-size:11px;color:var(--text3);margin-top:4px">Added to consult notes as: CCFPP [name] [phone]</div>
     </div>
+    <div style="margin-top:10px">
+      <label>Notes <span style="font-weight:400;color:var(--text3)">(added to all claims)</span></label>
+      <textarea id="c-notes" rows="2" oninput="refreshPreview()" style="width:100%;padding:9px 10px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:13px;font-family:inherit;resize:vertical;background:var(--surface)" placeholder="e.g. Post-cath monitoring, transferred from Vernon"></textarea>
+    </div>
   </div>
 
 </div>
@@ -1024,6 +1028,7 @@ function buildClaims() {
                 : st.consultType === 'limited' ? '33012'
                 : '';
     var cnotes = '';
+  var extraNotes = (document.getElementById('c-notes')||{value:''}).value.trim();
     if (document.getElementById('c-ccfpp').checked) {
       var fpn = (document.getElementById('c-ccfpp-name').value||'').trim();
       var fpp = (document.getElementById('c-ccfpp-ph').value||'').trim();
@@ -1034,23 +1039,25 @@ function buildClaims() {
       claims.push(Object.assign({},base,{ id:uid(), claimType:'most', date:cDate, fee:'03701', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:'MOST add-on', _sortDate:cDate, _sortSub:1 }));
   }
 
+  if (typeof extraNotes === 'undefined') var extraNotes = (document.getElementById('c-notes')||{value:''}).value.trim();
   st.dailyDates.slice().sort().forEach(function(iso){
-    claims.push(Object.assign({},base,{ id:uid(), claimType:'daily', date:iso, fee:'', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:'', _sortDate:iso, _sortSub:3 }));
+    claims.push(Object.assign({},base,{ id:uid(), claimType:'daily', date:iso, fee:'33008', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:extraNotes, _sortDate:iso, _sortSub:3 }));
   });
 
   var cbReason = (document.getElementById('combined-reason').value||'').trim();
   var cbNote = cbReason ? 'Combined daily care for '+cbReason : 'Combined daily';
   st.combinedDates.slice().sort().forEach(function(iso){
-    claims.push(Object.assign({},base,{ id:uid(), claimType:'combined', date:iso, fee:'', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:cbNote, _sortDate:iso, _sortSub:4 }));
+    claims.push(Object.assign({},base,{ id:uid(), claimType:'combined', date:iso, fee:'33008', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:cbNote+(extraNotes?' | '+extraNotes:''), _sortDate:iso, _sortSub:4 }));
   });
 
   st.directiveDates.slice().sort().forEach(function(iso){
-    claims.push(Object.assign({},base,{ id:uid(), claimType:'directive', date:iso, fee:'', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:'', _sortDate:iso, _sortSub:5 }));
+    claims.push(Object.assign({},base,{ id:uid(), claimType:'directive', date:iso, fee:'33006', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:extraNotes, _sortDate:iso, _sortSub:5 }));
   });
 
   st.ccuDates.slice().sort().forEach(function(iso, i){
-    var dn=i+1, fee=dn===1?'1411':dn===2?'1421':'1431';
-    claims.push(Object.assign({},base,{ id:uid(), claimType:'ccu', date:iso, fee:fee, icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:'CCU day '+dn, _sortDate:iso, _sortSub:6 }));
+    var dn=i+1, fee=dn===1?'1411':dn<=7?'1421':'1431';
+    var ccuNote='CCU day '+dn+(extraNotes?' | '+extraNotes:'');
+    claims.push(Object.assign({},base,{ id:uid(), claimType:'ccu', date:iso, fee:fee, icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:ccuNote, _sortDate:iso, _sortSub:6 }));
   });
 
   claims.sort(function(a,b){ return a._sortDate<b._sortDate?-1:a._sortDate>b._sortDate?1:a._sortSub-b._sortSub; });
@@ -1415,30 +1422,32 @@ function exportSheets() {
   var claims=getExportClaims();
   if (!claims.length){ setStatus('export-status','st-warn','No claims to export.'); return; }
   setStatus('export-status','st-info','Sending to Sheets…');
-  var xhr=new XMLHttpRequest();
-  xhr.open('POST',url,true);
-  // Omit Content-Type to avoid CORS preflight — Apps Script reads postData.contents regardless
-  xhr.timeout=60000;
-  xhr.onload=function(){
-    var data; try{data=JSON.parse(xhr.responseText);}catch(e){data={};}
-    if (data.ok) {
-      var ins = data.inserted || 0;
-      var dups = data.duplicates || [];
-      var msg = 'Saved '+ins+' claim'+(ins===1?'':'s')+' to Historical tab ✓';
-      if (dups.length) {
-        msg += '\n\n⚠ '+dups.length+' duplicate'+(dups.length===1?'':'s')+' skipped:\n';
-        msg += dups.map(function(d){ return '  '+d.name+' · '+d.fee+' · '+d.date+' ('+d.reason+')'; }).join('\n');
-        setStatus('export-status','st-warn',msg);
+  var payload=JSON.stringify({action:'saveHistorical', key:getScriptKey(), claims:claimsToPayload(sortClaimsForExport(claims))});
+  // Use fetch — handles Google Apps Script 302 redirect correctly (XHR loses POST body on redirect)
+  var ctrl=new AbortController();
+  var timer=setTimeout(function(){ ctrl.abort(); setStatus('export-status','st-warn','Request timed out after 90s'); }, 90000);
+  fetch(url, { method:'POST', body:payload, signal:ctrl.signal })
+    .then(function(r){ return r.text(); })
+    .then(function(text){
+      clearTimeout(timer);
+      var data; try{ data=JSON.parse(text); }catch(e){ data={}; }
+      if (data.ok) {
+        var ins=data.inserted||0, dups=data.duplicates||[];
+        var msg='Saved '+ins+' claim'+(ins===1?'':'s')+' to Uploaded Claims tab ✓';
+        if (dups.length) {
+          msg+='\n\n⚠ '+dups.length+' duplicate'+(dups.length===1?'':'s')+' skipped:\n';
+          msg+=dups.map(function(d){ return '  '+d.name+' · '+d.fee+' · '+d.date+' ('+d.reason+')'; }).join('\n');
+          setStatus('export-status','st-warn',msg);
+        } else { setStatus('export-status','st-ok',msg); }
       } else {
-        setStatus('export-status','st-ok',msg);
+        setStatus('export-status','st-warn','Sheets error: '+JSON.stringify(data).slice(0,200));
       }
-    } else {
-      setStatus('export-status','st-warn','Sheets error: '+JSON.stringify(data).slice(0,120));
-    }
-  };
-  xhr.onerror=function(){ setStatus('export-status','st-warn','Network error'); };
-  xhr.ontimeout=function(){ setStatus('export-status','st-warn','Request timed out'); };
-  xhr.send(JSON.stringify({action:'saveHistorical', key:getScriptKey(), claims:claimsToPayload(sortClaimsForExport(claims))}));
+    })
+    .catch(function(err){
+      clearTimeout(timer);
+      if (err.name==='AbortError') return;
+      setStatus('export-status','st-warn','Network error: '+err.message);
+    });
 }
 
 // ─── Crop modal ───────────────────────────────────────────────────────────────
