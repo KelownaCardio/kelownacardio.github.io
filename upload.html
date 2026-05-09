@@ -461,17 +461,20 @@ var _refCloseTimer = null;
 
 function callSearchPhysicians(q, callback) {
   var url = document.getElementById('script-url').value.trim();
-  if (!url || q.length < 2) { callback([]); return; }
+  if (!url || q.length < 2) { callback([], null); return; }
   var xhr = new XMLHttpRequest();
   xhr.open('POST', url, true);
   xhr.setRequestHeader('Content-Type','application/json');
-  xhr.timeout = 8000;
+  xhr.timeout = 10000;
   xhr.onload = function(){
-    var data; try { data = JSON.parse(xhr.responseText); } catch(e) { callback([]); return; }
-    if (Array.isArray(data)) callback(data);
-    else callback([]);
+    var data; try { data = JSON.parse(xhr.responseText); } catch(e) { callback([], 'Bad response: ' + xhr.responseText.slice(0,80)); return; }
+    if (Array.isArray(data)) { callback(data, null); return; }
+    if (data && Array.isArray(data.results)) { callback(data.results, null); return; }
+    if (data && Array.isArray(data.physicians)) { callback(data.physicians, null); return; }
+    callback([], 'Unexpected: ' + JSON.stringify(data).slice(0,100));
   };
-  xhr.onerror = xhr.ontimeout = function(){ callback([]); };
+  xhr.onerror   = function(){ callback([], 'Network error'); };
+  xhr.ontimeout = function(){ callback([], 'Search timed out'); };
   xhr.send(JSON.stringify({ action:'searchPhysicians', key:getScriptKey(), q:q }));
 }
 
@@ -480,10 +483,8 @@ function normQuery(raw) {
 }
 
 function onRefInput() {
-  // If the field was cleared manually, reset confirmed state
   var inp = document.getElementById('c-ref');
   if (!inp.value.trim()) { clearRef(true); return; }
-  // If a match is already confirmed and the user edits the text, reopen search
   if (inp.dataset.docnum) {
     inp.dataset.docnum = '';
     inp.dataset.refname = '';
@@ -492,13 +493,28 @@ function onRefInput() {
   refreshPreview();
   var q = normQuery(inp.value);
   if (q.length < 2) { closeRefDd(); return; }
-  callSearchPhysicians(q, function(results){ renderRefDd(results); });
+  // Show loading row immediately
+  showRefDdMessage('Searching…', 'var(--text3)');
+  callSearchPhysicians(q, function(results, err){ renderRefDd(results, err); });
 }
 
-function renderRefDd(results) {
+function showRefDdMessage(msg, color) {
+  var dd = document.getElementById('ref-dd');
+  dd.innerHTML = '<div style="padding:10px 12px;font-size:12px;color:' + color + '">' + msg + '</div>';
+  dd.classList.add('open');
+}
+
+function renderRefDd(results, err) {
   var dd = document.getElementById('ref-dd');
   dd.innerHTML = '';
-  if (!results || !results.length) { dd.classList.remove('open'); return; }
+  if (err) {
+    showRefDdMessage('⚠ ' + err, 'var(--amber-t)');
+    return;
+  }
+  if (!results || !results.length) {
+    showRefDdMessage('No results', 'var(--text3)');
+    return;
+  }
   results.forEach(function(r){
     var row = document.createElement('div');
     row.className = 'ref-dd-row';
@@ -510,7 +526,6 @@ function renderRefDd(results) {
       '<div class="ref-dd-name">' + nameStr + '</div>' +
       (subParts.length ? '<div class="ref-dd-sub">' + subParts.join(' · ') + '</div>' : '') +
       (r.num ? '<div class="ref-dd-num">Billing #' + r.num + '</div>' : '');
-    // onmousedown fires before blur — prevents iOS dropdown-closes-before-click race
     row.addEventListener('mousedown', function(e){ e.preventDefault(); selectRef(r); });
     row.addEventListener('touchstart', function(e){ e.preventDefault(); selectRef(r); }, {passive:false});
     dd.appendChild(row);
@@ -567,7 +582,7 @@ function searchRefFromOCR(raw) {
   inp.dataset.docnum  = '';
   inp.dataset.refname = '';
   document.getElementById('ref-confirmed').style.display = 'none';
-  callSearchPhysicians(q, function(results){ renderRefDd(results); });
+  callSearchPhysicians(q, function(results, err){ renderRefDd(results, err); });
 }
 
 // ─── Consult type / CCFPP ────────────────────────────────────────────────────
