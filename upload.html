@@ -1,4 +1,49 @@
 <!DOCTYPE html>
+<!--
+===================================================================
+upload.html — KGH Historical Billing Tool
+-------------------------------------------------------------------
+Hosted:   kelownacardio.github.io/upload.html
+Repo:     github.com/KelownaCardio/kelownacardio.github.io
+
+VERSION HISTORY
+───────────────────────────────────────────────────────────────────
+v1.0  2026-05-08  Initial build. Single-card and batch OCR modes.
+                  Cloudflare Worker → Claude Vision extraction.
+                  Calendar with Daily / Combined / Directive / CCU.
+                  Export to CSV and Google Sheets (Uploaded Claims).
+                  Alias dropdown, CCFPP toggle, MOST toggle.
+
+v1.1  2026-05-09  Referring MD dropdown — server-side Apps Script
+                  search replaced with embedded BC_PHYSICIANS_LOCAL
+                  directory (2300 physicians, instant local search).
+                  Same dropdown pattern as main app (onmousedown,
+                  green confirmed chip, billing number shown).
+
+v1.2  2026-05-09  ICD-9 diagnosis dropdown — 100+ cardiology codes
+                  searchable by code or keyword. Common quick-picks
+                  on focus. Blue confirmed chip.
+
+v1.3  2026-05-09  Fee codes wired up: Daily→33008, Directive→33006,
+                  Combined→33008, CCU day1=1411/day2-7=1421/day8+=1431.
+                  Consult fee field removed (set by Consult/Lmtd
+                  Consult buttons: 33010/33012). Notes textarea added
+                  (appended to all claims for the patient).
+                  exportSheets switched from XHR to fetch() to handle
+                  Google Apps Script 302 redirect correctly.
+                  getScriptKey() function added (was undefined).
+
+v1.4  2026-05-09  Patient pre-check banner: fires after OCR fills
+                  form, queries Sheets for 2-of-3 match (PHN/last/DOB),
+                  shows existing claim count + 6 most recent claims.
+                  Pre-fills any blanks the OCR missed from Sheets data.
+                  OCR corrections logging: diffs OCR output vs final
+                  saved values, logs changed fields to OCR Corrections
+                  tab via saveHistorical payload (atomic, no extra call).
+                  Fixed CORRECTION_FIELDS mutation bug (was accumulating
+                  duplicate 'refby' entries across calls).
+===================================================================
+-->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
