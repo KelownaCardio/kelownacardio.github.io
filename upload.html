@@ -245,12 +245,13 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <!-- Patient -->
 <div class="card">
   <div class="card-title" id="patient-card-title">Patient</div>
+  <div id="lookup-banner" style="display:none;border-radius:var(--rsm);padding:10px 12px;margin-bottom:10px;font-size:12px"></div>
   <div class="row">
     <div><label>Last name *</label><input id="f-last" type="text" placeholder="Smith" oninput="refreshPreview()"></div>
     <div><label>First name *</label><input id="f-first" type="text" placeholder="Jane" oninput="refreshPreview()"></div>
   </div>
   <div class="row">
-    <div><label>PHN * (10 digits)</label><input id="f-phn" type="text" inputmode="numeric" placeholder="9123456789" oninput="refreshPreview()"></div>
+    <div><label>PHN * (10 digits)</label><input id="f-phn" type="text" inputmode="numeric" placeholder="9123456789" oninput="refreshPreview()" onblur="if(!window._ocrOriginal)lookupPatientFromSheets(this.value,'','')"></div>
     <div><label>DOB (DD/MM/YYYY)</label><input id="f-dob" type="text" placeholder="15/03/1958" oninput="refreshPreview()"></div>
   </div>
   <div class="row">
@@ -1130,6 +1131,10 @@ function clearForm() {
   pz.innerHTML='<svg style="width:26px;height:26px;stroke:var(--text3);fill:none;stroke-width:1.5" viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg><span style="font-size:12px;color:var(--text2)">Tap to photo or upload sticker</span>';
   pz.style.padding='';
   setStatus('ocr-status','','');
+  window._ocrOriginal = null;
+  var lb=document.getElementById('lookup-banner'); if(lb){lb.style.display='none';lb.innerHTML='';}
+  var ni=document.getElementById('c-notes'); if(ni) ni.value='';
+  clearIcd();
   renderCal(); refreshPreview();
 }
 
@@ -1168,6 +1173,10 @@ function loadBatchItem(idx) {
     document.getElementById('c-ref').value = item.refbyRaw;
     searchRefFromOCR(item.refbyRaw);
   }
+  // Store raw OCR output for corrections logging
+  window._ocrOriginal = { last:item.last||'', first:item.first||'', phn:item.phn||'',
+                           dob:item.dob||'', sex:item.sex||'', engine:'worker-batch' };
+  lookupPatientFromSheets(item.phn||'', item.last||'', item.dob||'');
   if (item.most) document.getElementById('c-most').checked = true;
   if (item.ccfppName) {
     document.getElementById('c-ccfpp').checked = true;
@@ -1293,7 +1302,11 @@ function sendSingleOCR(b64) {
     if (data.ward) document.getElementById('f-ward').value=data.ward;
     if (data.room) document.getElementById('f-room').value=data.room;
     setStatus('ocr-status','st-ok','Extracted: '+(data.last||'?')+', '+(data.first||'?')+(data.phn?' · PHN: '+data.phn:''));
+    // Store raw OCR output for corrections logging at save time
+    window._ocrOriginal = { last:data.last||'', first:data.first||'', phn:data.phn||'',
+                             dob:data.dob||'', sex:data.sex||'', engine:'worker' };
     refreshPreview();
+    lookupPatientFromSheets(data.phn||'', data.last||'', data.dob||'');
   };
   xhr.onerror=function(){ setStatus('ocr-status','st-warn','Network error'); };
   xhr.ontimeout=function(){ setStatus('ocr-status','st-warn','Timed out'); };
@@ -1347,6 +1360,124 @@ function sendBatchOCR(dataUrl) {
     xhr.send(JSON.stringify({image:b64,mediaType:'image/jpeg',mode:'card-batch'}));
   };
   img.src=dataUrl;
+}
+
+
+// ─── Patient pre-check ───────────────────────────────────────────────────────
+// Fires right after OCR fills the form (or on manual PHN blur).
+// Shows a banner above the patient card: found/not-found + existing claim count.
+
+function lookupPatientFromSheets(phn, last, dob) {
+  var url = document.getElementById('script-url').value.trim();
+  var lb  = document.getElementById('lookup-banner');
+  if (!url || (!phn && !last)) { if(lb) lb.style.display='none'; return; }
+
+  lb.style.display='block';
+  lb.style.background='var(--surface2)';
+  lb.style.color='var(--text3)';
+  lb.style.border='.5px solid var(--border)';
+  lb.innerHTML='<span style="opacity:.6">Checking records…</span>';
+
+  fetch(url, { method:'POST',
+    body: JSON.stringify({ action:'lookupPatient', key:getScriptKey(), phn:phn, last:last, dob:dob }) })
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      renderLookupBanner(lb, data);
+    })
+    .catch(function(){ lb.style.display='none'; });
+}
+
+function renderLookupBanner(lb, data) {
+  if (!data || data.error) { lb.style.display='none'; return; }
+
+  if (!data.found && data.claimCount === 0) {
+    lb.style.background='var(--surface2)';
+    lb.style.color='var(--text2)';
+    lb.style.border='.5px solid var(--border)';
+    lb.innerHTML='<b>New patient</b> — not found in Patients tab, no existing claims.';
+    return;
+  }
+
+  var lines = [];
+  if (data.found && data.patient) {
+    var p = data.patient;
+    var matchStr = data.matchedOn && data.matchedOn.length ? ' (matched on ' + data.matchedOn.join(' + ') + ')' : '';
+    lines.push('<b>Found:</b> ' + esc(p.last) + ', ' + esc(p.first) +
+               (p.dob ? ' · DOB ' + esc(p.dob) : '') +
+               (p.ward ? ' · ' + esc(p.ward) : '') + matchStr);
+    // Pre-fill any blanks the OCR missed
+    if (p.dob  && !document.getElementById('f-dob').value)  document.getElementById('f-dob').value  = p.dob;
+    if (p.sex  && !document.getElementById('f-sex').value)  document.getElementById('f-sex').value  = p.sex;
+    if (p.ward && !document.getElementById('f-ward').value) document.getElementById('f-ward').value = p.ward;
+  }
+
+  if (data.claimCount > 0) {
+    lines.push('<b>' + data.claimCount + ' existing claim' + (data.claimCount===1?'':'s') + '</b> on file.');
+    if (data.recentClaims && data.recentClaims.length) {
+      var recent = data.recentClaims.slice(0, 5).map(function(c){
+        return esc(c.date) + ' ' + esc(c.fee) + (c.claimType?' ('+esc(c.claimType)+')':'');
+      });
+      lines.push('<span style="color:var(--text3);font-size:11px">Most recent: ' + recent.join(' · ') + '</span>');
+    }
+    lb.style.background='var(--amber-bg)';
+    lb.style.color='var(--amber-t)';
+    lb.style.border='.5px solid var(--amber)';
+  } else {
+    lb.style.background='var(--green-bg)';
+    lb.style.color='var(--green-t)';
+    lb.style.border='.5px solid var(--green)';
+  }
+
+  lb.innerHTML = lines.join('<br>');
+}
+
+
+// ─── OCR corrections diff ────────────────────────────────────────────────────
+// Compares the original OCR extraction (window._ocrOriginal) to the final
+// saved form values. Returns an array of {field, ocr_value, corrected_value}
+// for any field that changed meaningfully.
+
+var CORRECTION_FIELDS = ['last','first','phn','dob','sex'];
+
+function buildCorrections(phn, last, first) {
+  if (!window._ocrOriginal) return [];
+  var orig = window._ocrOriginal;
+  var current = {
+    last:  (document.getElementById('f-last').value  ||'').trim(),
+    first: (document.getElementById('f-first').value ||'').trim(),
+    phn:   (document.getElementById('f-phn').value   ||'').trim().replace(/\D/g,''),
+    dob:   (document.getElementById('f-dob').value   ||'').trim(),
+    sex:   (document.getElementById('f-sex').value   ||'').trim()
+  };
+  var refInp = document.getElementById('c-ref');
+  var origRef = orig.refbyRaw || '';
+  var finalRef = (refInp && refInp.dataset.refname) ? refInp.dataset.refname : '';
+  var fieldsToCheck = CORRECTION_FIELDS.slice(); // always use a fresh copy
+  if (origRef || finalRef) {
+    orig.refby   = origRef;
+    current.refby = finalRef;
+    fieldsToCheck.push('refby');
+  }
+
+  var corrections = [];
+  var seen = {};
+  fieldsToCheck.forEach(function(field) {
+    if (seen[field]) return; seen[field] = true;
+    var ov = String(orig[field]  || '').trim();
+    var cv = String(current[field] || '').trim();
+    if (ov && cv && ov !== cv) {
+      corrections.push({
+        phn:             phn || current.phn,
+        patientName:     (last||current.last) + ', ' + (first||current.first),
+        field:           field,
+        ocr_value:       ov,
+        corrected_value: cv,
+        engine:          orig.engine || 'worker',
+        source:          'upload'
+      });
+    }
+  });
+  return corrections;
 }
 
 // ─── Export ───────────────────────────────────────────────────────────────────
@@ -1422,7 +1553,12 @@ function exportSheets() {
   var claims=getExportClaims();
   if (!claims.length){ setStatus('export-status','st-warn','No claims to export.'); return; }
   setStatus('export-status','st-info','Sending to Sheets…');
-  var payload=JSON.stringify({action:'saveHistorical', key:getScriptKey(), claims:claimsToPayload(sortClaimsForExport(claims))});
+  // Build corrections diff before sending (while form values are still present)
+  var sampleClaim = claims[0] || {};
+  var corrections = buildCorrections(sampleClaim.phn, sampleClaim.last, sampleClaim.first);
+  var payload=JSON.stringify({action:'saveHistorical', key:getScriptKey(),
+    claims:claimsToPayload(sortClaimsForExport(claims)),
+    corrections:corrections});
   // Use fetch — handles Google Apps Script 302 redirect correctly (XHR loses POST body on redirect)
   var ctrl=new AbortController();
   var timer=setTimeout(function(){ ctrl.abort(); setStatus('export-status','st-warn','Request timed out after 90s'); }, 90000);
@@ -1433,7 +1569,7 @@ function exportSheets() {
       var data; try{ data=JSON.parse(text); }catch(e){ data={}; }
       if (data.ok) {
         var ins=data.inserted||0, dups=data.duplicates||[];
-        var msg='Saved '+ins+' claim'+(ins===1?'':'s')+' to Uploaded Claims tab ✓';
+        var msg='Saved '+ins+' claim'+(ins===1?'':'s')+' to Uploaded Claims tab ✓'+(corrections.length?' · '+corrections.length+' OCR correction'+(corrections.length===1?'':'s')+' logged':'');
         if (dups.length) {
           msg+='\n\n⚠ '+dups.length+' duplicate'+(dups.length===1?'':'s')+' skipped:\n';
           msg+=dups.map(function(d){ return '  '+d.name+' · '+d.fee+' · '+d.date+' ('+d.reason+')'; }).join('\n');
