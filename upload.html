@@ -156,6 +156,12 @@ input[type=checkbox]{width:auto;margin-right:6px;accent-color:var(--blue)}
 .ctype-pick{display:flex;gap:6px;margin-bottom:6px}
 .ctype-pill{flex:1;padding:9px;text-align:center;font-size:13px;font-weight:600;border-radius:var(--rsm);border:.5px solid var(--border2);cursor:pointer;background:var(--surface2);color:var(--text2)}
 .ctype-pill.sel{background:var(--amber-bg);color:var(--amber-t);border-color:var(--amber)}
+.mod-banner{border-radius:var(--rsm);padding:8px 12px;font-size:12px;margin-top:8px;font-weight:600}
+.mod-banner.mod-night  {background:#fde8e8;color:#8b1a1a;border:.5px solid #f5a0a0}
+.mod-banner.mod-weekend{background:#e8f5e8;color:#1a5c1a;border:.5px solid #8bc88b}
+.mod-banner.mod-evening{background:#fff3e0;color:#7c4000;border:.5px solid #ffb74d}
+.mod-banner.mod-day    {background:var(--surface2);color:var(--text2);border:.5px solid var(--border)}
+.mod-banner .mod-inc   {font-weight:400;font-size:11px;opacity:.8;margin-top:3px}
 .icd-confirmed{display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--blue-bg);border-radius:var(--rsm);margin-top:6px}
 .icd-confirmed-code{font-size:14px;font-weight:700;color:var(--blue-t);font-family:ui-monospace,"SF Mono",monospace}
 .icd-confirmed-desc{font-size:12px;color:var(--blue-t);flex:1;margin-left:6px}
@@ -357,9 +363,10 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
       </div>
     </div>
     <div class="row">
-      <div><label>Start time</label><input id="c-start" type="time" oninput="refreshPreview()"></div>
-      <div><label>End time</label><input id="c-end" type="time" oninput="refreshPreview()"></div>
+      <div><label>Start time</label><input id="c-start" type="time" oninput="onStartTimeChange()"></div>
+      <div><label>End time</label><input id="c-end" type="time" oninput="updateModifierBanner()"></div>
     </div>
+    <div id="mod-banner"></div>
     <label>Referring MD</label>
     <div class="ref-wrap" id="ref-wrap">
       <input id="c-ref" type="text" placeholder="Search by last name…" oninput="onRefInput()" onblur="closeRefDdDelayed()" autocomplete="off">
@@ -1045,6 +1052,151 @@ function renderCal() {
 function onConsultDateChange() {
   var iso = document.getElementById('c-date').value;
   if (iso) { var d=new Date(iso+'T12:00:00'); st.calMonth=new Date(d.getFullYear(),d.getMonth(),1); renderCal(); }
+  updateModifierBanner();
+  refreshPreview();
+}
+
+
+// ─── BC Stat Holidays + Call Modifier Detection ───────────────────────────────
+// Ported directly from index.html (04_billing.js)
+
+function pad(n){ return n < 10 ? '0' + n : String(n); }
+
+function easterDate(y) {
+  var a=y%19, b=Math.floor(y/100), c=y%100, d=Math.floor(b/4), e=b%4,
+      f=Math.floor((b+8)/25), g=Math.floor((b-f+1)/3),
+      h=(19*a+b-d-g+15)%30, i=Math.floor(c/4), k=c%4,
+      l=(32+2*e+2*i-h-k)%7, m=Math.floor((a+11*h+22*l)/451),
+      mo=Math.floor((h+l-7*m+114)/31), da=((h+l-7*m+114)%31)+1;
+  return new Date(y, mo-1, da);
+}
+
+function bcStatHolidays(year) {
+  var y = year;
+  function nthMon(n, m) { var d=new Date(y,m,1); d.setDate(1+(8-d.getDay())%7+(n-1)*7); return d; }
+  function monBefore(m, day) { var d=new Date(y,m,day); while(d.getDay()!==1) d.setDate(d.getDate()-1); return d; }
+  var easter = easterDate(y);
+  var goodFri = new Date(easter); goodFri.setDate(easter.getDate()-2);
+  var easterMon = new Date(easter); easterMon.setDate(easter.getDate()+1);
+  return [
+    new Date(y,0,1),       // New Year's Day
+    nthMon(3,1),           // Family Day — 3rd Monday Feb
+    goodFri,               // Good Friday
+    easterMon,             // Easter Monday
+    monBefore(4,25),       // Victoria Day — Monday before May 25
+    new Date(y,6,1),       // Canada Day
+    nthMon(1,7),           // BC Day — 1st Monday Aug
+    nthMon(1,8),           // Labour Day — 1st Monday Sep
+    new Date(y,8,30),      // National Day for Truth & Reconciliation
+    nthMon(2,9),           // Thanksgiving — 2nd Monday Oct
+    new Date(y,10,11),     // Remembrance Day
+    new Date(y,11,25),     // Christmas Day
+    new Date(y,11,26),     // Boxing Day
+  ].map(function(d) {
+    return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+  });
+}
+
+function isBCStat(dateStr) {
+  var d = new Date(dateStr + 'T12:00:00');
+  var key = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+  return bcStatHolidays(d.getFullYear()).indexOf(key) !== -1;
+}
+
+function isWeekendOrStat(dateStr) {
+  if (!dateStr) return false;
+  var d = new Date(dateStr + 'T12:00:00'); var dow = d.getDay();
+  return dow === 0 || dow === 6 || isBCStat(dateStr);
+}
+
+function t2m(s) {
+  if (!s) return -1;
+  var p = String(s).split(':');
+  return parseInt(p[0]) * 60 + parseInt(p[1] || 0);
+}
+
+function minsToTime(m) {
+  m = ((m % 1440) + 1440) % 1440;
+  var h = Math.floor(m / 60), mn = m % 60;
+  return pad(h) + ':' + pad(mn);
+}
+
+// Priority: night (23:00-07:59) > weekend/stat (any time) > evening (18:00-22:59)
+function getModifier(timeStr, dateStr) {
+  if (!dateStr) return null;
+  var mins = t2m(timeStr);
+  if (mins >= 0 && (mins >= 23*60 || mins < 8*60))
+    return { type:'night',   base:'1201', inc:'1206', label:'Night call (23:00–07:59)',   cls:'mod-night'   };
+  if (isWeekendOrStat(dateStr))
+    return { type:'weekend', base:'1202', inc:'1207', label:'Weekend / stat holiday',     cls:'mod-weekend' };
+  if (mins >= 0 && mins >= 18*60)
+    return { type:'evening', base:'1200', inc:'1205', label:'Evening call (18:00–22:59)', cls:'mod-evening' };
+  return null;
+}
+
+function getModifierForIncrement(startTimeStr, dateStr) {
+  if (!startTimeStr) return null;
+  var incTime = minsToTime((t2m(startTimeStr) + 30) % 1440);
+  return getModifier(incTime, dateStr);
+}
+
+function consultHasIncrement(startTimeStr, endTimeStr) {
+  if (!startTimeStr || !endTimeStr) return false;
+  var s = t2m(startTimeStr), e = t2m(endTimeStr);
+  if (e < s) e += 1440;
+  return (e - s) >= 45;
+}
+
+function consultIncUnits(startTimeStr, endTimeStr) {
+  if (!startTimeStr || !endTimeStr) return 0;
+  var s = t2m(startTimeStr), e = t2m(endTimeStr);
+  if (e < s) e += 1440;
+  var dur = e - s;
+  if (dur < 45) return 0;
+  var units = 0;
+  for (var n = 1; n <= 10; n++) {
+    if (dur >= 15 + n * 30) units = n; else break;
+  }
+  return units;
+}
+
+function onStartTimeChange() {
+  var startEl = document.getElementById('c-start');
+  var endEl   = document.getElementById('c-end');
+  if (startEl && startEl.value && endEl) {
+    endEl.value = minsToTime(t2m(startEl.value) + 50); // default 50-min consult
+  }
+  updateModifierBanner();
+}
+
+function updateModifierBanner() {
+  var start   = (document.getElementById('c-start')||{}).value;
+  var end     = (document.getElementById('c-end')||{}).value;
+  var dateISO = (document.getElementById('c-date')||{}).value;
+  var el      = document.getElementById('mod-banner');
+  if (!el || st.consultType === 'none') { if(el) el.innerHTML=''; return; }
+  if (!start && !dateISO) { el.innerHTML = ''; return; }
+
+  var modBase  = getModifier(start, dateISO);
+  var incUnits = consultIncUnits(start, end);
+  var modInc   = incUnits > 0 ? getModifierForIncrement(start, dateISO) : null;
+
+  if (modBase) {
+    var html2 = '<div class="mod-banner ' + modBase.cls + '">';
+    html2 += modBase.label + ' — adds <strong>' + modBase.base + '</strong> ×1';
+    if (incUnits > 0) {
+      var im = modInc || modBase;
+      html2 += '<div class="mod-inc">Consult &gt; 45 min — adds <strong>' + im.inc + '</strong> ×' + incUnits + ' increment</div>';
+    } else if (end) {
+      html2 += '<div class="mod-inc">Duration ≤ 45 min — no increment</div>';
+    }
+    html2 += '</div>';
+    el.innerHTML = html2;
+  } else if (dateISO && isWeekendOrStat && start) {
+    el.innerHTML = '<div class="mod-banner mod-day">✓ Daytime weekday — no call-out modifier</div>';
+  } else {
+    el.innerHTML = '';
+  }
   refreshPreview();
 }
 
@@ -1080,9 +1232,21 @@ function buildClaims() {
       var fpp = (document.getElementById('c-ccfpp-ph').value||'').trim();
       cnotes = 'CCFPP '+fpn+(fpp?' '+fpp:'');
     }
-    claims.push(Object.assign({},base,{ id:uid(), claimType:st.consultType, date:cDate, fee:fee, icd:dx, refby:refNum, refbyName:refName, startTime:start, endTime:end, notes:cnotes, _sortDate:cDate, _sortSub:0 }));
+    var fullNote = [cnotes, extraNotes].filter(function(s){return s;}).join(' | ');
+    claims.push(Object.assign({},base,{ id:uid(), claimType:st.consultType, date:cDate, fee:fee, icd:dx, refby:refNum, refbyName:refName, startTime:start, endTime:end, notes:fullNote, _sortDate:cDate, _sortSub:0 }));
     if (document.getElementById('c-most').checked)
       claims.push(Object.assign({},base,{ id:uid(), claimType:'most', date:cDate, fee:'03701', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:'MOST add-on', _sortDate:cDate, _sortSub:1 }));
+    // Modifier claims (night / weekend+stat / evening)
+    var modBase  = getModifier(start, cDate);
+    var incUnits = consultIncUnits(start, end);
+    var modInc   = incUnits > 0 ? getModifierForIncrement(start, cDate) : null;
+    if (modBase) {
+      claims.push(Object.assign({},base,{ id:uid(), claimType:'modifier', date:cDate, fee:modBase.base, icd:dx, refby:refNum, refbyName:refName, startTime:start, endTime:end, notes:fullNote, _sortDate:cDate, _sortSub:2 }));
+      if (modInc) {
+        var incStart = minsToTime((t2m(start) + 30) % 1440);
+        claims.push(Object.assign({},base,{ id:uid(), claimType:'modifier-inc', date:cDate, fee:modInc.inc, icd:dx, refby:refNum, refbyName:refName, startTime:incStart, endTime:'', notes:fullNote, _sortDate:cDate, _sortSub:2, _units:incUnits }));
+      }
+    }
   }
 
   if (typeof extraNotes === 'undefined') var extraNotes = (document.getElementById('c-notes')||{value:''}).value.trim();
@@ -1546,6 +1710,7 @@ function claimsToPayload(claims) {
     return { id:c.id, alias:c.alias, last:c.last, first:c.first, phn:c.phn,
              dob:c.dob, sex:c.sex, ward:c.ward||'', room:c.room||'',
              claimType:c.claimType, fee:c.fee, icd:c.icd||'',
+             units: c._units || 1,
              date:isoToBc(c.date), startTime:c.startTime||'', endTime:c.endTime||'',
              refby:c.refby||'', refbyName:c.refbyName||'', notes:c.notes||'', source:'historical' };
   });
