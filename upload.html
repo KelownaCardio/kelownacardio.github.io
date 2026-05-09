@@ -455,31 +455,75 @@ function switchMode(m) {
   updateConfirmedBar();
 }
 
-// ─── Referrer search (server-side via searchPhysicians) ──────────────────────
+// ─── Referrer search — local BC directory, same as main app ─────────────────
 
 var _refCloseTimer = null;
-
-function callSearchPhysicians(q, callback) {
-  var url = document.getElementById('script-url').value.trim();
-  if (!url || q.length < 2) { callback([], null); return; }
-  var xhr = new XMLHttpRequest();
-  xhr.open('POST', url, true);
-  xhr.setRequestHeader('Content-Type','application/json');
-  xhr.timeout = 10000;
-  xhr.onload = function(){
-    var data; try { data = JSON.parse(xhr.responseText); } catch(e) { callback([], 'Bad response: ' + xhr.responseText.slice(0,80)); return; }
-    if (Array.isArray(data)) { callback(data, null); return; }
-    if (data && Array.isArray(data.results)) { callback(data.results, null); return; }
-    if (data && Array.isArray(data.physicians)) { callback(data.physicians, null); return; }
-    callback([], 'Unexpected: ' + JSON.stringify(data).slice(0,100));
-  };
-  xhr.onerror   = function(){ callback([], 'Network error'); };
-  xhr.ontimeout = function(){ callback([], 'Search timed out'); };
-  xhr.send(JSON.stringify({ action:'searchPhysicians', key:getScriptKey(), q:q }));
-}
+var _remoteRefTimer = null;
+var _lastRefQ = '';
 
 function normQuery(raw) {
   return (raw||'').replace(/^dr\.?\s*/i,'').replace(/\(.*\)/,'').replace(/[^a-z0-9 ]/gi,'').trim();
+}
+
+function searchPhysiciansLocal(query) {
+  var q = query.toLowerCase().trim();
+  var results = [], seen = {};
+  if (typeof BC_PHYSICIANS_LOCAL === 'undefined') return results;
+  for (var i = 0; i < BC_PHYSICIANS_LOCAL.length; i++) {
+    var p = BC_PHYSICIANS_LOCAL[i];
+    var fullName = (p[0] + ' ' + p[1]).toLowerCase();
+    var num = String(p[2]).toLowerCase();
+    if (fullName.indexOf(q) !== -1 || num.indexOf(q) !== -1) {
+      if (!seen[p[2]]) {
+        seen[p[2]] = true;
+        results.push({ last:p[0], first:p[1], num:p[2], spec:p[3]||'', city:p[4]||'' });
+        if (results.length >= 15) break;
+      }
+    }
+  }
+  return results;
+}
+
+function buildRefRowHtml(r) {
+  var display = 'Dr. ' + r.last + (r.first ? ', ' + r.first : '');
+  var sub = (r.spec||'') + (r.city ? (r.spec ? ' • ' : '') + r.city : '');
+  var specShort = r.spec ? r.spec.split(' - ')[0] : '';
+  var subLine = specShort + (r.city ? (specShort ? ' • ' : '') + r.city : '');
+  return '<div class="ref-dd-row" data-num="' + esc(r.num) + '" data-name="' + esc(display) + '"' +
+         ' data-spec="' + esc(specShort) + '" data-city="' + esc(r.city||'') + '"' +
+         ' onmousedown="event.preventDefault();selectRefRow(this)"' +
+         ' ontouchstart="event.preventDefault();selectRefRow(this)">' +
+         '<div class="ref-dd-name">' + esc(display) + ' <span style="color:var(--text3);font-family:ui-monospace,monospace;font-size:11px">#' + esc(r.num) + '</span></div>' +
+         (subLine ? '<div class="ref-dd-sub">' + esc(subLine) + '</div>' : '') +
+         '</div>';
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function refSearch(query) {
+  var dd = document.getElementById('ref-dd');
+  if (!dd) return;
+
+  if (!query || !query.trim()) {
+    if (typeof BC_PHYSICIANS_LOCAL !== 'undefined') {
+      var kelowna = BC_PHYSICIANS_LOCAL.filter(function(p){ return p[4]==='Kelowna'; }).slice(0,12);
+      dd.innerHTML = '<div style="padding:5px 10px;font-size:10px;color:var(--text3)">Type to search all BC physicians</div>' +
+        kelowna.map(function(p){ return buildRefRowHtml({last:p[0],first:p[1],num:p[2],spec:p[3]||'',city:p[4]||''}); }).join('');
+      dd.classList.add('open');
+    }
+    return;
+  }
+
+  var local = searchPhysiciansLocal(query);
+  if (!local.length) {
+    dd.innerHTML = '<div style="padding:8px 10px;font-size:11px;color:var(--text2)">No results for “' + esc(query) + '”</div>';
+    dd.classList.add('open');
+    return;
+  }
+  dd.innerHTML = local.map(buildRefRowHtml).join('');
+  dd.classList.add('open');
 }
 
 function onRefInput() {
@@ -493,62 +537,33 @@ function onRefInput() {
   refreshPreview();
   var q = normQuery(inp.value);
   if (q.length < 2) { closeRefDd(); return; }
-  // Show loading row immediately
-  showRefDdMessage('Searching…', 'var(--text3)');
-  callSearchPhysicians(q, function(results, err){ renderRefDd(results, err); });
+  refSearch(q);
 }
 
-function showRefDdMessage(msg, color) {
-  var dd = document.getElementById('ref-dd');
-  dd.innerHTML = '<div style="padding:10px 12px;font-size:12px;color:' + color + '">' + msg + '</div>';
-  dd.classList.add('open');
+function selectRefRow(el) {
+  if (el && !el.hasAttribute('data-num')) el = el.closest('.ref-dd-row');
+  if (!el) return;
+  var num     = el.getAttribute('data-num')  || '';
+  var name    = el.getAttribute('data-name') || '';
+  var spec    = el.getAttribute('data-spec') || '';
+  var city    = el.getAttribute('data-city') || '';
+  selectRefConfirm(num, name, spec, city);
 }
 
-function renderRefDd(results, err) {
-  var dd = document.getElementById('ref-dd');
-  dd.innerHTML = '';
-  if (err) {
-    showRefDdMessage('⚠ ' + err, 'var(--amber-t)');
-    return;
-  }
-  if (!results || !results.length) {
-    showRefDdMessage('No results', 'var(--text3)');
-    return;
-  }
-  results.forEach(function(r){
-    var row = document.createElement('div');
-    row.className = 'ref-dd-row';
-    var nameStr = 'Dr. ' + r.last + (r.first ? ', ' + r.first : '');
-    var subParts = [];
-    if (r.spec) subParts.push(r.spec.split(' - ')[0]);
-    if (r.city) subParts.push(r.city);
-    row.innerHTML =
-      '<div class="ref-dd-name">' + nameStr + '</div>' +
-      (subParts.length ? '<div class="ref-dd-sub">' + subParts.join(' · ') + '</div>' : '') +
-      (r.num ? '<div class="ref-dd-num">Billing #' + r.num + '</div>' : '');
-    row.addEventListener('mousedown', function(e){ e.preventDefault(); selectRef(r); });
-    row.addEventListener('touchstart', function(e){ e.preventDefault(); selectRef(r); }, {passive:false});
-    dd.appendChild(row);
-  });
-  dd.classList.add('open');
-}
-
-function selectRef(r) {
+function selectRefConfirm(num, name, spec, city) {
   if (_refCloseTimer) { clearTimeout(_refCloseTimer); _refCloseTimer = null; }
-  var refName = 'Dr. ' + r.last + (r.first ? ', ' + r.first : '');
   var inp = document.getElementById('c-ref');
-  inp.value = refName;
-  inp.dataset.docnum  = r.num   || '';
-  inp.dataset.refname = refName;
+  inp.value = name;
+  inp.dataset.docnum  = num;
+  inp.dataset.refname = name;
   closeRefDd();
   // Show confirmed chip
-  document.getElementById('ref-confirmed-name').textContent = refName;
-  var numStr = r.num ? 'Billing #' + r.num : '';
-  var subParts = [];
-  if (r.spec) subParts.push(r.spec.split(' - ')[0]);
-  if (r.city) subParts.push(r.city);
-  if (numStr) subParts.unshift(numStr);
-  document.getElementById('ref-confirmed-num').textContent = subParts.join(' · ');
+  document.getElementById('ref-confirmed-name').textContent = name;
+  var parts = [];
+  if (num)  parts.push('Billing #' + num);
+  if (spec) parts.push(spec.split(' - ')[0]);
+  if (city) parts.push(city);
+  document.getElementById('ref-confirmed-num').textContent = parts.join(' · ');
   document.getElementById('ref-confirmed').style.display = 'flex';
   refreshPreview();
 }
@@ -575,14 +590,12 @@ function closeRefDdDelayed() {
 // When batch loads a patient with a refbyRaw, auto-search and pre-populate
 function searchRefFromOCR(raw) {
   var q = normQuery(raw);
-  if (q.length < 2) return;
-  // Pre-fill the input with the raw OCR text so the user sees what was extracted
   var inp = document.getElementById('c-ref');
   inp.value = raw;
   inp.dataset.docnum  = '';
   inp.dataset.refname = '';
   document.getElementById('ref-confirmed').style.display = 'none';
-  callSearchPhysicians(q, function(results, err){ renderRefDd(results, err); });
+  if (q.length >= 2) refSearch(q);
 }
 
 // ─── Consult type / CCFPP ────────────────────────────────────────────────────
