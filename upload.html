@@ -111,11 +111,21 @@ input[type=checkbox]{width:auto;margin-right:6px;accent-color:var(--blue)}
 .ctype-pick{display:flex;gap:6px;margin-bottom:6px}
 .ctype-pill{flex:1;padding:9px;text-align:center;font-size:13px;font-weight:600;border-radius:var(--rsm);border:.5px solid var(--border2);cursor:pointer;background:var(--surface2);color:var(--text2)}
 .ctype-pill.sel{background:var(--amber-bg);color:var(--amber-t);border-color:var(--amber)}
-/* referrer suggestions */
-.ref-suggestions{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;min-height:0}
-.ref-chip{font-size:11px;font-weight:600;padding:5px 10px;border-radius:20px;background:var(--surface2);border:.5px solid var(--border2);cursor:pointer;color:var(--text2)}
-.ref-chip:hover{background:var(--blue-bg);color:var(--blue-t)}
-.ref-chip.matched{background:var(--green-bg);color:var(--green-t);border-color:var(--green)}
+/* referrer dropdown */
+.ref-wrap{position:relative}
+.ref-dd{position:absolute;left:0;right:0;top:calc(100% + 2px);background:var(--surface);border:.5px solid var(--border2);border-radius:var(--rsm);z-index:100;box-shadow:0 4px 20px rgba(0,0,0,.14);max-height:230px;overflow-y:auto;display:none}
+.ref-dd.open{display:block}
+.ref-dd-row{padding:10px 12px;cursor:pointer;border-bottom:.5px solid var(--border)}
+.ref-dd-row:last-child{border-bottom:none}
+.ref-dd-row:hover,.ref-dd-row.hover{background:var(--blue-bg)}
+.ref-dd-name{font-size:13px;font-weight:600;color:var(--text)}
+.ref-dd-sub{font-size:11px;color:var(--text2);margin-top:2px}
+.ref-dd-num{font-size:10px;color:var(--text3);font-family:ui-monospace,"SF Mono",monospace;margin-top:1px}
+.ref-confirmed{display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--green-bg);border-radius:var(--rsm);margin-top:6px}
+.ref-confirmed-name{font-size:13px;font-weight:700;color:var(--green-t);flex:1}
+.ref-confirmed-num{font-size:11px;color:var(--green-t);opacity:.75;font-family:ui-monospace,"SF Mono",monospace}
+.ref-confirmed-clear{background:none;border:none;cursor:pointer;color:var(--green-t);font-size:16px;padding:0 2px;line-height:1;opacity:.7}
+.ref-confirmed-clear:hover{opacity:1}
 /* batch queue */
 .queue-bar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
 .q-chip{font-size:11px;font-weight:600;padding:5px 10px;border-radius:20px;cursor:pointer;border:2px solid transparent;background:var(--surface2);color:var(--text2);white-space:nowrap}
@@ -281,8 +291,17 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
       <div><label>End time</label><input id="c-end" type="time" oninput="refreshPreview()"></div>
     </div>
     <label>Referring MD</label>
-    <input id="c-ref" type="text" placeholder="Dr. Smith" oninput="onRefInput()">
-    <div id="ref-suggestions" class="ref-suggestions"></div>
+    <div class="ref-wrap" id="ref-wrap">
+      <input id="c-ref" type="text" placeholder="Search by last name…" oninput="onRefInput()" onblur="closeRefDdDelayed()" autocomplete="off">
+      <div id="ref-dd" class="ref-dd"></div>
+    </div>
+    <div id="ref-confirmed" class="ref-confirmed" style="display:none">
+      <div style="flex:1">
+        <div class="ref-confirmed-name" id="ref-confirmed-name"></div>
+        <div class="ref-confirmed-num" id="ref-confirmed-num"></div>
+      </div>
+      <button class="ref-confirmed-clear" onclick="clearRef()" title="Clear">✕</button>
+    </div>
     <div class="tgl-row" style="margin-top:10px">
       <div><div class="tgl-lbl">+MOST</div><div class="tgl-sub">MOST claim same day</div></div>
       <label class="tgl"><input type="checkbox" id="c-most" onchange="refreshPreview()"><div class="tgl-track"></div><div class="tgl-thumb"></div></label>
@@ -438,6 +457,7 @@ function switchMode(m) {
 
 // ─── Referrer search (server-side via searchPhysicians) ──────────────────────
 
+var _refCloseTimer = null;
 
 function callSearchPhysicians(q, callback) {
   var url = document.getElementById('script-url').value.trim();
@@ -456,57 +476,98 @@ function callSearchPhysicians(q, callback) {
 }
 
 function normQuery(raw) {
-  // Strip "Dr." prefix and location suffixes like "(Salmon Arm)"
   return (raw||'').replace(/^dr\.?\s*/i,'').replace(/\(.*\)/,'').replace(/[^a-z0-9 ]/gi,'').trim();
 }
 
 function onRefInput() {
-  refreshPreview();
-  var raw = document.getElementById('c-ref').value;
-  var q = normQuery(raw);
-  var box = document.getElementById('ref-suggestions');
-  if (!document.getElementById('script-url').value.trim()) {
-    box.innerHTML = '<div style="font-size:11px;color:var(--amber-t);padding:4px 0">Configure Apps Script URL in settings to enable physician search</div>';
-    return;
+  // If the field was cleared manually, reset confirmed state
+  var inp = document.getElementById('c-ref');
+  if (!inp.value.trim()) { clearRef(true); return; }
+  // If a match is already confirmed and the user edits the text, reopen search
+  if (inp.dataset.docnum) {
+    inp.dataset.docnum = '';
+    inp.dataset.refname = '';
+    document.getElementById('ref-confirmed').style.display = 'none';
   }
-  if (q.length < 2) { box.innerHTML = ''; return; }
-  callSearchPhysicians(q, function(results){ renderRefSuggestions(results); });
+  refreshPreview();
+  var q = normQuery(inp.value);
+  if (q.length < 2) { closeRefDd(); return; }
+  callSearchPhysicians(q, function(results){ renderRefDd(results); });
 }
 
-function renderRefSuggestions(results) {
-  var box = document.getElementById('ref-suggestions');
-  box.innerHTML = '';
-  if (!results || !results.length) return;
+function renderRefDd(results) {
+  var dd = document.getElementById('ref-dd');
+  dd.innerHTML = '';
+  if (!results || !results.length) { dd.classList.remove('open'); return; }
   results.forEach(function(r){
-    var chip = document.createElement('div');
-    chip.className = 'ref-chip';
-    // r is {last, first, num, spec, city} from searchPhysicians
-    var label = 'Dr. ' + r.last + (r.first ? ', ' + r.first : '')
-              + (r.spec ? ' · ' + r.spec.split(' - ')[0] : '')
-              + (r.city ? ' (' + r.city + ')' : '')
-              + (r.num  ? ' [' + r.num + ']'  : '');
-    chip.textContent = label;
-    chip.addEventListener('click', function(){
-      // Display: "Dr. LastName, FirstName" — matches iClinic refbyName format
-      var refName = 'Dr. ' + r.last + (r.first ? ', ' + r.first : '');
-      var el = document.getElementById('c-ref');
-      el.value = refName;
-      el.dataset.docnum  = r.num  || '';   // billing number → refby in export
-      el.dataset.refname = refName;        // formatted name  → refbyName in export
-      box.innerHTML = '';
-      chip.className = 'ref-chip matched';
-      box.appendChild(chip);
-      refreshPreview();
-    });
-    box.appendChild(chip);
+    var row = document.createElement('div');
+    row.className = 'ref-dd-row';
+    var nameStr = 'Dr. ' + r.last + (r.first ? ', ' + r.first : '');
+    var subParts = [];
+    if (r.spec) subParts.push(r.spec.split(' - ')[0]);
+    if (r.city) subParts.push(r.city);
+    row.innerHTML =
+      '<div class="ref-dd-name">' + nameStr + '</div>' +
+      (subParts.length ? '<div class="ref-dd-sub">' + subParts.join(' · ') + '</div>' : '') +
+      (r.num ? '<div class="ref-dd-num">Billing #' + r.num + '</div>' : '');
+    // onmousedown fires before blur — prevents iOS dropdown-closes-before-click race
+    row.addEventListener('mousedown', function(e){ e.preventDefault(); selectRef(r); });
+    row.addEventListener('touchstart', function(e){ e.preventDefault(); selectRef(r); }, {passive:false});
+    dd.appendChild(row);
   });
+  dd.classList.add('open');
 }
 
-// When batch loads a patient with a refbyRaw, auto-search it
+function selectRef(r) {
+  if (_refCloseTimer) { clearTimeout(_refCloseTimer); _refCloseTimer = null; }
+  var refName = 'Dr. ' + r.last + (r.first ? ', ' + r.first : '');
+  var inp = document.getElementById('c-ref');
+  inp.value = refName;
+  inp.dataset.docnum  = r.num   || '';
+  inp.dataset.refname = refName;
+  closeRefDd();
+  // Show confirmed chip
+  document.getElementById('ref-confirmed-name').textContent = refName;
+  var numStr = r.num ? 'Billing #' + r.num : '';
+  var subParts = [];
+  if (r.spec) subParts.push(r.spec.split(' - ')[0]);
+  if (r.city) subParts.push(r.city);
+  if (numStr) subParts.unshift(numStr);
+  document.getElementById('ref-confirmed-num').textContent = subParts.join(' · ');
+  document.getElementById('ref-confirmed').style.display = 'flex';
+  refreshPreview();
+}
+
+function clearRef(keepInput) {
+  var inp = document.getElementById('c-ref');
+  if (!keepInput) inp.value = '';
+  inp.dataset.docnum  = '';
+  inp.dataset.refname = '';
+  document.getElementById('ref-confirmed').style.display = 'none';
+  closeRefDd();
+  refreshPreview();
+}
+
+function closeRefDd() {
+  var dd = document.getElementById('ref-dd');
+  if (dd) { dd.classList.remove('open'); dd.innerHTML = ''; }
+}
+
+function closeRefDdDelayed() {
+  _refCloseTimer = setTimeout(closeRefDd, 200);
+}
+
+// When batch loads a patient with a refbyRaw, auto-search and pre-populate
 function searchRefFromOCR(raw) {
   var q = normQuery(raw);
   if (q.length < 2) return;
-  callSearchPhysicians(q, function(results){ renderRefSuggestions(results); });
+  // Pre-fill the input with the raw OCR text so the user sees what was extracted
+  var inp = document.getElementById('c-ref');
+  inp.value = raw;
+  inp.dataset.docnum  = '';
+  inp.dataset.refname = '';
+  document.getElementById('ref-confirmed').style.display = 'none';
+  callSearchPhysicians(q, function(results){ renderRefDd(results); });
 }
 
 // ─── Consult type / CCFPP ────────────────────────────────────────────────────
@@ -734,7 +795,7 @@ function clearForm() {
   document.getElementById('c-most').checked=false;
   document.getElementById('c-ccfpp').checked=false;
   document.getElementById('ccfpp-fields').style.display='none';
-  document.getElementById('ref-suggestions').innerHTML='';
+  clearRef();
   st.dailyDates=[]; st.combinedDates=[]; st.directiveDates=[]; st.ccuDates=[];
   _feeOverrides={};
   setConsultType('consult');
