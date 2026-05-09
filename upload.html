@@ -383,16 +383,11 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
       <div><div class="tgl-lbl">+MOST</div><div class="tgl-sub">MOST claim same day</div></div>
       <label class="tgl"><input type="checkbox" id="c-most" onchange="refreshPreview()"><div class="tgl-track"></div><div class="tgl-thumb"></div></label>
     </div>
-    <div class="tgl-row">
-      <div><div class="tgl-lbl">+CCFPP</div><div class="tgl-sub">Adds FP details to consult notes</div></div>
-      <label class="tgl"><input type="checkbox" id="c-ccfpp" onchange="toggleCcfpp()"><div class="tgl-track"></div><div class="tgl-thumb"></div></label>
-    </div>
-    <div id="ccfpp-fields" style="display:none;margin-top:6px">
-      <div class="row">
-        <div><label>FP name</label><input id="c-ccfpp-name" type="text" placeholder="Dr. Jones" oninput="refreshPreview()"></div>
-        <div><label>FP phone</label><input id="c-ccfpp-ph" type="text" placeholder="9055551234" inputmode="numeric" oninput="refreshPreview()"></div>
-      </div>
-      <div style="font-size:11px;color:var(--text3);margin-top:4px">Added to consult notes as: CCFPP [name] [phone]</div>
+    <div style="margin-top:8px">
+      <label>CCFPP <span style="font-weight:400;color:var(--text3)">(auto-detected or manual)</span></label>
+      <input id="c-ccfpp-note" type="text" placeholder="e.g. CCFPP Smith, John (9012345678)" oninput="refreshPreview()" autocomplete="off"
+             style="font-size:12px;font-family:ui-monospace,'SF Mono',monospace">
+      <div id="ccfpp-note-hint" style="font-size:10px;color:var(--text3);margin-top:3px;display:none"></div>
     </div>
     <div style="margin-top:10px">
       <label>Notes <span style="font-weight:400;color:var(--text3)">(added to all claims)</span></label>
@@ -957,10 +952,7 @@ function setConsultType(t) {
   refreshPreview();
 }
 
-function toggleCcfpp() {
-  document.getElementById('ccfpp-fields').style.display = document.getElementById('c-ccfpp').checked ? '' : 'none';
-  refreshPreview();
-}
+
 
 function onAliasChange() {
   document.getElementById('alias-other-wrap').style.display = document.getElementById('f-alias').value === 'other' ? '' : 'none';
@@ -1163,10 +1155,11 @@ function consultIncUnits(startTimeStr, endTimeStr) {
 function onStartTimeChange() {
   var startEl = document.getElementById('c-start');
   var endEl   = document.getElementById('c-end');
-  if (startEl && startEl.value && endEl) {
+  if (startEl && startEl.value && endEl && !endEl.value) {
     endEl.value = minsToTime(t2m(startEl.value) + 50); // default 50-min consult
   }
   updateModifierBanner();
+  detectCCFPP();
 }
 
 function updateModifierBanner() {
@@ -1200,6 +1193,69 @@ function updateModifierBanner() {
   refreshPreview();
 }
 
+
+// ─── Auto-CCFPP detection ─────────────────────────────────────────────────────
+// Checks batch.confirmed for a consult by the same alias on the same date whose
+// modifier window overlaps with this consult's start time.
+// Overlap = this start falls within [prevStart, prevStart + 75 min].
+// If found and the CCFPP note field is empty, auto-fills it.
+function detectCCFPP() {
+  var noteEl = document.getElementById('c-ccfpp-note');
+  var hintEl = document.getElementById('ccfpp-note-hint');
+  if (!noteEl) return;
+
+  var start   = (document.getElementById('c-start')||{}).value;
+  var cDate   = consultDateISO();
+  var alias   = getAlias();
+  var curPhn  = (document.getElementById('f-phn')||{value:''}).value.replace(/\D/g,'');
+
+  if (!start || !cDate || !alias) { if(hintEl) hintEl.style.display='none'; return; }
+
+  var thisM = t2m(start);
+  var found = null;
+
+  // Search batch.confirmed for overlapping consults from same doctor
+  var pool = (typeof batch !== 'undefined' && batch.confirmed) ? batch.confirmed : [];
+  for (var i = 0; i < pool.length; i++) {
+    var c = pool[i];
+    if (c.alias !== alias)                        continue;
+    if (c.phn === curPhn)                         continue; // same patient
+    if (c._sortDate !== cDate)                    continue; // different date
+    if (c.fee !== '33010' && c.fee !== '33012')   continue; // not a consult
+    if (!c.startTime)                             continue;
+    var prevM = t2m(c.startTime);
+    var diff  = (thisM - prevM + 1440) % 1440;
+    if (diff > 0 && diff <= 75) {
+      found = c; break;
+    }
+    // Also check if previous consult starts after this one (reverse overlap)
+    var rdiff = (prevM - thisM + 1440) % 1440;
+    if (rdiff > 0 && rdiff <= 75) {
+      found = c; break;
+    }
+  }
+
+  if (found) {
+    var autoNote = 'CCFPP ' + (found.last||'') + ', ' + (found.first||'') + ' (' + (found.phn||'') + ')';
+    // Only auto-fill if the field is empty or already has an auto-filled value
+    if (!noteEl.value || noteEl.dataset.autoFilled === 'true') {
+      noteEl.value = autoNote;
+      noteEl.dataset.autoFilled = 'true';
+    }
+    if (hintEl) {
+      hintEl.textContent = 'Auto-detected overlap with ' + (found.last||'?') + ', ' + (found.first||'?');
+      hintEl.style.display = 'block';
+    }
+  } else {
+    // Clear auto-filled value if no overlap found anymore
+    if (noteEl.dataset.autoFilled === 'true') {
+      noteEl.value = '';
+      noteEl.dataset.autoFilled = '';
+    }
+    if (hintEl) hintEl.style.display = 'none';
+  }
+}
+
 // ─── Build claims ─────────────────────────────────────────────────────────────
 function buildClaims() {
   var last  = (document.getElementById('f-last').value||'').trim();
@@ -1225,14 +1281,9 @@ function buildClaims() {
     var fee   = st.consultType === 'consult' ? '33010'
                 : st.consultType === 'limited' ? '33012'
                 : '';
-    var cnotes = '';
-  var extraNotes = (document.getElementById('c-notes')||{value:''}).value.trim();
-    if (document.getElementById('c-ccfpp').checked) {
-      var fpn = (document.getElementById('c-ccfpp-name').value||'').trim();
-      var fpp = (document.getElementById('c-ccfpp-ph').value||'').trim();
-      cnotes = 'CCFPP '+fpn+(fpp?' '+fpp:'');
-    }
-    var fullNote = [cnotes, extraNotes].filter(function(s){return s;}).join(' | ');
+    var ccfppNote = (document.getElementById('c-ccfpp-note')||{value:''}).value.trim();
+    var extraNotes = (document.getElementById('c-notes')||{value:''}).value.trim();
+    var fullNote = [ccfppNote, extraNotes].filter(function(s){return s;}).join(' | ');
     claims.push(Object.assign({},base,{ id:uid(), claimType:st.consultType, date:cDate, fee:fee, icd:dx, refby:refNum, refbyName:refName, startTime:start, endTime:end, notes:fullNote, _sortDate:cDate, _sortSub:0 }));
     if (document.getElementById('c-most').checked)
       claims.push(Object.assign({},base,{ id:uid(), claimType:'most', date:cDate, fee:'03701', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:'MOST add-on', _sortDate:cDate, _sortSub:1 }));
@@ -1327,11 +1378,13 @@ function deleteClaim(c) {
 
 // ─── Clear form ───────────────────────────────────────────────────────────────
 function clearForm() {
-  ['f-last','f-first','f-phn','f-dob','f-ward','f-room','c-date','c-dx','c-ref','c-start','c-end','c-ccfpp-name','c-ccfpp-ph','combined-reason'].forEach(function(id){ document.getElementById(id).value=''; });
+  ['f-last','f-first','f-phn','f-dob','f-ward','f-room','c-date','c-dx','c-ref','c-start','c-end','c-ccfpp-note','combined-reason'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
   document.getElementById('f-sex').value='';
   document.getElementById('c-most').checked=false;
-  document.getElementById('c-ccfpp').checked=false;
-  document.getElementById('ccfpp-fields').style.display='none';
+  clearIcd();
+  var hintEl=document.getElementById('ccfpp-note-hint'); if(hintEl){hintEl.style.display='none';hintEl.textContent='';}
+  var ccfppEl=document.getElementById('c-ccfpp-note'); if(ccfppEl) ccfppEl.dataset.autoFilled='';
+  var modEl=document.getElementById('mod-banner'); if(modEl) modEl.innerHTML='';
   clearRef();
   st.dailyDates=[]; st.combinedDates=[]; st.directiveDates=[]; st.ccuDates=[];
   _feeOverrides={};
@@ -1387,11 +1440,11 @@ function loadBatchItem(idx) {
                            dob:item.dob||'', sex:item.sex||'', engine:'worker-batch' };
   lookupPatientFromSheets(item.phn||'', item.last||'', item.dob||'');
   if (item.most) document.getElementById('c-most').checked = true;
+  // Pre-fill CCFPP note from OCR if present (OCR may extract "ccfppName" from card)
   if (item.ccfppName) {
-    document.getElementById('c-ccfpp').checked = true;
-    document.getElementById('ccfpp-fields').style.display = '';
-    document.getElementById('c-ccfpp-name').value = item.ccfppName;
-    if (item.ccfppPhone) document.getElementById('c-ccfpp-ph').value = item.ccfppPhone;
+    var ccfppStr = item.ccfppName + (item.ccfppPhone ? ' (' + item.ccfppPhone + ')' : '');
+    var el = document.getElementById('c-ccfpp-note');
+    if (el) el.value = 'CCFPP ' + ccfppStr;
   }
   if (item.combinedReason) document.getElementById('combined-reason').value = item.combinedReason;
   // Calendar dates
