@@ -1,25 +1,25 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology Billing — main app
-  Version:    v3.24
-  Built:      2026-05-10 21:00 UTC
+  Version:    v3.25
+  Built:      2026-05-10 21:30 UTC
   Repo:       github.com/KelownaCardio/kelownacardio.github.io
   Changes in this build:
-    - Ships with ocr_offline.js v1.1 (multi-pass Tesseract with
-      paper-tuned AND screen-tuned preprocessing). Doctors photograph
-      Meditech screens directly; the screen-tuned pass uses 3x
-      downscale-upscale to defeat LCD moiré patterns.
-    - The winning preprocessor is logged in _meta.preprocessor so the
-      debug bundle shows whether 'paper' or 'screen' produced the result.
-  Changes in v3.23:
+    - Ships with ocr_offline.js v1.2 (Meditech parser fixes):
+      * HCN# recognised in addition to HCN
+      * Inline DD/MM/YYYY DOB recognised in Meditech mode
+      * Bare M/F sex after age recognised in Meditech mode
+      * OCR edge-artifact prefix (single letter + space) stripped from names
+  From v3.24:
+    - Multi-pass Tesseract (paper + screen preprocessing).
+  From v3.23:
     - Meditech-aware empty-OCR ward/room corrections logged with rawText.
-  Changes in v3.22:
+  From v3.22:
     - Debug panel minimizable (small pill in corner).
-  Changes in v3.21:
-    - Debug panel introduced.
-    - Service Worker rewritten to be version-aware.
+  From v3.21:
+    - Debug panel + version-aware Service Worker.
   From v3.20:
-    - OCR corrections capture (logOCRCorrections action).
+    - OCR corrections capture.
 -->
 <html lang="en">
 <head>
@@ -567,7 +567,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span id="hdr-version" style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.24</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span id="hdr-version" style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.25</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1699,12 +1699,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.24-2026-05-10-screen-photo-fix';
+var BUILD_ID    = 'v3.25-2026-05-10-meditech-parser-fixes';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.24';
-var APP_BUILT   = '2026-05-10 21:00 UTC';
+var APP_VERSION = 'v3.25';
+var APP_BUILT   = '2026-05-10 21:30 UTC';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');

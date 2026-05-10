@@ -1,23 +1,26 @@
 // ===================================================================
 // ocr_offline.js  —  KGH offline OCR engine
 // -------------------------------------------------------------------
-// Version:    v1.1
-// Built:      2026-05-10 21:00 UTC
+// Version:    v1.2
+// Built:      2026-05-10 21:30 UTC
 // Repo:       github.com/KelownaCardio/kelownacardio.github.io
 // -------------------------------------------------------------------
+// Changes in v1.2:
+//   - Parser fixes targeted at Meditech screen photo extraction:
+//     * PHN: now recognises "HCN#" (Meditech format) in addition to
+//       "HCN" (chart sticker format)
+//     * DOB: in Meditech mode, falls back to "DD/MM/YYYY" inline
+//       format when no "DD MMM YYYY" date is found
+//     * Sex: in Meditech mode, picks up bare "M" or "F" following age
+//       (e.g. "71, F · DOB") since Meditech has no L: anchor
+//     * Name: strips OCR edge-artifact prefixes (single letter + space)
+//       that screen photos commonly inject (e.g. "l Wheelhouse" -> "Wheelhouse")
+//
 // Changes in v1.1:
-//   - Multi-pass Tesseract: now runs TWO preprocessing strategies
-//     (paper-tuned and screen-tuned) and picks the result with more
-//     recognisable KGH content. Specifically:
-//       * Paper pass: grayscale+contrast, PSM 11 (sparse text)
-//       * Screen pass: 3x downscale-upscale (defeats moiré from
-//         photographing displays) + Otsu binarisation, PSM 6 (block)
-//     Result includes _meta.preprocessor='paper'|'screen' and scores
-//     so the debug bundle shows which strategy won on each image.
-//   - This adds ~1-2s to offline scans but means a single code path
-//     handles BOTH paper chart stickers AND photos-of-screens
-//     (Meditech headers), which doctors must photograph because
-//     screenshots aren't always available from the hospital network.
+//   - Multi-pass Tesseract: paper-tuned AND screen-tuned preprocessing
+//     run in parallel; result with more recognisable KGH content wins.
+//     Screen preprocessing uses 3x downscale-upscale to defeat moiré
+//     from photographing displays, plus Otsu binarisation.
 //
 // Standalone module. Lifts the v0.3 parser from the test app and
 // wraps it in a single Promise-returning entry point.
@@ -46,8 +49,8 @@
 (function (root) {
   'use strict';
 
-  var VERSION = 'v1.1';
-  var BUILT   = '2026-05-10 21:00 UTC';
+  var VERSION = 'v1.2';
+  var BUILT   = '2026-05-10 21:30 UTC';
 
   try {
     console.log('%c[KGH OCR offline] ' + VERSION + ' · built ' + BUILT,
@@ -475,7 +478,8 @@
   // -- Sticker type detection ---------------------------------------
   function detectStickerType(text) {
     var hasBD = /\bBD\s+\d/i.test(text);
-    var hasHCN = /\bHCN\s+\d/i.test(text);
+    // Accept both "HCN 9..." (chart sticker) and "HCN# 9..." (Meditech) shapes
+    var hasHCN = /\bHCN\s*#?\s+\d/i.test(text);
     var hasFAM = /\bFAM\b/i.test(text);
     if (hasBD && hasHCN && hasFAM) return 'labvial';
 
@@ -517,6 +521,24 @@
   function stripLeadingNoise(s) {
     if (!s) return s;
     return s.replace(/^[^A-Za-z0-9*]+/, '').trim();
+  }
+
+  // Strip leading single-character noise that OCR sometimes injects at the
+  // start of a name (e.g. "l Wheelhouse" — the "l " is a misread vertical
+  // line from the photo's left edge, not part of the surname). Only fires
+  // when there's a single letter followed by a space and then a normal
+  // capitalised name — safe because real names like "O Brien" use comma.
+  // Examples this catches:
+  //   "l Wheelhouse"  -> "Wheelhouse"
+  //   "i Smith"       -> "Smith"
+  //   "1 Jones"       -> "Jones"
+  // Examples this leaves alone:
+  //   "O'Brien"       -> "O'Brien"  (apostrophe, not space)
+  //   "Van Houten"    -> "Van Houten"  (real two-word surname, leading word > 1 char)
+  function stripOCREdgePrefix(s) {
+    if (!s) return s;
+    // Single letter or digit, then whitespace, then a Capital letter starting a real word
+    return s.replace(/^[A-Za-z0-9]\s+([A-Z][a-z])/, '$1');
   }
 
   function decodeMeditechLocation(lines) {
@@ -715,8 +737,10 @@
     var col = noKG.replace(/(\d)\s+(\d)/g, '$1$2').replace(/(\d)\s+(\d)/g, '$1$2');
 
     // PHN extraction
+    // Note: Meditech headers use "HCN# 9123456789" with hash and space; chart
+    // stickers use "HCN 9123456789" with just a space. Accept both.
     var hcnRaw = null;
-    var hcnMatch = col.match(/HCN\s*(\d{7,12})\b/i);
+    var hcnMatch = col.match(/HCN\s*#?\s*(\d{7,12})\b/i);
     if (hcnMatch) {
       hcnRaw = hcnMatch[1].slice(0, 10);
       log('HCN copy raw: ' + hcnRaw + (hcnRaw.length < 10 ? ' [SHORT]' : ''));
@@ -765,6 +789,33 @@
         }
       }
     }
+
+    // Meditech DOB fallback: Meditech headers show DOB as inline "DD/MM/YYYY"
+    // (e.g. "71, F · 06/05/1955") rather than the chart-sticker "DOB DD MMM YYYY"
+    // format. If we found no DOB above and we're in Meditech mode, scan for
+    // any DD/MM/YYYY and pick the oldest (DOB is always the oldest date).
+    if (!dob && effectiveMode === 'meditech') {
+      var slashRegex = /(\d{1,2})\/(\d{1,2})\/(\d{4})/g;
+      var sm;
+      while ((sm = slashRegex.exec(text)) !== null) {
+        var sDay = ('0' + sm[1]).slice(-2);
+        var sMon = ('0' + sm[2]).slice(-2);
+        var sYr  = sm[3];
+        if (sYr >= '1900' && sYr <= '2030' &&
+            parseInt(sMon, 10) >= 1 && parseInt(sMon, 10) <= 12 &&
+            parseInt(sDay, 10) >= 1 && parseInt(sDay, 10) <= 31) {
+          var syn = parseInt(sYr, 10);
+          if (syn < dobYear) {
+            dobYear = syn;
+            dob = sDay + '/' + sMon + '/' + sYr;
+            log('Meditech DOB candidate (slash format): ' + dob);
+          } else {
+            log('Other slash date (ADM?): ' + sDay + '/' + sMon + '/' + sYr);
+          }
+        }
+      }
+    }
+
     if (dob) {
       var dr = validateAndRescueDOB(dob);
       if (dr) {
@@ -830,6 +881,15 @@
       if (prefMatch) { first = prefMatch[1]; log('Preferred name used: ' + first); }
       last = stripLeadingNoise(fixNameOCR(last));
       first = stripLeadingNoise(fixNameOCR(first));
+      // Strip OCR edge artifact prefixes like "l " or "i " before the real name.
+      // Common on screen photos where the left edge of the display becomes a
+      // false vertical stroke that OCR reads as a single character.
+      var lastBefore = last;
+      last = stripOCREdgePrefix(last);
+      if (last !== lastBefore) log('OCR edge prefix stripped from last: "' + lastBefore + '" -> "' + last + '"');
+      var firstBefore = first;
+      first = stripOCREdgePrefix(first);
+      if (first !== firstBefore) log('OCR edge prefix stripped from first: "' + firstBefore + '" -> "' + first + '"');
       if (last && !/^[A-Z*]/i.test(last)) {
         nameClipped = true; last = '*' + last;
         log('Name clipped (no leading capital)');
@@ -839,8 +899,19 @@
 
     // Sex
     var sex = '';
+    // Chart sticker / lab vial pattern: "L: M" or "L: F" (the legal-sex anchor)
     var sexMatch = text.match(/L\s*[:.]\s*([MF])/i);
     if (sexMatch) { sex = sexMatch[1].toUpperCase(); log('Sex: ' + sex); }
+
+    // Meditech fallback: header shows "AGE, [MF] · DOB" — e.g. "71, F · 06/05/1955".
+    // No L: anchor present. Find a single M or F following the age digits.
+    if (!sex && effectiveMode === 'meditech') {
+      var medSexMatch = text.match(/\b\d{1,3}\s*,\s*([MF])\b/);
+      if (medSexMatch) {
+        sex = medSexMatch[1].toUpperCase();
+        log('Sex (Meditech age-comma pattern): ' + sex);
+      }
+    }
 
     // MRP
     var KNOWN_SERVICES = ['Cardiology', 'Hospitalist', 'CTU', 'ICU', 'CSICU', 'Cardiac Surgery',
