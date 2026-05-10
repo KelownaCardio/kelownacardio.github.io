@@ -1,10 +1,25 @@
 // ===================================================================
 // ocr_offline.js  —  KGH offline OCR engine
 // -------------------------------------------------------------------
-// Version:    v1.3
-// Built:      2026-05-10 22:00 UTC
+// Version:    v1.4
+// Built:      2026-05-10 23:30 UTC
 // Repo:       github.com/KelownaCardio/kelownacardio.github.io
 // -------------------------------------------------------------------
+// Changes in v1.4:
+//   - Learned corrections infrastructure: OCROffline.loadCorrections(rows)
+//     accepts an array of { field, ocr_value, corrected_value, engine } objects
+//     from the OCR Corrections Google Sheet. Corrections are applied after all
+//     regex-based fixes so that corpus-derived rules override parser guesses.
+//     Covers: last, first, room, ward fields.
+//   - Lenient room decoder: when the strict 4-digit regex fails (Tesseract
+//     misread a digit as a letter), decodeMeditechLocation() now applies a
+//     character substitution table (O→0, S→5, B→8, etc.) and re-tries.
+//     Requires exactly 4 substituted digits — prevents wrong guesses when
+//     a digit is genuinely missing (e.g., "H2S" stays empty; "O226" → "226B").
+//   - decodeMeditechLocation() now accepts the log function for traceability.
+//     Lenient decode attempts are always logged at parse-log level so the debug
+//     bundle shows exactly what substitutions were tried and why they passed/failed.
+//
 // Changes in v1.3:
 //   - Meditech detection broadened. Earlier rule required KELKGH which
 //     missed ED-view headers showing "ADM ACIN, KGH Emergency
@@ -55,8 +70,8 @@
 (function (root) {
   'use strict';
 
-  var VERSION = 'v1.3';
-  var BUILT   = '2026-05-10 22:00 UTC';
+  var VERSION = 'v1.4';
+  var BUILT   = '2026-05-10 23:30 UTC';
 
   try {
     console.log('%c[KGH OCR offline] ' + VERSION + ' · built ' + BUILT,
@@ -71,6 +86,51 @@
     tesseractWorker: null,
     tesseractLoading: null  // Promise while loading
   };
+
+  // ------------------------------------------------------------------
+  // Learned corrections — populated by OCROffline.loadCorrections()
+  // ------------------------------------------------------------------
+  // Shape: { last: { 'Wheethouse': 'Wheelhouse', ... }, first: {}, room: {}, ward: {} }
+  // Applied after all regex-based fixes so corpus rules take final precedence.
+  var _learnedCorrections = { last: {}, first: {}, room: {}, ward: {} };
+
+  // Return corrected value if a learned mapping exists for this field+value;
+  // otherwise return the original value unchanged.
+  function applyLearnedField(field, value) {
+    if (!value || !_learnedCorrections[field]) return value;
+    return _learnedCorrections[field][value] || value;
+  }
+
+  // Public method (exported below).
+  // rows: array of correction-sheet objects { field, ocr_value, corrected_value, engine, source }
+  // engineFilter: optional string — if set, only load rows whose .engine matches.
+  // Returns the count of corrections loaded.
+  function loadCorrections(rows, engineFilter) {
+    _learnedCorrections = { last: {}, first: {}, room: {}, ward: {} };
+    if (!Array.isArray(rows)) return 0;
+    var count = 0;
+    rows.forEach(function (row) {
+      if (engineFilter && row.engine !== engineFilter) return;
+      var field = (row.field || '').trim();
+      var ocr   = (row.ocr_value || '').trim();
+      var corr  = (row.corrected_value || '').trim();
+      // Skip: no data, identical values, or decoder-gap markers
+      if (!field || !ocr || !corr || ocr === corr) return;
+      if (ocr.indexOf('[empty]') === 0) return;
+      // Only track fields we can usefully apply
+      if (!Object.prototype.hasOwnProperty.call(_learnedCorrections, field)) return;
+      _learnedCorrections[field][ocr] = corr;
+      count++;
+    });
+    try {
+      console.log('[KGH OCR] Loaded ' + count + ' learned corrections (' +
+        Object.keys(_learnedCorrections.last).length  + ' last, ' +
+        Object.keys(_learnedCorrections.first).length + ' first, ' +
+        Object.keys(_learnedCorrections.room).length  + ' room, ' +
+        Object.keys(_learnedCorrections.ward).length  + ' ward)');
+    } catch (e) {}
+    return count;
+  }
 
   // ------------------------------------------------------------------
   // Engine detection
@@ -560,7 +620,8 @@
     return s.replace(/^[A-Za-z0-9]\s+([A-Z][a-z])/, '$1');
   }
 
-  function decodeMeditechLocation(lines) {
+  function decodeMeditechLocation(lines, log) {
+    if (!log) log = function () {};
     var WARDS = {
       'KELKGHSCCU': 'CCU', 'KELKGHICSI': 'CSICU', 'KELKGHCSI': 'CSICU',
       'KELKGHS2S': '2S', 'KELKGHS2W': '2W', 'KELKGHS3E': '3E', 'KELKGHS3W': '3W',
@@ -569,19 +630,97 @@
       'KELKGHC6W': '6W', 'KELKGHC1C': 'C1C', 'KELKGHCEOF': 'ED', 'KELKGHCMT': 'ED',
       'KELKGHAREH': 'REH', 'KELKGHSHAH': 'HAH'
     };
+
+    // Character-to-digit substitution for lenient room decoding.
+    // When Tesseract misreads a digit as a visually similar letter, these
+    // mappings let us recover the intended digit.  Applied only after the
+    // strict pure-digit regex fails.  Each entry is high-confidence (visual
+    // near-identity); ambiguous pairs (e.g. H) are deliberately omitted.
+    var CHAR_TO_DIGIT = {
+      'O': '0', 'Q': '0', 'D': '0',    // circular shapes → 0
+      'I': '1', 'l': '1',               // tall narrow strokes → 1
+      'Z': '2',                          // zigzag → 2
+      'S': '5',                          // mirrored curves → 5
+      'G': '6',                          // partial circle → 6
+      'B': '8', 'T': '7'                // multi-bump shapes → 8/7
+    };
+
+    function applyCharSub(s) {
+      var out = '';
+      for (var ci = 0; ci < s.length; ci++) {
+        var c = s[ci];
+        out += Object.prototype.hasOwnProperty.call(CHAR_TO_DIGIT, c) ? CHAR_TO_DIGIT[c] : c;
+      }
+      return out;
+    }
+
+    function decodeRoomNum(digits4, bed, wardName) {
+      // digits4 is always a 4-char string of digits at this point.
+      if (wardName === 'CCU') return String(parseInt(digits4.slice(2), 10));
+      if (digits4.charAt(0) === '0') return digits4.replace(/^0+/, '') + bed;
+      return digits4 + bed;
+    }
+
     var ward = '', room = '';
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i];
+
+      // -- Ward decode: exact WARDS lookup ---------------------------
       var wm = line.match(/KELKGH[A-Z0-9]+/);
-      if (wm && WARDS[wm[0]]) ward = WARDS[wm[0]];
+      if (wm && WARDS[wm[0]]) {
+        ward = WARDS[wm[0]];
+        log('Ward: ' + wm[0] + ' \u2192 ' + ward);
+      }
+
+      // -- Room decode: strict pass (requires exactly 4 pure digits) -
       var rm = line.match(/KGH[A-Z]+(\d{4})\s*-?\s*([A-Z])?/);
       if (rm) {
         var num = rm[1], bed = rm[2] || '';
-        if (ward === 'CCU') room = String(parseInt(num.slice(2), 10));
-        else if (num.charAt(0) === '0') room = num.replace(/^0+/, '') + bed;
-        else room = num + bed;
+        room = decodeRoomNum(num, bed, ward);
+        log('Room strict: ' + rm[0] + ' \u2192 ' + room);
+        continue;
+      }
+
+      // -- Room decode: lenient pass (OCR char→digit substitutions) --
+      // Only runs when strict found no room on this or any prior line.
+      // Strip KELKGH ward tokens first so they don't match as room codes.
+      if (!room) {
+        var lineNoKEL = line.replace(/KELKGH[A-Z0-9]+/gi, '');
+        // Grab the full alphanumeric run after KGH (e.g. "SO226", "SH2S", "RB116").
+        // We can't reliably split ward-prefix vs room-slot at regex time because
+        // substitution targets (O, S, B...) look identical to valid prefix letters.
+        // Instead: extract the full token, then try prefix lengths 1-4 in order.
+        var lm = lineNoKEL.match(/KGH([A-Z][A-Z0-9]{2,9})\s*-?\s*([A-Z])?/);
+        if (lm) {
+          var fullToken = lm[1]; // e.g. "SO226", "S225OZ", "RB116", "SH2S"
+          var bed2 = lm[2] || '';
+          var foundLenient = false;
+          // Try ward-prefix lengths 1 through min(4, len-3) — room slot needs ≥3 chars.
+          // The first split that yields exactly 4 digits after char-sub wins.
+          for (var pLen = 1; pLen <= Math.min(4, fullToken.length - 3) && !foundLenient; pLen++) {
+            var prefix  = fullToken.slice(0, pLen);
+            var rawSlot = fullToken.slice(pLen);
+            // Ward prefix must be all uppercase letters (no digits)
+            if (!/^[A-Z]+$/.test(prefix)) continue;
+            var normed = applyCharSub(rawSlot);
+            var digits = normed.replace(/\D/g, '');
+            if (digits.length === 4) {
+              var decoded = decodeRoomNum(digits, bed2, ward);
+              log('Room lenient (prefix=' + pLen + '): "' + rawSlot + '" \u2192 norm "' +
+                  normed + '" \u2192 digits "' + digits + '" \u2192 "' + decoded + '"');
+              room = decoded;
+              foundLenient = true;
+            }
+          }
+          if (!foundLenient) {
+            log('Room lenient: "' + fullToken + '" \u2014 no split yields exactly 4 recoverable digits \u2014 leaving blank');
+          }
+        }
       }
     }
+
+    // Apply any corpus-learned room correction last
+    if (room) room = applyLearnedField('room', room);
     return { ward: ward, room: room };
   }
 
@@ -929,6 +1068,13 @@
         nameClipped = true; last = '*' + last;
         log('Name clipped (no leading capital)');
       }
+      // Apply corpus-learned OCR name corrections (built from doctor edits).
+      // These run last so they override regex-based fixes when a specific
+      // OCR→correct mapping has been confirmed by a human.
+      var lastCorrected = applyLearnedField('last', last);
+      if (lastCorrected !== last) { log('Learned correction last: "' + last + '" \u2192 "' + lastCorrected + '"'); last = lastCorrected; }
+      var firstCorrected = applyLearnedField('first', first);
+      if (firstCorrected !== first) { log('Learned correction first: "' + first + '" \u2192 "' + firstCorrected + '"'); first = firstCorrected; }
     }
     if (!last) log('Name extraction FAILED');
 
@@ -975,7 +1121,7 @@
     // Ward / room (Meditech only)
     var ward = '', room = '';
     if (effectiveMode === 'meditech') {
-      var dec = decodeMeditechLocation(lines);
+      var dec = decodeMeditechLocation(lines, log);
       ward = dec.ward; room = dec.room;
       if (ward) log('Ward: ' + ward);
       if (room) log('Room: ' + room);
@@ -1069,13 +1215,21 @@
     detectEngine: detectEngine,
     preload: preload,
     isReady: isReady,
+    // Load correction-sheet rows to auto-improve future parses.
+    // Call this at app init with recent rows from the OCR Corrections sheet.
+    // rows: [{ field, ocr_value, corrected_value, engine, source }, ...]
+    // engineFilter: optional — if set, only load rows for that engine.
+    loadCorrections: loadCorrections,
     // Expose internals for the regression harness / unit tests
     _internal: {
       isValidBCPHN: isValidBCPHN,
       tryRescuePHN: tryRescuePHN,
       validateAndRescueDOB: validateAndRescueDOB,
       detectStickerType: detectStickerType,
-      parse: parse
+      parse: parse,
+      loadCorrections: loadCorrections,
+      applyLearnedField: applyLearnedField,
+      decodeMeditechLocation: decodeMeditechLocation
     }
   };
 
