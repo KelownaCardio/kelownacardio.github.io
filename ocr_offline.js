@@ -1,10 +1,24 @@
 // ===================================================================
 // ocr_offline.js  —  KGH offline OCR engine
 // -------------------------------------------------------------------
-// Version:    v1.0
-// Built:      2026-05-08 13:30 UTC
+// Version:    v1.1
+// Built:      2026-05-10 21:00 UTC
 // Repo:       github.com/KelownaCardio/kelownacardio.github.io
 // -------------------------------------------------------------------
+// Changes in v1.1:
+//   - Multi-pass Tesseract: now runs TWO preprocessing strategies
+//     (paper-tuned and screen-tuned) and picks the result with more
+//     recognisable KGH content. Specifically:
+//       * Paper pass: grayscale+contrast, PSM 11 (sparse text)
+//       * Screen pass: 3x downscale-upscale (defeats moiré from
+//         photographing displays) + Otsu binarisation, PSM 6 (block)
+//     Result includes _meta.preprocessor='paper'|'screen' and scores
+//     so the debug bundle shows which strategy won on each image.
+//   - This adds ~1-2s to offline scans but means a single code path
+//     handles BOTH paper chart stickers AND photos-of-screens
+//     (Meditech headers), which doctors must photograph because
+//     screenshots aren't always available from the hospital network.
+//
 // Standalone module. Lifts the v0.3 parser from the test app and
 // wraps it in a single Promise-returning entry point.
 //
@@ -32,8 +46,8 @@
 (function (root) {
   'use strict';
 
-  var VERSION = 'v1.0';
-  var BUILT   = '2026-05-08 13:30 UTC';
+  var VERSION = 'v1.1';
+  var BUILT   = '2026-05-10 21:00 UTC';
 
   try {
     console.log('%c[KGH OCR offline] ' + VERSION + ' · built ' + BUILT,
@@ -132,9 +146,15 @@
   }
 
   // Apply grayscale + contrast bump (matches test app preprocessing)
-  function preprocessForOCR(img) {
+  // ------------------------------------------------------------------
+  // Image preprocessing strategies
+  // ------------------------------------------------------------------
+  // PAPER strategy (the original): grayscale + linear contrast bump.
+  // Works well for chart stickers and lab vials where the OCR input is
+  // a flat printed surface with crisp lettering.
+  function preprocessPaper(img) {
     var canvas = document.createElement('canvas');
-    canvas.width = img.naturalWidth || img.width;
+    canvas.width  = img.naturalWidth  || img.width;
     canvas.height = img.naturalHeight || img.height;
     var ctx = canvas.getContext('2d');
     ctx.drawImage(img, 0, 0);
@@ -150,12 +170,104 @@
     return canvas;
   }
 
+  // SCREEN strategy (new): defeats moiré patterns from photographing a
+  // display. Moiré is a frequency artifact — when an iPhone camera
+  // captures an LCD screen, the sensor grid and pixel grid interfere
+  // to produce wavy patterns that destroy character edges. The fix:
+  //   1. Downscale by ~3x — averages multiple screen pixels into one,
+  //      eliminating the moiré frequency
+  //   2. Then upscale back so Tesseract sees a normally-sized image
+  //   3. Apply Otsu-style threshold (auto-pick the right cutoff) to
+  //      produce clean black/white output without losing thin strokes
+  // This is the well-known "scale down to lose the pattern" trick used
+  // in printing and image-stabilization pipelines.
+  function preprocessScreen(img) {
+    var srcW = img.naturalWidth  || img.width;
+    var srcH = img.naturalHeight || img.height;
+
+    // Step 1: downscale by 3x with bilinear smoothing
+    var DOWNSCALE = 3;
+    var small = document.createElement('canvas');
+    small.width  = Math.max(1, Math.floor(srcW / DOWNSCALE));
+    small.height = Math.max(1, Math.floor(srcH / DOWNSCALE));
+    var sctx = small.getContext('2d');
+    sctx.imageSmoothingEnabled = true;
+    sctx.imageSmoothingQuality = 'high';
+    sctx.drawImage(img, 0, 0, small.width, small.height);
+
+    // Step 2: upscale back to roughly original size
+    var canvas = document.createElement('canvas');
+    canvas.width  = srcW;
+    canvas.height = srcH;
+    var ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(small, 0, 0, srcW, srcH);
+
+    // Step 3: convert to grayscale, build histogram, find Otsu threshold
+    var imageData = ctx.getImageData(0, 0, srcW, srcH);
+    var d = imageData.data;
+    var hist = new Array(256).fill(0);
+    var lums = new Uint8Array(d.length / 4);
+
+    for (var i = 0, j = 0; i < d.length; i += 4, j++) {
+      var lum = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) | 0;
+      lums[j] = lum;
+      hist[lum]++;
+    }
+
+    // Otsu's method: find the threshold that maximises between-class variance
+    var total = lums.length;
+    var sum = 0;
+    for (var t = 0; t < 256; t++) sum += t * hist[t];
+    var sumB = 0, wB = 0, maxVar = 0, threshold = 128;
+    for (var t2 = 0; t2 < 256; t2++) {
+      wB += hist[t2];
+      if (wB === 0) continue;
+      var wF = total - wB;
+      if (wF === 0) break;
+      sumB += t2 * hist[t2];
+      var mB = sumB / wB;
+      var mF = (sum - sumB) / wF;
+      var v = wB * wF * (mB - mF) * (mB - mF);
+      if (v > maxVar) { maxVar = v; threshold = t2; }
+    }
+
+    // Step 4: binarise. Foreground (text) → 0 (black), background → 255 (white).
+    // Heuristic: dark-on-light is typical, so values below threshold are text.
+    for (var k = 0, m = 0; k < d.length; k += 4, m++) {
+      var bw = lums[m] < threshold ? 0 : 255;
+      d[k] = d[k + 1] = d[k + 2] = bw;
+    }
+    ctx.putImageData(imageData, 0, 0);
+    return canvas;
+  }
+
+  // Legacy single-strategy preprocessor — kept for any external callers.
+  function preprocessForOCR(img) { return preprocessPaper(img); }
+
   // ------------------------------------------------------------------
   // OCR engine dispatch
   // ------------------------------------------------------------------
-  function runOCR(canvas) {
-    if (state.engine === 'mlkit') return runMLKit(canvas);
-    return runTesseract(canvas);
+  // Tesseract path now runs TWO passes — one paper-tuned, one screen-tuned —
+  // and picks the result with more recognisable KGH content. This adds
+  // ~1-2 seconds to offline scans but means a single code path handles
+  // both paper chart stickers AND photos-of-screens (Meditech headers).
+  //
+  // ML Kit path runs single-pass with paper preprocessing — the native
+  // TextDetector on Android handles screen text robustly without the
+  // moiré-defeating downscale trick.
+  //
+  // Returns { text, strategy } so the caller can log which preprocessor
+  // won. strategy is one of: 'paper', 'screen', 'mlkit'.
+  function runOCR(img) {
+    if (state.engine === 'mlkit') {
+      var canvas = preprocessPaper(img);
+      return runMLKit(canvas).then(function (text) {
+        return { text: text, strategy: 'mlkit' };
+      });
+    }
+    return runTesseractMultiPass(img);
   }
 
   function runMLKit(canvas) {
@@ -168,6 +280,82 @@
     });
   }
 
+  // Score raw OCR text by how many KGH-recognisable anchor tokens it
+  // contains. Higher = more confident we got real characters out.
+  // Used to pick the winning preprocessing strategy in multi-pass mode.
+  function scoreTesseractOutput(text) {
+    if (!text) return 0;
+    var t = text.toUpperCase();
+    var score = 0;
+    if (/HCN\s*#?/.test(t))    score += 30;
+    if (/MRN\s*#?/.test(t))    score += 30;
+    if (/KELKGH/.test(t))      score += 30;
+    if (/KGH[A-Z]\d/.test(t))  score += 20;
+    if (/\bACT\b/.test(t))     score += 10;
+    if (/\bADM\b/.test(t))     score += 10;
+    if (/\bMRP\b/.test(t))     score += 10;
+    if (/\bFAM\b/.test(t))     score += 10;
+    if (/\bDOB\b/.test(t))     score += 10;
+    if (/\b9\d{9}\b/.test(t))                  score += 20;  // BC PHN
+    if (/\d{2}\/\d{2}\/\d{4}/.test(t))         score += 10;  // DOB
+    var words = (t.match(/[A-Z]{4,}/g) || []);
+    score += Math.min(words.length, 10);
+    return score;
+  }
+
+  // Run Tesseract with an explicit PSM mode on a pre-processed canvas.
+  function runTesseractPass(canvas, psm) {
+    var dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    return loadTesseract().then(function () {
+      return state.tesseractWorker.setParameters({ tessedit_pageseg_mode: String(psm) });
+    }).then(function () {
+      return state.tesseractWorker.recognize(dataUrl);
+    }).then(function (result) {
+      return (result && result.data && result.data.text) || '';
+    }).catch(function (err) {
+      // Don't fail the whole multi-pass on one pass error
+      return '';
+    });
+  }
+
+  // Multi-pass Tesseract: run both preprocessing strategies + appropriate
+  // PSM, score each result, return the better one. Adds tracing so we can
+  // see in the debug bundle which strategy won.
+  function runTesseractMultiPass(img) {
+    var paperCanvas  = preprocessPaper(img);
+    var screenCanvas = preprocessScreen(img);
+
+    // PSM 11 = sparse text (good for sticker labels with scattered text)
+    // PSM 6  = uniform block of text (good for Meditech screen headers)
+    var paperPromise  = runTesseractPass(paperCanvas,  '11');
+    var screenPromise = runTesseractPass(screenCanvas, '6');
+
+    return Promise.all([paperPromise, screenPromise]).then(function (results) {
+      var paperText  = results[0];
+      var screenText = results[1];
+      var paperScore  = scoreTesseractOutput(paperText);
+      var screenScore = scoreTesseractOutput(screenText);
+
+      // Pick the higher-scoring result. Ties go to paper (the proven path).
+      var winner, winnerText, winnerScore, loserScore;
+      if (screenScore > paperScore) {
+        winner = 'screen';  winnerText = screenText;
+        winnerScore = screenScore; loserScore = paperScore;
+      } else {
+        winner = 'paper';   winnerText = paperText;
+        winnerScore = paperScore;  loserScore = screenScore;
+      }
+
+      return {
+        text:     winnerText,
+        strategy: winner,
+        scores:   { paper: paperScore, screen: screenScore }
+      };
+    });
+  }
+
+  // Legacy single-pass entry point — kept for any external callers.
+  // Internal code now uses runOCR(img) which returns {text, strategy}.
   function runTesseract(canvas) {
     var dataUrl = canvas.toDataURL('image/jpeg', 0.92);
     return loadTesseract().then(function () {
@@ -724,9 +912,21 @@
 
     return detectEngine().then(function (eng) {
       return loadImage(toDataURL(b64, mediaType)).then(function (img) {
-        var canvas = preprocessForOCR(img);
-        return runOCR(canvas).then(function (rawText) {
+        return runOCR(img).then(function (ocrResult) {
+          var rawText = ocrResult.text;
           var parsed = parse(rawText, mode);
+          // Surface multi-pass diagnostic info into the parse log so the
+          // debug bundle shows which preprocessing strategy won.
+          if (ocrResult.strategy) {
+            parsed._parseLog = parsed._parseLog || [];
+            var pre = '[preprocessor: ' + ocrResult.strategy;
+            if (ocrResult.scores) {
+              pre += ' · scores paper=' + ocrResult.scores.paper +
+                     ' screen=' + ocrResult.scores.screen;
+            }
+            pre += ']';
+            parsed._parseLog.unshift(pre);
+          }
           // Shape that matches the Cloudflare Worker output for drop-in use:
           var out = {
             last: parsed.last || '',
@@ -742,7 +942,9 @@
               stickerType: parsed._stickerType,
               parseLog: parsed._parseLog,
               flags: parsed._flags || {},
-              rawText: parsed._rawText
+              rawText: parsed._rawText,
+              preprocessor: ocrResult.strategy || null,
+              scores: ocrResult.scores || null
             }
           };
           return out;
