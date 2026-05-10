@@ -1,10 +1,17 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology Billing — main app
-  Version:    v3.17
-  Built:      2026-05-08 13:30 UTC
+  Version:    v3.20
+  Built:      2026-05-10 17:30 UTC
   Repo:       github.com/KelownaCardio/kelownacardio.github.io
   Changes in this build:
+    - OCR corrections capture: every patient added via OCR diffs the
+      OCR output against the saved form values; corrections sent to
+      shared OCR Corrections sheet via push('logOCRCorrections') —
+      same backend that upload.html already uses.
+    - window._lastOCR persisted on every scan for console-debugging
+      (`console.log(window._lastOCR._meta)` to see parser log + flags).
+  From v3.17/3.19:
     - Silent offline OCR fallback (uses ocr_offline.js when Cloudflare blocked)
     - Engine indicator on extracted bar (☁️ cloud / 📱 device)
     - Meditech import button restored — opens import.html (Apps Script path)
@@ -555,7 +562,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span id="hdr-version" style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.19</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span id="hdr-version" style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.20</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1687,12 +1694,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.19-2026-05-08-ap-consult-redesign';
+var BUILD_ID    = 'v3.20-2026-05-10-ocr-corrections-capture';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.19';
-var APP_BUILT   = '2026-05-08 (session 2)';
+var APP_VERSION = 'v3.20';
+var APP_BUILT   = '2026-05-10 17:30 UTC';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -5265,6 +5272,16 @@ function _addPatientCore(withClaim) {
   if (SHEETS_URL) push('savePatient', p);
   logChange(p, 'Admitted', ward + (p.bed ? ' Bed/Rm ' + p.bed : ''));
 
+  // OCR corrections capture — if this patient was OCR'd, diff what the OCR
+  // produced against what was actually saved and log any corrections.
+  // Same pattern as upload.html. Cleared after each successful save so it
+  // doesn't bleed into the next patient.
+  if (window._ocrOriginal) {
+    var corrections = buildOCRCorrections(p);
+    if (corrections.length && SHEETS_URL) push('logOCRCorrections', { corrections: corrections });
+    window._ocrOriginal = null;
+  }
+
   // Optionally create a consult claim at the same time
   if (withClaim && st.doc) {
     var cCode    = document.getElementById('f-c-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
@@ -5954,6 +5971,25 @@ function handleOCRResult(data, bar) {
     catch (e) { if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'Bad JSON in response'; } return; }
   }
 
+  // Persist the full OCR result for two purposes:
+  //   1. window._lastOCR — debug from console: console.log(window._lastOCR._meta)
+  //   2. window._ocrOriginal — snapshot of what OCR produced, used by
+  //      buildOCRCorrections() at save time to compute a diff against
+  //      the doctor's final form values. Same shape as upload.html.
+  window._lastOCR     = p;
+  window._ocrOriginal = {
+    last:   p.last  || '',
+    first:  p.first || '',
+    phn:    p.phn   || '',
+    dob:    p.dob   || '',
+    sex:    p.sex   || '',
+    mrp:    p.mrp   || '',
+    ward:   p.ward  || '',
+    room:   p.room  || '',
+    engine: p._engine || 'worker',
+    capturedAt: Date.now()
+  };
+
   if (p.last)  document.getElementById('f-last').value  = p.last;
   if (p.first) document.getElementById('f-first').value = p.first;
   if (p.phn)   document.getElementById('f-phn').value   = (p.phn + '').replace(/\D/g,'').slice(0,10);
@@ -5994,6 +6030,51 @@ function handleOCRResult(data, bar) {
     else if (p._engine === 'mlkit')     engineTag = '📱 ';
     bar.textContent = engineTag + '✓ Extracted: ' + (p.last||'?') + ', ' + (p.first||'?') + (p.phn ? ' · ' + p.phn : '');
   }
+}
+
+// ─── OCR corrections diff ──────────────────────────────────────────
+// Compares the OCR snapshot (window._ocrOriginal, set by handleOCRResult)
+// against the patient as actually saved. Returns an array of
+// {ts, phn, patientName, field, ocr_value, corrected_value, engine, source}
+// for every field the doctor changed. Schema matches the live Apps Script
+// 'OCR Corrections' sheet exactly (8 cols).
+//
+// Sent to Apps Script via push('logOCRCorrections', { corrections }).
+// upload.html uses the same backend (action name and schema) — corrections
+// from both apps land in one shared sheet, tagged by `source`.
+//
+// Only logs CORRECTIONS — fields where OCR produced something AND the doctor
+// changed it. Empty-OCR-then-doctor-typed-something is NOT a correction
+// (OCR didn't claim anything to be wrong about).
+
+var OCR_CORRECTION_FIELDS = ['last','first','phn','dob','sex','mrp','ward','room'];
+
+function buildOCRCorrections(savedPatient) {
+  if (!window._ocrOriginal) return [];
+  var orig = window._ocrOriginal;
+  var corrections = [];
+  OCR_CORRECTION_FIELDS.forEach(function(field) {
+    var ov = String(orig[field]   || '').trim();
+    var cv = String(savedPatient[field] || '').trim();
+    // PHN: normalise both sides to digits-only before comparing
+    if (field === 'phn') {
+      ov = ov.replace(/\D/g,'');
+      cv = cv.replace(/\D/g,'');
+    }
+    if (ov && cv && ov !== cv) {
+      corrections.push({
+        ts:              new Date().toISOString(),
+        phn:             savedPatient.phn || cv,
+        patientName:     (savedPatient.last || '') + ', ' + (savedPatient.first || ''),
+        field:           field,
+        ocr_value:       ov,
+        corrected_value: cv,
+        engine:          orig.engine || 'worker',
+        source:          'main'
+      });
+    }
+  });
+  return corrections;
 }
 
 

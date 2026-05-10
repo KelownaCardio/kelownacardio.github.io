@@ -42,6 +42,9 @@ v1.4  2026-05-09  Patient pre-check banner: fires after OCR fills
                   tab via saveHistorical payload (atomic, no extra call).
                   Fixed CORRECTION_FIELDS mutation bug (was accumulating
                   duplicate 'refby' entries across calls).
+
+v1.5  2026-05-10  Persist window._lastOCR after each scan for console
+                  debugging. Same pattern now used by main app v3.20.
 ===================================================================
 -->
 <html lang="en">
@@ -1564,9 +1567,13 @@ function sendSingleOCR(b64) {
     if (data.ward) document.getElementById('f-ward').value=data.ward;
     if (data.room) document.getElementById('f-room').value=data.room;
     setStatus('ocr-status','st-ok','Extracted: '+(data.last||'?')+', '+(data.first||'?')+(data.phn?' · PHN: '+data.phn:''));
-    // Store raw OCR output for corrections logging at save time
+    // Store full OCR output for two purposes:
+    //   1. window._lastOCR — debug from console: console.log(window._lastOCR)
+    //   2. window._ocrOriginal — snapshot used by buildCorrections() at save time
+    window._lastOCR = data;
     window._ocrOriginal = { last:data.last||'', first:data.first||'', phn:data.phn||'',
-                             dob:data.dob||'', sex:data.sex||'', engine:'worker' };
+                             dob:data.dob||'', sex:data.sex||'', engine:'worker',
+                             capturedAt: Date.now() };
     refreshPreview();
     lookupPatientFromSheets(data.phn||'', data.last||'', data.dob||'');
   };
