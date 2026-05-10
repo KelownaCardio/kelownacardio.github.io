@@ -1,20 +1,26 @@
 // ===================================================================
 // ocr_offline.js  —  KGH offline OCR engine
 // -------------------------------------------------------------------
-// Version:    v1.2
-// Built:      2026-05-10 21:30 UTC
+// Version:    v1.3
+// Built:      2026-05-10 22:00 UTC
 // Repo:       github.com/KelownaCardio/kelownacardio.github.io
 // -------------------------------------------------------------------
+// Changes in v1.3:
+//   - Meditech detection broadened. Earlier rule required KELKGH which
+//     missed ED-view headers showing "ADM ACIN, KGH Emergency
+//     Department" as plain text. Now: KELKGH OR HCN#/MRN# (hash format,
+//     unique to Meditech) OR "ADM ACIN" phrase, with ADM present and
+//     no "ACT KG".
+//   - Name regex accepts "Surname, First" (with space) in addition to
+//     "Surname,First" (no space — chart sticker style).
+//   - Routing prefix exclusion now uses word boundary on ACT and ADM so
+//     "Acute" no longer false-matches "ACT".
+//
 // Changes in v1.2:
-//   - Parser fixes targeted at Meditech screen photo extraction:
-//     * PHN: now recognises "HCN#" (Meditech format) in addition to
-//       "HCN" (chart sticker format)
-//     * DOB: in Meditech mode, falls back to "DD/MM/YYYY" inline
-//       format when no "DD MMM YYYY" date is found
-//     * Sex: in Meditech mode, picks up bare "M" or "F" following age
-//       (e.g. "71, F · DOB") since Meditech has no L: anchor
-//     * Name: strips OCR edge-artifact prefixes (single letter + space)
-//       that screen photos commonly inject (e.g. "l Wheelhouse" -> "Wheelhouse")
+//   - HCN# recognised in addition to HCN
+//   - Inline DD/MM/YYYY DOB recognised in Meditech mode
+//   - Bare M/F sex after age recognised in Meditech mode
+//   - OCR edge-artifact prefix stripped from names
 //
 // Changes in v1.1:
 //   - Multi-pass Tesseract: paper-tuned AND screen-tuned preprocessing
@@ -49,8 +55,8 @@
 (function (root) {
   'use strict';
 
-  var VERSION = 'v1.2';
-  var BUILT   = '2026-05-10 21:30 UTC';
+  var VERSION = 'v1.3';
+  var BUILT   = '2026-05-10 22:00 UTC';
 
   try {
     console.log('%c[KGH OCR offline] ' + VERSION + ' · built ' + BUILT,
@@ -483,9 +489,22 @@
     var hasFAM = /\bFAM\b/i.test(text);
     if (hasBD && hasHCN && hasFAM) return 'labvial';
 
-    var hasKELKGH = /KELKGH/i.test(text);
-    var hasADM = /\bADM\b/i.test(text);
-    if (hasKELKGH && hasADM && !/ACT\s+KG/i.test(text)) return 'meditech';
+    // Meditech detection — broadened. Earlier versions required KELKGH which
+    // missed some Meditech views (e.g. ED shows "ADM ACIN, KGH Emergency
+    // Department" as plain text, no KELKGH code). Now use ANY of these:
+    //   • KELKGH location code (most CCU/ward views)
+    //   • HCN# / MRN# (hash-prefixed format unique to Meditech)
+    //   • "ADM ACIN" phrase (Meditech admission header)
+    // Chart stickers never use any of these — they have ACT KG / HCN<space>.
+    var hasKELKGH       = /KELKGH/i.test(text);
+    var hasHashedField  = /\b(?:HCN|MRN)#/i.test(text);
+    var hasAdmAcin      = /\bADM\s+ACIN\b/i.test(text);
+    var hasADM          = /\bADM\b/i.test(text);
+    var hasActKG        = /ACT\s+KG/i.test(text);
+
+    if (!hasActKG && (hasKELKGH || hasHashedField || hasAdmAcin) && hasADM) {
+      return 'meditech';
+    }
 
     return 'sticker';
   }
@@ -835,8 +854,16 @@
     var lines = text.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(Boolean);
 
     // Name extraction (first comma/period line in first 8, with wrap detection)
-    var ROUTING = /^(MOS|REN|AGG|EDC|ACIN|MHL|D\s*MOS|ID\s*MOS|ACT|ADM|HCN|INS|MRP|FRM|FAM|DOB|BD|RCIN|SPEC)\b/i;
-    var NAME_PATTERN = /^[A-Za-z*][A-Za-z\s\-']{1,30}[,.][A-Za-z]/;
+    var ROUTING = /^(MOS|REN|AGG|EDC|ACIN|MHL|D\s*MOS|ID\s*MOS|ACT\b|ADM\b|HCN|INS|MRP|FRM|FAM|DOB|BD|RCIN|SPEC)\b/i;
+    // Name regex requirements:
+    //   - Starts with a letter (or * for clipped)
+    //   - Surname part: must be a coherent word (≥2 letters, no internal spaces
+    //     except for two-word surnames like "Van Houten"). Cannot end with a
+    //     space immediately before the separator — that's garbage like "i ly i . g".
+    //   - Separator: comma or period
+    //   - Optional space after separator (Meditech "Surname, First" vs sticker "Surname,First")
+    //   - First name starts with a letter, at least 2 letters
+    var NAME_PATTERN = /^[A-Za-z*][A-Za-z\-']{1,}(?:\s[A-Za-z][A-Za-z\-']+){0,2}[,.]\s*[A-Za-z][A-Za-z]/;
 
     var nameLineIdx = -1;
     var nameRaw = '';
@@ -847,9 +874,17 @@
         log('Skip noise line: "' + lines[i] + '"');
         continue;
       }
-      if (NAME_PATTERN.test(lines[i])) {
+      // Pre-strip OCR edge artifacts (e.g. "l " or "i " before the real name
+      // on screen photos) before testing against NAME_PATTERN. The strip
+      // function only modifies if pattern matches a single letter + space
+      // before a capitalised word, so it's safe to apply universally.
+      var candidate = stripOCREdgePrefix(lines[i]);
+      if (candidate !== lines[i]) {
+        log('Edge-prefix pre-stripped: "' + lines[i] + '" -> "' + candidate + '"');
+      }
+      if (NAME_PATTERN.test(candidate)) {
         nameLineIdx = i;
-        nameRaw = lines[i];
+        nameRaw = candidate;
         log('Name line found at ' + i + ': ' + nameRaw);
         break;
       }
