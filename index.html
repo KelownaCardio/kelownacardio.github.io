@@ -1,25 +1,25 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology Billing — main app
-  Version:    v3.21
-  Built:      2026-05-10 18:00 UTC
+  Version:    v3.23
+  Built:      2026-05-10 20:45 UTC
   Repo:       github.com/KelownaCardio/kelownacardio.github.io
   Changes in this build:
-    - Debug panel: append ?debug=1 to URL for a mobile-friendly
-      OCR debug panel with force-offline toggle and clipboard copy
-      of full _lastOCR bundle. Hidden in normal use.
-    - Service Worker (sw.js) rewritten to be version-aware — bumps
-      to a new cache name on each deploy so doctors actually get
-      latest builds.
-  Changes in v3.20:
-    - OCR corrections capture: every patient added via OCR diffs the
-      OCR output against the saved form values; corrections sent to
-      shared 'OCR Corrections' Google Sheet via push('logOCRCorrections').
-    - window._lastOCR persisted on every scan for console-debugging.
-  From v3.17/3.19:
-    - Silent offline OCR fallback (uses ocr_offline.js when Cloudflare blocked)
-    - Engine indicator on extracted bar (☁️ cloud / 📱 device)
-    - Meditech import button restored — opens import.html (Apps Script path)
+    - Meditech-aware correction capture. Empty-OCR → typed corrections
+      for ward/room are now logged when stickerType='meditech' — the
+      doctor's value is exactly the signal needed to extend the
+      decodeMeditechLocation map. The raw KELKGH/KGH code from OCR
+      is captured in ocr_value as a "(rawText: ...)" hint.
+    - Corrections are now tagged with sticker type in `source`
+      (e.g. 'main:meditech', 'main:sticker', 'main:labvial') so the
+      next chat can slice the corpus by what was being scanned.
+  Changes in v3.22:
+    - Debug panel minimizable (small pill in corner by default).
+  Changes in v3.21:
+    - Debug panel introduced.
+    - Service Worker rewritten to be version-aware.
+  From v3.20:
+    - OCR corrections capture (logOCRCorrections action).
 -->
 <html lang="en">
 <head>
@@ -567,7 +567,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span id="hdr-version" style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.21</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span id="hdr-version" style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.23</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1699,12 +1699,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.21-2026-05-10-debug-panel';
+var BUILD_ID    = 'v3.23-2026-05-10-meditech-learning';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.21';
-var APP_BUILT   = '2026-05-10 18:00 UTC';
+var APP_VERSION = 'v3.23';
+var APP_BUILT   = '2026-05-10 20:45 UTC';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -6050,14 +6050,39 @@ function handleOCRResult(data, bar) {
 //
 // Only logs CORRECTIONS — fields where OCR produced something AND the doctor
 // changed it. Empty-OCR-then-doctor-typed-something is NOT a correction
-// (OCR didn't claim anything to be wrong about).
+// (OCR didn't claim anything to be wrong about) — EXCEPT for ward and
+// room, where empty often means "decoder map missing an entry" and the
+// doctor's value is exactly the signal we need to fix that.
 
 var OCR_CORRECTION_FIELDS = ['last','first','phn','dob','sex','mrp','ward','room'];
+
+// Fields where empty→typed IS a useful learning signal:
+//   ward/room: empty usually means decodeMeditechLocation missed a code.
+//              The doctor's value tells us what code maps to what ward/room.
+var LOG_EMPTY_AS_CORRECTION = { ward: true, room: true };
 
 function buildOCRCorrections(savedPatient) {
   if (!window._ocrOriginal) return [];
   var orig = window._ocrOriginal;
   var corrections = [];
+
+  // Pull stickerType from the last OCR result so we know whether this scan
+  // was a chart sticker, lab vial, or Meditech header — useful for slicing
+  // the corrections corpus later.
+  var stickerType = '';
+  if (window._lastOCR && window._lastOCR._meta) {
+    stickerType = window._lastOCR._meta.stickerType || '';
+  }
+
+  // Pull raw OCR text for ward/room corrections — lets us see what code
+  // the OCR captured that the decoder failed on (e.g. KELKGHX123 -> ward=X).
+  // Stored under ocr_value when the original ward/room is blank, so the
+  // next chat can extend decodeMeditechLocation accordingly.
+  var rawText = '';
+  if (window._lastOCR && window._lastOCR._meta) {
+    rawText = window._lastOCR._meta.rawText || '';
+  }
+
   OCR_CORRECTION_FIELDS.forEach(function(field) {
     var ov = String(orig[field]   || '').trim();
     var cv = String(savedPatient[field] || '').trim();
@@ -6066,16 +6091,40 @@ function buildOCRCorrections(savedPatient) {
       ov = ov.replace(/\D/g,'');
       cv = cv.replace(/\D/g,'');
     }
-    if (ov && cv && ov !== cv) {
+
+    var isStandardCorrection = (ov && cv && ov !== cv);
+    // Empty→typed ward/room is signal ONLY on Meditech headers,
+    // where the decoder SHOULD have produced a ward/room. On chart
+    // stickers, ward is always entered manually — not a correction.
+    var isEmptyOcrLearning   = (!ov && cv
+                                && LOG_EMPTY_AS_CORRECTION[field]
+                                && stickerType === 'meditech');
+
+    if (isStandardCorrection || isEmptyOcrLearning) {
+      // For empty-OCR ward/room: stash the raw KELKGH/KGH line from OCR
+      // in ocr_value so we can see what the decoder should have matched.
+      var ocrValForLog = ov;
+      if (isEmptyOcrLearning) {
+        var hint = '';
+        if (field === 'ward' && rawText) {
+          var wm = rawText.match(/KELKGH[A-Z0-9]+/);
+          if (wm) hint = '(rawText: ' + wm[0] + ')';
+        } else if (field === 'room' && rawText) {
+          var rm = rawText.match(/KGH[A-Z]+\d{3,4}[\s-]?[A-Z]?/);
+          if (rm) hint = '(rawText: ' + rm[0] + ')';
+        }
+        ocrValForLog = '[empty] ' + hint;
+      }
+
       corrections.push({
         ts:              new Date().toISOString(),
         phn:             savedPatient.phn || cv,
         patientName:     (savedPatient.last || '') + ', ' + (savedPatient.first || ''),
         field:           field,
-        ocr_value:       ov,
+        ocr_value:       ocrValForLog,
         corrected_value: cv,
         engine:          orig.engine || 'worker',
-        source:          'main'
+        source:          stickerType ? 'main:' + stickerType : 'main'
       });
     }
   });
@@ -7478,72 +7527,113 @@ function openSummaryEl(el) { openPatientSummary(el.getAttribute("data-pid") || e
 <!-- ═══════════════════════════════════════════════════════
      DEBUG PANEL — visible only when URL has ?debug=1
      ───────────────────────────────────────────────────
-     Lets the doctor (and support) test offline OCR and
-     copy diagnostic info without needing browser DevTools.
-     Mobile-friendly: large tap targets, clipboard copy.
+     Starts MINIMIZED as a small pill in the corner so it
+     doesn't block interaction with the app. Tap pill to
+     expand into the full panel; tap the chevron to collapse.
+     State persists across reloads via localStorage.
      ═══════════════════════════════════════════════════════ -->
-<div id="kgh-debug-panel" style="display:none; position:fixed; bottom:64px; right:8px; left:8px;
-     max-width:380px; margin-left:auto; z-index:9999;
-     background:#1a1a1a; color:#e5e5ea; border-radius:12px; padding:14px;
+
+<!-- Minimized pill (default visible state) -->
+<div id="kgh-debug-pill"
+     onclick="dbgToggle(true)"
+     style="display:none; position:fixed; bottom:8px; right:8px; z-index:9999;
+            background:#1a1a1a; color:#7fd1ff; border:1px solid #2d4a6a;
+            border-radius:18px; padding:6px 12px; font-size:12px;
+            font-family:ui-monospace,'SF Mono',Menlo,monospace;
+            box-shadow:0 2px 8px rgba(0,0,0,.3); cursor:pointer; user-select:none;
+            display:none; align-items:center; gap:6px;">
+  <span>🔧</span>
+  <span id="dbg-pill-text">debug</span>
+</div>
+
+<!-- Full panel (hidden until pill is tapped) -->
+<div id="kgh-debug-panel" style="display:none; position:fixed; bottom:8px; right:8px; left:8px;
+     max-width:340px; margin-left:auto; z-index:9999;
+     background:#1a1a1a; color:#e5e5ea; border-radius:12px; padding:12px;
      font-family:ui-monospace,'SF Mono',Menlo,monospace; font-size:13px;
      box-shadow:0 4px 18px rgba(0,0,0,.4);">
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
     <strong style="color:#7fd1ff;">🔧 OCR Debug</strong>
-    <span id="dbg-engine-pill" style="font-size:11px; padding:3px 8px; border-radius:10px; background:#333;">probing…</span>
+    <div style="display:flex; align-items:center; gap:8px;">
+      <span id="dbg-engine-pill" style="font-size:11px; padding:3px 8px; border-radius:10px; background:#333;">probing…</span>
+      <button onclick="dbgToggle(false)" aria-label="Minimize"
+              style="background:transparent; border:none; color:#888;
+                     font-size:18px; cursor:pointer; padding:0 4px; line-height:1;">×</button>
+    </div>
   </div>
 
-  <label style="display:flex; align-items:center; gap:10px; padding:10px 0; cursor:pointer;">
+  <label style="display:flex; align-items:center; gap:10px; padding:8px 0; cursor:pointer;">
     <input type="checkbox" id="dbg-force-offline" style="width:20px; height:20px; accent-color:#7fd1ff;">
     <span>Force offline OCR (skip Cloudflare)</span>
   </label>
 
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
-    <button onclick="dbgShowLast()" style="padding:11px; border:none; border-radius:8px;
+    <button onclick="dbgShowLast()" style="padding:10px; border:none; border-radius:8px;
             background:#2d4a6a; color:#fff; font-family:inherit; font-size:13px; cursor:pointer;">
       Show last OCR
     </button>
-    <button onclick="dbgCopyLast()" style="padding:11px; border:none; border-radius:8px;
+    <button onclick="dbgCopyLast()" style="padding:10px; border:none; border-radius:8px;
             background:#2d6a4a; color:#fff; font-family:inherit; font-size:13px; cursor:pointer;">
-      📋 Copy to clipboard
+      📋 Copy
     </button>
   </div>
 
   <div id="dbg-status" style="margin-top:10px; padding:8px; background:#252525; border-radius:6px;
-       font-size:11px; color:#888; min-height:32px; word-break:break-word;">
+       font-size:11px; color:#888; min-height:32px; word-break:break-word; cursor:pointer;">
     No scan yet. Tap photograph in Add Patient.
-  </div>
-
-  <div style="margin-top:8px; font-size:10px; color:#666; text-align:right;">
-    Append <code style="background:#252525; padding:2px 4px; border-radius:3px;">?debug=1</code> to URL to enable
   </div>
 </div>
 
 <script>
+// ── Debug panel show/hide ──────────────────────────────
+function dbgToggle(expand) {
+  var pill  = document.getElementById('kgh-debug-pill');
+  var panel = document.getElementById('kgh-debug-panel');
+  if (!pill || !panel) return;
+  if (expand) {
+    pill.style.display  = 'none';
+    panel.style.display = 'block';
+    try { localStorage.setItem('kgh:dbg-expanded', '1'); } catch (e) {}
+  } else {
+    pill.style.display  = 'inline-flex';
+    panel.style.display = 'none';
+    try { localStorage.setItem('kgh:dbg-expanded', '0'); } catch (e) {}
+  }
+}
+
 // Activate debug panel if URL has ?debug=1
 (function () {
   try {
     var params = new URLSearchParams(window.location.search);
     if (params.get('debug') !== '1') return;
 
-    var panel = document.getElementById('kgh-debug-panel');
-    if (!panel) return;
-    panel.style.display = 'block';
+    // Show pill or panel based on last-saved preference (default: minimized)
+    var wasExpanded = false;
+    try { wasExpanded = localStorage.getItem('kgh:dbg-expanded') === '1'; } catch (e) {}
+    dbgToggle(wasExpanded);
 
-    // ── Force-offline toggle ───────────────────────────────
     var toggle = document.getElementById('dbg-force-offline');
     var pill   = document.getElementById('dbg-engine-pill');
+    var pillText = document.getElementById('dbg-pill-text');
 
     function paintPill() {
       var r = window._cloudOCRReachable;
-      if (r === false)       { pill.textContent = '📱 OFFLINE FORCED'; pill.style.background = '#5a3030'; }
-      else if (r === true)   { pill.textContent = '☁️ cloud reachable'; pill.style.background = '#1f3d2f'; }
-      else                   { pill.textContent = 'cloud: untested';   pill.style.background = '#333'; }
+      var label, bg;
+      if (r === false)     { label = '📱 OFFLINE FORCED'; bg = '#5a3030'; }
+      else if (r === true) { label = '☁️ cloud reachable'; bg = '#1f3d2f'; }
+      else                 { label = 'cloud: untested';   bg = '#333'; }
+      if (pill) { pill.textContent = label; pill.style.background = bg; }
+      // Mirror state in the minimized pill so you can see engine status at a glance
+      if (pillText) {
+        if (r === false)     pillText.textContent = '📱 offline';
+        else if (r === true) pillText.textContent = '☁️ cloud';
+        else                 pillText.textContent = 'debug';
+      }
     }
 
     toggle.addEventListener('change', function() {
       if (toggle.checked) {
         window._cloudOCRReachable = false;
-        // Preload Tesseract so the first scan isn't a 15s wait
         if (window.OCROffline && window.OCROffline.preload) {
           window.OCROffline.preload().then(function() {
             dbgSetStatus('Offline engine ready — go scan');
@@ -7553,21 +7643,18 @@ function openSummaryEl(el) { openPatientSummary(el.getAttribute("data-pid") || e
           dbgSetStatus('Loading Tesseract (~2 MB one-time)…');
         }
       } else {
-        // Re-enable cloud for next scan (will re-probe)
         window._cloudOCRReachable = null;
         dbgSetStatus('Cloud re-enabled. Next scan probes Cloudflare.');
       }
       paintPill();
     });
 
-    // Initial pill state + reflect any pre-existing window state
     if (window._cloudOCRReachable === false) toggle.checked = true;
     paintPill();
 
-    // Repaint pill every 2s so it reflects cloud probe outcomes
     setInterval(paintPill, 2000);
 
-    // Reveal debug log on click of status box
+    // Tap status area to see full parser log
     document.getElementById('dbg-status').addEventListener('click', function() {
       if (!window._lastOCR) return;
       var meta = window._lastOCR._meta || {};
@@ -7583,6 +7670,15 @@ function openSummaryEl(el) { openPatientSummary(el.getAttribute("data-pid") || e
 function dbgSetStatus(msg) {
   var el = document.getElementById('dbg-status');
   if (el) el.textContent = msg;
+  // Also briefly show a notification dot on the minimized pill
+  var pillText = document.getElementById('dbg-pill-text');
+  if (pillText && document.getElementById('kgh-debug-pill').style.display !== 'none') {
+    var prev = pillText.textContent;
+    pillText.textContent = '● new';
+    setTimeout(function() {
+      if (pillText.textContent === '● new') pillText.textContent = prev;
+    }, 2500);
+  }
 }
 
 // Hook into handleOCRResult so the panel updates after every scan
@@ -7591,22 +7687,24 @@ function dbgSetStatus(msg) {
   var orig = handleOCRResult;
   window.handleOCRResult = function(data, bar) {
     var result = orig.apply(this, arguments);
-    // Update debug status if panel is active
-    if (document.getElementById('kgh-debug-panel').style.display !== 'none') {
-      var p = window._lastOCR || {};
-      var meta = p._meta || {};
-      var bits = [];
-      bits.push((p._engine || '?') + ' / ' + (meta.stickerType || 'n/a'));
-      bits.push('last=' + (p.last  || '∅'));
-      bits.push('first='+ (p.first || '∅'));
-      bits.push('phn='  + (p.phn   || '∅'));
-      bits.push('dob='  + (p.dob   || '∅'));
-      if (meta.flags) {
-        var flagged = Object.keys(meta.flags).filter(function(k){ return meta.flags[k]; });
-        if (flagged.length) bits.push('flags: ' + flagged.join(','));
-      }
-      dbgSetStatus(bits.join(' · ') + '\n\n[tap for parser log]');
+    // Only run debug work if the pill/panel are present (i.e. ?debug=1)
+    var panel = document.getElementById('kgh-debug-panel');
+    var pill  = document.getElementById('kgh-debug-pill');
+    if (!panel || (panel.style.display === 'none' && pill.style.display === 'none')) return result;
+
+    var p = window._lastOCR || {};
+    var meta = p._meta || {};
+    var bits = [];
+    bits.push((p._engine || '?') + ' / ' + (meta.stickerType || 'n/a'));
+    bits.push('last=' + (p.last  || '∅'));
+    bits.push('first='+ (p.first || '∅'));
+    bits.push('phn='  + (p.phn   || '∅'));
+    bits.push('dob='  + (p.dob   || '∅'));
+    if (meta.flags) {
+      var flagged = Object.keys(meta.flags).filter(function(k){ return meta.flags[k]; });
+      if (flagged.length) bits.push('flags: ' + flagged.join(','));
     }
+    dbgSetStatus(bits.join(' · ') + '\n\n[tap for parser log]');
     return result;
   };
 })();
@@ -7634,7 +7732,6 @@ function dbgShowLast() {
 
 function dbgCopyLast() {
   if (!window._lastOCR) { dbgSetStatus('Nothing to copy yet.'); return; }
-  // Include original snapshot too so we capture cloud-vs-saved if relevant
   var bundle = {
     timestamp:    new Date().toISOString(),
     appVersion:   (typeof APP_VERSION !== 'undefined' ? APP_VERSION : 'unknown'),
@@ -7644,12 +7741,10 @@ function dbgCopyLast() {
   };
   var text = JSON.stringify(bundle, null, 2);
 
-  // navigator.clipboard requires HTTPS + secure context — should work on github.io
   function done() {
-    dbgSetStatus('✓ Copied ' + text.length + ' chars to clipboard. Paste into chat.');
+    dbgSetStatus('✓ Copied ' + text.length + ' chars. Paste into chat.');
   }
   function fallback() {
-    // Old-school fallback for browsers without clipboard API
     var ta = document.createElement('textarea');
     ta.value = text;
     ta.style.position = 'fixed';
@@ -7657,7 +7752,7 @@ function dbgCopyLast() {
     document.body.appendChild(ta);
     ta.select();
     try { document.execCommand('copy'); done(); }
-    catch (e) { dbgSetStatus('Copy failed. Open console and run: copy(JSON.stringify(window._lastOCR))'); }
+    catch (e) { dbgSetStatus('Copy failed. Use console: copy(JSON.stringify(window._lastOCR))'); }
     document.body.removeChild(ta);
   }
   if (navigator.clipboard && navigator.clipboard.writeText) {
