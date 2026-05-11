@@ -1,28 +1,29 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology Billing — main app
-  Version:    v3.29
+  Version:    v3.30
   Built:      2026-05-10 UTC
   Repo:       github.com/KelownaCardio/kelownacardio.github.io
 
-  Changes in this build (v3.29) — FEES trimmed to actual usage:
-    - FEES reduced from 56 codes (v3.28 audit set) to 20 codes the
-      cardiology group actually bills. Removed: echo (billed by hospital),
-      ECG/Holter, stress tests, pacemaker checks, remote monitoring,
-      event recorders, cardiac rehab, telehealth variants, 33007/33009.
-    - Kept: 4 consult codes (33010/33012/33014/33005), 2 continuing-care
-      codes (33006/33008), 2 procedure codes (Y33025/00751), 2 discharge
-      codes (78717/78720), 4 CCU codes (1411/1421/1431/1441), 6 out-of-
-      office call modifiers (1200-series).
-    - LEGACY_FEE_LABELS unchanged: still explains 14101/14105/14113 if
-      they appear in historical claims.
-    - Default ICD 3062 confirmed intentional (per team).
+  Changes in this build (v3.30) — calendar colour fix:
+    - _cvDominantType now recognises 33005 (emergency), 33014 (prolonged
+      counsel), 1441 (CCU day 31+), Y33025 (cardioversion), 00751
+      (pericardiocentesis), 78717 (discharge), 78720 (MOST). Previously
+      days with only these fee codes rendered with no colour because the
+      dominant detector returned null. Added a hasAny fallback so any
+      claimed day at minimum gets the consult amber.
+    - byDate in _ptSummaryCalendarHTML now normalises each claim's date
+      through fmtClaimDate before keying, so claims that round-trip
+      through Sheets as a Date object or ISO string still match the
+      DD/MM/YYYY keys the calendar generates.
+    - _cvShowDayDetails colour map expanded to match the new code set.
 
-  v3.28: FEES audited against MSC Payment Schedule 2026; 13 mis-labelled
-         codes fixed; 3 invalid codes removed (14101/14105/14113); $
-         amounts added to every entry; getFeeLabel() refactored.
-  v3.27: Calendar view default in patient summary; gap detection for
-         CCU + MRP daily wards; tap-to-add picker; discharge gap check.
+  v3.29: FEES trimmed from 56 to 20 codes (group's actual usage).
+  v3.28: FEES audited against MSC 2026; 13 mis-labels fixed; 3 invalid
+         codes removed (14101/14105/14113); $ amounts added; getFeeLabel
+         refactored.
+  v3.27: Calendar view default in patient summary; gap detection for CCU
+         + MRP daily wards; tap-to-add picker; discharge gap check.
   v3.25: ocr_offline.js v1.2 (Meditech parser fixes).
   v3.24: Multi-pass Tesseract (paper + screen preprocessing).
   v3.23: Meditech-aware empty-OCR ward/room corrections with rawText.
@@ -580,14 +581,20 @@ input[type=file] { display:none; }
           justify-content:center; font-size:12px; font-weight:600; cursor:pointer; position:relative;
           user-select:none; border:1px solid transparent; }
 .cv-day.cv-outside { color:var(--text3); opacity:.35; cursor:default; }
-.cv-day.cv-gap     { background:var(--surface2); color:var(--text2); }
-.cv-day.cv-today   { box-shadow:inset 0 0 0 2px var(--blue); }
-.cv-day.cv-discharged { box-shadow:inset 0 0 0 2px var(--red); }
-.cv-day.cv-consult   { background:var(--amber-bg);  color:var(--amber-t); }
-.cv-day.cv-daily     { background:var(--green-bg);  color:var(--green-t); }
-.cv-day.cv-combined  { background:var(--teal-bg);   color:var(--teal-t); }
-.cv-day.cv-directive { background:var(--blue-bg);   color:var(--blue-t); }
-.cv-day.cv-ccu       { background:var(--purple-bg); color:var(--purple-t); }
+.cv-day.cv-gap     { background:#d4d4d8; color:#4a4a52; border:1px dashed #8a8a92; }
+.cv-day.cv-today   { box-shadow:inset 0 0 0 2.5px var(--blue); }
+.cv-day.cv-discharged { box-shadow:inset 0 0 0 2.5px var(--red); }
+/* v3.29 — deepened cell fills. The chip-bg pastels (--amber-bg, --purple-bg
+   etc.) rendered near-white on some phone screens, making CCU/Daily/etc.
+   indistinguishable from blank squares. These hex values are saturated
+   enough to read clearly. Text colour tuned for contrast against each fill.
+   CCU is red-family (high-acuity); Daily is dark green; Combined is lighter
+   green so the two greens read as a hierarchy at a glance. */
+.cv-day.cv-consult   { background:#ffcf73; color:#5a2700; }
+.cv-day.cv-daily     { background:#3fa658; color:#062814; }
+.cv-day.cv-combined  { background:#b8e6c4; color:#0a4520; }
+.cv-day.cv-directive { background:#8eb5fa; color:#002461; }
+.cv-day.cv-ccu       { background:#f08585; color:#5e1414; }
 .cv-day .cv-num { font-size:12px; line-height:1; }
 .cv-day .cv-tag { font-size:8px; font-weight:700; line-height:1; margin-top:2px; opacity:.85; letter-spacing:.3px; }
 .cv-warn { background:var(--amber-bg); border:1px solid #f5d28a; color:var(--amber-t);
@@ -631,7 +638,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span id="hdr-version" style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.29</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span id="hdr-version" style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.30</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1791,7 +1798,7 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.29-2026-05-10-fees-trimmed';
+var BUILD_ID    = 'v3.30-2026-05-10-calendar-color-fix';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
@@ -4255,23 +4262,36 @@ function _cvAdmitSpan(p) {
 function _cvDominantType(dayClaims) {
   if (!dayClaims || !dayClaims.length) return null;
   var has = { consult:false, ccu:false, daily:false, directive:false, combined:false };
+  var hasAny = false;
   dayClaims.forEach(function(c) {
-    if (c.fee === '33010' || c.fee === '33012') has.consult = true;
-    else if (c.fee === 'CCU_DAILY' || c.fee === '1411' || c.fee === '1421' || c.fee === '1431') has.ccu = true;
+    hasAny = true;
+    // Consults (full / limited / emergency / prolonged counselling)
+    if (c.fee === '33010' || c.fee === '33012' || c.fee === '33005' || c.fee === '33014') has.consult = true;
+    // CCU bands (raw tap + days 1 / 2-7 / 8-30 / 31+)
+    else if (c.fee === 'CCU_DAILY' || c.fee === '1411' || c.fee === '1421' || c.fee === '1431' || c.fee === '1441') has.ccu = true;
+    // Directive visit
     else if (c.fee === '33006') has.directive = true;
+    // 33008 is both daily AND combined daily — differentiate by note presence
+    // (combined daily care from the calendar always adds an "<icd> — <reason>" note)
     else if (c.fee === '33008') {
-      // 33008 is both daily AND combined daily. Differentiate by note presence
-      // or by multiple 33008 claims on same date (combined = 2× with note on 2nd).
-      // Simple rule: if notes present on any 33008 today, treat as combined.
       if (c.notes && String(c.notes).trim()) has.combined = true;
       else has.daily = true;
     }
+    // Bedside procedures (cardioversion, pericardiocentesis) — flag as consult-coloured
+    // since they typically accompany a consult/visit event the same day
+    else if (c.fee === 'Y33025' || c.fee === '00751') has.consult = true;
+    // 78717 (complex discharge) / 78720 (MOST) are extras that piggyback on a
+    // regular visit. Fall through; if a 33008/33010 is also billed today, that
+    // wins. If those are the ONLY claims, the hasAny fallback at the end paints
+    // the day with consult colour so it isn't invisible.
   });
   if (has.consult)   return 'consult';
   if (has.ccu)       return 'ccu';
   if (has.daily)     return 'daily';
   if (has.directive) return 'directive';
   if (has.combined)  return 'combined';
+  // Fallback — any claim on the day deserves *some* colour so the doctor sees it
+  if (hasAny) return 'consult';
   return null;
 }
 
@@ -4325,11 +4345,15 @@ function _cvCcuFeeForDate(p, dateStr) {
 
 // Build calendar HTML
 function _ptSummaryCalendarHTML(p, claims) {
-  // Index claims by DD/MM/YYYY
+  // Index claims by DD/MM/YYYY — normalize each claim's date first since
+  // claims that round-trip through Sheets may come back as a Date object or
+  // ISO string instead of DD/MM/YYYY (see fmtClaimDate defensive logic).
   var byDate = {};
   claims.forEach(function(c) {
-    if (!byDate[c.date]) byDate[c.date] = [];
-    byDate[c.date].push(c);
+    var dateKey = fmtClaimDate(c.date);  // always DD/MM/YYYY after this
+    if (!dateKey) return;
+    if (!byDate[dateKey]) byDate[dateKey] = [];
+    byDate[dateKey].push(c);
   });
 
   var span = _cvAdmitSpan(p);
@@ -4347,12 +4371,12 @@ function _ptSummaryCalendarHTML(p, claims) {
 
   // Legend
   html += '<div class="cv-legend">' +
-            '<div class="cv-lg"><div class="cv-sw" style="background:var(--amber-bg)"></div>Consult</div>' +
-            '<div class="cv-lg"><div class="cv-sw" style="background:var(--purple-bg)"></div>CCU</div>' +
-            '<div class="cv-lg"><div class="cv-sw" style="background:var(--green-bg)"></div>Daily</div>' +
-            '<div class="cv-lg"><div class="cv-sw" style="background:var(--blue-bg)"></div>Directive</div>' +
-            '<div class="cv-lg"><div class="cv-sw" style="background:var(--teal-bg)"></div>Combined</div>' +
-            (rule ? '<div class="cv-lg"><div class="cv-sw" style="background:var(--surface2);border:1px solid var(--border2)"></div>Gap</div>' : '') +
+            '<div class="cv-lg"><div class="cv-sw" style="background:#ffcf73"></div>Consult</div>' +
+            '<div class="cv-lg"><div class="cv-sw" style="background:#f08585"></div>CCU</div>' +
+            '<div class="cv-lg"><div class="cv-sw" style="background:#3fa658"></div>Daily</div>' +
+            '<div class="cv-lg"><div class="cv-sw" style="background:#8eb5fa"></div>Directive</div>' +
+            '<div class="cv-lg"><div class="cv-sw" style="background:#b8e6c4"></div>Combined</div>' +
+            (rule ? '<div class="cv-lg"><div class="cv-sw" style="background:#d4d4d8;border:1px dashed #8a8a92"></div>Gap</div>' : '') +
           '</div>';
 
   // Month nav
@@ -4468,11 +4492,13 @@ function _cvShowDayDetails(pid, dateStr, dayClaims) {
     var dxLabel  = icdShortLabel(c.icd);
     if (dxLabel.length > 45) dxLabel = dxLabel.slice(0, 42) + '…';
     var typeColor = 'var(--text)';
-    if (c.fee === '33010' || c.fee === '33012') typeColor = 'var(--amber-t)';
-    else if (c.fee === 'CCU_DAILY' || c.fee === '1411' || c.fee === '1421' || c.fee === '1431') typeColor = 'var(--purple-t)';
+    if (c.fee === '33010' || c.fee === '33012' || c.fee === '33005' || c.fee === '33014') typeColor = 'var(--amber-t)';
+    else if (c.fee === 'CCU_DAILY' || c.fee === '1411' || c.fee === '1421' || c.fee === '1431' || c.fee === '1441') typeColor = 'var(--purple-t)';
     else if (c.fee === '33006') typeColor = 'var(--blue-t)';
     else if (c.fee === '33008' && c.notes) typeColor = 'var(--teal-t)';
     else if (c.fee === '33008') typeColor = 'var(--green-t)';
+    else if (c.fee === 'Y33025' || c.fee === '00751') typeColor = 'var(--red-t)';
+    else if (c.fee === '78717' || c.fee === '78720') typeColor = 'var(--green-t)';
     return (
       '<div style="background:var(--surface2);border-radius:8px;padding:10px 12px;margin-bottom:8px">' +
         '<div style="display:flex;justify-content:space-between;font-weight:700;font-size:13px;color:' + typeColor + '">' +
