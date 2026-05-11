@@ -45,6 +45,11 @@ v1.4  2026-05-09  Patient pre-check banner: fires after OCR fills
 
 v1.5  2026-05-10  Persist window._lastOCR after each scan for console
                   debugging. Same pattern now used by main app v3.20.
+
+v1.6  2026-05-11  Dropbox integration: OAuth PKCE, Load from Dropbox
+                  (Chooser SDK picks individual card photos), saves
+                  thumbnail + JSON sidecar to Apps/KCA Billing/Processed/
+                  on batchConfirm. App key: t4fc354dztzh4fi.
 ===================================================================
 -->
 <html lang="en">
@@ -53,6 +58,7 @@ v1.5  2026-05-10  Persist window._lastOCR after each scan for console
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>KGH Historical Billing</title>
+<script src="https://www.dropbox.com/static/api/2/dropins.js" id="dropboxjs" data-app-key="t4fc354dztzh4fi"></script>
 <style>
 :root {
   --bg:#f5f5f7;--surface:#fff;--surface2:#f0f0f3;
@@ -225,6 +231,13 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 .crop-actions button{flex:1;padding:13px;font-size:14px;font-weight:700;border-radius:var(--r);border:none;cursor:pointer;font-family:inherit}
 .crop-btn-cancel{background:rgba(255,255,255,.18);color:#fff}
 .crop-btn-use{background:var(--blue);color:#fff}
+/* Dropbox status bar */
+.dbx-bar{display:flex;align-items:center;gap:8px;background:var(--surface2);border-bottom:.5px solid var(--border);padding:7px 16px;font-size:12px;color:var(--text2)}
+.dbx-dot{width:8px;height:8px;border-radius:50%;background:var(--border2);flex-shrink:0}
+.dbx-dot.on{background:var(--green)}
+.dbx-lbl{flex:1}
+.dbx-btn{font-size:11px;font-weight:600;color:var(--blue);background:none;border:none;cursor:pointer;font-family:inherit;padding:4px 8px}
+.dbx-save-chip{font-size:9px;font-weight:700;padding:2px 5px;border-radius:10px;background:var(--blue-bg);color:var(--blue-t);margin-left:4px;vertical-align:middle}
 </style>
 </head>
 <body>
@@ -237,6 +250,12 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <div class="mode-bar">
   <div class="mode-tab active" id="tab-single" onclick="switchMode('single')">Single card</div>
   <div class="mode-tab" id="tab-batch" onclick="switchMode('batch')">Batch scan</div>
+</div>
+
+<div id="dbx-bar" class="dbx-bar" style="display:none">
+  <div class="dbx-dot" id="dbx-dot"></div>
+  <div class="dbx-lbl" id="dbx-lbl">Dropbox not connected</div>
+  <button class="dbx-btn" id="dbx-btn" onclick="dbxToggle()">Connect</button>
 </div>
 
 <div class="container">
@@ -277,6 +296,9 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
     <span style="font-size:10px;color:var(--text3)">JPEG/PNG — all cards in one image</span>
   </div>
   <input id="batch-file-in" class="file-input" type="file" accept="image/*" onchange="handleBatchPhoto(this)">
+  <button class="btn btn-s" id="dbx-load-btn" style="margin-top:0;font-size:13px" onclick="dbxLoadCards()" disabled>
+    📂 Load from Dropbox <span id="dbx-folder-hint" style="font-size:10px;color:var(--text3)">(connect Dropbox first)</span>
+  </button>
   <div id="batch-ocr-status" class="status-bar"></div>
 </div>
 
@@ -493,6 +515,7 @@ var batch = {
   items: [], current: 0,
   status: [],          // 'pending'|'confirmed'|'skipped'
   confirmed: [],       // accumulated claims from all confirmed cards
+  sourceImages: [],    // dataUrl per card — used for Dropbox thumbnails
 };
 // Referrer lookup uses existing searchPhysicians endpoint (server-side)
 var _feeOverrides = {};
@@ -1491,6 +1514,11 @@ function batchConfirm() {
   }
   batch.confirmed = batch.confirmed.concat(toSave);
   batch.status[batch.current] = 'confirmed';
+  // Save thumbnail + JSON sidecar to Dropbox if connected
+  var imgSrc = batch.sourceImages && batch.sourceImages[batch.current];
+  if (imgSrc && dbxGetToken() && toSave.length) {
+    dbxSaveCard(imgSrc, toSave, batch.current);
+  }
   updateConfirmedBar();
   batchAdvance();
 }
@@ -1920,7 +1948,199 @@ function cropUse() {
   var p=_cropPending;_cropPending=null;_cropState=null;if(p&&p.onUse)p.onUse(dataUrl);
 }
 
+// ─── Dropbox Integration ──────────────────────────────────────────────────────
+var DBX_APP_KEY   = 't4fc354dztzh4fi';
+var DBX_REDIRECT  = 'https://kelownacardio.github.io/upload.html';
+var DBX_PROCESSED = '/Processed';
+var _dbxToken   = null;
+var _dbxRefresh = null;
+
+// PKCE helpers
+function dbxRandStr(n) {
+  var a = new Uint8Array(n); crypto.getRandomValues(a);
+  return Array.from(a, function(b){ return ('0'+b.toString(16)).slice(-2); }).join('');
+}
+async function dbxChallenge(v) {
+  var buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v));
+  return btoa(String.fromCharCode.apply(null, new Uint8Array(buf)))
+    .replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+
+// Auth
+async function dbxConnect() {
+  var v = dbxRandStr(32);
+  localStorage.setItem('dbx_v', v);
+  var c = await dbxChallenge(v);
+  window.location.href = 'https://www.dropbox.com/oauth2/authorize'
+    + '?client_id='             + DBX_APP_KEY
+    + '&response_type=code'
+    + '&code_challenge='        + c
+    + '&code_challenge_method=S256'
+    + '&redirect_uri='          + encodeURIComponent(DBX_REDIRECT)
+    + '&token_access_type=offline';
+}
+async function dbxHandleCallback() {
+  var p = new URLSearchParams(window.location.search);
+  var code = p.get('code'); if (!code) return;
+  history.replaceState({}, '', window.location.pathname);
+  var v = localStorage.getItem('dbx_v'); if (!v) return;
+  try {
+    var r = await fetch('https://api.dropboxapi.com/oauth2/token', {
+      method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:'code='+encodeURIComponent(code)+'&grant_type=authorization_code'
+          +'&client_id='+DBX_APP_KEY+'&code_verifier='+encodeURIComponent(v)
+          +'&redirect_uri='+encodeURIComponent(DBX_REDIRECT)
+    });
+    var d = await r.json();
+    if (d.access_token) {
+      _dbxToken = d.access_token; _dbxRefresh = d.refresh_token||null;
+      localStorage.setItem('dbx_token', _dbxToken);
+      localStorage.setItem('dbx_refresh', _dbxRefresh||'');
+      localStorage.removeItem('dbx_v');
+      dbxUpdateUI();
+    }
+  } catch(e) { console.warn('Dropbox auth error', e); }
+}
+async function dbxRefreshToken() {
+  if (!_dbxRefresh) return false;
+  try {
+    var r = await fetch('https://api.dropboxapi.com/oauth2/token', {
+      method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:'grant_type=refresh_token&refresh_token='+encodeURIComponent(_dbxRefresh)+'&client_id='+DBX_APP_KEY
+    });
+    var d = await r.json();
+    if (d.access_token) { _dbxToken=d.access_token; localStorage.setItem('dbx_token',_dbxToken); return true; }
+  } catch(e) {}
+  return false;
+}
+function dbxDisconnect() {
+  _dbxToken=_dbxRefresh=null;
+  localStorage.removeItem('dbx_token'); localStorage.removeItem('dbx_refresh');
+  dbxUpdateUI();
+}
+function dbxGetToken() { return _dbxToken; }
+function dbxToggle() { if (_dbxToken) dbxDisconnect(); else dbxConnect(); }
+function dbxUpdateUI() {
+  var on = !!_dbxToken;
+  var bar = document.getElementById('dbx-bar');
+  if (!bar) return;
+  bar.style.display = '';
+  document.getElementById('dbx-dot').className = 'dbx-dot' + (on?' on':'');
+  document.getElementById('dbx-lbl').textContent = on
+    ? 'Dropbox connected — Apps/KCA Billing/' : 'Dropbox not connected';
+  document.getElementById('dbx-btn').textContent = on ? 'Disconnect' : 'Connect';
+  var lb = document.getElementById('dbx-load-btn');
+  var lh = document.getElementById('dbx-folder-hint');
+  if (lb) lb.disabled = !on;
+  if (lh) lh.textContent = on ? '(Apps/KCA Billing/)' : '(connect Dropbox first)';
+}
+
+// Chooser — picks individual card photos from Dropbox
+function dbxLoadCards() {
+  if (!_dbxToken) { dbxConnect(); return; }
+  if (typeof Dropbox === 'undefined' || !Dropbox.choose) {
+    setStatus('batch-ocr-status','st-warn','Dropbox picker not loaded — check internet connection.'); return;
+  }
+  Dropbox.choose({
+    success: function(files) {
+      if (!files.length) return;
+      setStatus('batch-ocr-status','st-info','Loading '+files.length+' photo'+(files.length===1?'':'s')+' from Dropbox…');
+      dbxProcessPickedFiles(files);
+    },
+    cancel: function() {},
+    linkType: 'direct', multiselect: true,
+    extensions: ['.jpg','.jpeg','.png','.heic'], folderselect: false
+  });
+}
+
+async function dbxProcessPickedFiles(files) {
+  // Each file is an individual card photo — OCR one at a time, build queue
+  batch.items=[]; batch.status=[]; batch.sourceImages=[]; batch.confirmed=[];
+  document.getElementById('batch-queue-card').style.display='none';
+  for (var i=0; i<files.length; i++) {
+    setStatus('batch-ocr-status','st-info','Extracting card '+(i+1)+' of '+files.length+': '+files[i].name+'…');
+    var dataUrl = '';
+    try { dataUrl = await dbxFetchAsDataUrl(files[i].link); } catch(e) {}
+    var result = {};
+    if (dataUrl) {
+      try { result = await dbxOcrSingle(dataUrl); } catch(e) { result={}; }
+    }
+    batch.items.push(result.error ? {} : (result||{}));
+    batch.status.push('pending');
+    batch.sourceImages.push(dataUrl);
+  }
+  if (!batch.items.length) { setStatus('batch-ocr-status','st-warn','No cards loaded.'); return; }
+  document.getElementById('batch-queue-card').style.display='';
+  setStatus('batch-ocr-status','st-ok',files.length+' card'+(files.length===1?'':'s')+' loaded from Dropbox — reviewing card 1');
+  loadBatchItem(0);
+}
+
+async function dbxFetchAsDataUrl(url) {
+  var blob = await (await fetch(url)).blob();
+  return new Promise(function(res,rej){
+    var r=new FileReader(); r.onload=function(e){res(e.target.result);}; r.onerror=rej; r.readAsDataURL(blob);
+  });
+}
+
+async function dbxOcrSingle(dataUrl) {
+  var img = await new Promise(function(res){ var i=new Image(); i.onload=function(){res(i);}; i.src=dataUrl; });
+  var MAX=1600,w=img.width,h=img.height;
+  if (w>h&&w>MAX){h=Math.round(h*MAX/w);w=MAX;}else if(h>MAX){w=Math.round(w*MAX/h);h=MAX;}
+  var cv=document.createElement('canvas');cv.width=w;cv.height=h;
+  cv.getContext('2d').drawImage(img,0,0,w,h);
+  var b64=cv.toDataURL('image/jpeg',0.88).split(',')[1];
+  var workerUrl=document.getElementById('worker-url').value.trim();
+  var r = await fetch(workerUrl, {method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({image:b64,mediaType:'image/jpeg'})});
+  return await r.json();
+}
+
+// Save 300px thumbnail + JSON sidecar to Dropbox/Processed/ after confirm
+async function dbxSaveCard(dataUrl, claims, cardIdx) {
+  var token=dbxGetToken(); if (!token||!dataUrl) return;
+  var c=claims[0]||{};
+  var stem=(c.phn||'nophn')+'_'+(c.date||todayISO()).replace(/\//g,'-')+'_'+(c.last||'unknown').toLowerCase().replace(/\s+/g,'');
+  // Thumbnail
+  try {
+    var img=await new Promise(function(res){var i=new Image();i.onload=function(){res(i);};i.src=dataUrl;});
+    var TW=300,th=Math.round(img.height*TW/img.width);
+    var cv=document.createElement('canvas');cv.width=TW;cv.height=th;
+    cv.getContext('2d').drawImage(img,0,0,TW,th);
+    var bytes=Uint8Array.from(atob(cv.toDataURL('image/jpeg',0.70).split(',')[1]),function(c){return c.charCodeAt(0);});
+    await dbxUpload(token, DBX_PROCESSED+'/'+stem+'.jpg', bytes);
+  } catch(e){console.warn('Dropbox thumb fail',e);}
+  // JSON sidecar
+  try {
+    var json=new TextEncoder().encode(JSON.stringify({savedAt:new Date().toISOString(),claims:claims},null,2));
+    await dbxUpload(token, DBX_PROCESSED+'/'+stem+'.json', json);
+  } catch(e){console.warn('Dropbox JSON fail',e);}
+  // Badge the queue chip
+  var chips=document.querySelectorAll('.q-chip');
+  if (chips[cardIdx]&&!chips[cardIdx].querySelector('.dbx-save-chip')) {
+    var badge=document.createElement('span');badge.className='dbx-save-chip';
+    badge.textContent='📦';badge.title='Saved to Dropbox';chips[cardIdx].appendChild(badge);
+  }
+}
+
+async function dbxUpload(token, path, data) {
+  var r=await fetch('https://content.dropboxapi.com/2/files/upload',{
+    method:'POST',
+    headers:{'Authorization':'Bearer '+token,
+             'Dropbox-API-Arg':JSON.stringify({path:path,mode:'overwrite',autorename:false}),
+             'Content-Type':'application/octet-stream'},
+    body:data
+  });
+  if (r.status===401) { var ok=await dbxRefreshToken(); if(ok) return dbxUpload(_dbxToken,path,data); else dbxDisconnect(); }
+  return r;
+}
+
 // ─── Init ─────────────────────────────────────────────────────────────────────
+// Restore Dropbox session
+_dbxToken   = localStorage.getItem('dbx_token')   || null;
+_dbxRefresh = localStorage.getItem('dbx_refresh')  || null;
+dbxUpdateUI();
+// Handle OAuth callback if returning from Dropbox auth
+dbxHandleCallback();
 renderCal();
 refreshPreview();
 
