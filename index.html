@@ -1,31 +1,36 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology Billing — main app
-  Version:    v3.31
+  Version:    v3.32
   Built:      2026-05-11 UTC
   Repo:       github.com/KelownaCardio/kelownacardio.github.io
 
-  Changes in this build (v3.31) — Location & service rule tightening:
-    - On/Off service (`list`) is now ward-driven, not role-driven.
-      wardChange() and peWardChange() set the default: CCU/2S/2W → on
-      service, everything else → off service. User can still override
-      manually per patient.
-    - roleChange() / mrpChange() / peRoleChange() / peMrpChange() no
-      longer touch `list`. The bidirectional role ↔ MRP binding is kept
-      (role=mrp ↔ mrp=Cardiology; role=consultant ↔ mrp=non-Cardiology),
-      and the hidden `care` field is still updated, but service location
-      is no longer clobbered when the doctor flips role or MRP.
-    - Edit Patient init now passes {preserveList:true} to peWardChange
-      so opening the edit modal doesn't overwrite the saved `list` value
-      with the ward default.
-    - Meditech import: unrecognised MRPs (consulting role, attending not
-      Hospitalist/CTU/CSICU/ICU/Cardiac Surgery) now default to 'Other'
-      rather than an empty string, matching the Add/Edit dropdown shape.
-      Cardiology MRP cases are guaranteed to write mrp='Cardiology'.
+  Changes in this build (v3.32) — toast + ward defaults:
+    - showToast no longer stacks. Each call removes any previous toast
+      div immediately (the v3.31 code cleared the removal timer but left
+      the orphan div in the DOM until its own timer fired, so rapid
+      rounding taps left several banners visible). Duration shortened
+      from 2400ms to 1600ms. Any visible toast is also dismissed when
+      the user navigates to a different pane via showPane.
+    - wardChange / peWardChange now snap role + MRP + care to the ward's
+      defaults (in addition to list, which v3.31 added). CCU/2S/2W set
+      role=MRP, mrp=Cardiology; everything else sets role=Consulting,
+      mrp=Other. Care is set to ccu for CCU/CSICU/ICUA/B/D, daily for
+      2S/2W, directive elsewhere. This fixes the case where adding a
+      patient to a non-cardiac ward via the form left them with
+      role=MRP+mrp=Cardiology (defaults from clearAddForm), causing the
+      wrong quick-tap buttons (+ Daily instead of + Directive / + Combined
+      daily). User can still manually override after.
+    - Edit modal: preserveList renamed to preserveAll and now also
+      preserves the saved role / mrp / care, so opening edit on an
+      existing patient never clobbers their saved values.
+    - clearAddForm now defers to wardChange() to pick role/mrp/list/care
+      based on the current ward, instead of hard-coding mrp+on+daily.
 
-  v3.30: Calendar colour fix — _cvDominantType recognises 33005/33014/
-         1441/Y33025/00751/78717/78720; byDate normalises claim dates
-         via fmtClaimDate; _cvShowDayDetails colour map expanded.
+  v3.31: Location & service rule tightening — list (on/off) ward-driven;
+         role ↔ MRP bidirectional binding kept but list-snapping removed;
+         edit-modal preserves saved list; Meditech import writes role and
+         defaults unrecognised MRPs to 'Other'.
 
   v3.29: FEES trimmed from 56 to 20 codes (group's actual usage).
   v3.28: FEES audited against MSC 2026; 13 mis-labels fixed; 3 invalid
@@ -651,7 +656,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span id="hdr-version" style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.31</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span id="hdr-version" style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.32</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1811,7 +1816,7 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.31-2026-05-11-location-service-rules';
+var BUILD_ID    = 'v3.32-2026-05-11-toast-ward-defaults';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
@@ -5129,43 +5134,30 @@ function openPatientEdit(pid) {
 
   // Populate bed options after render
   setTimeout(function() {
-    // Preserve the patient's saved list (on/off service) — don't snap to
-    // ward default when re-opening edit; only manual ward changes do that.
-    peWardChange({preserveList:true});
+    // Preserve the patient's saved list / role / mrp / care — opening
+    // edit must never clobber values with ward defaults. Only manual
+    // ward changes inside the modal will reset them.
+    peWardChange({preserveAll:true});
     // Restore current bed value into the input
     var bedInp = document.getElementById('pe-bed');
     if (bedInp && p.bed) bedInp.value = p.bed;
-    // Reflect MRP role in fields
-    peRoleChange();
-    // But restore the actual saved mrp value
-    var mrpSel = document.getElementById('pe-mrp');
-    if (mrpSel && p.mrp) mrpSel.value = p.mrp;
+    // (No peRoleChange() here — preserveAll already kept role/mrp/care.
+    //  Calling peRoleChange would overwrite the saved care value based
+    //  on role, losing 'combined' on CSICU/ICU patients etc.)
   }, 50);
 }
 
 // Dynamic ward change in edit form
 function peWardChange(opts) {
   var ward = (document.getElementById('pe-ward') || {}).value || 'CCU';
-  var wdef = WARDS[ward] || {};
   var bedLbl = document.getElementById('pe-bed-lbl');
   if (bedLbl) bedLbl.textContent = ward === 'CCU' ? 'Bed #' : 'Room';
-  var rooms = (wdef.rooms || []).slice();
-  var bedSel = document.getElementById('pe-bed');
-  if (!bedSel) return;
 
-  // Ward-driven list default. Skip on init so the saved list value isn't
-  // clobbered when the edit modal first opens — init passes preserveList.
-  if (!opts || !opts.preserveList) {
-    var listSel = document.getElementById('pe-list');
-    if (listSel) listSel.value = wdef.list || 'off';
-  }
-
-  // Re-apply role rules so MRP daily/CCU care type tracks the new ward
-  var roleSel = document.getElementById('pe-role');
-  if (roleSel && roleSel.value === 'mrp') {
-    var careFld  = document.getElementById('pe-care');
-    var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
-    if (careFld) careFld.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
+  // Apply ward defaults to list / role / mrp / care unless this call is
+  // the edit-modal init (opts.preserveAll=true) — we don't want opening
+  // edit on an existing patient to clobber their saved values.
+  if (!opts || !opts.preserveAll) {
+    applyWardDefaults(ward, { list:'pe-list', role:'pe-role', mrp:'pe-mrp', care:'pe-care' });
   }
 }
 
@@ -6061,13 +6053,37 @@ function selectBed(row) {
   if (row.parentElement) row.parentElement.style.display = 'none';
 }
 
+// Apply ward-default role / mrp / care / list to a set of form selects.
+// CCU/2S/2W → MRP role, Cardiology, on-service, ccu-or-daily care.
+// Everything else → Consulting role, Other mrp, off-service, directive care.
+// Used by both wardChange (Add Patient) and peWardChange (Edit Patient).
+// Caller passes the four element IDs; missing IDs are skipped.
+function applyWardDefaults(ward, ids) {
+  var wdef = WARDS[ward] || {};
+  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
+  var isMRPward = wdef.role === 'mrp';
+
+  var listEl = ids.list && document.getElementById(ids.list);
+  var roleEl = ids.role && document.getElementById(ids.role);
+  var mrpEl  = ids.mrp  && document.getElementById(ids.mrp);
+  var careEl = ids.care && document.getElementById(ids.care);
+
+  if (listEl) listEl.value = wdef.list || 'off';
+  if (roleEl) roleEl.value = isMRPward ? 'mrp' : 'consultant';
+  if (mrpEl)  mrpEl.value  = isMRPward ? 'Cardiology' : 'Other';
+  if (careEl) {
+    if (isMRPward) careEl.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
+    else           careEl.value = 'directive';
+  }
+}
+
 function wardChange(opts) {
-  // Set bed label, show/hide custom-ward input, clear bed, refresh care
-  // for MRP role, and (unless preserveList) reset on/off-service to the
-  // ward's default. CCU/2S/2W default to On Service; everything else to
-  // Off Service. User can still manually flip after.
-  var w    = gv('f-ward');
-  var wdef = WARDS[w] || {};
+  // Set bed label, show/hide custom-ward input, clear bed, and (unless
+  // preserveAll) snap list + role + mrp + care to ward defaults.
+  // CCU/2S/2W → MRP/Cardiology/on; everything else → Consulting/Other/off.
+  // User can manually override any field after; the next ward change
+  // will reset them again.
+  var w = gv('f-ward');
   var bedLbl = document.getElementById('bed-lbl');
   if (bedLbl) bedLbl.textContent = w === 'CCU' ? 'Bed #' : 'Room';
 
@@ -6079,18 +6095,9 @@ function wardChange(opts) {
   var bedInp = document.getElementById('f-bed');
   if (bedInp) bedInp.value = '';
 
-  // Ward-driven list default
-  if (!opts || !opts.preserveList) {
-    var listSel = document.getElementById('f-list');
-    if (listSel) listSel.value = wdef.list || 'off';
-  }
-
-  // Re-apply role rules (care field only — list is handled above)
-  var roleSel = document.getElementById('f-role');
-  if (roleSel && roleSel.value === 'mrp') {
-    var careFld  = document.getElementById('f-care');
-    var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
-    if (careFld) careFld.value = icuWards.indexOf(w) !== -1 ? 'ccu' : 'daily';
+  // Apply ward defaults unless explicitly suppressed
+  if (!opts || !opts.preserveAll) {
+    applyWardDefaults(w, { list:'f-list', role:'f-role', mrp:'f-mrp', care:'f-care' });
   }
 }
 
@@ -6180,11 +6187,10 @@ function clearAddForm() {
   document.getElementById('f-refby-num').value   = '';
   document.getElementById('f-icd').value         = '';
   document.getElementById('f-sex').value         = '';
-  // New patient defaults: Cardiology MRP, On Service
-  var roleEl = document.getElementById('f-role'); if (roleEl) roleEl.value = 'mrp';
-  var mrpEl  = document.getElementById('f-mrp');  if (mrpEl)  mrpEl.value  = 'Cardiology';
-  var listEl = document.getElementById('f-list'); if (listEl) listEl.value = 'on';
-  var careEl = document.getElementById('f-care'); if (careEl) careEl.value = 'daily';
+  // Defer role / mrp / list / care to the current ward's defaults via
+  // wardChange. This ensures the form is internally consistent: CCU/2S/2W
+  // open as Cardiology MRP, everything else as Consulting.
+  wardChange();
   document.getElementById('f-ref-dd').style.display = 'none';
   document.getElementById('ocr-bar').style.display  = 'none';
   // Re-initialise the consult card (date/time, toggles, performing physician)
@@ -7931,6 +7937,10 @@ var ALL_PANES = ['p0','p1','p-discharged','p-claim','p-loc'];
 function showPane(id) {
   ALL_PANES.forEach(function(pid) { document.getElementById(pid).classList.remove('on'); });
   document.getElementById(id).classList.add('on');
+  // Sweep any visible toasts so they don't hang over the new pane
+  clearTimeout(_toastTimer);
+  var stragglers = document.querySelectorAll('.kgh-toast');
+  for (var i = 0; i < stragglers.length; i++) { stragglers[i].remove(); }
 }
 
 function nav(n, el) {
@@ -8138,15 +8148,23 @@ function chkIco10() {
 // Toast notification
 var _toastTimer;
 function showToast(msg) {
+  // Remove any previous toast div BEFORE adding the new one — v3.31 only
+  // cleared the removal timer, so rapid taps left orphan divs visible
+  // until each one's individual timer fired. Tag with a class so showPane
+  // can sweep any stragglers on navigation.
   clearTimeout(_toastTimer);
+  var prev = document.querySelectorAll('.kgh-toast');
+  for (var i = 0; i < prev.length; i++) { prev[i].remove(); }
+
   var d = document.createElement('div');
+  d.className = 'kgh-toast';
   d.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);' +
                     'background:#1a1a18;color:#fff;padding:8px 16px;border-radius:20px;' +
                     'font-size:12px;font-weight:600;z-index:999;white-space:nowrap;' +
                     'pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.3)';
   d.textContent = msg;
   document.body.appendChild(d);
-  _toastTimer = setTimeout(function() { d.remove(); }, 2400);
+  _toastTimer = setTimeout(function() { d.remove(); }, 1600);
 }
 
 // Re-sync whenever the user switches back to this tab/app
