@@ -56,6 +56,14 @@ v1.6  2026-05-11  Multi-photo batch with crop-per-photo: batch file input
                   ICD-9 additions: 427.81 sick sinus, 426.2 LBBB,
                   426.50-426.54 fascicular/bilateral BBB, 426.6 LGL,
                   426.81-426.82 long QT, 426.89, 426.9.
+v1.7  2026-05-11  Referring MD search parity with main app: 3-tier system.
+                  Tier 1: focus on empty field shows top Kelowna MDs.
+                  Tier 2: searchPhysiciansLocal — embedded ~2300-entry array.
+                  Tier 3: searchPhysiciansRemote — debounced 400ms fetch to
+                  Apps Script ?action=searchPhysicians against full 15,958-row
+                  Physicians tab. Fires when local=0 OR local<5 results.
+                  Shows "Searching all BC..." placeholder while loading.
+                  ICD-9 list already matched index.html as of v1.6.
 ===================================================================
 -->
 <html lang="en">
@@ -241,7 +249,10 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <body>
 
 <div class="hdr">
-  <div class="hdr-title">KGH Historical Billing</div>
+  <div style="display:flex;align-items:baseline;gap:8px">
+    <div class="hdr-title">KGH Historical Billing</div>
+    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.7</div>
+  </div>
   <div class="hdr-sub" id="hdr-sub">Single card mode</div>
 </div>
 
@@ -799,12 +810,48 @@ function esc(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// ── Tier 3: Remote search via Google Sheets (debounced, 400 ms) ────────────────────────
+function searchPhysiciansRemote(query) {
+  var url = (document.getElementById('script-url')||{}).value || '';
+  if (!url || !query || query.length < 2) return;
+  clearTimeout(_remoteRefTimer);
+  _remoteRefTimer = setTimeout(function() {
+    _lastRefQ = query;
+    fetch(url + '?action=searchPhysicians&q=' + encodeURIComponent(query) + '&key=kgh2026')
+      .then(function(r){ return r.json(); })
+      .then(function(data) {
+        if (query !== _lastRefQ) return; // stale response
+        if (!Array.isArray(data) || !data.length) return;
+        var dd = document.getElementById('ref-dd');
+        if (!dd || !dd.classList.contains('open')) return;
+        // Remove "searching..." placeholder
+        var ph = dd.querySelector('.bc-searching');
+        if (ph) ph.remove();
+        // Find billing numbers already shown
+        var shownNums = [];
+        dd.querySelectorAll('[data-num]').forEach(function(el){ shownNums.push(el.getAttribute('data-num')); });
+        // Append non-duplicate remote results
+        var extraHtml = data
+          .filter(function(p){ return shownNums.indexOf(String(p.num||p[2]||'')) === -1; })
+          .slice(0, 8)
+          .map(function(p){
+            return buildRefRowHtml({ last:p.last||p[0]||'', first:p.first||p[1]||'',
+                                     num:p.num||p[2]||'', spec:p.spec||p[3]||'', city:p.city||p[4]||'' });
+          }).join('');
+        if (extraHtml) dd.innerHTML += extraHtml;
+      })
+      .catch(function(){}); // silent fail — offline OK
+  }, 400);
+}
+
+// ── Main ref search: local first, then remote fallback ────────────────────────────
 function refSearch(query) {
   var dd = document.getElementById('ref-dd');
   if (!dd) return;
 
+  // Empty field on focus — show top Kelowna physicians as a quick-start list
   if (!query || !query.trim()) {
-    if (typeof BC_PHYSICIANS_LOCAL !== 'undefined') {
+    if (typeof BC_PHYSICIANS_LOCAL !== 'undefined' && BC_PHYSICIANS_LOCAL.length) {
       var kelowna = BC_PHYSICIANS_LOCAL.filter(function(p){ return p[4]==='Kelowna'; }).slice(0,12);
       dd.innerHTML = '<div style="padding:5px 10px;font-size:10px;color:var(--text3)">Type to search all BC physicians</div>' +
         kelowna.map(function(p){ return buildRefRowHtml({last:p[0],first:p[1],num:p[2],spec:p[3]||'',city:p[4]||''}); }).join('');
@@ -814,12 +861,22 @@ function refSearch(query) {
   }
 
   var local = searchPhysiciansLocal(query);
+
+  // No local results — hit Sheets immediately, show "Searching all BC..." placeholder
   if (!local.length) {
-    dd.innerHTML = '<div style="padding:8px 10px;font-size:11px;color:var(--text2)">No results for “' + esc(query) + '”</div>';
+    dd.innerHTML = '<div class="bc-searching" style="padding:8px 10px;font-size:11px;color:var(--text2)">Searching all BC...</div>';
     dd.classList.add('open');
+    searchPhysiciansRemote(query);
     return;
   }
-  dd.innerHTML = local.map(buildRefRowHtml).join('');
+
+  // Have local results — show them, and also search remote if fewer than 5
+  var html = local.map(buildRefRowHtml).join('');
+  if (local.length < 5) {
+    html += '<div class="bc-searching" style="padding:6px 10px;font-size:10px;color:var(--text3)">Also searching all BC...</div>';
+    searchPhysiciansRemote(query);
+  }
+  dd.innerHTML = html;
   dd.classList.add('open');
 }
 
