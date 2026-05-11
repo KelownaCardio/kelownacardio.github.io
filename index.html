@@ -1,25 +1,34 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology Billing — main app
-  Version:    v3.25
-  Built:      2026-05-10 21:30 UTC
+  Version:    v3.29
+  Built:      2026-05-10 UTC
   Repo:       github.com/KelownaCardio/kelownacardio.github.io
-  Changes in this build:
-    - Ships with ocr_offline.js v1.2 (Meditech parser fixes):
-      * HCN# recognised in addition to HCN
-      * Inline DD/MM/YYYY DOB recognised in Meditech mode
-      * Bare M/F sex after age recognised in Meditech mode
-      * OCR edge-artifact prefix (single letter + space) stripped from names
-  From v3.24:
-    - Multi-pass Tesseract (paper + screen preprocessing).
-  From v3.23:
-    - Meditech-aware empty-OCR ward/room corrections logged with rawText.
-  From v3.22:
-    - Debug panel minimizable (small pill in corner).
-  From v3.21:
-    - Debug panel + version-aware Service Worker.
-  From v3.20:
-    - OCR corrections capture.
+
+  Changes in this build (v3.29) — FEES trimmed to actual usage:
+    - FEES reduced from 56 codes (v3.28 audit set) to 20 codes the
+      cardiology group actually bills. Removed: echo (billed by hospital),
+      ECG/Holter, stress tests, pacemaker checks, remote monitoring,
+      event recorders, cardiac rehab, telehealth variants, 33007/33009.
+    - Kept: 4 consult codes (33010/33012/33014/33005), 2 continuing-care
+      codes (33006/33008), 2 procedure codes (Y33025/00751), 2 discharge
+      codes (78717/78720), 4 CCU codes (1411/1421/1431/1441), 6 out-of-
+      office call modifiers (1200-series).
+    - LEGACY_FEE_LABELS unchanged: still explains 14101/14105/14113 if
+      they appear in historical claims.
+    - Default ICD 3062 confirmed intentional (per team).
+
+  v3.28: FEES audited against MSC Payment Schedule 2026; 13 mis-labelled
+         codes fixed; 3 invalid codes removed (14101/14105/14113); $
+         amounts added to every entry; getFeeLabel() refactored.
+  v3.27: Calendar view default in patient summary; gap detection for
+         CCU + MRP daily wards; tap-to-add picker; discharge gap check.
+  v3.25: ocr_offline.js v1.2 (Meditech parser fixes).
+  v3.24: Multi-pass Tesseract (paper + screen preprocessing).
+  v3.23: Meditech-aware empty-OCR ward/room corrections with rawText.
+  v3.22: Debug panel minimizable.
+  v3.21: Debug panel + version-aware Service Worker.
+  v3.20: OCR corrections capture.
 -->
 <html lang="en">
 <head>
@@ -553,6 +562,61 @@ input[type=file] { display:none; }
 .claim-del-btn  { color:var(--red-t);  border-color:var(--red-t); }
 .claim-del-btn:active  { background:var(--red-bg); }
 
+/* ═══ v3.27 — calendar view in patient summary ═══ */
+.cv-tog { display:flex; background:var(--surface2); border-radius:var(--rsm); padding:3px; margin-bottom:10px; }
+.cv-tog button { flex:1; padding:8px; border:none; border-radius:6px; font-size:13px; font-weight:600;
+                 cursor:pointer; font-family:inherit; background:transparent; color:var(--text2); }
+.cv-tog button.on { background:var(--surface); color:var(--text); box-shadow:0 1px 2px rgba(0,0,0,.06); }
+.cv-legend { display:flex; flex-wrap:wrap; gap:6px 12px; padding:4px 0 10px; font-size:10px; color:var(--text2); }
+.cv-lg { display:flex; align-items:center; gap:4px; }
+.cv-sw { width:10px; height:10px; border-radius:2px; }
+.cv-nav { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+.cv-nav button { background:var(--surface2); border:none; width:30px; height:30px; border-radius:6px;
+                 font-size:16px; cursor:pointer; color:var(--text); font-family:inherit; }
+.cv-month { font-size:14px; font-weight:700; }
+.cv-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:3px; }
+.cv-dow { text-align:center; font-size:10px; color:var(--text3); font-weight:600; padding:4px 0; }
+.cv-day { aspect-ratio:1; border-radius:6px; display:flex; flex-direction:column; align-items:center;
+          justify-content:center; font-size:12px; font-weight:600; cursor:pointer; position:relative;
+          user-select:none; border:1px solid transparent; }
+.cv-day.cv-outside { color:var(--text3); opacity:.35; cursor:default; }
+.cv-day.cv-gap     { background:var(--surface2); color:var(--text2); }
+.cv-day.cv-today   { box-shadow:inset 0 0 0 2px var(--blue); }
+.cv-day.cv-discharged { box-shadow:inset 0 0 0 2px var(--red); }
+.cv-day.cv-consult   { background:var(--amber-bg);  color:var(--amber-t); }
+.cv-day.cv-daily     { background:var(--green-bg);  color:var(--green-t); }
+.cv-day.cv-combined  { background:var(--teal-bg);   color:var(--teal-t); }
+.cv-day.cv-directive { background:var(--blue-bg);   color:var(--blue-t); }
+.cv-day.cv-ccu       { background:var(--purple-bg); color:var(--purple-t); }
+.cv-day .cv-num { font-size:12px; line-height:1; }
+.cv-day .cv-tag { font-size:8px; font-weight:700; line-height:1; margin-top:2px; opacity:.85; letter-spacing:.3px; }
+.cv-warn { background:var(--amber-bg); border:1px solid #f5d28a; color:var(--amber-t);
+           border-radius:var(--rsm); padding:10px 12px; font-size:12px; margin:10px 0 6px;
+           display:flex; gap:10px; align-items:flex-start; }
+.cv-warn-ok { background:var(--green-bg); border-color:#a8e2b8; color:var(--green-t); }
+.cv-warn-icon { font-size:16px; line-height:1; }
+.cv-warn-body { flex:1; line-height:1.4; }
+.cv-warn-body b { display:block; margin-bottom:2px; }
+
+/* Type picker (CCU / Daily / Directive / Combined daily) */
+.cv-pick-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:6px 0 12px; }
+.cv-pick-btn { position:relative; padding:14px 10px; border-radius:var(--rsm); border:2px solid transparent;
+               cursor:pointer; font-family:inherit; text-align:center; }
+.cv-pick-btn:active { transform:scale(.97); transition:transform .08s; }
+.cv-pick-btn .cv-pk-l { font-size:14px; font-weight:700; line-height:1.1; }
+.cv-pick-btn .cv-pk-s { font-size:10px; margin-top:3px; opacity:.75; }
+.cv-pick-btn .cv-pk-flag { position:absolute; top:-7px; left:50%; transform:translateX(-50%);
+                           background:var(--amber); color:#fff; font-size:8px; font-weight:800;
+                           padding:2px 6px; border-radius:6px; letter-spacing:.3px; text-transform:uppercase; }
+.cv-pick-btn.cv-pk-ccu       { background:var(--purple-bg); color:var(--purple-t); }
+.cv-pick-btn.cv-pk-daily     { background:var(--green-bg);  color:var(--green-t); }
+.cv-pick-btn.cv-pk-directive { background:var(--blue-bg);   color:var(--blue-t); }
+.cv-pick-btn.cv-pk-combined  { background:var(--teal-bg);   color:var(--teal-t); }
+.cv-pick-btn.cv-pk-rec.cv-pk-ccu       { border-color:var(--purple); }
+.cv-pick-btn.cv-pk-rec.cv-pk-daily     { border-color:var(--green); }
+.cv-pick-btn.cv-pk-rec.cv-pk-directive { border-color:var(--blue); }
+.cv-pick-btn.cv-pk-rec.cv-pk-combined  { border-color:var(--teal); }
+
 </style>
 </head>
 <body>
@@ -567,7 +631,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span id="hdr-version" style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.26</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span id="hdr-version" style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.29</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -960,6 +1024,14 @@ input[type=file] { display:none; }
   </div>
 </div>
 
+<!-- ═══ CALENDAR GAP PICKER MODAL (v3.27) ═══ -->
+<div class="overlay" id="cv-picker-modal">
+  <div class="modal" style="border-radius:18px 18px 0 0;padding-bottom:env(safe-area-inset-bottom);max-width:480px;margin:auto">
+    <div class="modal-handle"></div>
+    <div id="cv-picker-content"></div>
+  </div>
+</div>
+
 <!-- ═══ PATIENT EDIT MODAL ═══ -->
 <div class="overlay" id="pt-edit-modal">
   <div class="modal">
@@ -1208,47 +1280,67 @@ function updateDailyTotal() {
     '</span>';
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// FEES — MSC Payment Schedule (January 31, 2026) — Kelowna Cardiology
+//
+// Each entry: { code, desc, amount, cat, clr }
+//   - code   = MSP fee item submitted to iClinic
+//   - desc   = official MSC description (paraphrased for brevity)
+//   - amount = scheduled payment (BC MSP cardiology rate, Jan 2026)
+//   - cat    = grouping for the picker
+//   - clr    = chip colour class
+//
+// v3.29 (2026-05-10) — trimmed to the 20 codes the group actually bills.
+// Echo, ECG, Holter, stress tests, pacemaker checks, remote monitoring,
+// event recorders, and cardiac rehab codes are NOT included — those are
+// billed by hospital / other specialty groups, not this cardiology
+// service. Telehealth variants and 33007/33009 (office/home subseq)
+// also removed per usage. If a service is later added back, restore
+// the relevant codes from the MSC 2026 audit document.
+// ─────────────────────────────────────────────────────────────────────────
 var FEES = [
-  // ── Consultations ──────────────────────────────────
-  { code:'33010', desc:'Cardiology consultation — full',              cat:'Consult',   clr:'chip-blue' },
-  { code:'33012', desc:'Cardiology consultation — limited',           cat:'Consult',   clr:'chip-blue' },
-  { code:'33110', desc:'Subsequent cardiology consultation',          cat:'Consult',   clr:'chip-blue' },
-  { code:'33005', desc:'Emergency visit',                             cat:'Consult',   clr:'chip-red'  },
-  // ── Visits ─────────────────────────────────────────
-  { code:'33008', desc:'Daily in-hospital care / combined daily',     cat:'Daily',     clr:'chip-blue' },
-  { code:'33007', desc:'Out-of-office visit',                         cat:'Daily',     clr:'chip-blue' },
-  { code:'33006', desc:'Directive visit (consultant, max 2/week)',    cat:'Directive', clr:'chip-amber'},
-  // ── Procedures ─────────────────────────────────────
-  { code:'33047', desc:'Electrocardiogram — interpretation only',     cat:'Procedure', clr:'chip-teal' },
-  { code:'33016', desc:'Holter monitor — interpretation',             cat:'Procedure', clr:'chip-teal' },
-  { code:'33062', desc:'Echocardiogram — M-mode + 2D',               cat:'Procedure', clr:'chip-teal' },
-  { code:'33069', desc:'Echocardiogram — Doppler addition',           cat:'Procedure', clr:'chip-teal' },
-  { code:'33035', desc:'Exercise stress test — supervision + interpretation', cat:'Procedure', clr:'chip-teal' },
-  { code:'33028', desc:'Treadmill stress test — interpretation only', cat:'Procedure', clr:'chip-teal' },
-  { code:'33174', desc:'Ambulatory blood pressure monitoring — interpretation', cat:'Procedure', clr:'chip-teal' },
-  { code:'33176', desc:'Ambulatory BP monitoring — technical only',   cat:'Procedure', clr:'chip-teal' },
-  { code:'33107', desc:'Pacemaker check — single chamber',           cat:'Procedure', clr:'chip-teal' },
-  { code:'33018', desc:'Nuclear cardiology — interpretation',         cat:'Procedure', clr:'chip-teal' },
-  // ── Cardioversion / Arrhythmia ─────────────────────
-  { code:'14101', desc:'Cardioversion — elective DC',                 cat:'Procedure', clr:'chip-red'  },
-  { code:'14105', desc:'Cardioversion — emergency DC',                cat:'Procedure', clr:'chip-red'  },
-  { code:'14113', desc:'Pacemaker insertion — temporary transvenous', cat:'Procedure', clr:'chip-red'  },
-  { code:'00751', desc:'Pericardiocentesis',                           cat:'Procedure', clr:'chip-red'  },
-  // ── Discharge / Planning ───────────────────────────
-  { code:'78717', desc:'Complex discharge — comprehensive planning',  cat:'Discharge', clr:'chip-green'},
-  { code:'78720', desc:'MOST — advance care planning (new consult)',  cat:'Other',     clr:'chip-teal' },
-  // ── CCU ────────────────────────────────────────────
-  { code:'1411',  desc:'CCU critical care — Day 1',                  cat:'CCU',       clr:'chip-red'  },
-  { code:'1421',  desc:'CCU critical care — Days 2–7 (max 6 units)', cat:'CCU',       clr:'chip-red'  },
-  { code:'1431',  desc:'CCU critical care — Days 8–30',              cat:'CCU',       clr:'chip-red'  },
-  // ── Call modifiers ─────────────────────────────────
-  { code:'1200',  desc:'Evening call modifier — base 30 min',        cat:'Modifier',  clr:'chip-amber'},
-  { code:'1205',  desc:'Evening call — increment per 30 min',        cat:'Modifier',  clr:'chip-amber'},
-  { code:'1201',  desc:'Night call modifier — base 30 min',          cat:'Modifier',  clr:'chip-red'  },
-  { code:'1206',  desc:'Night call — increment per 30 min',          cat:'Modifier',  clr:'chip-red'  },
-  { code:'1202',  desc:'Weekend/stat call modifier — base 30 min',   cat:'Modifier',  clr:'chip-teal' },
-  { code:'1207',  desc:'Weekend/stat call — increment per 30 min',   cat:'Modifier',  clr:'chip-teal' },
+  // ── Consultations ────────────────────────────────────────────────
+  { code:'33010',  desc:'Cardiology consultation — full',                                 amount:'$186.14', cat:'Consult',   clr:'chip-blue'  },
+  { code:'33012',  desc:'Repeat / limited consultation (same illness, within 6 months)',  amount:'$93.08',  cat:'Consult',   clr:'chip-blue'  },
+  { code:'33014',  desc:'Prolonged visit for counselling (max 4/year)',                   amount:'$66.47',  cat:'Consult',   clr:'chip-blue'  },
+  { code:'33005',  desc:'Emergency visit when specially called',                          amount:'$97.15',  cat:'Consult',   clr:'chip-red'   },
+
+  // ── Continuing care by consultant ────────────────────────────────
+  { code:'33006',  desc:'Directive visit (max 2 per Sun–Sat week; 3rd requires note)',    amount:'$82.42',  cat:'Directive', clr:'chip-amber' },
+  { code:'33008',  desc:'Subsequent hospital visit / MRP daily / combined daily care',    amount:'$63.95',  cat:'Daily',     clr:'chip-blue'  },
+
+  // ── Cardiology procedures performed by the group ─────────────────
+  { code:'Y33025', desc:'Cardioversion (operation only)',                                 amount:'$105.70', cat:'Procedure', clr:'chip-red'   },
+  { code:'00751',  desc:'Pericardiocentesis (pericardial puncture)',                      amount:'$258.25', cat:'Procedure', clr:'chip-red'   },
+
+  // ── Discharge / planning ────────────────────────────────────────
+  { code:'78717',  desc:'Specialist discharge care plan for complex patients (extra)',    amount:'$82.19',  cat:'Discharge', clr:'chip-green' },
+  { code:'78720',  desc:'Specialist advance care planning discussion / MOST (extra)',     amount:'$43.82',  cat:'Discharge', clr:'chip-green' },
+
+  // ── CCU / Critical Care daily fees ──────────────────────────────
+  { code:'1411',   desc:'CCU / ICU critical care — Day 1',                                amount:'$347.74', cat:'CCU',       clr:'chip-red'   },
+  { code:'1421',   desc:'CCU / ICU critical care — Days 2–7 (per diem, max 6 units)',     amount:'$174.38', cat:'CCU',       clr:'chip-red'   },
+  { code:'1431',   desc:'CCU / ICU critical care — Days 8–30',                            amount:'$133.01', cat:'CCU',       clr:'chip-red'   },
+  { code:'1441',   desc:'CCU / ICU critical care — Day 31 onward',                        amount:'$138.53', cat:'CCU',       clr:'chip-red'   },
+
+  // ── Call-out modifiers (Evening / Night / Weekend) ───────────────
+  { code:'1200',   desc:'Evening call modifier — base 30 min',                            amount:'$79.08',  cat:'Modifier',  clr:'chip-amber' },
+  { code:'1201',   desc:'Night call modifier — base 30 min',                              amount:'$111.05', cat:'Modifier',  clr:'chip-red'   },
+  { code:'1202',   desc:'Weekend/stat call modifier — base 30 min',                       amount:'$79.08',  cat:'Modifier',  clr:'chip-teal'  },
+  { code:'1205',   desc:'Evening call — increment per 30 min',                            amount:'$72.69',  cat:'Modifier',  clr:'chip-amber' },
+  { code:'1206',   desc:'Night call — increment per 30 min',                              amount:'$99.40',  cat:'Modifier',  clr:'chip-red'   },
+  { code:'1207',   desc:'Weekend/stat call — increment per 30 min',                       amount:'$72.69',  cat:'Modifier',  clr:'chip-teal'  }
 ];
+
+// Legacy fee codes that appeared in older versions of this app but were
+// invalid in MSC 2026 (14101/14105/14113). Kept so that historical claims
+// in the Sheets render with a meaningful label rather than a bare code.
+// NOT shown in the picker.
+var LEGACY_FEE_LABELS = {
+  '14101': 'Legacy code (was used for cardioversion; correct code is Y33025)',
+  '14105': 'Legacy code (was used for cardioversion; correct code is Y33025)',
+  '14113': 'Legacy code (was used for temp pacemaker; correct code is 33030)'
+};
 
 // ── Comprehensive ICD-9 diagnosis list ────────────────
 // Format: { code, label } where label = "Description (code)"
@@ -1699,7 +1791,7 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.26-2026-05-10-meditech-detection-broader';
+var BUILD_ID    = 'v3.29-2026-05-10-fees-trimmed';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
@@ -3459,18 +3551,24 @@ function feeSearch(query) {
   }
 
   var catColors = {
-    'Consult':'var(--blue-t)', 'Daily':'var(--blue-t)', 'Directive':'var(--amber-t)',
-    'Procedure':'var(--teal-t)', 'Discharge':'var(--green-t)', 'CCU':'var(--red-t)',
-    'Modifier':'var(--text3)', 'Other':'var(--teal-t)'
+    'Consult':'var(--blue-t)',    'Daily':'var(--blue-t)',     'Directive':'var(--amber-t)',
+    'Telehealth':'var(--blue-t)', 'ECG':'var(--teal-t)',       'Stress':'var(--teal-t)',
+    'Echo':'var(--teal-t)',       'Pacemaker':'var(--teal-t)', 'Remote':'var(--teal-t)',
+    'Event':'var(--teal-t)',      'Procedure':'var(--red-t)',  'Rehab':'var(--green-t)',
+    'Discharge':'var(--green-t)', 'CCU':'var(--red-t)',        'Modifier':'var(--text3)',
+    'Other':'var(--teal-t)'
   };
 
   dd.innerHTML = matches.map(function(f) {
     var col = catColors[f.cat] || 'var(--text2)';
+    var amt = f.amount ? '<span style="font-size:11px;font-weight:700;color:var(--text2);margin-left:auto;padding-left:8px">' + esc(f.amount) + '</span>' : '';
     return '<div class="ref-dd-row" data-code="' + esc(f.code) + '" data-desc="' + esc(f.desc) + '" ' +
-      'onclick="selectFeeCode(this.getAttribute(\'data-code\'),this.getAttribute(\'data-desc\'))">' +
-      '<span style="font-weight:700;color:' + col + ';margin-right:6px">' + esc(f.code) + '</span>' +
-      esc(f.desc) +
+      'onclick="selectFeeCode(this.getAttribute(\'data-code\'),this.getAttribute(\'data-desc\'))" ' +
+      'style="display:flex;align-items:center;gap:4px">' +
+      '<span style="font-weight:700;color:' + col + ';margin-right:6px;min-width:50px">' + esc(f.code) + '</span>' +
+      '<span style="flex:1;min-width:0">' + esc(f.desc) + '</span>' +
       '<span style="font-size:10px;color:var(--text3);margin-left:6px">' + esc(f.cat) + '</span>' +
+      amt +
       '</div>';
   }).join('');
   dd.style.display = 'block';
@@ -3609,11 +3707,13 @@ function updateOtherPreview() {
     return;
   }
   var knownFee = FEES.find(function(f) { return f.code === fee; });
+  var amt      = knownFee && knownFee.amount ? '<span class="cp-amount" style="margin-left:8px;font-weight:700;color:var(--green-t)">' + esc(knownFee.amount) + '</span>' : '';
   prev.innerHTML = '<div class="cp-title">Claim to add</div>' +
-    '<div class="cp-row">' +
+    '<div class="cp-row" style="display:flex;align-items:center;gap:6px">' +
     '<span class="cp-code">' + esc(fee) + '</span>' +
-    '<span class="cp-desc">' + esc(knownFee ? knownFee.desc : 'Custom fee code') + '</span>' +
+    '<span class="cp-desc" style="flex:1;min-width:0">' + esc(knownFee ? knownFee.desc : 'Custom fee code') + '</span>' +
     '<span class="cp-units">×' + units + '</span>' +
+    amt +
     '</div>';
 }
 
@@ -4000,8 +4100,7 @@ function openPatientSummary(pid) {
   }
   html += '</div>'; // end demographics card
 
-  // ── Claims section — Add claim button first ───────────
-  // Add claim button at top
+  // ── Claims section — toggle (Calendar default) + List/Calendar views (v3.27) ─
   var addClaimFn2 = p.discharged ? 'openClaimFromDischarged' : 'openClaimScreen';
   html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px">';
   html +=   '<div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">' +
@@ -4011,75 +4110,549 @@ function openPatientSummary(pid) {
             '</div>';
   html += '</div>';
 
-  if (!claims.length) {
-    html += '<div class="empty" style="padding:16px 0">No claims recorded yet for this patient.</div>';
-  } else {
-    // Group by date for easier reading
-    var byDate = {};
-    var dateOrder = [];
-    claims.forEach(function(c) {
-      if (!byDate[c.date]) { byDate[c.date] = []; dateOrder.push(c.date); }
-      byDate[c.date].push(c);
-    });
+  // View toggle — defaults to Calendar
+  html += '<div class="cv-tog">' +
+            '<button id="cv-tog-list" onclick="togglePtSummaryView(\'list\')">List</button>' +
+            '<button id="cv-tog-cal" class="on" onclick="togglePtSummaryView(\'cal\')">Calendar</button>' +
+          '</div>';
 
-    dateOrder.forEach(function(date) {
-      var dayClaims = byDate[date];
+  // List view (hidden by default)
+  html += '<div id="cv-view-list" style="display:none">' + _ptSummaryListHTML(p, claims) + '</div>';
 
-      // Date header
-      html += '<div style="font-size:11px;font-weight:700;color:var(--text2);margin:10px 0 5px;padding-bottom:4px;border-bottom:.5px solid var(--border)">' + dispDate(date) + '</div>';
-
-      dayClaims.forEach(function(c) {
-        var feeLabel = getFeeLabel(c.fee);
-        var dxLabel = icdShortLabel(c.icd);
-        // Truncate dx label if too long
-        if (dxLabel.length > 45) dxLabel = dxLabel.slice(0, 42) + '…';
-        var isCCU = c.fee === 'CCU_DAILY' || c.fee === '1411' || c.fee === '1421' || c.fee === '1431';
-
-        html += '<div style="display:flex;align-items:flex-start;gap:9px;padding:7px 0;border-bottom:.5px solid var(--border)">';
-
-        // Fee code badge
-        html +=   '<div style="min-width:52px;flex-shrink:0">';
-        html +=     '<span style="font-size:11px;font-weight:700;font-family:monospace;' +
-                    'background:' + (isCCU ? 'var(--red-bg)' : 'var(--blue-bg)') + ';' +
-                    'color:' + (isCCU ? 'var(--red-t)' : 'var(--blue-t)') + ';' +
-                    'padding:2px 6px;border-radius:4px">' + esc(c.fee === 'CCU_DAILY' ? '1411/21/31' : c.fee) + '</span>';
-        if (c.units && c.units > 1) html += '<div style="font-size:9px;color:var(--text3);margin-top:2px">×' + c.units + '</div>';
-        html +=   '</div>';
-
-        // Description + diagnosis
-        html +=   '<div style="flex:1;min-width:0">';
-        html +=     '<div style="font-size:12px;font-weight:600">' + esc(feeLabel) + '</div>';
-        html +=     '<div style="font-size:10px;color:var(--text2);margin-top:2px">' + esc(dxLabel) + '</div>';
-        if (c.notes) html += '<div style="font-size:10px;color:var(--amber-t);margin-top:2px;font-style:italic">' + esc(c.notes) + '</div>';
-        html +=   '</div>';
-
-        // Doctor alias + edit/delete
-        html +=   '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0">';
-        html +=     '<div style="font-size:10px;color:var(--text3);text-align:right">' + esc(c.alias || '—');
-        if (c.startTime) {
-          var displayTime = fmtStartTime(c.startTime);
-          // Defensive: skip if still looks like an ISO timestamp (parser failed)
-          if (displayTime && displayTime.length <= 5 && !/T|Z|\d{4}-/.test(displayTime)) {
-            html += '<div style="margin-top:1px">' + esc(displayTime) + '</div>';
-          }
-        }
-        html +=     '</div>';
-        html +=     '<div style="display:flex;gap:4px">';
-        html +=       '<button class="claim-action-btn claim-edit-btn" data-cid="' + c.id + '" data-pid="' + p.id + '" onclick="openClaimEdit(this)" title="Edit claim">✎</button>';
-        html +=       '<button class="claim-action-btn claim-del-btn"  data-cid="' + c.id + '" data-pid="' + p.id + '" onclick="deleteClaimBtn(this)" title="Delete claim">✕</button>';
-        html +=     '</div>';
-        html +=   '</div>';
-
-        html += '</div>';
-      });
-    });
-  }
+  // Calendar view (shown by default)
+  html += '<div id="cv-view-cal">' + _ptSummaryCalendarHTML(p, claims) + '</div>';
 
   // Close button
   html += '<button class="btn btn-s" style="margin-top:12px;margin-bottom:0" onclick="hideModal(\'pt-summary-modal\')">Close</button>';
 
   document.getElementById('pt-summary-content').innerHTML = html;
   showModal('pt-summary-modal');
+
+  // Stash the patient id for calendar interactions
+  window._cvPid = p.id;
+  // Default calendar month: most recent of (today's month, admit month)
+  var admitMs = p.admitDate ? parseDMYsafe(p.admitDate) : null;
+  var nowD = new Date();
+  if (admitMs) {
+    var aD = new Date(admitMs);
+    // Show month containing today by default; user can navigate back to admit
+    window._cvMonth = new Date(nowD.getFullYear(), nowD.getMonth(), 1);
+  } else {
+    window._cvMonth = new Date(nowD.getFullYear(), nowD.getMonth(), 1);
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// v3.27 — Calendar view of patient claims
+// ═════════════════════════════════════════════════════════════════════════
+
+// Switch between list & calendar inside the patient summary modal
+function togglePtSummaryView(view) {
+  var listEl = document.getElementById('cv-view-list');
+  var calEl  = document.getElementById('cv-view-cal');
+  var tL = document.getElementById('cv-tog-list');
+  var tC = document.getElementById('cv-tog-cal');
+  if (!listEl || !calEl) return;
+  if (view === 'list') {
+    listEl.style.display = '';
+    calEl.style.display  = 'none';
+    if (tL) tL.classList.add('on');
+    if (tC) tC.classList.remove('on');
+  } else {
+    listEl.style.display = 'none';
+    calEl.style.display  = '';
+    if (tL) tL.classList.remove('on');
+    if (tC) tC.classList.add('on');
+  }
+}
+
+// ── Existing list rendering — extracted into a helper so it can live in a div ──
+function _ptSummaryListHTML(p, claims) {
+  if (!claims.length) {
+    return '<div class="empty" style="padding:16px 0">No claims recorded yet for this patient.</div>';
+  }
+  // Group by date for easier reading (oldest → newest, since claims arrive sorted that way)
+  var byDate = {};
+  var dateOrder = [];
+  claims.forEach(function(c) {
+    if (!byDate[c.date]) { byDate[c.date] = []; dateOrder.push(c.date); }
+    byDate[c.date].push(c);
+  });
+
+  var html = '';
+  dateOrder.forEach(function(date) {
+    var dayClaims = byDate[date];
+    html += '<div style="font-size:11px;font-weight:700;color:var(--text2);margin:10px 0 5px;padding-bottom:4px;border-bottom:.5px solid var(--border)">' + dispDate(date) + '</div>';
+    dayClaims.forEach(function(c) {
+      var feeLabel = getFeeLabel(c.fee);
+      var dxLabel  = icdShortLabel(c.icd);
+      if (dxLabel.length > 45) dxLabel = dxLabel.slice(0, 42) + '…';
+      var isCCU = c.fee === 'CCU_DAILY' || c.fee === '1411' || c.fee === '1421' || c.fee === '1431';
+
+      html += '<div style="display:flex;align-items:flex-start;gap:9px;padding:7px 0;border-bottom:.5px solid var(--border)">';
+      html +=   '<div style="min-width:52px;flex-shrink:0">';
+      html +=     '<span style="font-size:11px;font-weight:700;font-family:monospace;' +
+                  'background:' + (isCCU ? 'var(--red-bg)' : 'var(--blue-bg)') + ';' +
+                  'color:' + (isCCU ? 'var(--red-t)' : 'var(--blue-t)') + ';' +
+                  'padding:2px 6px;border-radius:4px">' + esc(c.fee === 'CCU_DAILY' ? '1411/21/31' : c.fee) + '</span>';
+      if (c.units && c.units > 1) html += '<div style="font-size:9px;color:var(--text3);margin-top:2px">×' + c.units + '</div>';
+      html +=   '</div>';
+      html +=   '<div style="flex:1;min-width:0">';
+      html +=     '<div style="font-size:12px;font-weight:600">' + esc(feeLabel) + '</div>';
+      html +=     '<div style="font-size:10px;color:var(--text2);margin-top:2px">' + esc(dxLabel) + '</div>';
+      if (c.notes) html += '<div style="font-size:10px;color:var(--amber-t);margin-top:2px;font-style:italic">' + esc(c.notes) + '</div>';
+      html +=   '</div>';
+      html +=   '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0">';
+      html +=     '<div style="font-size:10px;color:var(--text3);text-align:right">' + esc(c.alias || '—');
+      if (c.startTime) {
+        var displayTime = fmtStartTime(c.startTime);
+        if (displayTime && displayTime.length <= 5 && !/T|Z|\d{4}-/.test(displayTime)) {
+          html += '<div style="margin-top:1px">' + esc(displayTime) + '</div>';
+        }
+      }
+      html +=     '</div>';
+      html +=     '<div style="display:flex;gap:4px">';
+      html +=       '<button class="claim-action-btn claim-edit-btn" data-cid="' + c.id + '" data-pid="' + p.id + '" onclick="openClaimEdit(this)" title="Edit claim">✎</button>';
+      html +=       '<button class="claim-action-btn claim-del-btn"  data-cid="' + c.id + '" data-pid="' + p.id + '" onclick="deleteClaimBtn(this)" title="Delete claim">✕</button>';
+      html +=     '</div>';
+      html +=   '</div>';
+      html += '</div>';
+    });
+  });
+  return html;
+}
+
+// ── Calendar view ─────────────────────────────────────────────────────────
+// Returns 'ccu' (CCU/ICU ward + MRP role) | 'daily' (MRP role, non-CCU ward) | null
+function _cvGapRuleForPatient(p) {
+  if (!p) return null;
+  if (p.role !== 'mrp' && p.care !== 'daily' && p.care !== 'ccu') return null;
+  var ccuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
+  if (ccuWards.indexOf(p.ward) !== -1) return 'ccu';
+  if (p.role === 'mrp' || p.care === 'daily') return 'daily';
+  return null;
+}
+
+// Returns { startMs, endMs } — admission span as epoch ms, end = dischargeDate or today
+function _cvAdmitSpan(p) {
+  if (!p || !p.admitDate) return null;
+  var startMs = parseDMYsafe(p.admitDate);
+  if (!startMs) return null;
+  var endMs;
+  if (p.discharged && p.dischargeDate) {
+    endMs = parseDMYsafe(p.dischargeDate);
+  }
+  if (!endMs) {
+    // Fall back to today
+    var now = new Date();
+    endMs = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  }
+  return { startMs: startMs, endMs: endMs };
+}
+
+// Map a DD/MM/YYYY date to the dominant cell-colour key.
+// Priority: consult > ccu > daily > directive > combined
+function _cvDominantType(dayClaims) {
+  if (!dayClaims || !dayClaims.length) return null;
+  var has = { consult:false, ccu:false, daily:false, directive:false, combined:false };
+  dayClaims.forEach(function(c) {
+    if (c.fee === '33010' || c.fee === '33012') has.consult = true;
+    else if (c.fee === 'CCU_DAILY' || c.fee === '1411' || c.fee === '1421' || c.fee === '1431') has.ccu = true;
+    else if (c.fee === '33006') has.directive = true;
+    else if (c.fee === '33008') {
+      // 33008 is both daily AND combined daily. Differentiate by note presence
+      // or by multiple 33008 claims on same date (combined = 2× with note on 2nd).
+      // Simple rule: if notes present on any 33008 today, treat as combined.
+      if (c.notes && String(c.notes).trim()) has.combined = true;
+      else has.daily = true;
+    }
+  });
+  if (has.consult)   return 'consult';
+  if (has.ccu)       return 'ccu';
+  if (has.daily)     return 'daily';
+  if (has.directive) return 'directive';
+  if (has.combined)  return 'combined';
+  return null;
+}
+
+// Build the list of gap days (DD/MM/YYYY strings) for a patient
+function _cvGapDays(p, claims) {
+  var span = _cvAdmitSpan(p);
+  var rule = _cvGapRuleForPatient(p);
+  if (!span || !rule) return [];
+  var DAY_MS = 86400000;
+  var todayMs = parseDMYsafe(TODAY);
+  // Build a set of claimed days (any visit fee counts as occupying the day)
+  var claimedSet = {};
+  claims.forEach(function(c) {
+    var ms = parseDMYsafe(c.date);
+    if (ms) claimedSet[ms] = true;
+  });
+  var gaps = [];
+  // Don't flag today as a gap — doctor may still be rounding
+  var endMs = Math.min(span.endMs, todayMs - DAY_MS);
+  for (var d = span.startMs; d <= endMs; d += DAY_MS) {
+    if (!claimedSet[d]) {
+      var dt = new Date(d);
+      gaps.push(pad(dt.getDate()) + '/' + pad(dt.getMonth()+1) + '/' + dt.getFullYear());
+    }
+  }
+  return gaps;
+}
+
+// CCU fee for a specific date based on consecutive prior CCU days
+function _cvCcuFeeForDate(p, dateStr) {
+  var CCU_FEES = ['CCU_DAILY','1411','1421','1431'];
+  var DAY_MS = 86400000;
+  var targetMs = parseDMYsafe(dateStr);
+  if (!targetMs) return '1411';
+  // Count consecutive CCU days immediately preceding targetMs
+  var ccuDateSet = {};
+  st.claims.forEach(function(c) {
+    if (samePhn(c.phn, p.phn) && CCU_FEES.indexOf(c.fee) !== -1) {
+      var ms = parseDMYsafe(c.date);
+      if (ms && ms < targetMs) ccuDateSet[ms] = true;
+    }
+  });
+  var consec = 0;
+  var checkMs = targetMs - DAY_MS;
+  while (ccuDateSet[checkMs]) { consec++; checkMs -= DAY_MS; }
+  var dayNum = consec + 1;
+  if (dayNum === 1) return '1411';
+  if (dayNum <= 7)  return '1421';
+  return '1431';
+}
+
+// Build calendar HTML
+function _ptSummaryCalendarHTML(p, claims) {
+  // Index claims by DD/MM/YYYY
+  var byDate = {};
+  claims.forEach(function(c) {
+    if (!byDate[c.date]) byDate[c.date] = [];
+    byDate[c.date].push(c);
+  });
+
+  var span = _cvAdmitSpan(p);
+  var rule = _cvGapRuleForPatient(p);
+  var gaps = _cvGapDays(p, claims);
+  var month = window._cvMonth || (function() {
+    var n = new Date();
+    return new Date(n.getFullYear(), n.getMonth(), 1);
+  })();
+
+  var monthName = ['January','February','March','April','May','June','July','August','September','October','November','December'][month.getMonth()];
+  var year = month.getFullYear();
+
+  var html = '';
+
+  // Legend
+  html += '<div class="cv-legend">' +
+            '<div class="cv-lg"><div class="cv-sw" style="background:var(--amber-bg)"></div>Consult</div>' +
+            '<div class="cv-lg"><div class="cv-sw" style="background:var(--purple-bg)"></div>CCU</div>' +
+            '<div class="cv-lg"><div class="cv-sw" style="background:var(--green-bg)"></div>Daily</div>' +
+            '<div class="cv-lg"><div class="cv-sw" style="background:var(--blue-bg)"></div>Directive</div>' +
+            '<div class="cv-lg"><div class="cv-sw" style="background:var(--teal-bg)"></div>Combined</div>' +
+            (rule ? '<div class="cv-lg"><div class="cv-sw" style="background:var(--surface2);border:1px solid var(--border2)"></div>Gap</div>' : '') +
+          '</div>';
+
+  // Month nav
+  html += '<div class="cv-nav">' +
+            '<button onclick="_cvChangeMonth(-1)">‹</button>' +
+            '<div class="cv-month">' + monthName + ' ' + year + '</div>' +
+            '<button onclick="_cvChangeMonth(1)">›</button>' +
+          '</div>';
+
+  // Grid
+  html += '<div class="cv-grid">';
+  html +=   '<div class="cv-dow">Su</div><div class="cv-dow">Mo</div><div class="cv-dow">Tu</div>' +
+            '<div class="cv-dow">We</div><div class="cv-dow">Th</div><div class="cv-dow">Fr</div>' +
+            '<div class="cv-dow">Sa</div>';
+
+  var firstDow = new Date(year, month.getMonth(), 1).getDay();
+  var daysIn   = new Date(year, month.getMonth() + 1, 0).getDate();
+  for (var i = 0; i < firstDow; i++) html += '<div class="cv-day cv-outside"></div>';
+
+  var todayKey = TODAY;
+  for (var d = 1; d <= daysIn; d++) {
+    var dateStr = pad(d) + '/' + pad(month.getMonth()+1) + '/' + year;
+    var dayClaims = byDate[dateStr] || [];
+    var dominant = _cvDominantType(dayClaims);
+    var dayMs = new Date(year, month.getMonth(), d).getTime();
+    var inSpan = span && dayMs >= span.startMs && dayMs <= span.endMs;
+    var isGap = inSpan && rule && !dayClaims.length && dateStr !== todayKey;
+
+    var cls = 'cv-day';
+    if (dominant) cls += ' cv-' + dominant;
+    else if (isGap) cls += ' cv-gap';
+    if (dateStr === todayKey) cls += ' cv-today';
+    if (p.discharged && p.dischargeDate === dateStr) cls += ' cv-discharged';
+
+    var tag = '';
+    if (dominant === 'ccu') {
+      // Show the band (1411 / 1421 / 1431)
+      var ccuClaim = dayClaims.find(function(c) {
+        return c.fee === '1411' || c.fee === '1421' || c.fee === '1431';
+      });
+      if (ccuClaim) tag = ccuClaim.fee;
+    }
+
+    var tappable = (dayClaims.length > 0) || inSpan;
+    var onclick = tappable ? ' onclick="tapCalDay(\'' + dateStr + '\')"' : '';
+    html += '<div class="' + cls + '"' + onclick + '>' +
+              '<div class="cv-num">' + d + '</div>' +
+              (tag ? '<div class="cv-tag">' + tag + '</div>' : '') +
+            '</div>';
+  }
+
+  html += '</div>';
+
+  // Gap warning banner
+  if (rule) {
+    if (gaps.length === 0) {
+      html += '<div class="cv-warn cv-warn-ok">' +
+                '<div class="cv-warn-icon">✓</div>' +
+                '<div class="cv-warn-body"><b>No billing gaps</b>' +
+                '<span>Every ' + (rule === 'ccu' ? 'CCU' : 'MRP') + ' day in this admission has a claim.</span></div>' +
+              '</div>';
+    } else {
+      var gapStr = gaps.slice(0, 4).map(function(g) {
+        var parts = g.split('/');
+        return parseInt(parts[0]) + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(parts[1])-1];
+      }).join(', ') + (gaps.length > 4 ? '…' : '');
+      html += '<div class="cv-warn">' +
+                '<div class="cv-warn-icon">⚠</div>' +
+                '<div class="cv-warn-body"><b>' + gaps.length + ' billing gap' + (gaps.length>1?'s':'') + ' in this admission</b>' +
+                '<span>' + gapStr + '. Tap a grey day to fill.</span></div>' +
+              '</div>';
+    }
+  }
+
+  return html;
+}
+
+// Change month and re-render calendar in-place
+function _cvChangeMonth(delta) {
+  var m = window._cvMonth || new Date();
+  window._cvMonth = new Date(m.getFullYear(), m.getMonth() + delta, 1);
+  var pid = window._cvPid;
+  if (!pid) return;
+  var p = getP(pid);
+  if (!p) return;
+  var claims = st.claims.filter(function(c) {
+    return c.phn && p.phn && samePhn(c.phn, p.phn);
+  }).sort(function(a, b) { return parseDMY(a.date) - parseDMY(b.date); });
+  var calEl = document.getElementById('cv-view-cal');
+  if (calEl) calEl.innerHTML = _ptSummaryCalendarHTML(p, claims);
+}
+
+// Tap a day — open details or the gap-fill picker
+function tapCalDay(dateStr) {
+  var pid = window._cvPid;
+  if (!pid) return;
+  var p = getP(pid);
+  if (!p) return;
+  var dayClaims = st.claims.filter(function(c) {
+    return samePhn(c.phn, p.phn) && c.date === dateStr;
+  });
+  if (dayClaims.length) {
+    _cvShowDayDetails(pid, dateStr, dayClaims);
+  } else {
+    _cvShowPicker(pid, dateStr);
+  }
+}
+
+// Sheet showing all claims on a single day with edit/delete
+function _cvShowDayDetails(pid, dateStr, dayClaims) {
+  var rows = dayClaims.map(function(c) {
+    var feeLabel = getFeeLabel(c.fee);
+    var dxLabel  = icdShortLabel(c.icd);
+    if (dxLabel.length > 45) dxLabel = dxLabel.slice(0, 42) + '…';
+    var typeColor = 'var(--text)';
+    if (c.fee === '33010' || c.fee === '33012') typeColor = 'var(--amber-t)';
+    else if (c.fee === 'CCU_DAILY' || c.fee === '1411' || c.fee === '1421' || c.fee === '1431') typeColor = 'var(--purple-t)';
+    else if (c.fee === '33006') typeColor = 'var(--blue-t)';
+    else if (c.fee === '33008' && c.notes) typeColor = 'var(--teal-t)';
+    else if (c.fee === '33008') typeColor = 'var(--green-t)';
+    return (
+      '<div style="background:var(--surface2);border-radius:8px;padding:10px 12px;margin-bottom:8px">' +
+        '<div style="display:flex;justify-content:space-between;font-weight:700;font-size:13px;color:' + typeColor + '">' +
+          '<span>' + esc(feeLabel) + ' &bull; ' + esc(c.fee) + '</span>' +
+          '<span>' + esc(c.alias || '—') + '</span>' +
+        '</div>' +
+        '<div style="font-size:11px;color:var(--text2);margin-top:4px">' + esc(dxLabel) + '</div>' +
+        (c.notes ? '<div style="font-size:11px;color:var(--amber-t);margin-top:4px;font-style:italic">' + esc(c.notes) + '</div>' : '') +
+        '<div style="display:flex;gap:6px;margin-top:8px">' +
+          '<button class="claim-action-btn claim-edit-btn" data-cid="' + c.id + '" data-pid="' + pid + '" onclick="_cvEditFromSheet(this)" title="Edit">✎ Edit</button>' +
+          '<button class="claim-action-btn claim-del-btn"  data-cid="' + c.id + '" data-pid="' + pid + '" onclick="_cvDeleteFromSheet(this)" title="Delete">✕ Delete</button>' +
+        '</div>' +
+      '</div>'
+    );
+  }).join('');
+
+  var html =
+    '<div style="font-size:14px;font-weight:700;margin-bottom:2px">' + dispDate(dateStr) + '</div>' +
+    '<div style="font-size:11px;color:var(--text2);margin-bottom:12px">' + dayClaims.length + ' claim' + (dayClaims.length>1?'s':'') + ' on this day</div>' +
+    rows +
+    '<button class="btn btn-s" style="margin-top:6px;margin-bottom:0" onclick="hideModal(\'cv-picker-modal\')">Close</button>';
+  document.getElementById('cv-picker-content').innerHTML = html;
+  showModal('cv-picker-modal');
+}
+
+function _cvEditFromSheet(btn) {
+  var cid = btn.getAttribute('data-cid');
+  var pid = btn.getAttribute('data-pid');
+  hideModal('cv-picker-modal');
+  hideModal('pt-summary-modal');
+  // Reuse existing edit flow
+  var fakeBtn = { getAttribute: function(k) { return k === 'data-cid' ? cid : (k === 'data-pid' ? pid : null); } };
+  openClaimEdit(fakeBtn);
+}
+
+function _cvDeleteFromSheet(btn) {
+  var cid = btn.getAttribute('data-cid');
+  var pid = btn.getAttribute('data-pid');
+  hideModal('cv-picker-modal');
+  var fakeBtn = { getAttribute: function(k) { return k === 'data-cid' ? cid : (k === 'data-pid' ? pid : null); } };
+  deleteClaimBtn(fakeBtn);
+  // Re-render the calendar after the delete is processed
+  setTimeout(function() {
+    if (window._cvPid) {
+      var p = getP(window._cvPid);
+      if (p) openPatientSummary(p.id);
+    }
+  }, 100);
+}
+
+// Gap-fill picker — 4 options, rule-recommended type highlighted
+function _cvShowPicker(pid, dateStr) {
+  var p = getP(pid);
+  if (!p) return;
+  var rec = _cvGapRuleForPatient(p);   // 'ccu' | 'daily' | null
+
+  var ccuFee  = _cvCcuFeeForDate(p, dateStr);
+  var ccuBand = ccuFee === '1411' ? 'day 1' : (ccuFee === '1421' ? 'day 2–7' : 'day 8+');
+  var typeOpts = [
+    { id:'ccu',       label:'CCU',            sub:ccuBand + ' • ' + ccuFee, cls:'cv-pk-ccu' },
+    { id:'daily',     label:'Daily',          sub:'33008',                  cls:'cv-pk-daily' },
+    { id:'directive', label:'Directive',      sub:'33006',                  cls:'cv-pk-directive' },
+    { id:'combined',  label:'Combined daily', sub:'needs reason',           cls:'cv-pk-combined' }
+  ];
+  var btns = typeOpts.map(function(o) {
+    var recCls = (o.id === rec) ? ' cv-pk-rec' : '';
+    return '<button class="cv-pick-btn ' + o.cls + recCls + '" data-pid="' + pid + '" data-date="' + dateStr + '" data-type="' + o.id + '" onclick="_cvPickType(this)">' +
+             '<div class="cv-pk-l">' + o.label + '</div>' +
+             '<div class="cv-pk-s">' + o.sub + '</div>' +
+             (o.id === rec ? '<div class="cv-pk-flag">Recommended</div>' : '') +
+           '</button>';
+  }).join('');
+
+  var headerColor = rec ? 'var(--amber-t)' : 'var(--text)';
+  var headerIcon  = rec ? '⚠ ' : '+ ';
+  var hint = rec
+    ? p.last + ' was ' + (rec === 'ccu' ? 'in CCU' : 'MRP') + ' this day — pick a type to backfill.'
+    : 'No claim on file. Pick a visit type to add for this date.';
+
+  var html =
+    '<div style="font-size:14px;font-weight:700;color:' + headerColor + ';margin-bottom:2px">' + headerIcon + dispDate(dateStr) + '</div>' +
+    '<div style="font-size:11px;color:var(--text2);margin-bottom:6px">' + hint + '</div>' +
+    '<div class="cv-pick-grid">' + btns + '</div>' +
+    '<div style="display:flex;gap:8px;margin-top:6px">' +
+      '<button class="btn btn-s" style="flex:1;margin-bottom:0" onclick="hideModal(\'cv-picker-modal\')">Cancel</button>' +
+    '</div>';
+  document.getElementById('cv-picker-content').innerHTML = html;
+  showModal('cv-picker-modal');
+}
+
+function _cvPickType(btn) {
+  var pid     = btn.getAttribute('data-pid');
+  var dateStr = btn.getAttribute('data-date');
+  var type    = btn.getAttribute('data-type');
+  if (type === 'combined') return _cvShowCombinedForm(pid, dateStr);
+  _cvFillClaim(pid, dateStr, type, '');
+}
+
+// Combined daily sub-form — ICD + reason
+function _cvShowCombinedForm(pid, dateStr) {
+  var p = getP(pid);
+  if (!p) return;
+  var defaultIcd = String(p.icd || '').trim();
+  var html =
+    '<div style="font-size:14px;font-weight:700;color:var(--teal-t);margin-bottom:2px">Combined daily — ' + dispDate(dateStr) + '</div>' +
+    '<div style="font-size:11px;color:var(--text2);margin-bottom:12px">Combined daily requires documentation. Both fields attach to the claim note.</div>' +
+
+    '<label style="display:block;font-size:11px;font-weight:600;color:var(--text2);margin:0 0 4px">ICD-9 diagnostic code</label>' +
+    '<input id="cv-cb-icd" type="text" value="' + esc(defaultIcd) + '" placeholder="e.g. 428.0" autocomplete="off" ' +
+    'style="width:100%;padding:11px;border:.5px solid var(--border2);border-radius:8px;font-size:14px;font-family:inherit;background:var(--surface2)">' +
+
+    '<label style="display:block;font-size:11px;font-weight:600;color:var(--text2);margin:12px 0 4px">Why combined daily care was needed</label>' +
+    '<textarea id="cv-cb-reason" rows="3" autocomplete="off" placeholder="e.g. CHF — co-managed with hospitalist for renal optimization" ' +
+    'style="width:100%;padding:11px;border:.5px solid var(--border2);border-radius:8px;font-size:14px;font-family:inherit;background:var(--surface2);resize:vertical"></textarea>' +
+
+    '<div style="display:flex;gap:8px;margin-top:14px">' +
+      '<button class="btn btn-s" style="flex:1;margin-bottom:0" data-pid="' + pid + '" data-date="' + dateStr + '" onclick="_cvBackFromCombined(this)">‹ Back</button>' +
+      '<button class="btn btn-p" style="flex:1;margin-bottom:0" data-pid="' + pid + '" data-date="' + dateStr + '" onclick="_cvConfirmCombined(this)">Add combined daily</button>' +
+    '</div>';
+  document.getElementById('cv-picker-content').innerHTML = html;
+  showModal('cv-picker-modal');
+  setTimeout(function() {
+    var el = document.getElementById('cv-cb-reason');
+    if (el) el.focus();
+  }, 200);
+}
+
+function _cvBackFromCombined(btn) {
+  _cvShowPicker(btn.getAttribute('data-pid'), btn.getAttribute('data-date'));
+}
+
+function _cvConfirmCombined(btn) {
+  var pid     = btn.getAttribute('data-pid');
+  var dateStr = btn.getAttribute('data-date');
+  var icdEl    = document.getElementById('cv-cb-icd');
+  var reasonEl = document.getElementById('cv-cb-reason');
+  var icd    = (icdEl    ? icdEl.value    : '').trim();
+  var reason = (reasonEl ? reasonEl.value : '').trim();
+  if (!icd)    { if (icdEl)    icdEl.style.borderColor    = 'var(--red)'; return; }
+  if (!reason) { if (reasonEl) reasonEl.style.borderColor = 'var(--red)'; return; }
+  var note = icd + ' — ' + reason;
+  _cvFillClaim(pid, dateStr, 'combined', note, icd);
+}
+
+// Create the gap-fill claim and refresh the calendar
+function _cvFillClaim(pid, dateStr, type, note, icdOverride) {
+  var p = getP(pid);
+  if (!p) return;
+  if (!checkDoc()) return;
+  // Temporarily override patient ICD for the addClaim call if provided
+  var origIcd = p.icd;
+  if (icdOverride) p.icd = icdOverride;
+
+  var alias = st.doc.alias;
+  if (type === 'ccu') {
+    addClaim(p, 'CCU_DAILY', 'CCU_DAILY', 1, dateStr, 'I', null, note || null, null, alias);
+  } else if (type === 'daily') {
+    addClaim(p, '33008', '33008', 1, dateStr, 'I', null, note || null, null, alias);
+  } else if (type === 'directive') {
+    addClaim(p, '33006', '33006', 1, dateStr, 'I', null, note || null, null, alias);
+  } else if (type === 'combined') {
+    addClaim(p, '33008', '33008', 1, dateStr, 'I', null, note, null, alias);
+  }
+  // Restore original ICD (the claim copy already captured it)
+  if (icdOverride) p.icd = origIcd;
+
+  sv('patients', st.patients);
+  sv('claims',   st.claims);
+  hideModal('cv-picker-modal');
+  showToast(type === 'combined' ? 'Combined daily added — ' + p.last : 'Claim added — ' + p.last);
+
+  // Refresh the calendar in-place
+  var claims = st.claims.filter(function(c) {
+    return c.phn && p.phn && samePhn(c.phn, p.phn);
+  }).sort(function(a, b) { return parseDMY(a.date) - parseDMY(b.date); });
+  var calEl = document.getElementById('cv-view-cal');
+  if (calEl) calEl.innerHTML = _ptSummaryCalendarHTML(p, claims);
+  var listEl = document.getElementById('cv-view-list');
+  if (listEl) listEl.innerHTML = _ptSummaryListHTML(p, claims);
+  render();
 }
 
 // Get short ICD-9 label: "Description (code)"
@@ -4165,25 +4738,22 @@ function icdShortLabel(code) {
 
 // Get short human label for a fee code
 function getFeeLabel(fee) {
-  var labels = {
-    '33010':'Consultation full',
-    '33012':'Consultation limited',
-    '33008':'Daily care / MRP rounds',
-    '33006':'Directive visit',
-    '78717':'Complex discharge',
-    '78720':'MOST advance care planning',
-    '1411': 'CCU critical care day 1',
-    '1421': 'CCU critical care days 2–7',
-    '1431': 'CCU critical care days 8–30',
-    '1200': 'Evening call modifier base',
-    '1201': 'Night call modifier base',
-    '1202': 'Weekend/stat call modifier base',
-    '1205': 'Evening call increment',
-    '1206': 'Night call increment',
-    '1207': 'Weekend/stat call increment',
-    'CCU_DAILY': 'CCU daily visit'
-  };
-  return labels[fee] || fee;
+  // CCU pre-rollup tap (not a real MSC code)
+  if (fee === 'CCU_DAILY') return 'CCU daily visit (band auto-assigned 1411/1421/1431)';
+  // Look up canonical FEES first
+  var f = FEES.find(function(x) { return x.code === fee; });
+  if (f) return f.desc;
+  // Fall back to legacy labels for historical claims that used invalid codes
+  if (LEGACY_FEE_LABELS[fee]) return LEGACY_FEE_LABELS[fee];
+  // Unknown — return the raw code so doctor can investigate
+  return fee;
+}
+
+// Returns the $ amount for a fee code (e.g. '$186.14'), or empty string
+function getFeeAmount(fee) {
+  if (fee === 'CCU_DAILY') return '';  // band not yet assigned
+  var f = FEES.find(function(x) { return x.code === fee; });
+  return f ? (f.amount || '') : '';
 }
 
 function ptSummaryAddClaim(btn) {
@@ -6264,8 +6834,59 @@ function openDischModal(pid) {
   _claimPid = pid;
   var p = getP(pid);
   document.getElementById('disch-title').textContent = p.last + ', ' + p.first;
-  _dischStep1(pid);
+  // v3.27 — surface admission-wide billing gaps before the today's-visit prompt
+  _dischCheckGaps(pid);
   showModal('disch-modal');
+}
+
+// v3.27 — if any historical days inside the admission are unbilled (and the
+// patient has a gap rule, i.e. CCU or MRP daily), prompt the doctor to fix
+// them BEFORE the existing today's-visit + LOS>4 flow. If no gaps, fall
+// straight through to _dischStep1 as before.
+function _dischCheckGaps(pid) {
+  var p = getP(pid);
+  if (!p) { _dischStep1(pid); return; }
+  var rule = _cvGapRuleForPatient(p);
+  if (!rule) { _dischStep1(pid); return; }
+  var claims = st.claims.filter(function(c) {
+    return c.phn && p.phn && samePhn(c.phn, p.phn);
+  });
+  var gaps = _cvGapDays(p, claims);
+  if (!gaps.length) { _dischStep1(pid); return; }
+
+  // Render gap-warning step into the discharge modal body
+  var gapStr = gaps.slice(0, 8).map(function(g) {
+    var parts = g.split('/');
+    return parseInt(parts[0]) + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(parts[1])-1];
+  }).join(', ') + (gaps.length > 8 ? '…' : '');
+
+  var body = document.getElementById('disch-body');
+  if (!body) { _dischStep1(pid); return; }
+
+  body.innerHTML =
+    '<div class="cv-warn" style="margin:6px 0 12px">' +
+      '<div class="cv-warn-icon">⚠</div>' +
+      '<div class="cv-warn-body">' +
+        '<b>' + gaps.length + ' unbilled ' + (rule === 'ccu' ? 'CCU' : 'MRP') + ' day' + (gaps.length>1?'s':'') + ' in this admission</b>' +
+        '<span>' + gapStr + '. Discharging now leaves them unbilled.</span>' +
+      '</div>' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;margin-bottom:10px">' +
+      '<button class="btn btn-s" style="flex:1;margin-bottom:0" data-pid="' + pid + '" onclick="_dischIgnoreGaps(this)">Discharge anyway</button>' +
+      '<button class="btn btn-p" style="flex:1;margin-bottom:0" data-pid="' + pid + '" onclick="_dischFixGaps(this)">Fix gaps first</button>' +
+    '</div>';
+}
+
+function _dischIgnoreGaps(btn) {
+  var pid = btn.getAttribute('data-pid');
+  _dischStep1(pid);
+}
+
+function _dischFixGaps(btn) {
+  var pid = btn.getAttribute('data-pid');
+  hideModal('disch-modal');
+  // Open patient summary on the calendar tab — that's where the doc fixes gaps
+  openPatientSummary(pid);
 }
 
 // Has any visit been billed today for this patient?

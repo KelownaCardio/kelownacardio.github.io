@@ -28,476 +28,138 @@ This file tracks every feature, fix, and architectural decision across all chat 
 
 ---
 
-## Session 2026-05-07 — v3.14
+## Session 2026-05-10 — v3.29 (FEES trimmed to actual usage)
 
-### v3.14 — Defensive sweep + daily claims list
+### v3.29 — Trimmed FEES from 56 codes to 20
+- Per team confirmation, the cardiology group only bills the following service classes — everything else is billed by the hospital or other specialty groups (echo lab, EP, imaging, etc.). FEES picker now reflects exactly what gets billed.
+- **Kept (20 codes):**
+  - **Consultations** — 33010, 33012, 33014, 33005
+  - **Continuing care** — 33006 (directive), 33008 (subseq hospital / MRP daily / combined)
+  - **Procedures** — Y33025 (cardioversion), 00751 (pericardiocentesis)
+  - **Discharge / planning** — 78717 (complex discharge), 78720 (advance care planning / MOST)
+  - **CCU** — 1411, 1421, 1431, 1441
+  - **Out-of-office hours** — 1200, 1201, 1202, 1205, 1206, 1207 (renamed in the picker from "Out-of-office hours premiums" to "Call-out modifiers"; descriptions restored to the older shorter style — "Evening call modifier — base 30 min", "Night call — increment per 30 min", etc. — to match team convention from earlier versions).
+- **Removed (36 codes added in the v3.28 audit but not used by this group):**
+  - All echo codes (33091, 08638, 08679, 08662, 33094, 33093) — billed by hospital echo lab
+  - All ECG / Holter codes (33016, 33017, 33018, 33047, 33048)
+  - All stress test codes (33034, 33035, 33036)
+  - All pacemaker codes (33026, 33053, 33028, 33054, 33030, 33032, 33033) — billed by EP / device clinic
+  - All remote monitoring codes (33174, 33175, 33176, 33177)
+  - All event / loop recorder codes (33062, 33069, 33092)
+  - Cardiac rehab (33020)
+  - All telehealth variants (33110, 33112, 33106, 33107, 33108)
+  - Subseq office visit (33007) and subseq home visit (33009)
+- **LEGACY_FEE_LABELS unchanged** — still explains 14101/14105/14113 in case they appear in historical claims.
+- **BUILD_ID** bumped to `v3.29-2026-05-10-fees-trimmed`. Header version label updated to v3.29.
 
-**Two things:**
+### v3.28 outstanding items — resolved
+- ~~Default ICD `3062` in `addClaim()`~~ → **Confirmed intentional by the team.** No change. (The ICD-9 decode of `306.2` is "cardiovascular malfunction in mental origin" but it is being used as a deliberate placeholder by the team and is acceptable.)
+- ~~50% reduction rule for stress + exercise echo same-day~~ → **Not applicable** since the group doesn't bill stress tests or echo. Removing the follow-up.
 
-#### 1. Defensive sweep (carrying lessons from v3.12 forward)
-
-After fixing the silent `.slice()` crash in `dischargedRow`, audited every other patient row renderer for the same bug class. Found and fixed:
-
-- **Deleted `phnOrWarn(p)`** — defined at line 2888, never called. Had the same `p.phn.slice(-4)` bug. Dead code, gone.
-- **`p.mrp.toLowerCase()`** in form prefill — wrapped in `String(p.mrp || '')` even though guarded by `if (p.mrp)`. A non-zero numeric `mrp` would have crashed.
-- **`ep.last.toLowerCase()` / `ep.first.toLowerCase()`** in Meditech import duplicate detection — wrapped in `String(... || '')`.
-- **All four `a.last.localeCompare(b.last)` sort callers** — wrapped each side in `String(... || '')`. Numeric or undefined `last` would have crashed every sort.
-
-**New helper:** `safeRenderRows(patients, rowFn)`. Wraps each row render in try/catch — one bad patient renders as a small ⚠ placeholder instead of killing the entire list. All four `.map(alphaRow)` and `.map(offRow)` callers now use it.
-
-**`wardHtml`'s `pts.forEach` loop** — also wrapped in try/catch with the same placeholder pattern. (It wasn't a `.map`-able pattern because it appends to `h` inline.)
-
-Net effect: any future Sheets data quirk (a number where a string was expected, an unexpected null, etc.) renders a placeholder for that row but the rest of the list remains visible.
-
-#### 2. Daily claims list (new feature)
-
-Tap the green **`$X (N claims)`** in the header to open a modal showing:
-- Every claim billed today by the signed-in doctor
-- Sorted by patient last name → start time
-- Format: `Last, First` — `Fee description (start time)` — `$amount`
-- CCU rollup taps shown muted with note "(rolls up at export)"
-- Title bar shows total claims count and total dollars
-
-Quick visual check at end of day that nothing's been missed. Single modal, no edit functionality (read-only — use the patient summary or claim screen for changes). Scrollable up to 60% of viewport height.
-
-Both sides (`$X` and `(N claims)`) are tappable. Cursor pointer on hover.
+### Notes for future
+- If the group ever takes over billing for any of the removed services, the codes can be restored from `MSC_2026_audit.md` (kept in the repo as the canonical MSC 2026 reference).
+- The MSC schedule moves annually (typically January 31). When the 2027 schedule releases, re-run the audit and adjust amounts where they've changed.
 
 ---
 
-## Session 2026-05-07 — v3.13
+## Session 2026-05-10 — v3.28 (MSC fee schedule corrections)
 
-### v3.13 — Defensive sweep across all row renderers and PHN comparisons
+### v3.28 — FEES array rebuilt against MSC Payment Schedule, January 31, 2026
+- **Audited every code** in `FEES` against MSC 2026 Cardiology (§12), Critical Care (§6), and Out-of-Office Hours premiums (§2). Found 13 mis-labelled codes and 3 invalid codes.
+- **Removed invalid codes:**
+  - `14101` / `14105` — were labelled "Cardioversion elective/emergency DC". These are not real cardiology codes in MSC 2026. Real code is **Y33025** at $105.70.
+  - `14113` — was labelled "Pacemaker insertion temporary transvenous". Real code is **33030** at $180.05.
+- **Fixed mis-labelled codes** (kept the code, corrected description to MSC truth):
+  - `33007` — was "Out-of-office visit"; **is** Subsequent office visit ($82.51).
+  - `33008` — was "Daily in-hospital care / combined daily"; **is** Subsequent hospital visit ($63.95) — note this is the SAME procedure used for MRP daily AND combined daily, but description now reflects the official MSC name.
+  - `33016` — was "Holter monitor — interpretation"; **is** ECG and interpretation — office, each ($25.08).
+  - `33018` — was "Nuclear cardiology — interpretation"; **is** ECG — professional fee, in-hospital read ($9.01).
+  - `33028` — was "Treadmill stress test — interpretation only"; **is** Dual chamber pacemaker testing — professional fee ($70.93).
+  - `33035` — was "Exercise stress test — supervision + interpretation"; **is** Graded exercise — professional fee only ($47.11). The supervision+interpretation code is **33034** ($79.42), now added separately.
+  - `33047` — was "ECG — interpretation only"; **is** Holter monitor (24h ECG scan) — professional fee ($67.63).
+  - `33062` — was "Echocardiogram — M-mode + 2D"; **is** Event/loop recorder (first strip) — professional fee ($37.03). Real echo is **33091** at $148.61, now added.
+  - `33069` — was "Echocardiogram — Doppler addition"; **is** Event/loop recorder — each additional strip ($18.51). Real Doppler echo is **08679** at $47.78, now added.
+  - `33107` — was "Pacemaker check — single chamber"; **is** Telehealth subsequent office visit ($82.51). Real single chamber pacemaker check is **33026** at $52.32, now added.
+  - `33110` — was "Subsequent cardiology consultation"; **is** Telehealth consultation full ($186.14).
+  - `33174` — was "Ambulatory BP monitoring — interpretation"; **is** Remote monitoring of single chamber implantable cardiac device — professional fee ($47.29).
+  - `33176` — was "Ambulatory BP monitoring — technical only"; **is** Remote monitoring of dual chamber implantable cardiac device — professional fee ($70.93).
+- **Added the real codes** for procedures whose labels were previously wrong: **Y33025** (cardioversion), **33030** (temp RV pacemaker), **33032/33033** (pacemaker standby / generator placement), **33091/08638/08679/08662/33093/33094** (echo variants), **33034/33036** (treadmill stress test full + technical), **33026/33053/33054** (single/dual chamber pacemaker testing tech fees), **33092** (event recorder tech fee).
+- **Added other useful real codes:** **33014** (prolonged counselling, max 4/yr), **33017** (ECG home), **33009** (subsequent home visit), **33020** (cardiac rehab supervision per week), **33106/33108/33112** (telehealth directive / hospital subseq / repeat consult), **33175/33177** (remote monitoring technical fees), **01441** (CCU day 31 onward, $138.53).
+- **Every fee in `FEES` now has an `amount` field**, displayed in the fee-search picker (right-aligned) and the claim preview (green, after the units). Doctors can see the $ they'll be paid before submitting.
+- **`getFeeLabel()` refactored** to source from `FEES` first, then `LEGACY_FEE_LABELS` for historical claims that used 14101/14105/14113 — so old claims in Sheets still display with a meaningful explanation rather than a bare code.
+- **New helper `getFeeAmount(code)`** returns `'$xx.xx'` or empty string for any code.
+- **BUILD_ID** bumped to `v3.28-2026-05-10-msc-fee-corrections`. Forces all device caches to wipe on next load — important because FEES changed shape (new `amount` field).
+- Header version label updated to v3.28. Top-of-file comment block updated with full v3.28 notes.
 
-Same root cause as v3.12 but applied across every other patient row renderer and lookup site, before they bite.
+### Outstanding from v3.27 — addressed in v3.29
+- ~~Default ICD `3062` in `addClaim()`~~ — confirmed intentional by team in v3.29 session.
+- ~~MSC 50% rule for stress + exercise echo~~ — not applicable; group doesn't bill those services (v3.29).
 
-**Defensive coercion at the sync boundary** — `syncFromSheets` and `loadLocal` now coerce `phn`, `bed`, `last`, `first` to strings as patients arrive. Sheets returns these as numbers when the cell happens to be all-digits. Doing this once at the boundary means downstream code can rely on string semantics.
-
-**Type-safe PHN equality** — added `samePhn(a, b)` helper that does `String(a) === String(b)` with null guards. Replaced 14 sites across the codebase that used `c.phn === p.phn` (which silently returned false when one side was a string and the other a number). This was a meaningful bug — could have caused inconsistent "Seen today" green chips, missed dedup of duplicate claims, and broken back-fill from claim history. Worth its own bullet.
-
-**PHN-keyed hash maps coerce keys** — `_localByPhn` and `_patByPhn` now use `String(phn)` for both writes and reads, preventing miss-on-typo lookups.
-
-**Self-defending `wardLabel`** — now always returns a string (`String((WARDS[w] && WARDS[w].label) || w || '')`) so callers can safely chain `.replace`, `.slice`, etc.
-
-**Self-defending row renderers**:
-- `alphaRow`, `offRow`: every patient field that goes into HTML is wrapped in `String(p.x || '')` — `last`, `first`, `bed`, ward labels, etc.
-- `wardHtml`: each per-patient render in the ward `forEach` is wrapped in try/catch. One bad patient row no longer kills the whole ward's render.
-- New `safeRowMap(arr, renderFn)` helper used at all 4 callsites of `alphaRow` and `offRow`. Same pattern as `renderDischarged` from v3.12.
-
-**Misc fixes**:
-- `mrpLower = String(p.mrp || '').toLowerCase()` — was unguarded against numeric `mrp`.
-- Meditech import existing-patient check coerces `ep.last`/`ep.first` to string before `.toLowerCase()`.
-- All `a.last.localeCompare(b.last)` sorts now use `String(a.last || '')` etc.
-- Removed unused `phnOrWarn(p)` helper that had the same `.slice(-4)` bug.
-
-The geographic ward view, alphabetical view, off-service view, search results across both lists, and Recently Discharged are now all defensive against mixed-type field data. One bad row in any of them produces a "⚠ Could not render X, Y" placeholder instead of a blank pane.
-
-No behavioral changes for the user — purely robustness.
-
----
-
-## Session 2026-05-07 — v3.12
-
-### v3.12 — Tabula rasa: clean rewrite of discharged pane
-
-**Cause of the original bug** (now confirmed): `dischargedRow` called `p.phn.slice(-4)` but `p.phn` could be a number (not a string) when returned from Sheets. `.slice` on a number throws TypeError, kills the entire `recent.map()` loop silently, leaves `container.innerHTML` unchanged, and the pane appears empty.
-
-**Wholesale rewrite** of all discharged-pane code:
-
-- **Deleted** ~302 lines: old `renderDischargedList`, old `dischargedRow`, `trialDirectFetch`, all the diagnostic checkpoint scaffolding, all the verbose console logging, the trial button, the trial-results container.
-- **Added** ~190 lines of clean, defensive code:
-  - `renderDischarged(query)` — pure function over `st.patients`. Filters → sorts → date filter → search filter → render.
-  - `dischargedRow(p)` — coerces every field to a safe type before use (`String(p.phn || '')` etc.). Wrapped in try/catch in the caller so one bad row can't kill the whole list.
-  - `isDischarged(p)` — type-safe truthy check on `discharged` field.
-  - `toEpochMs(v)` — type-safe parser for `dischargedAt` (handles number, numeric string, ISO string).
-  - `restorePatient(pid)` and `_doRestore(pid, list)` — kept clean, no surprises.
-
-**No more:** `_pendingPush` references in this code path, no merge logic, no diagnostic scaffolding, no checkpoint tracking, no trial button, no `_lastSyncResponse` mutations. The pane reads `st.patients` (populated by `syncFromSheets`) and renders. Period.
-
-**The sync mutex from v3.11 stays** (prevents concurrent syncs from racing). The `syncFromSheets` function itself is unchanged from v3.11.
-
-**Restored existing v2.81 behavior:** restore button on each row, tap row to bill missed claim, all working through the same well-tested paths.
+### Confirmed from older outstanding work
+- ~~Confirm 1202 weekend/stat base rate~~ → **$79.08** (same as 01200 evening base).
+- ~~Confirm cardioversion 14101/14105 rates~~ → those codes don't exist as cardiology. Real code is **Y33025** at $105.70.
 
 ---
 
-## Session 2026-05-07 — v3.11
+## Session 2026-05-10 — v3.27 (calendar view release)
 
-### v3.11 — Trial proves data is fine; isolating sync vs render
+### v3.27 — Calendar view in patient summary
+- **Patient summary modal now opens on a calendar view by default**, with a List/Calendar toggle at the top of the claims section. List view is preserved verbatim — one tap away.
+- **Calendar grid** renders the patient's month with one colour per day based on the dominant claim:
+  - Amber = Consult (33010 / 33012)
+  - Purple = CCU (CCU_DAILY / 1411 / 1421 / 1431), shows the band as a tag under the date
+  - Green = Daily (33008 without notes)
+  - Teal = Combined daily (33008 with notes)
+  - Blue = Directive (33006)
+  - Grey = gap day inside admission span (only when patient has a gap rule)
+  - Blue ring = today; Red ring = discharge date
+- **Gap rule** (only patients matching this get grey gap shading and the warning banner):
+  - `p.ward ∈ {CCU, CSICU, ICUA, ICUB, ICUD}` AND `p.role === 'mrp'` → expects CCU each day
+  - `p.role === 'mrp'` on any other ward → expects 33008 daily
+  - All other patients (consultants, off-service) → no gap shading; calendar still works for tap-to-add
+- **Tap a coloured day** → bottom sheet showing every claim on that date with inline Edit / Delete buttons that route through the existing `openClaimEdit` / `deleteClaimBtn` handlers.
+- **Tap a gap (or any empty in-admit) day** → 4-button picker: CCU / Daily / Directive / Combined daily. The rule-recommended type wears an amber "RECOMMENDED" ribbon and a coloured border, but all 4 are tappable so the doctor can override.
+  - CCU: auto-computes 1411/1421/1431 from consecutive prior CCU days, one tap → claim created via `addClaim(p, 'CCU_DAILY', ...)`.
+  - Daily: one tap → `addClaim(p, '33008', ...)`.
+  - Directive: one tap → `addClaim(p, '33006', ...)`.
+  - Combined daily: opens a sub-form requiring **ICD-9 code** (pre-filled from `p.icd`, editable) AND **reason text**. Saved as `33008` with `notes = "ICD — reason"`. Both fields validate red on save if blank.
+- **Discharge integration:** new `_dischCheckGaps()` runs ahead of the existing `_dischStep1` today's-visit prompt. If the patient has a gap rule AND any historical admit days are unbilled, the discharge modal opens on a banner listing the missed days with two options:
+  - **Fix gaps first** → closes discharge modal, opens patient summary on the calendar so the doctor can tap each gap day.
+  - **Discharge anyway** → falls straight through to the original `_dischStep1` (today's-visit prompt → LOS>4 prompt → confirm discharge).
+  - Patients with no gap rule skip the check entirely; existing flow unchanged.
+- **BUILD_ID** bumped to `v3.27-2026-05-10-calendar-view` (forces device localStorage wipe on next load — important since this release touches the patient summary modal that depends on `st.claims` shape).
+- Header version label updated to `v3.27`. File top-comment block updated.
 
-**Trial succeeded**: HTTP 200 in 7.5s, 45 patients returned, 16 discharged correctly identified. Apps Script and Sheets are 100% fine. The bug is in the client-side sync flow.
+### Schema reference unchanged
+No new patient/claim columns. Calendar reads existing fields:
+- `p.admitDate`, `p.dischargeDate` (DD/MM/YYYY)
+- `p.ward`, `p.role`, `p.care` (gap rule)
+- `c.phn`, `c.date`, `c.fee`, `c.notes` (cell colour + day details)
 
-**v3.11 changes:**
+### New JS functions added (all prefixed `_cv` or `tapCalDay` / `togglePtSummaryView` so they're easy to grep for)
+`togglePtSummaryView`, `_ptSummaryListHTML`, `_ptSummaryCalendarHTML`, `_cvGapRuleForPatient`, `_cvAdmitSpan`, `_cvDominantType`, `_cvGapDays`, `_cvCcuFeeForDate`, `_cvChangeMonth`, `tapCalDay`, `_cvShowDayDetails`, `_cvEditFromSheet`, `_cvDeleteFromSheet`, `_cvShowPicker`, `_cvPickType`, `_cvShowCombinedForm`, `_cvBackFromCombined`, `_cvConfirmCombined`, `_cvFillClaim`, `_dischCheckGaps`, `_dischIgnoreGaps`, `_dischFixGaps`.
 
-1. **Sync mutex (`window._syncInFlight`)** — prevents concurrent syncs from racing each other. iOS Safari may fire `pageshow`, `visibilitychange`, and init's sync close together, kicking off multiple parallel `getAll` requests. Each one mutates `st.patients` independently and the result depends on which finishes last. The mutex serializes them.
+### New HTML
+- One new modal: `<div id="cv-picker-modal">` sits next to `pt-summary-modal`. Uses the existing `.overlay` / `.modal` / `.modal-handle` classes — same bottom-sheet pattern as every other modal in the app.
 
-2. **Simplified patient merge** — replaced the complex pending-push protection with a simpler "remote wins; keep local-only with pending pushes" logic. Less surface area for bugs.
-
-3. **Trial button now also injects results into `st.patients`** — proves whether the bug is in sync OR in render. After tapping the trial button:
-   - If the discharged list below populates with 16 patients → bug is 100% in `syncFromSheets` (data + render are fine)
-   - If the discharged list is still empty → bug is in `renderDischargedList` itself
-
-**For testing v3.11:**
-1. Load it
-2. Wait for first sync to complete (sync dot goes green)
-3. If discharged list is empty → tap **🧪 Trial: direct fetch from Sheets**
-4. The discharged list should now populate with 16 patients
-5. Report back what you see
-
-### Note on dischargeDate vs dischargedAt
-Both fields exist in the schema. `dischargedAt` (epoch ms, set by `removePatient`) is the authoritative timestamp. `dischargeDate` (DD/MM/YYYY string, set by `dischConfirmRemove`) is for human display only. Some patients have only `dischargedAt` because they were discharged via flows that didn't set the human-readable string. The app's filtering uses `dischargedAt` exclusively, so this isn't the bug — but worth fixing later for cleanliness.
-
----
-
-## Session 2026-05-07 — v3.10
-
-### v3.10 — Trial: direct fetch bypassing all sync/merge layers
-
-**User insight:** Claims read/write works (quick-tap buttons persist, green tints work, $516/5 claims in header is correct). So the Sheets ↔ App connection is NOT broken. Something specific to the discharge-list path is failing.
-
-**Approach:** Add a "🧪 Trial" button on the Recently Discharged pane that:
-1. Fires its own `fetch(..../getAll...)` — independent of `syncFromSheets()`, `_pendingPush`, `st.patients`
-2. Parses the response
-3. Filters `patients` for `discharged=true` (handles boolean `true`, string `'true'`/`'TRUE'`, etc.)
-4. Renders the matches as a plain list with raw field values
-
-This isolates the question: does the data ARRIVE from Sheets correctly, or does it arrive but get lost in our local processing?
-
-**Three possible outcomes when you tap the Trial button:**
-
-1. **Trial shows the 16 discharged patients** → Sheets and Apps Script are fine; the bug is in our local `syncFromSheets` / merge / `_pendingPush` logic. We can fix that with high confidence.
-
-2. **Trial shows 0 discharged patients but does show all 45 patients** → Apps Script is returning data but the `discharged` field is being lost somewhere on the wire. The diagnostic will show what `discharged` field actually looks like (e.g., empty string, undefined).
-
-3. **Trial fails to fetch / shows 0 patients total** → The fetch itself is broken for this specific user/device, despite claims working. (Unlikely given claims work, but possible.)
-
-**Tap the button and screenshot the result.** That will tell us which of the three failure modes is actually happening.
+### New CSS
+- ~70 lines under `/* ═══ v3.27 — calendar view in patient summary ═══ */` immediately before `</style>`. All class names prefixed `cv-` for clean grep / future cleanup.
 
 ---
 
-## Session 2026-05-07 — v3.09
-
-### v3.09 — iOS Safari BFCache fix: prevent hung fetch promise restoration
-
-**Apps Script analysis (with full source from user):** The Apps Script is fine. `getAll()` reads 4 sheets via `sheetToObjects`, max ~46 actual rows of patient data. Should respond in under a second normally.
-
-**Real diagnosis:** iOS Safari is **caching the page state including in-flight fetch promises** in BFCache. When the user "refreshes" on iPad:
-1. Safari froze the JS heap when navigating away (including `st.claims` with 5 items, `_syncAttempts: 1`, and the in-progress `await fetch(...)` for `getAll`)
-2. Safari restored the entire JS heap on "refresh" — variables come back populated, but the network request was severed and the fetch promise hangs forever
-3. Diagnostic shows `Checkpoint: fetch-start` because the awaited fetch never resolves
-4. Header shows `5 claims` because `st.claims` was restored from BFCache memory, not re-synced
-
-**Two fixes:**
-
-1. **Disable BFCache caching of this page.** Adding an empty `unload` event listener prevents iOS Safari/Firefox from freezing the page state. This forces a true reload on every navigation and prevents the "in-flight fetch never resumes" pathology. Trade-off: page reloads are slightly slower (no BFCache speedup), but state is always fresh.
-
-2. **Fire `syncFromSheets()` on EVERY pageshow**, not just persisted ones. Defensive — even on a hard reload, this catches edge cases.
-
-3. **Explicit fetch options** to fix iOS Safari Apps Script redirect issues:
-   - `redirect: 'follow'` — Apps Script returns 302 to `googleusercontent.com`
-   - `cache: 'no-store'` — prevents iOS Safari from intercepting with cached fetch responses
-   - `credentials: 'omit'` — Apps Script doesn't need cookies; including them confuses CORS
-   - URL cache-bust query param `&_t=<now>` — defeats any URL-keyed cache
-
-**Apps Script does NOT need changes** — the issue is entirely client-side in iOS Safari's BFCache behavior interacting with cross-origin fetch promises.
-
-**Please test v3.09:**
-1. Load it
-2. Hard refresh (or close + reopen the tab)
-3. Navigate to Recently Discharged
-4. Diagnostic should show `Checkpoint: completed` with patient counts populated
-5. The 16 discharged patients in your Sheets should appear
-
-If checkpoint is still `fetch-start` after 45 seconds, the fetch timeout will fire and show "Fetch aborted after 45s timeout" — at which point the issue is genuinely network-side, not BFCache-side.
-
----
-
-## Session 2026-05-07 — v3.08
-
-### v3.08 — Surface stalled fetches; handle iOS BFCache restores
-
-**v3.07 finding from screenshot:** Checkpoint stuck at `fetch-start`. Header shows 5 claims loaded ($516). Total attempts: 1. This is contradictory — only one sync ran, it never completed, yet data is loaded.
-
-**Diagnosis:** The `await fetch(...)` is hanging indefinitely. The Apps Script is taking too long to respond (or never responding). The 5 claims in the header are from a PRIOR session whose state was restored by **iOS Safari BFCache** (back/forward cache). When iPad Safari "refreshes" without a hard reload, it can restore the entire JavaScript heap from cache, including in-memory state, while a stalled in-flight fetch continues from where it was interrupted.
-
-**Two fixes:**
-
-1. **45-second fetch timeout via AbortController.** `await fetch(...)` no longer hangs forever — if no response in 45s, the fetch is aborted and the diagnostic shows `Fetch error: Fetch aborted after 45s timeout — Apps Script may be slow or unreachable`. This prevents the silent hang and makes the failure visible.
-
-2. **`pageshow` event handler with `e.persisted` check.** When iOS Safari restores the page from BFCache, this fires. If we're being restored from cache, force a fresh `syncFromSheets()` immediately — the in-memory state could be from another session and is untrustworthy.
-
-**Likely root cause of the original problem:** The `getAll` request to Apps Script is timing out for the patients sheet specifically. Apps Script reads 1000-row Patients sheet × 27 columns and applies `setNumberFormat` operations — on slow networks or a busy Apps Script instance, this can stall past iOS Safari's default fetch timeout.
-
-**To address the actual underlying performance**, you may need to optimize the Apps Script's `getAll` to:
-- Only read non-empty rows (use `getDataRange()` instead of `getRange(1, 1, lastRow, lastCol)` if possible)
-- Avoid unnecessary per-cell formatting calls during reads
-- Maybe split into separate `getPatients` and `getClaims` endpoints to fail/succeed independently
-
-For now: load v3.08, navigate to Recently Discharged, share the diagnostic. With the timeout in place, you'll see a definitive answer (either it succeeds → data appears, or it shows "Fetch error: aborted after 45s" → Apps Script side issue confirmed).
-
----
-
-## Session 2026-05-07 — v3.07
-
-### v3.07 — Checkpoint-based sync diagnostic
-
-**v3.06 finding:** Diagnostic showed "Attempts: 1, No response captured yet" while header showed 5 claims loaded ($516). That's contradictory unless the sync that loaded claims was somehow not captured by my diagnostic. Most likely cause: the capture happened mid-sync and the function exited via an early `return` (HTTP not-ok) before reaching the response-capture code.
-
-**v3.07 fix:** Captures sync state at every checkpoint, not just at successful completion:
-- `attemptN` — which attempt number this is
-- `startedAt` — timestamp when sync began
-- `checkpoint` — current stage: `fetch-start` → `fetch-returned` → `parsing-json` → `json-parsed` → `merge-patients-running` → `completed`, or `EXCEPTION at <stage>` if it threw
-- `httpStatus` / `httpOk` — captured immediately after fetch returns, even if not-ok
-- `exception` — if caught
-- `completedAt`, `stPatientsFinal`, `stClaimsFinal` — final results if sync completed
-
-The diagnostic panel now shows whichever checkpoint was last reached, even if sync exited early. This will tell us the EXACT stage where things go wrong on the user's device.
-
-**Please load v3.07 and share what the diagnostic shows.** Specifically the "Checkpoint" line — that pinpoints exactly where in the sync function execution stopped.
-
----
-
-## Session 2026-05-07 — v3.06
-
-### v3.06 — Diagnostic was self-erasing; preserve sync history across attempts
-
-**Bug in v3.05 diagnostic:** I was resetting `window._lastSyncResponse = null` at the start of every `syncFromSheets()` call. This meant: a second sync (triggered by `visibilitychange` or push retry) would wipe the diagnostic from the first successful sync before failing, leaving "No sync has run yet" displayed even when sync had clearly run (claims loaded, dot turned green earlier).
-
-**Fix:** Removed the reset. `_lastSyncResponse` now persists across syncs — diagnostic always shows the latest CAPTURED response, regardless of whether subsequent attempts succeed or fail. `_lastSyncError` is reset per-attempt as before (it's about THIS attempt's outcome).
-
-**Additional diagnostic added:**
-- `window._syncAttempts` — counts total sync calls since page load
-- `lastResp.patientsMergeRan` — explicit flag for whether the patient-merge block ran
-- `lastResp.patientsMergeSkipReason` — why it was skipped (`d.patients is falsy` or `d.patients is not an array`)
-- `lastResp.patientsAfterMerge` — `st.patients.length` after merge completes
-
-This will show definitively whether:
-1. Apps Script returned valid `d.patients` (then merge would have populated `st.patients`)
-2. `d.patients` came back malformed (merge skipped, st.patients stayed empty)
-3. Merge ran but ended with 0 patients (logic bug in my code)
-
-**Please load v3.06 and share what the diagnostic shows now.** Specifically the "Sync history" block — d.patients type/length, merge ran true/false, st.patients after merge.
-
----
-
-## Session 2026-05-07 — v3.05
-
-### v3.05 — Capture sync response shape (claims load but not patients)
-
-**New finding:** v3.04 diagnostic shows: signed in as KBrown, **5 claims loaded** ($516 in header), but **0 patients in memory**, sync dot **red**.
-
-This is impossible if sync was wholly failing — claims wouldn't have loaded either. So sync GET succeeded and returned data, but `d.patients` was either falsy, null, undefined, or non-array (which is why the patient merge block at line 1668 was skipped while claims merge ran). Possibilities:
-- Apps Script `getAll` is partially failing — returning `claims` but not `patients`
-- Apps Script `getAll` is hitting a quota/timeout reading the Patients sheet
-- `d.patients` is being returned as something unexpected (object instead of array, etc.)
-
-**This release captures the actual response shape** in `window._lastSyncResponse`:
-- Type of `d.patients` and length
-- Type of `d.claims` and length
-- All top-level keys in the response
-- Timestamp of the sync
-
-**The Recently Discharged diagnostic panel now shows this data**, so we can see exactly what the Apps Script returned. This is the missing piece — the parsed-JSON shape.
-
-**Please:** Load v3.05, navigate to Recently Discharged, expand the diagnostic, and share what "Last sync response" says. That'll definitively tell us whether the issue is on the Apps Script end or the parsing end.
-
----
-
-## Session 2026-05-07 — v3.04
-
-### v3.04 — Diagnose-and-recover: sync error capture + preserve sign-in across builds
-
-**Diagnostic finding:** v3.03's UI diagnostic showed total patients in memory = 0. So the discharged list isn't broken — **sync is silently failing** and the app has no patient data. The red sync dot stays red. This is why no discharged patients show up: there are no patients at all in `st.patients`.
-
-The user is also signed out — "Sign in" button is visible. This was a side-effect of every BUILD_ID bump wiping the entire `kgh5:*` localStorage namespace, including `kgh5:doc` which holds the doctor signin.
-
-**Fixes:**
-
-1. **Preserve safe local-only keys across BUILD_ID changes.** The cache-buster now wipes everything EXCEPT `kgh5:doc`, `kgh5:recentIcds`, `kgh5:recentRefs`, and `kgh5:customWards`. Doctors stay signed in across version bumps. Clinical data (patients/claims) still gets cleared since Sheets is the source of truth.
-
-2. **Capture sync errors in `window._lastSyncError`.** Every failure path of `syncFromSheets` now records what went wrong: HTTP status, Apps Script error message, or thrown exception text.
-
-3. **Visible error in Recently Discharged diagnostic.** The diagnostic panel now shows the last sync error in red (Apps Script error message, HTTP code, or network exception).
-
-4. **Retry button** in the diagnostic panel — taps re-run sync and re-render.
-
-5. **Diagnostic auto-expands** (open by default) so user sees it immediately.
-
-**For the user:** Load v3.04. Open Recently Discharged. The diagnostic will show what went wrong with sync. Tap "Retry sync" to attempt again. Share the error text and I can pinpoint exactly what's failing.
-
----
-
-## Session 2026-05-07 — v3.03
-
-### v3.03 — Visible UI diagnostic for empty Recently Discharged
-
-**Status of investigation:** User uploaded their actual Sheets data. The data is **correct** — Sheets has 16 patients with `discharged='true'` and valid `dischargedAt` timestamps within the last 21 days, including a patient discharged just minutes before the export. None show up in the user's app.
-
-**What this rules out:**
-- Apps Script not saving data correctly (it is)
-- `parseBool` / `parseDischargedAt` parser bugs (the data formats are handled)
-- Sync race wiping discharge updates (the data persisted correctly)
-
-**What's left to investigate:**
-- Whether `st.patients` on the user's device actually contains these 16 patients with `discharged: true` at the moment of viewing
-- Whether the merge step is returning correct data
-- Whether something between sync and render is re-flipping the flag
-
-**This release adds visible UI diagnostic** in the empty state of the Recently Discharged pane:
-- Total patients in memory
-- Number with `discharged=true`
-- Number with `dischargedAt` timestamp set
-- Number passing pool filter
-- Number passing 21-day filter
-- Plus an ANOMALY warning to console if dischargedAt is set but discharged isn't true
-
-**Please reproduce on your device, navigate to Recently Discharged, expand the "Diagnostic info" panel that appears in the empty state, and share those numbers with me.** They will tell me definitively where the data is being lost.
-
-If "Total patients in memory" is way less than 45 → sync didn't pull all data.
-If "Total patients" is correct but "discharged=true" is 0 → discharge flag is being lost in transit.
-If "discharged=true" is correct but "passed pool filter" is 0 → there's a bug in the filter (unlikely but possible).
-
----
-
-## Session 2026-05-07 — v3.02 (version label fix)
-
-### Caught: missing version bump
-- Through v2.96 → v3.02, I updated the CHANGELOG entries but forgot to update the user-facing `BUILD_ID` constant and the header version label, which were both stuck at `v2.95`.
-- This means devices loading the file weren't triggering the BUILD_ID cache wipe — they kept stale localStorage from v2.95.
-- **Fix:** bumped both to `v3.02-2026-05-07`. On next load, every device wipes localStorage and re-pulls from Sheets.
-- **Side effect:** any unsynced local changes get wiped. Patients/claims that successfully synced to Sheets are unaffected.
-
----
-
-## Session 2026-05-07 — v3.02
-
-### v3.02 — Diagnostic + lenient timestamp filter for Recently Discharged
-
-**User report:** Recently Discharged list still empty after v3.00 fix.
-
-**Likely cause:** Patients discharged BEFORE the v3.00 sync race fix had their `discharged=true` clobbered back to `discharged=false` on Sheets. The v3.00 fix is forward-looking only — it can't recover patients whose discharge state was lost in the race. The user would need to re-discharge them.
-
-**Defensive changes to make this more robust:**
-
-1. **Lenient timestamp filter:** `renderDischargedList` no longer hides discharged patients with missing/invalid `dischargedAt`. If `discharged=true` but timestamp is bad, show them anyway (better than silently hiding them — likely a sync glitch).
-
-2. **Diagnostic empty state:** When the list is empty and there ARE discharged patients in storage but none passed the date filter, show a hint: "N discharged patient in storage but none have a recent timestamp." Helps surface sync/timestamp issues.
-
-3. **Console diagnostic:** Every render of the discharged list logs `[discharged-list]` with total patient count, discharged count, and a sample of the first 3 discharged patients (showing their `dischargedAt` raw value and parsed value). Open console to see what's actually in memory.
-
-4. **`removePatient` now re-renders the discharged pane** if it's currently visible (forward-looking — covers any flow where discharge happens while user is on that pane).
-
-**For testing:**
-- Re-discharge a patient that should be discharged. The v3.00 race fix should let it stick.
-- If empty list persists, check browser console for `[discharged-list]` log to see what's in `st.patients`.
-
----
-
-## Session 2026-05-07 — v3.01
-
-### v3.01 — Rounds search: unified On + Off Service results, × clear button
-
-**Behavior changes:**
-- Placeholder text: "Search patients…" → "Search active patients"
-- Search now spans **both On Service and Off Service lists**, not just whichever list is currently selected
-- Results are grouped under "On Service (n)" and "Off Service (n)" section headers
-- Added × clear button on the right of the search input — appears when search has text, click to clear and refocus input
-- Search persists across On/Off Service toggle (was being cleared on toggle)
-- View toggle (Geographic/Alphabetical) hides while searching since results are a unified flat list
-
-**Implementation:**
-- Added `#search-view` container in rounds pane, hidden by default
-- New `renderRoundsSearch()` function builds unified results
-- `render()` now routes to `renderRoundsSearch()` whenever `_roundsQuery` is non-empty, otherwise shows the appropriate on-view or off-view
-- Removed dead per-render search filters from `wardHtml`, `renderAlpha`, `renderOff` (no longer needed since search routes to its own view)
-- New `clearRoundsSearch()` helper handles × button click; uses both `onclick` and `onpointerdown` for iOS reliability
-- × button uses CSS `.on` class toggle to show/hide based on input content
-
-**No regressions to claim-from-row, summary-from-row, discharge-from-row** — `alphaRow` is reused, all action handlers continue to work.
-
----
-
-## Session 2026-05-07 — v3.00
-
-### v3.00 — Fix sync race condition that wiped discharge updates
-
-**Bug reported:** Newly discharged patient didn't appear in Recently Discharged list. Search returned no hits.
-
-**Root cause:** Sync race condition.
-1. User discharges patient → `removePatient` sets `p.discharged = true` locally and fires `push('savePatient', p)`. Push goes into `_pendingPush[pid]`.
-2. Before that push reaches Sheets, the `visibilitychange` event handler (line 6762) triggers `syncFromSheets()` (e.g., user switches tabs, app regains focus, etc.).
-3. Sync pulls Sheets state. Sheets still has the stale row with `discharged = false` because the push hasn't completed yet.
-4. Old merge code: `var out = Object.assign({}, rp)` — remote always wins for existing patients. Local `discharged = true` gets clobbered back to `false`.
-5. Old pending-clear: `delete _pendingPush[p.id]` for any patient that came back from remote, regardless of whether the remote row reflected the pending change. So the next sync also has nothing to protect against.
-
-**The pending-push mechanism only guarded against new patients not yet on Sheets — it didn't protect field updates on existing patients.**
-
-**Fix (sync merge logic):**
-- Merge step now checks `_pendingPush[lp.id]` before letting remote win. If a push is pending for this patient, the local version is preserved (it reflects an unconfirmed update).
-- Pending-clear step now confirms the remote row actually reflects the pending change before clearing. Compares `discharged` and `dischargedAt`. Falls back to a 60s stale timeout to prevent stuck pending entries.
-- Added explicit re-render of the Recently Discharged pane at the end of `syncFromSheets()` if the user is currently viewing it (so post-sync data corrections become visible immediately, not on next user action).
-
-**This fix protects all field updates on existing patients, not just discharge** — restore, ward changes, MRP/care toggles, etc. all benefit.
-
----
-
-## Session 2026-05-07 — v2.99
-
-### v2.99 — Discharge model simplification + naming cleanup
-
-**Discharge flag system simplified:**
-- **Removed `trueDischarge` flag entirely.** Two-flag system (`discharged` + `trueDischarge`) was technical debt — easy to drift, hard to reason about.
-- **Removed "Remove from list (added in error)" path** as user requested. Discharge is now a single action: "Confirm discharge & remove". Patients added in error are corrected by editing the patient or simply not actioning them.
-- Step 3 of the discharge modal now shows: "Confirm discharge & remove" + "Cancel" — no third destructive option.
-- Recently Discharged filter simplified: was `p.discharged && p.trueDischarge`, now just `p.discharged`.
-- `_doRestore` no longer touches `trueDischarge` (field deleted).
-- `dischRemoveError` function deleted entirely.
-
-**Naming cleanup — `p-addclaim` was misleading after v2.98:**
-- Pane ID: `p-addclaim` → `p-discharged`
-- Search input ID: `addclaim-search` → `discharged-search`
-- Results container ID: `addclaim-results` → `discharged-results`
-- Functions: `initAddClaim` → `initDischarged`, `addClaimSearch` → `dischargedSearch`, `renderAddClaimResults` → `renderDischargedList`, `addClaimRow` → `dischargedRow`, `openClaimFromSearch` → `openClaimFromDischarged`
-- Section comment block updated: "06b_add_claim.js" → "06b_discharged.js"
-- `pt-addclaim-btn` (the "+ Add claim" button on patient summaries) **kept** — accurately named.
-
-**Dead code removal:**
-- `needsSticker` field — was set during patient creation/import but never read anywhere. UI warning for missing PHN uses `p.phn` ternary directly, not the flag. Removed all reads/writes (5 sites total). Was supposed to be removed in v2.78 schema cleanup but the runtime field persisted.
-
-**Net: -17 lines, simpler mental model, no orphaned references.**
-
-**Notes for testing:**
-- Existing patients in Sheets with stale `trueDischarge` columns are harmless — just ignored by the new code.
-- Existing patients with `needsSticker` columns are harmless — just ignored.
-- No Apps Script changes needed.
-
----
-
-## Session 2026-05-07 — v2.98
-
-### v2.98 — Nav restructure: Rounds/Add Patient/Recently Discharged moves to top; clean separation of concerns
-
-**Layout change (sticky header stack, top → bottom):**
-1. App title bar (unchanged, top:0)
-2. **Rounds / Add Patient / Recently Discharged** nav (moved up, now top:54px, z-index:49)
-3. **On Service / Off Service + rounds search bar + Geo/Alpha toggle** (below nav, top:88px, z-index:48, only visible on Rounds tab)
-
-**Rounds pane:**
-- `list-sel` bar now contains: On Service/Off Service buttons + live search input + Geo/Alpha toggle
-- Geo/Alpha toggle hidden when Off Service is active (not relevant there)
-- Rounds search filters across all three render paths: `wardHtml`, `renderAlpha`, `renderOff`
-- Search cleared when switching On/Off Service
-- `view-tog` removed from inside pane HTML; now lives permanently in `list-sel` sticky bar
-
-**Recently Discharged pane:**
-- `p-addclaim` is now purely and exclusively a recently discharged view
-- No more dual-mode / `dischargedOnly` flag complexity
-- Shows `discharged && trueDischarge && < 21 days` by default; search expands to all time
-- Actions available per row: restore to On Service, restore to Off Service, add missed claim
-- `renderAddClaimResults()` simplified by ~40 lines
-
-**Removed:**
-- `dischargedOnly` parameter from `renderAddClaimResults` (no longer needed)
-- Active patient sections from the discharged pane entirely
-- `padding-top:52px` from `p-addclaim` (was a workaround for the old dual nav stack)
+## Sessions 2026-05-07 → 2026-05-10 — v2.96 through v3.26
+*(placeholder — versions bumped across multiple sessions without CHANGELOG entries)*
+
+Live BUILD_ID prior to v3.27 was `v3.26-2026-05-10-meditech-detection-broader`. Known major work in this gap based on the in-file comment block at the top of `index.html`:
+- **v3.20** — OCR corrections capture.
+- **v3.21** — Debug panel + version-aware Service Worker.
+- **v3.22** — Debug panel minimisable (small pill in corner).
+- **v3.23** — Meditech-aware empty-OCR ward/room corrections logged with rawText.
+- **v3.24** — Multi-pass Tesseract (paper + screen preprocessing).
+- **v3.25** — ocr_offline.js v1.2 (Meditech parser fixes — HCN# variant, inline DD/MM/YYYY DOB, bare M/F sex, edge-artifact prefix strip).
+- **v3.26** — Meditech detection broader (per BUILD_ID string).
+
+Other intermediate changes (v2.96 → v3.19) are not tracked here; reconstruct from git history if needed.
 
 ---
 
