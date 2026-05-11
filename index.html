@@ -615,14 +615,18 @@ input[type=file] { display:none; }
 .cv-pick-btn .cv-pk-flag { position:absolute; top:-7px; left:50%; transform:translateX(-50%);
                            background:var(--amber); color:#fff; font-size:8px; font-weight:800;
                            padding:2px 6px; border-radius:6px; letter-spacing:.3px; text-transform:uppercase; }
-.cv-pick-btn.cv-pk-ccu       { background:var(--purple-bg); color:var(--purple-t); }
-.cv-pick-btn.cv-pk-daily     { background:var(--green-bg);  color:var(--green-t); }
-.cv-pick-btn.cv-pk-directive { background:var(--blue-bg);   color:var(--blue-t); }
-.cv-pick-btn.cv-pk-combined  { background:var(--teal-bg);   color:var(--teal-t); }
-.cv-pick-btn.cv-pk-rec.cv-pk-ccu       { border-color:var(--purple); }
-.cv-pick-btn.cv-pk-rec.cv-pk-daily     { border-color:var(--green); }
-.cv-pick-btn.cv-pk-rec.cv-pk-directive { border-color:var(--blue); }
-.cv-pick-btn.cv-pk-rec.cv-pk-combined  { border-color:var(--teal); }
+/* v3.29 — picker button fills match the calendar day cell palette so a
+   doctor reading the calendar sees the same colour mean the same thing
+   in the picker (CCU red-coral, Daily dark green, Combined light mint,
+   Directive periwinkle). Recommended border = a deeper shade of the fill. */
+.cv-pick-btn.cv-pk-ccu       { background:#f08585; color:#5e1414; }
+.cv-pick-btn.cv-pk-daily     { background:#3fa658; color:#062814; }
+.cv-pick-btn.cv-pk-directive { background:#8eb5fa; color:#002461; }
+.cv-pick-btn.cv-pk-combined  { background:#b8e6c4; color:#0a4520; }
+.cv-pick-btn.cv-pk-rec.cv-pk-ccu       { border-color:#b53636; }
+.cv-pick-btn.cv-pk-rec.cv-pk-daily     { border-color:#1a7a35; }
+.cv-pick-btn.cv-pk-rec.cv-pk-directive { border-color:#003478; }
+.cv-pick-btn.cv-pk-rec.cv-pk-combined  { border-color:#34804a; }
 
 </style>
 </head>
