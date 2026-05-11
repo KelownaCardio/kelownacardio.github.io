@@ -1,22 +1,31 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology Billing — main app
-  Version:    v3.30
-  Built:      2026-05-10 UTC
+  Version:    v3.31
+  Built:      2026-05-11 UTC
   Repo:       github.com/KelownaCardio/kelownacardio.github.io
 
-  Changes in this build (v3.30) — calendar colour fix:
-    - _cvDominantType now recognises 33005 (emergency), 33014 (prolonged
-      counsel), 1441 (CCU day 31+), Y33025 (cardioversion), 00751
-      (pericardiocentesis), 78717 (discharge), 78720 (MOST). Previously
-      days with only these fee codes rendered with no colour because the
-      dominant detector returned null. Added a hasAny fallback so any
-      claimed day at minimum gets the consult amber.
-    - byDate in _ptSummaryCalendarHTML now normalises each claim's date
-      through fmtClaimDate before keying, so claims that round-trip
-      through Sheets as a Date object or ISO string still match the
-      DD/MM/YYYY keys the calendar generates.
-    - _cvShowDayDetails colour map expanded to match the new code set.
+  Changes in this build (v3.31) — Location & service rule tightening:
+    - On/Off service (`list`) is now ward-driven, not role-driven.
+      wardChange() and peWardChange() set the default: CCU/2S/2W → on
+      service, everything else → off service. User can still override
+      manually per patient.
+    - roleChange() / mrpChange() / peRoleChange() / peMrpChange() no
+      longer touch `list`. The bidirectional role ↔ MRP binding is kept
+      (role=mrp ↔ mrp=Cardiology; role=consultant ↔ mrp=non-Cardiology),
+      and the hidden `care` field is still updated, but service location
+      is no longer clobbered when the doctor flips role or MRP.
+    - Edit Patient init now passes {preserveList:true} to peWardChange
+      so opening the edit modal doesn't overwrite the saved `list` value
+      with the ward default.
+    - Meditech import: unrecognised MRPs (consulting role, attending not
+      Hospitalist/CTU/CSICU/ICU/Cardiac Surgery) now default to 'Other'
+      rather than an empty string, matching the Add/Edit dropdown shape.
+      Cardiology MRP cases are guaranteed to write mrp='Cardiology'.
+
+  v3.30: Calendar colour fix — _cvDominantType recognises 33005/33014/
+         1441/Y33025/00751/78717/78720; byDate normalises claim dates
+         via fmtClaimDate; _cvShowDayDetails colour map expanded.
 
   v3.29: FEES trimmed from 56 to 20 codes (group's actual usage).
   v3.28: FEES audited against MSC 2026; 13 mis-labels fixed; 3 invalid
@@ -642,7 +651,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span id="hdr-version" style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.30</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span id="hdr-version" style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.31</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1802,7 +1811,7 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.30-2026-05-10-calendar-color-fix';
+var BUILD_ID    = 'v3.31-2026-05-11-location-service-rules';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
@@ -5120,7 +5129,9 @@ function openPatientEdit(pid) {
 
   // Populate bed options after render
   setTimeout(function() {
-    peWardChange();
+    // Preserve the patient's saved list (on/off service) — don't snap to
+    // ward default when re-opening edit; only manual ward changes do that.
+    peWardChange({preserveList:true});
     // Restore current bed value into the input
     var bedInp = document.getElementById('pe-bed');
     if (bedInp && p.bed) bedInp.value = p.bed;
@@ -5133,7 +5144,7 @@ function openPatientEdit(pid) {
 }
 
 // Dynamic ward change in edit form
-function peWardChange() {
+function peWardChange(opts) {
   var ward = (document.getElementById('pe-ward') || {}).value || 'CCU';
   var wdef = WARDS[ward] || {};
   var bedLbl = document.getElementById('pe-bed-lbl');
@@ -5141,6 +5152,14 @@ function peWardChange() {
   var rooms = (wdef.rooms || []).slice();
   var bedSel = document.getElementById('pe-bed');
   if (!bedSel) return;
+
+  // Ward-driven list default. Skip on init so the saved list value isn't
+  // clobbered when the edit modal first opens — init passes preserveList.
+  if (!opts || !opts.preserveList) {
+    var listSel = document.getElementById('pe-list');
+    if (listSel) listSel.value = wdef.list || 'off';
+  }
+
   // Re-apply role rules so MRP daily/CCU care type tracks the new ward
   var roleSel = document.getElementById('pe-role');
   if (roleSel && roleSel.value === 'mrp') {
@@ -5166,39 +5185,36 @@ function clearSearchField(searchId, hiddenId, hiddenNameId, ddId) {
 
 // Dynamic role change in edit form
 function peRoleChange() {
+  // Same rules as roleChange() — role ↔ MRP binding, care updates,
+  // list (on/off service) is NOT touched (ward-driven only).
   var roleSel = document.getElementById('pe-role');
   var mrpSel  = document.getElementById('pe-mrp');
-  var listSel = document.getElementById('pe-list');
   var careFld = document.getElementById('pe-care');
   var ward    = (document.getElementById('pe-ward') || {}).value || '';
   if (!roleSel || !mrpSel) return;
   var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
   if (roleSel.value === 'mrp') {
     mrpSel.value = 'Cardiology';
-    if (listSel) listSel.value = 'on';
     if (careFld) careFld.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
   } else {
     if (mrpSel.value === 'Cardiology') mrpSel.value = 'Other';
-    if (listSel) listSel.value = 'off';
     if (careFld) careFld.value = 'directive';
   }
 }
 
 function peMrpChange() {
+  // Same rules as mrpChange() — list is NOT touched.
   var mrpSel  = document.getElementById('pe-mrp');
   var roleSel = document.getElementById('pe-role');
-  var listSel = document.getElementById('pe-list');
   var careFld = document.getElementById('pe-care');
   var ward    = (document.getElementById('pe-ward') || {}).value || '';
   if (!mrpSel || !roleSel) return;
   var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
   if (mrpSel.value === 'Cardiology') {
     roleSel.value = 'mrp';
-    if (listSel) listSel.value = 'on';
     if (careFld) careFld.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
   } else {
     roleSel.value = 'consultant';
-    if (listSel) listSel.value = 'off';
     if (careFld) careFld.value = 'directive';
   }
 }
@@ -5940,39 +5956,44 @@ function openAdd(ward, bed) {
 // once the user manually toggles it.
 
 function mrpChange() {
+  // Bidirectional rule:
+  //   MRP = Cardiology       → role = MRP
+  //   MRP = anything else    → role = Consulting
+  // `list` (on/off service) is NOT touched here — it is ward-driven
+  // (see wardChange) and may be manually overridden by the user.
   var mrpSel  = document.getElementById('f-mrp');
   var roleSel = document.getElementById('f-role');
-  var listSel = document.getElementById('f-list');
   var careFld = document.getElementById('f-care');
   var ward    = gv('f-ward');
   if (!mrpSel || !roleSel) return;
   var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
   if (mrpSel.value === 'Cardiology') {
     roleSel.value = 'mrp';
-    if (listSel) listSel.value = 'on';
     if (careFld) careFld.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
   } else {
     roleSel.value = 'consultant';
-    if (listSel) listSel.value = 'off';
     if (careFld) careFld.value = 'directive';
   }
 }
 
 function roleChange() {
+  // Bidirectional rule:
+  //   role = MRP        → MRP = Cardiology
+  //   role = Consulting → MRP becomes "Other" ONLY if it was Cardiology;
+  //                        non-Cardiology values (e.g. Hospitalist from
+  //                        Meditech import) are preserved.
+  // `list` is NOT touched — ward-driven, see wardChange.
   var roleSel = document.getElementById('f-role');
   var mrpSel  = document.getElementById('f-mrp');
-  var listSel = document.getElementById('f-list');
   var careFld = document.getElementById('f-care');
   var ward    = gv('f-ward');
   if (!roleSel || !mrpSel) return;
   var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
   if (roleSel.value === 'mrp') {
     mrpSel.value = 'Cardiology';
-    if (listSel) listSel.value = 'on';
     if (careFld) careFld.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
   } else {
     if (mrpSel.value === 'Cardiology') mrpSel.value = 'Other';
-    if (listSel) listSel.value = 'off';
     if (careFld) careFld.value = 'directive';
   }
 }
@@ -6040,7 +6061,11 @@ function selectBed(row) {
   if (row.parentElement) row.parentElement.style.display = 'none';
 }
 
-function wardChange() {
+function wardChange(opts) {
+  // Set bed label, show/hide custom-ward input, clear bed, refresh care
+  // for MRP role, and (unless preserveList) reset on/off-service to the
+  // ward's default. CCU/2S/2W default to On Service; everything else to
+  // Off Service. User can still manually flip after.
   var w    = gv('f-ward');
   var wdef = WARDS[w] || {};
   var bedLbl = document.getElementById('bed-lbl');
@@ -6054,7 +6079,13 @@ function wardChange() {
   var bedInp = document.getElementById('f-bed');
   if (bedInp) bedInp.value = '';
 
-  // Re-apply role rules
+  // Ward-driven list default
+  if (!opts || !opts.preserveList) {
+    var listSel = document.getElementById('f-list');
+    if (listSel) listSel.value = wdef.list || 'off';
+  }
+
+  // Re-apply role rules (care field only — list is handled above)
   var roleSel = document.getElementById('f-role');
   if (roleSel && roleSel.value === 'mrp') {
     var careFld  = document.getElementById('f-care');
@@ -7698,7 +7729,14 @@ function renderMediteachPreview(patients) {
       return String(ep.last || '').toLowerCase() === String(p.last || '').toLowerCase() &&
              String(ep.first || '').toLowerCase().split(' ')[0] === String(p.first || '').toLowerCase().split(' ')[0];
     });
-    var _mrp = care.role === 'consultant' ? inferMRP(p.attending) : '';
+    // MRP field rules:
+    //   Cardiology MRP (role=mrp) → always 'Cardiology'
+    //   Consulting (role=consultant) → recognised service ('Hospitalist',
+    //     'CTU', etc.) if matched, else fall back to 'Other' so the value
+    //     matches the Add/Edit MRP dropdown options.
+    var _mrp;
+    if (care.role === 'mrp') _mrp = 'Cardiology';
+    else                      _mrp = inferMRP(p.attending) || 'Other';
     return Object.assign({}, p, {
       _idx: i, _ward: loc.ward, _room: loc.room,
       _list: care.list, _care: care.care, _role: care.role,
@@ -7771,9 +7809,10 @@ function confirmMediteachImport() {
       refbyName:   '',
       care:        p._care,
       list:        p._list,
+      role:        p._role || 'consultant',
       icd:         p._icd,
       roundedToday:null,
-      mrp:         p._mrp || ''
+      mrp:         p._mrp || 'Other'
     };
     st.patients.push(newPt);
     if (SHEETS_URL) push('savePatient', newPt);
