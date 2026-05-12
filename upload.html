@@ -64,112 +64,30 @@ v1.7  2026-05-11  Referring MD search parity with main app: 3-tier system.
                   Physicians tab. Fires when local=0 OR local<5 results.
                   Shows "Searching all BC..." placeholder while loading.
                   ICD-9 list already matched index.html as of v1.6.
-v1.8  2026-05-11  Historical claim overlay on calendar + duplicate guard +
-                  refby/icd pre-population.
-                  • Apps Script v2.5 lookupPatient now returns full claims[]
-                    across Claims + Uploaded Claims tabs, plus a defaults{}
-                    block (refby/refbyName/icd) derived from patient row
-                    then most-recent claim.
-                  • renderLookupBanner stashes data.claims as
-                    st.historicalClaims, pre-fills empty refby/icd from
-                    data.defaults, and triggers calendar redraw.
-                  • Calendar palette updated to match mobile app exactly:
-                    consult #ffcf73, CCU #f08585 (was purple), daily #3fa658,
-                    combined #b8e6c4, directive #8eb5fa, gap #d4d4d8 dashed.
-                  • Historical claims render in their proper colour on the
-                    calendar at .65 opacity with a small "old" tag so users
-                    can tell them apart from new selections.
-                  • Grey-dashed "gap" cells shown for days inside a CCU date
-                    range or daily date range (union of historical + new
-                    selections) that have no claim — surfaces missed days.
-                  • CCU day numbering in buildClaims and renderCal now counts
-                    historical CCU dates as priors, so a new tap on a date
-                    after 3 historical CCU days bills as day 4 (1421), not 1.
-                  • toggleDay tap guard: blocks same alias+fee+date duplicate
-                    against historical claims with a toast; blocks the
-                    33010/33012 ↔ 1411/1421/1431 mutex (can't consult and
-                    CCU same day).
-                  • onConsultDateChange refuses a consult date that already
-                    has a historical CCU claim (same mutex, other direction).
-                  • clearForm now also clears st.historicalClaims.
-                  • Mode chip palette (CCU) updated to match calendar.
-v1.9  2026-05-12  PHN-first workflow: type a PHN, get the whole record back.
-                  • Auto-fill on PHN match now writes ALL demographics from
-                    the Patients row, not just dob/sex/ward. Adds last,
-                    first, and bed (→ f-room) to the existing fill. Every
-                    field stays editable; existing values are never
-                    overwritten — only blanks are filled, in case the user
-                    is correcting an earlier mistake.
-                  • Banner now leads with a clear status pill:
-                    "✓ Pulled from Sheets" (green) when the patient is in
-                    the Patients tab and demographics auto-filled;
-                    "⚠ Has claims but no patient record" (amber) when
-                    Uploaded Claims has entries for this PHN but the
-                    Patients tab does not — still need OCR for demographics;
-                    "• No patient found" (grey) for a clean miss — snap a
-                    photo to fill in demographics.
-                  • Banner also lists what got pulled in a compact summary
-                    so it's obvious what the user can skip checking.
-                  • No backend changes. Apps Script v2.5 already returns
-                    everything this needs.
-v1.10 2026-05-12  Historical claims rendered in the Claims Preview pane.
-                  • refreshPreview now shows an "Existing claims (from
-                    Sheets)" section at the top with one row per historical
-                    claim. Primary line: fee · DD/MM/YYYY · alias. Detail
-                    line: ICD, referring MD, times, notes. "EXISTING" tag
-                    instead of fee input + delete button (these can't be
-                    edited from upload.html — they're already in the Sheet).
-                  • When new claims are being built, a "New claims (to
-                    submit)" subheader divides the two sections so it's
-                    obvious which rows will be submitted and which are
-                    just reference.
-                  • Most-recent-first sort within the historical section so
-                    the latest claim is at the top.
-                  • Empty-state message only shows when there's nothing at
-                    all (no history AND no new claims).
-                  • .ct-ccu preview chip flipped purple → red to match the
-                    calendar palette (was already changed for the calendar
-                    in v1.8 but the chip in the preview was missed).
-v1.11 2026-05-12  Auto-populate the performing physician (alias dropdown)
-                  from the most recent historical claim for the patient.
-                  • New helper setAliasFromHistory(alias): case-insensitive
-                    match against the dropdown options. If the alias is in
-                    the dropdown (KBrown, DPatton, JW, etc.) it's selected
-                    directly. If it's not (e.g., a legacy alias from before
-                    the dropdown was finalised), the dropdown drops to
-                    "other" and the custom-alias input is filled in.
-                  • Fires for both 'found' (patient in Patients tab) and
-                    'orphan-claims' (claims exist but no patient row) —
-                    any time there's historical data to pull from.
-                  • Banner's "Auto-filled" line now mentions performing MD
-                    when it changed, with the value so it's clear.
-                  • No change if the dropdown is already set to the same
-                    alias (no false positive in the banner).
-                  • Always overridable — Kathryn can still pick a different
-                    performing physician for the new claims after the
-                    auto-fill if she's covering for someone else.
-v1.12 2026-05-12  Form auto-reset after successful Sheets upload + shift-click
-                  range select on calendar.
-                  • exportSheets success → after a 2.5s pause (so the
-                    "Saved N claims ✓" confirmation is visible), clearForm
-                    fires automatically and the status bar updates to
-                    "Ready for next patient — type PHN or scan a card."
-                    Skipped when the response wasn't ok or the request errored.
-                  • Calendar tap handler now receives the click event so it
-                    can detect Shift. Click May 3 then Shift+Click May 9
-                    fills the entire range (May 3 → May 9) in the active
-                    calendar mode (daily/combined/directive/ccu), with the
-                    same per-day duplicate and mutex guards as a single tap.
-                    Anchor for the next shift-click is the most recent
-                    single tap in the same mode; switching modes resets the
-                    anchor.
-                  • Range fill toast shows "added N days, skipped M (X dup,
-                    Y mutex)" so the user knows what was actually applied.
-                  • Anchor (st._lastTap) also resets on clearForm and on a
-                    fresh PHN lookup so ranges never bleed across patients.
-                  • Shift-click range is desktop-only by nature (no shift
-                    key on touchscreen); the existing range-form fillRange
-                    function and the per-day tap behaviour are unchanged.
+
+v1.8  2026-05-12  Three claim-data cleanups:
+                  • 'MOST add-on' note removed from 03701 modifier claims —
+                    the fee code itself already communicates the modifier.
+                  • 'CCU day N' note removed from 1411/1421/1431 claims —
+                    the fee code already encodes the band (1411 = day 1,
+                    1421 = days 2–7, 1431 = day 8+). User-typed notes still
+                    pass through.
+                  • ICD9 validation: free text like "Angina" / "NSTEMI" /
+                    "ACS" is now rejected at export time. exportSheets()
+                    blocks with a clear message and focuses the c-dx field.
+                    Preview summary also shows "X need valid ICD9" live.
+                  Backend partner: Apps Script v2.6 (dob/sex enrichment
+                  from Patients tab + CCU_DAILY consolidation in the
+                  combined export).
+
+v1.9  2026-05-12  Inline claim editing in the preview list.
+                  Each claim row has a ✎ button that expands an edit strip:
+                  • Delete claim (×)
+                  • Change performing MD (alias dropdown, same options as form)
+                  • Change service date (date picker, converted to DD/MM/YYYY)
+                  _aliasOverrides + _dateOverrides extend the _feeOverrides
+                  pattern. All overrides applied at buildClaims() time and
+                  cleared on form reset or claim delete.
 ===================================================================
 -->
 <html lang="en">
@@ -248,15 +166,11 @@ input[type=checkbox]{width:auto;margin-right:6px;accent-color:var(--blue)}
 .cal-day.empty{pointer-events:none}
 .cal-day.other-m{color:var(--text3);background:none!important}
 .cal-day.today-dot::after{content:'';position:absolute;bottom:3px;left:50%;transform:translateX(-50%);width:4px;height:4px;border-radius:50%;background:var(--blue)}
-/* v1.8 — calendar palette matches mobile app (index.html cv-day classes) exactly */
-.cal-day.d-daily    {background:#3fa658;color:#062814}
-.cal-day.d-combined {background:#b8e6c4;color:#0a4520}
-.cal-day.d-directive{background:#8eb5fa;color:#002461}
-.cal-day.d-ccu      {background:#f08585;color:#5e1414}
-.cal-day.d-consult  {background:#ffcf73;color:#5a2700;font-weight:800;pointer-events:none}
-.cal-day.d-gap      {background:#d4d4d8;color:#4a4a52;border:1px dashed #8a8a92}
-.cal-day.d-hist     {opacity:.65}
-.cal-day.d-hist::before{content:'old';position:absolute;top:1px;right:3px;font-size:7px;font-weight:700;opacity:.75;letter-spacing:.3px;text-transform:uppercase}
+.cal-day.d-daily{background:var(--green-bg);color:var(--green-t)}
+.cal-day.d-combined{background:var(--teal-bg);color:var(--teal-t)}
+.cal-day.d-directive{background:var(--blue-bg);color:var(--blue-t)}
+.cal-day.d-ccu{background:var(--purple-bg);color:var(--purple-t)}
+.cal-day.d-consult{background:var(--amber-bg);color:var(--amber-t);font-weight:800;pointer-events:none}
 .cal-day-lbl{font-size:8px;font-weight:700;line-height:1;margin-top:1px}
 /* mode chips */
 .mode-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
@@ -264,30 +178,33 @@ input[type=checkbox]{width:auto;margin-right:6px;accent-color:var(--blue)}
 .mchip.daily{background:var(--green-bg);color:var(--green-t)}
 .mchip.combined{background:var(--teal-bg);color:var(--teal-t)}
 .mchip.directive{background:var(--blue-bg);color:var(--blue-t)}
-.mchip.ccu{background:#f08585;color:#5e1414}
+.mchip.ccu{background:var(--purple-bg);color:var(--purple-t)}
 .mchip.active{border-color:currentColor}
 .range-row{display:flex;gap:6px;align-items:flex-end;margin-bottom:10px}
 .range-row input{flex:1}
 /* claims preview */
 .claim-row{display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:.5px solid var(--border)}
 .claim-row:last-child{border-bottom:none}
+.claim-row.editing{background:var(--blue-bg);border-radius:8px;padding:8px;margin:-1px 0;border-bottom:.5px solid var(--blue)}
+.edit-strip{display:none;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px;padding-top:6px;border-top:.5px solid rgba(0,100,200,.15)}
+.claim-row.editing .edit-strip{display:flex}
+.edit-strip label{font-size:10px;font-weight:700;color:var(--blue-t);letter-spacing:.3px;text-transform:uppercase;white-space:nowrap}
+.edit-strip select,.edit-strip input[type=date]{padding:6px 8px;font-size:12px;border:.5px solid var(--border2);border-radius:6px;font-family:inherit;background:var(--surface);color:var(--text)}
+.edit-strip .strip-del{background:var(--red);color:#fff;border:none;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit}
+.edit-strip .strip-done{background:var(--blue);color:#fff;border:none;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit}
 .ctype{font-size:9px;font-weight:800;padding:3px 7px;border-radius:20px;white-space:nowrap;flex-shrink:0;margin-top:1px;text-transform:uppercase}
 .ct-consult,.ct-limited{background:var(--amber-bg);color:var(--amber-t)}
 .ct-most{background:var(--red-bg);color:var(--red-t)}
 .ct-daily{background:var(--green-bg);color:var(--green-t)}
 .ct-combined{background:var(--teal-bg);color:var(--teal-t)}
 .ct-directive{background:var(--blue-bg);color:var(--blue-t)}
-.ct-ccu{background:#f08585;color:#5e1414}
-/* v1.10 — historical claims section in preview pane */
-.preview-subhdr{font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;padding:8px 4px 4px;border-bottom:.5px solid var(--border);margin-bottom:4px}
-.preview-subhdr:not(:first-child){margin-top:12px}
-.claim-row.claim-row-hist{opacity:.78;background:var(--surface2);padding:8px;margin:0 -8px 4px;border-radius:var(--rsm);border-bottom:none}
-.hist-tag{font-size:9px;font-weight:800;color:var(--text3);letter-spacing:.5px;flex-shrink:0;padding:3px 7px;border:.5px solid var(--border2);border-radius:6px;align-self:flex-start;margin-top:1px;background:var(--surface)}
+.ct-ccu{background:var(--purple-bg);color:var(--purple-t)}
 .claim-info{flex:1;min-width:0}
 .claim-date-str{font-size:12px;font-weight:600}
 .claim-detail-str{font-size:11px;color:var(--text2);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .fee-inp{width:72px;flex-shrink:0;padding:6px 8px;font-size:13px;border:.5px solid var(--border2);border-radius:6px;font-family:inherit;color:var(--text)}
-.del-btn{background:none;border:none;cursor:pointer;color:var(--text3);font-size:18px;padding:2px 4px;line-height:1;flex-shrink:0}
+.edit-btn{background:none;border:none;cursor:pointer;color:var(--text3);font-size:15px;padding:2px 5px;line-height:1;flex-shrink:0;border-radius:4px}
+.edit-btn:hover,.edit-btn.active{color:var(--blue);background:var(--blue-bg)}
 .summary-bar{background:var(--surface2);border-radius:var(--rsm);padding:8px 12px;margin-bottom:10px;font-size:12px;color:var(--text2);display:flex;justify-content:space-between;align-items:center}
 /* consult type pills */
 .ctype-pick{display:flex;gap:6px;margin-bottom:6px}
@@ -366,7 +283,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:8px">
     <div class="hdr-title">KGH Historical Billing</div>
-    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.12</div>
+    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.9</div>
   </div>
   <div class="hdr-sub" id="hdr-sub">Single card mode</div>
 </div>
@@ -629,7 +546,6 @@ var st = {
   calMonth: new Date(),
   dailyDates: [], combinedDates: [], directiveDates: [], ccuDates: [],
   claims: [],
-  historicalClaims: [],   // v1.8 — populated by lookupPatient response
 };
 var batch = {
   items: [], current: 0,
@@ -637,7 +553,9 @@ var batch = {
   confirmed: [],       // accumulated claims from all confirmed cards
 };
 // Referrer lookup uses existing searchPhysicians endpoint (server-side)
-var _feeOverrides = {};
+var _feeOverrides   = {};
+var _aliasOverrides = {};   // v1.9: per-claim alias overrides
+var _dateOverrides  = {};   // v1.9: per-claim date overrides (DD/MM/YYYY)
 var _cropPending = null, _cropState = null;
 
 // ─── Apps Script snippet ──────────────────────────────────────────────────────
@@ -868,6 +786,13 @@ function clearIcd() {
   if (conf) conf.style.display = 'none';
   closeIcdDd();
   refreshPreview();
+}
+
+// v1.8: Accept only proper ICD9 codes — digits with optional decimal, or V-codes.
+// Rejects free-text like "Angina", "NSTEMI", "ACS" that won't be accepted by iClinic.
+function isValidIcd9(code) {
+  if (!code) return false;
+  return /^V?\d+(\.\d+)?$/i.test(String(code).trim());
 }
 
 function closeIcdDd() {
@@ -1190,114 +1115,20 @@ function fillRange() {
   renderCal(); refreshPreview();
 }
 
-function toggleDay(iso, evt) {
-  // v1.12 — shift+click extends a range from the last single-tap anchor
-  // (only if the anchor is in the same calendar mode, to avoid weird cross-mode ranges)
-  if (evt && evt.shiftKey
-      && st._lastTap
-      && st._lastTap.mode === st.calMode
-      && st._lastTap.iso
-      && st._lastTap.iso !== iso) {
-    fillDateRangeWithGuards(st._lastTap.iso, iso);
-    st._lastTap = { iso: iso, mode: st.calMode };  // update anchor to most-recent endpoint
-    return;
-  }
-
-  // v1.8 — guard against duplicates against historical claims and mutex violations
-  var alias = getAlias();
-  var hist = historicalClaimsOn(iso);
-  var arr  = st[st.calMode+'Dates'];
-  var already = arr.indexOf(iso) >= 0;
-
-  if (!already) {
-    // Mutex: in CCU mode, refuse a date that already has a consult claim
-    if (st.calMode === 'ccu' && hist.some(isConsultClaim)) {
-      showToast("Can't add CCU on a date that already has a consult claim — 33010/33012 and 1411 are mutually exclusive.");
-      return;
-    }
-    // Duplicate: same alias + same proposed fee + same date already in historical
-    var proposedFee = feeForCalMode(iso, st.calMode);
-    var dup = hist.some(function(c){
-      return String(c.fee||'') === proposedFee && String(c.alias||'') === alias;
-    });
-    if (dup) {
-      showToast('Already billed: ' + proposedFee + ' on ' + iso + ' by ' + alias + '. Same doctor, same fee, same date is a duplicate.');
-      return;
-    }
-  }
-
-  if (already) arr.splice(arr.indexOf(iso), 1);
-  else         arr.push(iso);
-
-  // v1.12 — remember the anchor for the next shift+click
-  st._lastTap = { iso: iso, mode: st.calMode };
-
+function toggleDay(iso) {
+  var arr = st[st.calMode+'Dates'];
+  var i = arr.indexOf(iso);
+  if (i >= 0) arr.splice(i,1); else arr.push(iso);
   renderCal(); refreshPreview();
-}
-
-// v1.12 — bulk-add a date range in the current calMode with the same per-day
-// duplicate and mutex guards as toggleDay. Always additive (never removes).
-function fillDateRangeWithGuards(fromIso, toIso) {
-  if (fromIso > toIso) { var tmp = fromIso; fromIso = toIso; toIso = tmp; }
-  var arr   = st[st.calMode + 'Dates'];
-  var alias = getAlias();
-  var added = 0, dupBlocked = 0, mutexBlocked = 0;
-  var cur = new Date(fromIso + 'T12:00:00');
-  var end = new Date(toIso   + 'T12:00:00');
-  while (cur <= end) {
-    var iso = cur.getFullYear() + '-'
-            + (cur.getMonth()+1).toString().padStart(2,'0') + '-'
-            + cur.getDate().toString().padStart(2,'0');
-    if (arr.indexOf(iso) < 0) {
-      var hist = historicalClaimsOn(iso);
-      var proposedFee = feeForCalMode(iso, st.calMode);
-      if (st.calMode === 'ccu' && hist.some(isConsultClaim)) {
-        mutexBlocked++;
-      } else {
-        var dup = hist.some(function(c){
-          return String(c.fee||'') === proposedFee && String(c.alias||'') === alias;
-        });
-        if (dup) dupBlocked++;
-        else     { arr.push(iso); added++; }
-      }
-    }
-    cur.setDate(cur.getDate() + 1);
-  }
-  renderCal(); refreshPreview();
-  var msg = 'Range fill: added ' + added + ' day' + (added===1?'':'s');
-  if (dupBlocked || mutexBlocked) {
-    var reasons = [];
-    if (dupBlocked)   reasons.push(dupBlocked   + ' duplicate');
-    if (mutexBlocked) reasons.push(mutexBlocked + ' mutex');
-    msg += ', skipped ' + (dupBlocked + mutexBlocked) + ' (' + reasons.join(', ') + ')';
-  }
-  showToast(msg);
 }
 
 function dayClass(iso) {
-  // Current selections win — they represent what the user is actively building
   if (st.dailyDates.indexOf(iso) >= 0)     return 'd-daily';
   if (st.combinedDates.indexOf(iso) >= 0)  return 'd-combined';
   if (st.directiveDates.indexOf(iso) >= 0) return 'd-directive';
   if (st.ccuDates.indexOf(iso) >= 0)       return 'd-ccu';
   var cd = consultDateISO();
   if (cd && iso === cd) return 'd-consult';
-
-  // v1.8 — historical claims render in their proper colour at reduced opacity
-  var hist = historicalClaimsOn(iso);
-  if (hist.length) {
-    if (hist.some(isCcuClaim))       return 'd-ccu d-hist';
-    if (hist.some(isConsultClaim))   return 'd-consult d-hist';
-    if (hist.some(isDailyClaim))     return 'd-daily d-hist';
-    if (hist.some(isCombinedClaim))  return 'd-combined d-hist';
-    if (hist.some(isDirectiveClaim)) return 'd-directive d-hist';
-    // Fallback — historical claim of an unrecognised type still gets shown
-    return 'd-consult d-hist';
-  }
-
-  // v1.8 — grey-dashed gap cells inside an active CCU or daily run
-  if (inCcuGapRange(iso))   return 'd-gap';
-  if (inDailyGapRange(iso)) return 'd-gap';
   return '';
 }
 
@@ -1307,8 +1138,7 @@ function renderCal() {
   var y=st.calMonth.getFullYear(), m=st.calMonth.getMonth();
   document.getElementById('cal-month-lbl').textContent = monthLabel(st.calMonth);
   var first=new Date(y,m,1).getDay(), days=new Date(y,m+1,0).getDate(), today=todayISO();
-  // v1.8 — CCU day numbers consider historical CCU dates as priors
-  var allCcuSorted = unionCcuDatesISO().sort();
+  var ccuSorted = st.ccuDates.slice().sort();
   for (var i=0;i<first;i++) { var e=document.createElement('div'); e.className='cal-day empty'; grid.appendChild(e); }
   for (var d=1;d<=days;d++) {
     var iso=y+'-'+(m+1).toString().padStart(2,'0')+'-'+d.toString().padStart(2,'0');
@@ -1317,200 +1147,21 @@ function renderCal() {
     el.className='cal-day '+dc;
     if (iso===today) el.classList.add('today-dot');
     var ns=document.createElement('span'); ns.textContent=d; el.appendChild(ns);
-    // Label: include CCU day number for both new and historical CCU cells
-    if (dc.indexOf('d-ccu')>=0) {
-      var dn=allCcuSorted.indexOf(iso)+1;
-      var l=document.createElement('span');l.className='cal-day-lbl';
-      l.textContent = dn>0 ? 'day '+dn : 'ccu';
-      el.appendChild(l);
-    }
-    else if (dc.indexOf('d-daily')>=0)    { var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='daily';el.appendChild(l); }
-    else if (dc.indexOf('d-combined')>=0) { var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='comb';el.appendChild(l); }
-    else if (dc.indexOf('d-directive')>=0){ var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='dir';el.appendChild(l); }
-    else if (dc.indexOf('d-consult')>=0)  { var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='cnslt';el.appendChild(l); }
-    (function(isoDate){ el.addEventListener('click', function(e){ toggleDay(isoDate, e); }); })(iso);
+    if (dc==='d-ccu') { var dn=ccuSorted.indexOf(iso)+1; var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='day '+dn;el.appendChild(l); }
+    else if (dc==='d-daily')    { var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='daily';el.appendChild(l); }
+    else if (dc==='d-combined') { var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='comb';el.appendChild(l); }
+    else if (dc==='d-directive'){ var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='dir';el.appendChild(l); }
+    else if (dc==='d-consult')  { var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='cnslt';el.appendChild(l); }
+    (function(isoDate){ el.addEventListener('click', function(){ toggleDay(isoDate); }); })(iso);
     grid.appendChild(el);
   }
 }
 
 function onConsultDateChange() {
   var iso = document.getElementById('c-date').value;
-  if (iso) {
-    // v1.8 — mutex: can't bill a consult on a date that already has a CCU claim
-    var hist = historicalClaimsOn(iso);
-    if (hist.some(isCcuClaim)) {
-      showToast("Can't set a consult date on a day that already has a CCU claim — 33010/33012 and 1411 are mutually exclusive.");
-      document.getElementById('c-date').value = '';
-      return;
-    }
-    var d=new Date(iso+'T12:00:00');
-    st.calMonth=new Date(d.getFullYear(),d.getMonth(),1);
-    renderCal();
-  }
+  if (iso) { var d=new Date(iso+'T12:00:00'); st.calMonth=new Date(d.getFullYear(),d.getMonth(),1); renderCal(); }
   updateModifierBanner();
   refreshPreview();
-}
-
-// ─── v1.8 helpers — historical claim handling ─────────────────────────────────
-
-function dmyToIso(dmy) {
-  if (!dmy) return '';
-  var m = String(dmy).match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (!m) return '';
-  return m[3] + '-' + m[2] + '-' + m[1];
-}
-
-function isConsultClaim(c) {
-  if (!c) return false;
-  if (c.claimType === 'Consult') return true;
-  return ['33010','33012','33005','33014','Y33025','00751'].indexOf(String(c.fee||'')) !== -1;
-}
-function isCcuClaim(c) {
-  if (!c) return false;
-  if (c.claimType === 'CCU') return true;
-  return ['1411','1421','1431','1441','CCU_DAILY'].indexOf(String(c.fee||'')) !== -1;
-}
-function isDailyClaim(c) {
-  if (!c) return false;
-  if (c.claimType === 'Daily') return true;
-  return String(c.fee||'') === '33008' && !(c.notes && String(c.notes).trim());
-}
-function isCombinedClaim(c) {
-  if (!c) return false;
-  if (c.claimType === 'Combined') return true;
-  return String(c.fee||'') === '33008' && !!(c.notes && String(c.notes).trim());
-}
-function isDirectiveClaim(c) {
-  if (!c) return false;
-  if (c.claimType === 'Directive') return true;
-  return String(c.fee||'') === '33006';
-}
-
-function historicalClaimsOn(iso) {
-  return (st.historicalClaims || []).filter(function(c) {
-    return dmyToIso(c.date) === iso;
-  });
-}
-
-function unionCcuDatesISO() {
-  var all = st.ccuDates.slice();
-  (st.historicalClaims || []).forEach(function(c) {
-    if (isCcuClaim(c)) {
-      var i = dmyToIso(c.date);
-      if (i && all.indexOf(i) < 0) all.push(i);
-    }
-  });
-  return all;
-}
-
-function unionDailyDatesISO() {
-  // 33008 = daily OR combined — same fee, share the gap range
-  var all = st.dailyDates.concat(st.combinedDates);
-  (st.historicalClaims || []).forEach(function(c) {
-    if (isDailyClaim(c) || isCombinedClaim(c)) {
-      var i = dmyToIso(c.date);
-      if (i && all.indexOf(i) < 0) all.push(i);
-    }
-  });
-  return all;
-}
-
-function inCcuGapRange(iso) {
-  var all = unionCcuDatesISO();
-  if (all.length < 2) return false;
-  all.sort();
-  return iso > all[0] && iso < all[all.length-1] && all.indexOf(iso) < 0;
-}
-
-function inDailyGapRange(iso) {
-  var all = unionDailyDatesISO();
-  if (all.length < 2) return false;
-  all.sort();
-  return iso > all[0] && iso < all[all.length-1] && all.indexOf(iso) < 0;
-}
-
-function feeForCalMode(iso, mode) {
-  if (mode === 'daily' || mode === 'combined') return '33008';
-  if (mode === 'directive') return '33006';
-  if (mode === 'ccu') {
-    var all = unionCcuDatesISO();
-    if (all.indexOf(iso) < 0) all.push(iso);
-    all.sort();
-    var dn = all.indexOf(iso) + 1;
-    if (dn === 1) return '1411';
-    if (dn <= 7) return '1421';
-    return '1431';
-  }
-  return '';
-}
-
-function showToast(msg) {
-  var t = document.getElementById('upload-toast');
-  if (!t) {
-    t = document.createElement('div');
-    t.id = 'upload-toast';
-    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1c1c1e;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;z-index:300;box-shadow:0 4px 12px rgba(0,0,0,.3);max-width:90%;text-align:center;opacity:0;pointer-events:none;transition:opacity .2s';
-    document.body.appendChild(t);
-  }
-  t.textContent = msg;
-  t.style.opacity = '1';
-  clearTimeout(t._timer);
-  t._timer = setTimeout(function(){ t.style.opacity = '0'; }, 3500);
-}
-
-// v1.11 — pick the most-recent historical claim's alias from a lookup response.
-// Prefers data.recentClaims (already date-sorted by Apps Script) and falls
-// back to a date-sorted scan of data.claims.
-function pickRecentAlias(data) {
-  if (!data) return '';
-  var pools = [];
-  if (data.recentClaims && data.recentClaims.length) pools.push(data.recentClaims);
-  if (data.claims && data.claims.length) {
-    var sorted = data.claims.slice().sort(function(a, b){
-      return (dmyToIso(b.date) || '').localeCompare(dmyToIso(a.date) || '');
-    });
-    pools.push(sorted);
-  }
-  for (var p = 0; p < pools.length; p++) {
-    for (var i = 0; i < pools[p].length; i++) {
-      var a = pools[p][i] && pools[p][i].alias;
-      if (a) return String(a).trim();
-    }
-  }
-  return '';
-}
-
-// v1.11 — set the f-alias dropdown from a historical claim's alias.
-// Case-insensitive match against the dropdown options; if no match,
-// drop to "other" and fill the custom alias input. Returns
-// { changed: bool, label: string } so the banner can mention it.
-function setAliasFromHistory(alias) {
-  if (!alias) return { changed: false, label: '' };
-  var sel = document.getElementById('f-alias');
-  if (!sel) return { changed: false, label: '' };
-  var target = String(alias).trim();
-  var matched = '';
-  for (var i = 0; i < sel.options.length; i++) {
-    if (String(sel.options[i].value).toUpperCase() === target.toUpperCase()) {
-      matched = sel.options[i].value;
-      break;
-    }
-  }
-  if (matched) {
-    if (sel.value === matched) return { changed: false, label: matched };
-    sel.value = matched;
-    if (typeof onAliasChange === 'function') onAliasChange();
-    return { changed: true, label: matched };
-  }
-  // Not in dropdown — use "other" with custom field, unless it's already set there
-  var custom = document.getElementById('f-alias-custom');
-  if (sel.value === 'other' && custom && String(custom.value || '').trim().toUpperCase() === target.toUpperCase()) {
-    return { changed: false, label: target };
-  }
-  sel.value = 'other';
-  if (custom) custom.value = target;
-  if (typeof onAliasChange === 'function') onAliasChange();
-  return { changed: true, label: target };
 }
 
 
@@ -1751,7 +1402,8 @@ function buildClaims() {
     var fullNote = [ccfppNote, extraNotes].filter(function(s){return s;}).join(' | ');
     claims.push(Object.assign({},base,{ id:uid(), claimType:st.consultType, date:cDate, fee:fee, icd:dx, refby:refNum, refbyName:refName, startTime:start, endTime:end, notes:fullNote, _sortDate:cDate, _sortSub:0 }));
     if (document.getElementById('c-most').checked)
-      claims.push(Object.assign({},base,{ id:uid(), claimType:'most', date:cDate, fee:'03701', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:'MOST add-on', _sortDate:cDate, _sortSub:1 }));
+      // v1.8: 'MOST add-on' note removed — was redundant with the 03701 fee code itself
+      claims.push(Object.assign({},base,{ id:uid(), claimType:'most', date:cDate, fee:'03701', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:'', _sortDate:cDate, _sortSub:1 }));
     // Modifier claims (night / weekend+stat / evening)
     var modBase  = getModifier(start, cDate);
     var incUnits = consultIncUnits(start, end);
@@ -1780,13 +1432,10 @@ function buildClaims() {
     claims.push(Object.assign({},base,{ id:uid(), claimType:'directive', date:iso, fee:'33006', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:extraNotes, _sortDate:iso, _sortSub:5 }));
   });
 
-  // v1.8 — CCU day numbering counts historical CCU dates as priors
-  var allCcuForNumbering = unionCcuDatesISO().sort();
-  st.ccuDates.slice().sort().forEach(function(iso){
-    var dn = allCcuForNumbering.indexOf(iso) + 1;
-    if (dn < 1) dn = 1;
-    var fee=dn===1?'1411':dn<=7?'1421':'1431';
-    var ccuNote='CCU day '+dn+(extraNotes?' | '+extraNotes:'');
+  st.ccuDates.slice().sort().forEach(function(iso, i){
+    var dn=i+1, fee=dn===1?'1411':dn<=7?'1421':'1431';
+    // v1.8: 'CCU day N' note removed — the fee code (1411/1421/1431) already encodes the band
+    var ccuNote = extraNotes || '';
     claims.push(Object.assign({},base,{ id:uid(), claimType:'ccu', date:iso, fee:fee, icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:ccuNote, _sortDate:iso, _sortSub:6 }));
   });
 
@@ -1798,139 +1447,126 @@ function buildClaims() {
 // ─── Preview ─────────────────────────────────────────────────────────────────
 function refreshPreview() {
   var claims = buildClaims();
-  var list    = document.getElementById('preview-list');
-  var empty   = document.getElementById('preview-empty');
+  var list = document.getElementById('preview-list');
+  var empty = document.getElementById('preview-empty');
   var summary = document.getElementById('preview-summary');
-
-  // capture fee overrides before rebuild
-  list.querySelectorAll('.fee-inp').forEach(function(inp){
-    if (inp.dataset.id && inp.value) _feeOverrides[inp.dataset.id] = inp.value;
+  // capture any overrides currently in the DOM before rebuilding
+  list.querySelectorAll('.fee-inp').forEach(function(inp){ if (inp.dataset.id && inp.value) _feeOverrides[inp.dataset.id]=inp.value; });
+  // apply all overrides
+  claims.forEach(function(c){
+    if (_feeOverrides[c.id])   c.fee   = _feeOverrides[c.id];
+    if (_aliasOverrides[c.id]) c.alias = _aliasOverrides[c.id];
+    if (_dateOverrides[c.id])  c.date  = _dateOverrides[c.id];
   });
-  claims.forEach(function(c){ if (_feeOverrides[c.id]) c.fee = _feeOverrides[c.id]; });
   list.innerHTML = '';
+  if (!claims.length) { empty.style.display=''; summary.style.display='none'; return; }
+  empty.style.display='none'; summary.style.display='flex';
+  var missingFee = claims.filter(function(c){ return !c.fee; }).length;
+  var badIcd     = claims.filter(function(c){ return !isValidIcd9(c.icd); }).length;
+  var issues = [];
+  if (missingFee) issues.push(missingFee + ' need fee code');
+  if (badIcd)     issues.push(badIcd + ' need valid ICD9 (pick from dropdown)');
+  summary.textContent = claims.length + ' claim' + (claims.length===1?'':'s') + ' · ' + (issues.length ? issues.join(' · ') : 'ready to export ✓');
 
-  var historical = (st.historicalClaims || []).slice();
-
-  // Empty state: no historical AND no new
-  if (!claims.length && !historical.length) {
-    empty.style.display = '';
-    summary.style.display = 'none';
-    return;
-  }
-  empty.style.display = 'none';
+  var ALIASES = ['JW','KBrown','FH','LH','SB','ASodhi','EMMassie','KHoskin','DPatton','AKhosla','KT','KP'];
+  var ALIAS_LABELS = {JW:'JW — Jordan Webber',KBrown:'KBrown — Kathryn Brown',FH:'FH — Frank Halperin',
+    LH:'LH — Laura Halperin',SB:'SB — Sandy Baker',ASodhi:'ASodhi — Amit Sodhi',
+    EMMassie:'EMMassie — Emma Massie',KHoskin:'KHoskin — Kurt Hoskin',
+    DPatton:'DPatton — Daniel Patton',AKhosla:'AKhosla — Amit Khosla',
+    KT:'KT — Keith Todd',KP:'KP — Kevin Pistawka'};
 
   var frag = document.createDocumentFragment();
+  claims.forEach(function(c){
+    var outer = document.createElement('div'); outer.className='claim-row'; outer.dataset.cid=c.id;
 
-  // ── Existing claims from Sheets ──────────────────────────────────────────
-  if (historical.length) {
-    var hdr = document.createElement('div');
-    hdr.className = 'preview-subhdr';
-    hdr.textContent = 'Existing claims (from Sheets) — ' + historical.length;
-    frag.appendChild(hdr);
+    // ── main claim line ──
+    var main = document.createElement('div'); main.style.cssText='display:flex;align-items:flex-start;gap:8px;flex:1;min-width:0';
 
-    // Most recent first
-    historical.sort(function(a, b){
-      return (dmyToIso(b.date) || '').localeCompare(dmyToIso(a.date) || '');
-    });
+    var chip=document.createElement('span'); chip.className='ctype ct-'+c.claimType; chip.textContent=c.claimType.toUpperCase();
+    var info=document.createElement('div'); info.className='claim-info';
+    var ds=document.createElement('div'); ds.className='claim-date-str';
+    ds.textContent = isoToDisp(c.date) + (c.alias ? ' · ' + c.alias : '');
+    info.appendChild(ds);
+    var det=[];
+    if (c.startTime&&c.endTime) det.push(c.startTime+'–'+c.endTime);
+    if (c.icd) det.push(c.icd); if (c.refbyName||c.refby) det.push(c.refbyName||c.refby); if (c.notes) det.push(c.notes);
+    if (det.length) { var dv=document.createElement('div'); dv.className='claim-detail-str'; dv.textContent=det.join(' · '); info.appendChild(dv); }
 
-    historical.forEach(function(c){
-      var row = document.createElement('div');
-      row.className = 'claim-row claim-row-hist';
+    var fi=document.createElement('input'); fi.type='text'; fi.className='fee-inp'; fi.value=c.fee; fi.placeholder='fee'; fi.dataset.id=c.id;
+    fi.addEventListener('input',function(){ _feeOverrides[this.dataset.id]=this.value; c.fee=this.value; updateSummaryBar(); });
 
-      var typeKey = String(c.claimType || '').toLowerCase() || 'consult';
-      var chip = document.createElement('span');
-      chip.className = 'ctype ct-' + typeKey;
-      chip.textContent = (c.claimType || '—').toUpperCase();
-      row.appendChild(chip);
-
-      var info = document.createElement('div');
-      info.className = 'claim-info';
-
-      // Primary line: fee · date · performing MD — matches what user asked for
-      var primary = [];
-      if (c.fee)   primary.push(c.fee);
-      if (c.date)  primary.push(c.date);
-      if (c.alias) primary.push(c.alias);
-      var ds = document.createElement('div');
-      ds.className = 'claim-date-str';
-      ds.textContent = primary.join(' · ');
-      info.appendChild(ds);
-
-      // Detail line: ICD, referring MD, times, notes
-      var det = [];
-      if (c.icd)                    det.push('ICD ' + c.icd);
-      if (c.refbyName)              det.push('ref ' + c.refbyName);
-      else if (c.refby)             det.push('ref #' + c.refby);
-      if (c.startTime && c.endTime) det.push(c.startTime + '–' + c.endTime);
-      if (c.notes)                  det.push(c.notes);
-      if (det.length) {
-        var dv = document.createElement('div');
-        dv.className = 'claim-detail-str';
-        dv.textContent = det.join(' · ');
-        info.appendChild(dv);
-      }
-      row.appendChild(info);
-
-      // EXISTING tag in place of fee input + delete button (can't edit from here)
-      var tag = document.createElement('span');
-      tag.className = 'hist-tag';
-      tag.textContent = 'EXISTING';
-      row.appendChild(tag);
-
-      frag.appendChild(row);
-    });
-  }
-
-  // ── New claims being built ───────────────────────────────────────────────
-  if (claims.length) {
-    if (historical.length) {
-      var hdr2 = document.createElement('div');
-      hdr2.className = 'preview-subhdr';
-      hdr2.textContent = 'New claims (to submit) — ' + claims.length;
-      frag.appendChild(hdr2);
-    }
-
-    summary.style.display = 'flex';
-    var missing = claims.filter(function(c){ return !c.fee; }).length;
-    summary.textContent = claims.length + ' new claim' + (claims.length===1?'':'s')
-                       + ' · ' + (missing ? missing + ' need fee code' : 'all fee codes set ✓');
-
-    claims.forEach(function(c){
-      var row = document.createElement('div'); row.className = 'claim-row';
-      var chip = document.createElement('span'); chip.className = 'ctype ct-' + c.claimType;
-      chip.textContent = c.claimType.toUpperCase(); row.appendChild(chip);
-      var info = document.createElement('div'); info.className = 'claim-info';
-      var ds = document.createElement('div'); ds.className = 'claim-date-str';
-      ds.textContent = isoToDisp(c.date); info.appendChild(ds);
-      var det = [];
-      if (c.startTime && c.endTime) det.push(c.startTime + '–' + c.endTime);
-      if (c.icd)                    det.push(c.icd);
-      if (c.refbyName || c.refby)   det.push(c.refbyName || c.refby);
-      if (c.notes)                  det.push(c.notes);
-      if (det.length) {
-        var dv = document.createElement('div'); dv.className = 'claim-detail-str';
-        dv.textContent = det.join(' · '); info.appendChild(dv);
-      }
-      row.appendChild(info);
-      var fi = document.createElement('input');
-      fi.type = 'text'; fi.className = 'fee-inp'; fi.value = c.fee;
-      fi.placeholder = 'fee'; fi.dataset.id = c.id;
-      fi.addEventListener('input', function(){
-        _feeOverrides[this.dataset.id] = this.value;
-        c.fee = this.value;
-        updateSummaryBar();
+    // edit toggle button
+    var eb=document.createElement('button'); eb.className='edit-btn'; eb.title='Edit'; eb.textContent='✎';
+    (function(claim, outerEl, ebtn){
+      ebtn.addEventListener('click',function(){
+        var isOpen = outerEl.classList.toggle('editing');
+        ebtn.classList.toggle('active', isOpen);
       });
-      row.appendChild(fi);
-      var db = document.createElement('button');
-      db.className = 'del-btn'; db.textContent = '×';
-      (function(claim){ db.addEventListener('click', function(){ deleteClaim(claim); }); })(c);
-      row.appendChild(db);
-      frag.appendChild(row);
-    });
-  } else {
-    summary.style.display = 'none';
-  }
+    })(c, outer, eb);
 
+    main.appendChild(chip); main.appendChild(info); main.appendChild(fi); main.appendChild(eb);
+    outer.appendChild(main);
+
+    // ── edit strip (hidden until ✎ tapped) ──
+    var strip = document.createElement('div'); strip.className='edit-strip';
+
+    // Alias selector
+    var alabel = document.createElement('label'); alabel.textContent='MD';
+    var asel = document.createElement('select');
+    ALIASES.forEach(function(a){
+      var opt=document.createElement('option'); opt.value=a; opt.textContent=ALIAS_LABELS[a]||a;
+      if (a===c.alias) opt.selected=true;
+      asel.appendChild(opt);
+    });
+    // Add "other" option if current alias isn't in the standard list
+    if (ALIASES.indexOf(c.alias)<0 && c.alias) {
+      var othOpt=document.createElement('option'); othOpt.value=c.alias; othOpt.textContent=c.alias; othOpt.selected=true;
+      asel.insertBefore(othOpt, asel.firstChild);
+    }
+    (function(claim, infoEl){
+      asel.addEventListener('change',function(){
+        _aliasOverrides[claim.id] = this.value;
+        claim.alias = this.value;
+        // update the date-alias display line live
+        infoEl.querySelector('.claim-date-str').textContent = isoToDisp(claim.date) + ' · ' + this.value;
+      });
+    })(c, info);
+
+    // Date input
+    var dlabel = document.createElement('label'); dlabel.textContent='Date';
+    var dinp = document.createElement('input'); dinp.type='date';
+    // Convert DD/MM/YYYY → YYYY-MM-DD for the date input
+    if (c.date && /^\d{2}\/\d{2}\/\d{4}$/.test(c.date)) {
+      var dp=c.date.split('/'); dinp.value=dp[2]+'-'+dp[1]+'-'+dp[0];
+    }
+    (function(claim, infoEl){
+      dinp.addEventListener('change',function(){
+        if (!this.value) return;
+        var parts=this.value.split('-');
+        var dmy=parts[2]+'/'+parts[1]+'/'+parts[0];
+        _dateOverrides[claim.id] = dmy;
+        claim.date = dmy;
+        infoEl.querySelector('.claim-date-str').textContent = isoToDisp(dmy) + (claim.alias?' · '+claim.alias:'');
+      });
+    })(c, info);
+
+    // Delete button
+    var delBtn=document.createElement('button'); delBtn.className='strip-del'; delBtn.textContent='Delete claim';
+    (function(claim){ delBtn.addEventListener('click',function(){ deleteClaim(claim); }); })(c);
+
+    // Done button
+    var doneBtn=document.createElement('button'); doneBtn.className='strip-done'; doneBtn.textContent='Done';
+    (function(outerEl, ebtn){ doneBtn.addEventListener('click',function(){
+      outerEl.classList.remove('editing'); ebtn.classList.remove('active');
+    }); })(outer, eb);
+
+    strip.appendChild(alabel); strip.appendChild(asel);
+    strip.appendChild(dlabel); strip.appendChild(dinp);
+    strip.appendChild(delBtn); strip.appendChild(doneBtn);
+    outer.appendChild(strip);
+
+    frag.appendChild(outer);
+  });
   list.appendChild(frag);
 }
 
@@ -1945,6 +1581,10 @@ function deleteClaim(c) {
     var type=k.replace('Dates','');
     if (c.claimType===type) { var i=st[k].indexOf(c.date); if (i>=0) st[k].splice(i,1); }
   });
+  // v1.9: clear all overrides for this claim id
+  delete _feeOverrides[c.id];
+  delete _aliasOverrides[c.id];
+  delete _dateOverrides[c.id];
   refreshPreview(); renderCal();
 }
 
@@ -1959,10 +1599,7 @@ function clearForm() {
   var modEl=document.getElementById('mod-banner'); if(modEl) modEl.innerHTML='';
   clearRef();
   st.dailyDates=[]; st.combinedDates=[]; st.directiveDates=[]; st.ccuDates=[];
-  st.historicalClaims = [];   // v1.8 — drop the previous patient's history
-  st._lastTap = null;         // v1.12 — drop the shift-click anchor
-  var lb = document.getElementById('lookup-banner'); if (lb) { lb.style.display='none'; lb.innerHTML=''; }
-  _feeOverrides={};
+  _feeOverrides={}; _aliasOverrides={}; _dateOverrides={};  // v1.9
   setConsultType('consult');
   var pz=document.getElementById('photo-zone');
   pz.innerHTML='<svg style="width:26px;height:26px;stroke:var(--text3);fill:none;stroke-width:1.5" viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg><span style="font-size:12px;color:var(--text2)">Tap to photo or upload sticker</span>';
@@ -2067,7 +1704,11 @@ function batchConfirm() {
   if (phn && window._singleThumb) saveThumbToStorage(phn, window._singleThumb);
   // Collect current preview claims into confirmed list
   document.querySelectorAll('.fee-inp').forEach(function(inp){ if (inp.dataset.id&&inp.value) _feeOverrides[inp.dataset.id]=inp.value; });
-  st.claims.forEach(function(c){ if (_feeOverrides[c.id]) c.fee=_feeOverrides[c.id]; });
+  st.claims.forEach(function(c){
+    if (_feeOverrides[c.id])   c.fee   = _feeOverrides[c.id];
+    if (_aliasOverrides[c.id]) c.alias = _aliasOverrides[c.id];   // v1.9
+    if (_dateOverrides[c.id])  c.date  = _dateOverrides[c.id];    // v1.9
+  });
   var toSave = st.claims.filter(function(c){ return c.fee&&c.fee.trim(); });
   if (!toSave.length) {
     // allow confirming even without fees — just save all
@@ -2311,12 +1952,6 @@ function lookupPatientFromSheets(phn, last, dob) {
   var lb  = document.getElementById('lookup-banner');
   if (!url || (!phn && !last)) { if(lb) lb.style.display='none'; return; }
 
-  // v1.8 — drop stale historical claims and redraw immediately so the calendar
-  // doesn't show the previous patient's data while the lookup is in flight
-  st.historicalClaims = [];
-  st._lastTap = null;   // v1.12 — drop the shift-click anchor (new patient)
-  renderCal();
-
   lb.style.display='block';
   lb.style.background='var(--surface2)';
   lb.style.color='var(--text3)';
@@ -2335,187 +1970,45 @@ function lookupPatientFromSheets(phn, last, dob) {
 function renderLookupBanner(lb, data) {
   if (!data || data.error) { lb.style.display='none'; return; }
 
-  // v1.8 — stash full claim history for calendar overlay + duplicate guards
-  st.historicalClaims = Array.isArray(data.claims) ? data.claims.slice() : [];
-
-  // v1.8 — pre-fill refby + icd from defaults if those fields are blank
-  if (data.defaults) applyLookupDefaults(data.defaults);
-
-  // v1.9 — three-state status: pull from Sheets, partial (claims-only), or miss
-  var state;             // 'found' | 'orphan-claims' | 'none'
-  if (data.found && data.patient) state = 'found';
-  else if (data.claimCount > 0)   state = 'orphan-claims';
-  else                            state = 'none';
-
-  // Pill styles per state
-  var pillCfg = {
-    'found':         { bg:'#1a7a35', fg:'#fff',          label:'✓ Pulled from Sheets' },
-    'orphan-claims': { bg:'#a55c00', fg:'#fff',          label:'⚠ Has claims but no patient record' },
-    'none':          { bg:'#e5e5ea', fg:'var(--text2)',  label:'• No patient found' }
-  }[state];
-
-  // Banner container styling
-  if (state === 'found') {
-    lb.style.background = 'var(--green-bg)';
-    lb.style.color      = 'var(--green-t)';
-    lb.style.border     = '.5px solid var(--green)';
-  } else if (state === 'orphan-claims') {
-    lb.style.background = 'var(--amber-bg)';
-    lb.style.color      = 'var(--amber-t)';
-    lb.style.border     = '.5px solid var(--amber)';
-  } else {
-    lb.style.background = 'var(--surface2)';
-    lb.style.color      = 'var(--text2)';
-    lb.style.border     = '.5px solid var(--border)';
+  if (!data.found && data.claimCount === 0) {
+    lb.style.background='var(--surface2)';
+    lb.style.color='var(--text2)';
+    lb.style.border='.5px solid var(--border)';
+    lb.innerHTML='<b>New patient</b> — not found in Patients tab, no existing claims.';
+    return;
   }
 
-  var pill = '<span style="display:inline-block;background:' + pillCfg.bg + ';color:' + pillCfg.fg
-           + ';font-size:11px;font-weight:700;padding:3px 9px;border-radius:10px;letter-spacing:.2px;margin-bottom:4px">'
-           + pillCfg.label + '</span>';
-
-  var lines = [pill];
-
-  if (state === 'found') {
+  var lines = [];
+  if (data.found && data.patient) {
     var p = data.patient;
-    var matchStr = data.matchedOn && data.matchedOn.length
-      ? ' <span style="opacity:.7">(matched on ' + data.matchedOn.join(' + ') + ')</span>'
-      : '';
-    lines.push('<b>' + esc(p.last || '?') + ', ' + esc(p.first || '?') + '</b>'
-               + (p.dob  ? ' · DOB ' + esc(p.dob)  : '')
-               + (p.sex  ? ' · '     + esc(p.sex)  : '')
-               + (p.ward ? ' · '     + esc(p.ward) : '')
-               + (p.bed  ? ' '       + esc(p.bed)  : '')
-               + matchStr);
-
-    // v1.9 — auto-fill EVERY demographic blank from the Patients row.
-    // Never overwrite existing values (user may already be correcting OCR).
-    var filled = [];
-    function fillIfBlank(elId, value, label) {
-      if (!value) return;
-      var el = document.getElementById(elId);
-      if (el && !String(el.value || '').trim()) {
-        el.value = value;
-        filled.push(label);
-      }
-    }
-    fillIfBlank('f-last',  p.last,  'last');
-    fillIfBlank('f-first', p.first, 'first');
-    fillIfBlank('f-dob',   p.dob,   'DOB');
-    fillIfBlank('f-sex',   p.sex,   'sex');
-    fillIfBlank('f-ward',  p.ward,  'ward');
-    fillIfBlank('f-room',  p.bed,   'bed');  // patient.bed → form's f-room
-
-    // v1.11 — auto-populate performing physician from most recent claim
-    var recentAlias = pickRecentAlias(data);
-    if (recentAlias) {
-      var aliasResult = setAliasFromHistory(recentAlias);
-      if (aliasResult.changed) filled.push('performing MD (' + aliasResult.label + ')');
-    }
-
-    if (filled.length) {
-      lines.push('<span style="color:var(--text3);font-size:11px">Auto-filled: '
-                 + filled.join(', ') + ' · all fields stay editable</span>');
-    }
-
-    if (data.claimCount > 0) {
-      lines.push('<span style="color:var(--text3);font-size:11px"><b>'
-                 + data.claimCount + ' existing claim'
-                 + (data.claimCount===1?'':'s')
-                 + '</b> on file — shown on calendar in their type colour.</span>');
-    } else {
-      lines.push('<span style="color:var(--text3);font-size:11px">No prior claims on file.</span>');
-    }
+    var matchStr = data.matchedOn && data.matchedOn.length ? ' (matched on ' + data.matchedOn.join(' + ') + ')' : '';
+    lines.push('<b>Found:</b> ' + esc(p.last) + ', ' + esc(p.first) +
+               (p.dob ? ' · DOB ' + esc(p.dob) : '') +
+               (p.ward ? ' · ' + esc(p.ward) : '') + matchStr);
+    // Pre-fill any blanks the OCR missed
+    if (p.dob  && !document.getElementById('f-dob').value)  document.getElementById('f-dob').value  = p.dob;
+    if (p.sex  && !document.getElementById('f-sex').value)  document.getElementById('f-sex').value  = p.sex;
+    if (p.ward && !document.getElementById('f-ward').value) document.getElementById('f-ward').value = p.ward;
   }
-  else if (state === 'orphan-claims') {
-    lines.push('<b>' + data.claimCount + ' claim'
-               + (data.claimCount===1?'':'s')
-               + '</b> on file for this PHN, but no patient record in the Patients tab.');
-    lines.push('<span style="color:var(--text3);font-size:11px">Snap a photo to capture demographics. Existing claims are shown on the calendar.</span>');
 
-    // v1.11 — auto-populate performing physician from most recent claim
-    var recentAliasOrphan = pickRecentAlias(data);
-    if (recentAliasOrphan) {
-      var aliasResultOrphan = setAliasFromHistory(recentAliasOrphan);
-      if (aliasResultOrphan.changed) {
-        lines.push('<span style="color:var(--text3);font-size:11px">Performing MD set to <b>'
-                   + esc(aliasResultOrphan.label) + '</b> from prior claim.</span>');
-      }
-    }
-
+  if (data.claimCount > 0) {
+    lines.push('<b>' + data.claimCount + ' existing claim' + (data.claimCount===1?'':'s') + '</b> on file.');
     if (data.recentClaims && data.recentClaims.length) {
       var recent = data.recentClaims.slice(0, 5).map(function(c){
         return esc(c.date) + ' ' + esc(c.fee) + (c.claimType?' ('+esc(c.claimType)+')':'');
       });
       lines.push('<span style="color:var(--text3);font-size:11px">Most recent: ' + recent.join(' · ') + '</span>');
     }
-  }
-  else {
-    lines.push('No matching record in Patients or claim history.');
-    lines.push('<span style="color:var(--text3);font-size:11px">Snap a photo to fill in demographics, or type them manually.</span>');
+    lb.style.background='var(--amber-bg)';
+    lb.style.color='var(--amber-t)';
+    lb.style.border='.5px solid var(--amber)';
+  } else {
+    lb.style.background='var(--green-bg)';
+    lb.style.color='var(--green-t)';
+    lb.style.border='.5px solid var(--green)';
   }
 
-  lb.style.display = 'block';
   lb.innerHTML = lines.join('<br>');
-
-  // v1.8 — redraw calendar so historical claims and gaps appear
-  renderCal();
-  refreshPreview();
-}
-
-// v1.8 — populate refby + icd from prior-claim defaults if those fields are empty.
-// Uses the same selectRefConfirm / selectIcdRow paths as a manual pick so the
-// confirmed chip shows and buildClaims sees the canonical values.
-function applyLookupDefaults(defaults) {
-  if (!defaults) return;
-
-  // Referring MD — only if user hasn't already typed one or picked one
-  try {
-    var refEl = document.getElementById('c-ref');
-    if (refEl && !refEl.value.trim() && !refEl.dataset.docnum && (defaults.refbyName || defaults.refby)) {
-      var num  = String(defaults.refby || '').trim();
-      var name = String(defaults.refbyName || '').trim() || ('Dr. # ' + num);
-      // Try to enrich with spec/city from the embedded BC directory if we have the number
-      var spec = '', city = '';
-      if (num && typeof BC_PHYSICIANS_LOCAL !== 'undefined') {
-        for (var i = 0; i < BC_PHYSICIANS_LOCAL.length; i++) {
-          if (String(BC_PHYSICIANS_LOCAL[i][2]) === num) {
-            if (!name || /^Dr\. # /.test(name)) name = 'Dr. ' + BC_PHYSICIANS_LOCAL[i][0] + ', ' + BC_PHYSICIANS_LOCAL[i][1];
-            spec = BC_PHYSICIANS_LOCAL[i][3] || '';
-            city = BC_PHYSICIANS_LOCAL[i][4] || '';
-            break;
-          }
-        }
-      }
-      if (typeof selectRefConfirm === 'function') selectRefConfirm(num, name, spec, city);
-    }
-  } catch(e) { /* defensive — never break on pre-fill */ }
-
-  // Diagnosis ICD — only if empty.
-  // Note: there are two selectIcdRow definitions in this file (the 1-arg one
-  // shadows the 2-arg one), so we replicate the confirmed-chip logic inline
-  // instead of calling the function. This is robust regardless of which
-  // definition wins at load time.
-  try {
-    var dxEl = document.getElementById('c-dx');
-    if (dxEl && !dxEl.value.trim() && defaults.icd) {
-      var code = String(defaults.icd).trim();
-      var desc = '';
-      if (typeof ICD9_LOCAL !== 'undefined') {
-        for (var j = 0; j < ICD9_LOCAL.length; j++) {
-          if (ICD9_LOCAL[j][0] === code) { desc = ICD9_LOCAL[j][1]; break; }
-        }
-      }
-      dxEl.value = code;
-      var confEl = document.getElementById('icd-confirmed');
-      var codeEl = document.getElementById('icd-confirmed-code');
-      var descEl = document.getElementById('icd-confirmed-desc');
-      if (confEl && codeEl && descEl) {
-        codeEl.textContent = code;
-        descEl.textContent = desc || '(description not in local list)';
-        confEl.style.display = 'flex';
-      }
-    }
-  } catch(e) { /* defensive */ }
 }
 
 
@@ -2570,7 +2063,11 @@ function buildCorrections(phn, last, first) {
 // ─── Export ───────────────────────────────────────────────────────────────────
 function getExportClaims() {
   document.querySelectorAll('.fee-inp').forEach(function(inp){ if (inp.dataset.id) _feeOverrides[inp.dataset.id]=inp.value; });
-  st.claims.forEach(function(c){ if (_feeOverrides[c.id]) c.fee=_feeOverrides[c.id]; });
+  st.claims.forEach(function(c){
+    if (_feeOverrides[c.id])   c.fee   = _feeOverrides[c.id];
+    if (_aliasOverrides[c.id]) c.alias = _aliasOverrides[c.id];   // v1.9
+    if (_dateOverrides[c.id])  c.date  = _dateOverrides[c.id];    // v1.9
+  });
   if (appMode === 'batch') {
     var current = st.claims.filter(function(c){ return c.fee&&c.fee.trim(); });
     var confirmedIds = {};
@@ -2619,6 +2116,18 @@ function exportSheets() {
   if (!url){ setStatus('export-status','st-warn','No Apps Script URL configured.'); return; }
   var claims=getExportClaims();
   if (!claims.length){ setStatus('export-status','st-warn','No claims to export.'); return; }
+  // v1.8: block submit if any claim has free-text ICD (e.g. "Angina", "NSTEMI").
+  // ICD9 must come from the dropdown so iClinic accepts it.
+  var bad = claims.filter(function(c){ return !isValidIcd9(c.icd); });
+  if (bad.length) {
+    var sample = bad[0].icd || '(empty)';
+    setStatus('export-status','st-warn',
+      bad.length + ' claim' + (bad.length===1?'':'s') + ' have invalid ICD9 code "' + sample + '". ' +
+      'Pick the diagnosis from the dropdown — free text is not accepted.');
+    var inp = document.getElementById('c-dx');
+    if (inp) { inp.focus(); inp.scrollIntoView({block:'center',behavior:'smooth'}); }
+    return;
+  }
   setStatus('export-status','st-info','Sending to Sheets…');
   var sampleClaim = claims[0] || {};
   var corrections = buildCorrections(sampleClaim.phn, sampleClaim.last, sampleClaim.first);
@@ -2640,12 +2149,6 @@ function exportSheets() {
           msg+=dups.map(function(d){ return '  '+d.name+' · '+d.fee+' · '+d.date+' ('+d.reason+')'; }).join('\n');
           setStatus('export-status','st-warn',msg);
         } else { setStatus('export-status','st-ok',msg); }
-        // v1.12 — auto-reset the form so we know it's done and ready for the next search.
-        // Brief delay so the "Saved N claims ✓" confirmation is visible first.
-        setTimeout(function(){
-          clearForm();
-          setStatus('export-status', 'st-info', 'Ready for next patient — type PHN or scan a card.');
-        }, 2500);
       } else {
         setStatus('export-status','st-warn','Sheets error: '+JSON.stringify(data).slice(0,200));
       }
