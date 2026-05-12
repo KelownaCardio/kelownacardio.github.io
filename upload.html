@@ -148,6 +148,28 @@ v1.11 2026-05-12  Auto-populate the performing physician (alias dropdown)
                   • Always overridable — Kathryn can still pick a different
                     performing physician for the new claims after the
                     auto-fill if she's covering for someone else.
+v1.12 2026-05-12  Form auto-reset after successful Sheets upload + shift-click
+                  range select on calendar.
+                  • exportSheets success → after a 2.5s pause (so the
+                    "Saved N claims ✓" confirmation is visible), clearForm
+                    fires automatically and the status bar updates to
+                    "Ready for next patient — type PHN or scan a card."
+                    Skipped when the response wasn't ok or the request errored.
+                  • Calendar tap handler now receives the click event so it
+                    can detect Shift. Click May 3 then Shift+Click May 9
+                    fills the entire range (May 3 → May 9) in the active
+                    calendar mode (daily/combined/directive/ccu), with the
+                    same per-day duplicate and mutex guards as a single tap.
+                    Anchor for the next shift-click is the most recent
+                    single tap in the same mode; switching modes resets the
+                    anchor.
+                  • Range fill toast shows "added N days, skipped M (X dup,
+                    Y mutex)" so the user knows what was actually applied.
+                  • Anchor (st._lastTap) also resets on clearForm and on a
+                    fresh PHN lookup so ranges never bleed across patients.
+                  • Shift-click range is desktop-only by nature (no shift
+                    key on touchscreen); the existing range-form fillRange
+                    function and the per-day tap behaviour are unchanged.
 ===================================================================
 -->
 <html lang="en">
@@ -344,7 +366,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:8px">
     <div class="hdr-title">KGH Historical Billing</div>
-    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.11</div>
+    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.12</div>
   </div>
   <div class="hdr-sub" id="hdr-sub">Single card mode</div>
 </div>
@@ -1168,7 +1190,19 @@ function fillRange() {
   renderCal(); refreshPreview();
 }
 
-function toggleDay(iso) {
+function toggleDay(iso, evt) {
+  // v1.12 — shift+click extends a range from the last single-tap anchor
+  // (only if the anchor is in the same calendar mode, to avoid weird cross-mode ranges)
+  if (evt && evt.shiftKey
+      && st._lastTap
+      && st._lastTap.mode === st.calMode
+      && st._lastTap.iso
+      && st._lastTap.iso !== iso) {
+    fillDateRangeWithGuards(st._lastTap.iso, iso);
+    st._lastTap = { iso: iso, mode: st.calMode };  // update anchor to most-recent endpoint
+    return;
+  }
+
   // v1.8 — guard against duplicates against historical claims and mutex violations
   var alias = getAlias();
   var hist = historicalClaimsOn(iso);
@@ -1194,7 +1228,50 @@ function toggleDay(iso) {
 
   if (already) arr.splice(arr.indexOf(iso), 1);
   else         arr.push(iso);
+
+  // v1.12 — remember the anchor for the next shift+click
+  st._lastTap = { iso: iso, mode: st.calMode };
+
   renderCal(); refreshPreview();
+}
+
+// v1.12 — bulk-add a date range in the current calMode with the same per-day
+// duplicate and mutex guards as toggleDay. Always additive (never removes).
+function fillDateRangeWithGuards(fromIso, toIso) {
+  if (fromIso > toIso) { var tmp = fromIso; fromIso = toIso; toIso = tmp; }
+  var arr   = st[st.calMode + 'Dates'];
+  var alias = getAlias();
+  var added = 0, dupBlocked = 0, mutexBlocked = 0;
+  var cur = new Date(fromIso + 'T12:00:00');
+  var end = new Date(toIso   + 'T12:00:00');
+  while (cur <= end) {
+    var iso = cur.getFullYear() + '-'
+            + (cur.getMonth()+1).toString().padStart(2,'0') + '-'
+            + cur.getDate().toString().padStart(2,'0');
+    if (arr.indexOf(iso) < 0) {
+      var hist = historicalClaimsOn(iso);
+      var proposedFee = feeForCalMode(iso, st.calMode);
+      if (st.calMode === 'ccu' && hist.some(isConsultClaim)) {
+        mutexBlocked++;
+      } else {
+        var dup = hist.some(function(c){
+          return String(c.fee||'') === proposedFee && String(c.alias||'') === alias;
+        });
+        if (dup) dupBlocked++;
+        else     { arr.push(iso); added++; }
+      }
+    }
+    cur.setDate(cur.getDate() + 1);
+  }
+  renderCal(); refreshPreview();
+  var msg = 'Range fill: added ' + added + ' day' + (added===1?'':'s');
+  if (dupBlocked || mutexBlocked) {
+    var reasons = [];
+    if (dupBlocked)   reasons.push(dupBlocked   + ' duplicate');
+    if (mutexBlocked) reasons.push(mutexBlocked + ' mutex');
+    msg += ', skipped ' + (dupBlocked + mutexBlocked) + ' (' + reasons.join(', ') + ')';
+  }
+  showToast(msg);
 }
 
 function dayClass(iso) {
@@ -1251,7 +1328,7 @@ function renderCal() {
     else if (dc.indexOf('d-combined')>=0) { var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='comb';el.appendChild(l); }
     else if (dc.indexOf('d-directive')>=0){ var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='dir';el.appendChild(l); }
     else if (dc.indexOf('d-consult')>=0)  { var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='cnslt';el.appendChild(l); }
-    (function(isoDate){ el.addEventListener('click', function(){ toggleDay(isoDate); }); })(iso);
+    (function(isoDate){ el.addEventListener('click', function(e){ toggleDay(isoDate, e); }); })(iso);
     grid.appendChild(el);
   }
 }
@@ -1883,6 +1960,7 @@ function clearForm() {
   clearRef();
   st.dailyDates=[]; st.combinedDates=[]; st.directiveDates=[]; st.ccuDates=[];
   st.historicalClaims = [];   // v1.8 — drop the previous patient's history
+  st._lastTap = null;         // v1.12 — drop the shift-click anchor
   var lb = document.getElementById('lookup-banner'); if (lb) { lb.style.display='none'; lb.innerHTML=''; }
   _feeOverrides={};
   setConsultType('consult');
@@ -2236,6 +2314,7 @@ function lookupPatientFromSheets(phn, last, dob) {
   // v1.8 — drop stale historical claims and redraw immediately so the calendar
   // doesn't show the previous patient's data while the lookup is in flight
   st.historicalClaims = [];
+  st._lastTap = null;   // v1.12 — drop the shift-click anchor (new patient)
   renderCal();
 
   lb.style.display='block';
@@ -2561,6 +2640,12 @@ function exportSheets() {
           msg+=dups.map(function(d){ return '  '+d.name+' · '+d.fee+' · '+d.date+' ('+d.reason+')'; }).join('\n');
           setStatus('export-status','st-warn',msg);
         } else { setStatus('export-status','st-ok',msg); }
+        // v1.12 — auto-reset the form so we know it's done and ready for the next search.
+        // Brief delay so the "Saved N claims ✓" confirmation is visible first.
+        setTimeout(function(){
+          clearForm();
+          setStatus('export-status', 'st-info', 'Ready for next patient — type PHN or scan a card.');
+        }, 2500);
       } else {
         setStatus('export-status','st-warn','Sheets error: '+JSON.stringify(data).slice(0,200));
       }
