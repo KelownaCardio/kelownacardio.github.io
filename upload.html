@@ -64,6 +64,35 @@ v1.7  2026-05-11  Referring MD search parity with main app: 3-tier system.
                   Physicians tab. Fires when local=0 OR local<5 results.
                   Shows "Searching all BC..." placeholder while loading.
                   ICD-9 list already matched index.html as of v1.6.
+v1.8  2026-05-11  Historical claim overlay on calendar + duplicate guard +
+                  refby/icd pre-population.
+                  • Apps Script v2.5 lookupPatient now returns full claims[]
+                    across Claims + Uploaded Claims tabs, plus a defaults{}
+                    block (refby/refbyName/icd) derived from patient row
+                    then most-recent claim.
+                  • renderLookupBanner stashes data.claims as
+                    st.historicalClaims, pre-fills empty refby/icd from
+                    data.defaults, and triggers calendar redraw.
+                  • Calendar palette updated to match mobile app exactly:
+                    consult #ffcf73, CCU #f08585 (was purple), daily #3fa658,
+                    combined #b8e6c4, directive #8eb5fa, gap #d4d4d8 dashed.
+                  • Historical claims render in their proper colour on the
+                    calendar at .65 opacity with a small "old" tag so users
+                    can tell them apart from new selections.
+                  • Grey-dashed "gap" cells shown for days inside a CCU date
+                    range or daily date range (union of historical + new
+                    selections) that have no claim — surfaces missed days.
+                  • CCU day numbering in buildClaims and renderCal now counts
+                    historical CCU dates as priors, so a new tap on a date
+                    after 3 historical CCU days bills as day 4 (1421), not 1.
+                  • toggleDay tap guard: blocks same alias+fee+date duplicate
+                    against historical claims with a toast; blocks the
+                    33010/33012 ↔ 1411/1421/1431 mutex (can't consult and
+                    CCU same day).
+                  • onConsultDateChange refuses a consult date that already
+                    has a historical CCU claim (same mutex, other direction).
+                  • clearForm now also clears st.historicalClaims.
+                  • Mode chip palette (CCU) updated to match calendar.
 ===================================================================
 -->
 <html lang="en">
@@ -142,11 +171,15 @@ input[type=checkbox]{width:auto;margin-right:6px;accent-color:var(--blue)}
 .cal-day.empty{pointer-events:none}
 .cal-day.other-m{color:var(--text3);background:none!important}
 .cal-day.today-dot::after{content:'';position:absolute;bottom:3px;left:50%;transform:translateX(-50%);width:4px;height:4px;border-radius:50%;background:var(--blue)}
-.cal-day.d-daily{background:var(--green-bg);color:var(--green-t)}
-.cal-day.d-combined{background:var(--teal-bg);color:var(--teal-t)}
-.cal-day.d-directive{background:var(--blue-bg);color:var(--blue-t)}
-.cal-day.d-ccu{background:var(--purple-bg);color:var(--purple-t)}
-.cal-day.d-consult{background:var(--amber-bg);color:var(--amber-t);font-weight:800;pointer-events:none}
+/* v1.8 — calendar palette matches mobile app (index.html cv-day classes) exactly */
+.cal-day.d-daily    {background:#3fa658;color:#062814}
+.cal-day.d-combined {background:#b8e6c4;color:#0a4520}
+.cal-day.d-directive{background:#8eb5fa;color:#002461}
+.cal-day.d-ccu      {background:#f08585;color:#5e1414}
+.cal-day.d-consult  {background:#ffcf73;color:#5a2700;font-weight:800;pointer-events:none}
+.cal-day.d-gap      {background:#d4d4d8;color:#4a4a52;border:1px dashed #8a8a92}
+.cal-day.d-hist     {opacity:.65}
+.cal-day.d-hist::before{content:'old';position:absolute;top:1px;right:3px;font-size:7px;font-weight:700;opacity:.75;letter-spacing:.3px;text-transform:uppercase}
 .cal-day-lbl{font-size:8px;font-weight:700;line-height:1;margin-top:1px}
 /* mode chips */
 .mode-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
@@ -154,7 +187,7 @@ input[type=checkbox]{width:auto;margin-right:6px;accent-color:var(--blue)}
 .mchip.daily{background:var(--green-bg);color:var(--green-t)}
 .mchip.combined{background:var(--teal-bg);color:var(--teal-t)}
 .mchip.directive{background:var(--blue-bg);color:var(--blue-t)}
-.mchip.ccu{background:var(--purple-bg);color:var(--purple-t)}
+.mchip.ccu{background:#f08585;color:#5e1414}
 .mchip.active{border-color:currentColor}
 .range-row{display:flex;gap:6px;align-items:flex-end;margin-bottom:10px}
 .range-row input{flex:1}
@@ -251,7 +284,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:8px">
     <div class="hdr-title">KGH Historical Billing</div>
-    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.7</div>
+    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.8</div>
   </div>
   <div class="hdr-sub" id="hdr-sub">Single card mode</div>
 </div>
@@ -514,6 +547,7 @@ var st = {
   calMonth: new Date(),
   dailyDates: [], combinedDates: [], directiveDates: [], ccuDates: [],
   claims: [],
+  historicalClaims: [],   // v1.8 — populated by lookupPatient response
 };
 var batch = {
   items: [], current: 0,
@@ -1075,19 +1109,58 @@ function fillRange() {
 }
 
 function toggleDay(iso) {
-  var arr = st[st.calMode+'Dates'];
-  var i = arr.indexOf(iso);
-  if (i >= 0) arr.splice(i,1); else arr.push(iso);
+  // v1.8 — guard against duplicates against historical claims and mutex violations
+  var alias = getAlias();
+  var hist = historicalClaimsOn(iso);
+  var arr  = st[st.calMode+'Dates'];
+  var already = arr.indexOf(iso) >= 0;
+
+  if (!already) {
+    // Mutex: in CCU mode, refuse a date that already has a consult claim
+    if (st.calMode === 'ccu' && hist.some(isConsultClaim)) {
+      showToast("Can't add CCU on a date that already has a consult claim — 33010/33012 and 1411 are mutually exclusive.");
+      return;
+    }
+    // Duplicate: same alias + same proposed fee + same date already in historical
+    var proposedFee = feeForCalMode(iso, st.calMode);
+    var dup = hist.some(function(c){
+      return String(c.fee||'') === proposedFee && String(c.alias||'') === alias;
+    });
+    if (dup) {
+      showToast('Already billed: ' + proposedFee + ' on ' + iso + ' by ' + alias + '. Same doctor, same fee, same date is a duplicate.');
+      return;
+    }
+  }
+
+  if (already) arr.splice(arr.indexOf(iso), 1);
+  else         arr.push(iso);
   renderCal(); refreshPreview();
 }
 
 function dayClass(iso) {
+  // Current selections win — they represent what the user is actively building
   if (st.dailyDates.indexOf(iso) >= 0)     return 'd-daily';
   if (st.combinedDates.indexOf(iso) >= 0)  return 'd-combined';
   if (st.directiveDates.indexOf(iso) >= 0) return 'd-directive';
   if (st.ccuDates.indexOf(iso) >= 0)       return 'd-ccu';
   var cd = consultDateISO();
   if (cd && iso === cd) return 'd-consult';
+
+  // v1.8 — historical claims render in their proper colour at reduced opacity
+  var hist = historicalClaimsOn(iso);
+  if (hist.length) {
+    if (hist.some(isCcuClaim))       return 'd-ccu d-hist';
+    if (hist.some(isConsultClaim))   return 'd-consult d-hist';
+    if (hist.some(isDailyClaim))     return 'd-daily d-hist';
+    if (hist.some(isCombinedClaim))  return 'd-combined d-hist';
+    if (hist.some(isDirectiveClaim)) return 'd-directive d-hist';
+    // Fallback — historical claim of an unrecognised type still gets shown
+    return 'd-consult d-hist';
+  }
+
+  // v1.8 — grey-dashed gap cells inside an active CCU or daily run
+  if (inCcuGapRange(iso))   return 'd-gap';
+  if (inDailyGapRange(iso)) return 'd-gap';
   return '';
 }
 
@@ -1097,7 +1170,8 @@ function renderCal() {
   var y=st.calMonth.getFullYear(), m=st.calMonth.getMonth();
   document.getElementById('cal-month-lbl').textContent = monthLabel(st.calMonth);
   var first=new Date(y,m,1).getDay(), days=new Date(y,m+1,0).getDate(), today=todayISO();
-  var ccuSorted = st.ccuDates.slice().sort();
+  // v1.8 — CCU day numbers consider historical CCU dates as priors
+  var allCcuSorted = unionCcuDatesISO().sort();
   for (var i=0;i<first;i++) { var e=document.createElement('div'); e.className='cal-day empty'; grid.appendChild(e); }
   for (var d=1;d<=days;d++) {
     var iso=y+'-'+(m+1).toString().padStart(2,'0')+'-'+d.toString().padStart(2,'0');
@@ -1106,11 +1180,17 @@ function renderCal() {
     el.className='cal-day '+dc;
     if (iso===today) el.classList.add('today-dot');
     var ns=document.createElement('span'); ns.textContent=d; el.appendChild(ns);
-    if (dc==='d-ccu') { var dn=ccuSorted.indexOf(iso)+1; var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='day '+dn;el.appendChild(l); }
-    else if (dc==='d-daily')    { var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='daily';el.appendChild(l); }
-    else if (dc==='d-combined') { var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='comb';el.appendChild(l); }
-    else if (dc==='d-directive'){ var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='dir';el.appendChild(l); }
-    else if (dc==='d-consult')  { var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='cnslt';el.appendChild(l); }
+    // Label: include CCU day number for both new and historical CCU cells
+    if (dc.indexOf('d-ccu')>=0) {
+      var dn=allCcuSorted.indexOf(iso)+1;
+      var l=document.createElement('span');l.className='cal-day-lbl';
+      l.textContent = dn>0 ? 'day '+dn : 'ccu';
+      el.appendChild(l);
+    }
+    else if (dc.indexOf('d-daily')>=0)    { var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='daily';el.appendChild(l); }
+    else if (dc.indexOf('d-combined')>=0) { var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='comb';el.appendChild(l); }
+    else if (dc.indexOf('d-directive')>=0){ var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='dir';el.appendChild(l); }
+    else if (dc.indexOf('d-consult')>=0)  { var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='cnslt';el.appendChild(l); }
     (function(isoDate){ el.addEventListener('click', function(){ toggleDay(isoDate); }); })(iso);
     grid.appendChild(el);
   }
@@ -1118,9 +1198,127 @@ function renderCal() {
 
 function onConsultDateChange() {
   var iso = document.getElementById('c-date').value;
-  if (iso) { var d=new Date(iso+'T12:00:00'); st.calMonth=new Date(d.getFullYear(),d.getMonth(),1); renderCal(); }
+  if (iso) {
+    // v1.8 — mutex: can't bill a consult on a date that already has a CCU claim
+    var hist = historicalClaimsOn(iso);
+    if (hist.some(isCcuClaim)) {
+      showToast("Can't set a consult date on a day that already has a CCU claim — 33010/33012 and 1411 are mutually exclusive.");
+      document.getElementById('c-date').value = '';
+      return;
+    }
+    var d=new Date(iso+'T12:00:00');
+    st.calMonth=new Date(d.getFullYear(),d.getMonth(),1);
+    renderCal();
+  }
   updateModifierBanner();
   refreshPreview();
+}
+
+// ─── v1.8 helpers — historical claim handling ─────────────────────────────────
+
+function dmyToIso(dmy) {
+  if (!dmy) return '';
+  var m = String(dmy).match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return '';
+  return m[3] + '-' + m[2] + '-' + m[1];
+}
+
+function isConsultClaim(c) {
+  if (!c) return false;
+  if (c.claimType === 'Consult') return true;
+  return ['33010','33012','33005','33014','Y33025','00751'].indexOf(String(c.fee||'')) !== -1;
+}
+function isCcuClaim(c) {
+  if (!c) return false;
+  if (c.claimType === 'CCU') return true;
+  return ['1411','1421','1431','1441','CCU_DAILY'].indexOf(String(c.fee||'')) !== -1;
+}
+function isDailyClaim(c) {
+  if (!c) return false;
+  if (c.claimType === 'Daily') return true;
+  return String(c.fee||'') === '33008' && !(c.notes && String(c.notes).trim());
+}
+function isCombinedClaim(c) {
+  if (!c) return false;
+  if (c.claimType === 'Combined') return true;
+  return String(c.fee||'') === '33008' && !!(c.notes && String(c.notes).trim());
+}
+function isDirectiveClaim(c) {
+  if (!c) return false;
+  if (c.claimType === 'Directive') return true;
+  return String(c.fee||'') === '33006';
+}
+
+function historicalClaimsOn(iso) {
+  return (st.historicalClaims || []).filter(function(c) {
+    return dmyToIso(c.date) === iso;
+  });
+}
+
+function unionCcuDatesISO() {
+  var all = st.ccuDates.slice();
+  (st.historicalClaims || []).forEach(function(c) {
+    if (isCcuClaim(c)) {
+      var i = dmyToIso(c.date);
+      if (i && all.indexOf(i) < 0) all.push(i);
+    }
+  });
+  return all;
+}
+
+function unionDailyDatesISO() {
+  // 33008 = daily OR combined — same fee, share the gap range
+  var all = st.dailyDates.concat(st.combinedDates);
+  (st.historicalClaims || []).forEach(function(c) {
+    if (isDailyClaim(c) || isCombinedClaim(c)) {
+      var i = dmyToIso(c.date);
+      if (i && all.indexOf(i) < 0) all.push(i);
+    }
+  });
+  return all;
+}
+
+function inCcuGapRange(iso) {
+  var all = unionCcuDatesISO();
+  if (all.length < 2) return false;
+  all.sort();
+  return iso > all[0] && iso < all[all.length-1] && all.indexOf(iso) < 0;
+}
+
+function inDailyGapRange(iso) {
+  var all = unionDailyDatesISO();
+  if (all.length < 2) return false;
+  all.sort();
+  return iso > all[0] && iso < all[all.length-1] && all.indexOf(iso) < 0;
+}
+
+function feeForCalMode(iso, mode) {
+  if (mode === 'daily' || mode === 'combined') return '33008';
+  if (mode === 'directive') return '33006';
+  if (mode === 'ccu') {
+    var all = unionCcuDatesISO();
+    if (all.indexOf(iso) < 0) all.push(iso);
+    all.sort();
+    var dn = all.indexOf(iso) + 1;
+    if (dn === 1) return '1411';
+    if (dn <= 7) return '1421';
+    return '1431';
+  }
+  return '';
+}
+
+function showToast(msg) {
+  var t = document.getElementById('upload-toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'upload-toast';
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1c1c1e;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;z-index:300;box-shadow:0 4px 12px rgba(0,0,0,.3);max-width:90%;text-align:center;opacity:0;pointer-events:none;transition:opacity .2s';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.opacity = '1';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(function(){ t.style.opacity = '0'; }, 3500);
 }
 
 
@@ -1390,8 +1588,12 @@ function buildClaims() {
     claims.push(Object.assign({},base,{ id:uid(), claimType:'directive', date:iso, fee:'33006', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:extraNotes, _sortDate:iso, _sortSub:5 }));
   });
 
-  st.ccuDates.slice().sort().forEach(function(iso, i){
-    var dn=i+1, fee=dn===1?'1411':dn<=7?'1421':'1431';
+  // v1.8 — CCU day numbering counts historical CCU dates as priors
+  var allCcuForNumbering = unionCcuDatesISO().sort();
+  st.ccuDates.slice().sort().forEach(function(iso){
+    var dn = allCcuForNumbering.indexOf(iso) + 1;
+    if (dn < 1) dn = 1;
+    var fee=dn===1?'1411':dn<=7?'1421':'1431';
     var ccuNote='CCU day '+dn+(extraNotes?' | '+extraNotes:'');
     claims.push(Object.assign({},base,{ id:uid(), claimType:'ccu', date:iso, fee:fee, icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:ccuNote, _sortDate:iso, _sortSub:6 }));
   });
@@ -1462,6 +1664,8 @@ function clearForm() {
   var modEl=document.getElementById('mod-banner'); if(modEl) modEl.innerHTML='';
   clearRef();
   st.dailyDates=[]; st.combinedDates=[]; st.directiveDates=[]; st.ccuDates=[];
+  st.historicalClaims = [];   // v1.8 — drop the previous patient's history
+  var lb = document.getElementById('lookup-banner'); if (lb) { lb.style.display='none'; lb.innerHTML=''; }
   _feeOverrides={};
   setConsultType('consult');
   var pz=document.getElementById('photo-zone');
@@ -1811,6 +2015,11 @@ function lookupPatientFromSheets(phn, last, dob) {
   var lb  = document.getElementById('lookup-banner');
   if (!url || (!phn && !last)) { if(lb) lb.style.display='none'; return; }
 
+  // v1.8 — drop stale historical claims and redraw immediately so the calendar
+  // doesn't show the previous patient's data while the lookup is in flight
+  st.historicalClaims = [];
+  renderCal();
+
   lb.style.display='block';
   lb.style.background='var(--surface2)';
   lb.style.color='var(--text3)';
@@ -1829,11 +2038,18 @@ function lookupPatientFromSheets(phn, last, dob) {
 function renderLookupBanner(lb, data) {
   if (!data || data.error) { lb.style.display='none'; return; }
 
+  // v1.8 — stash full claim history for calendar overlay + duplicate guards
+  st.historicalClaims = Array.isArray(data.claims) ? data.claims.slice() : [];
+
+  // v1.8 — pre-fill refby + icd from defaults if those fields are blank
+  if (data.defaults) applyLookupDefaults(data.defaults);
+
   if (!data.found && data.claimCount === 0) {
     lb.style.background='var(--surface2)';
     lb.style.color='var(--text2)';
     lb.style.border='.5px solid var(--border)';
     lb.innerHTML='<b>New patient</b> — not found in Patients tab, no existing claims.';
+    renderCal(); refreshPreview();
     return;
   }
 
@@ -1851,7 +2067,7 @@ function renderLookupBanner(lb, data) {
   }
 
   if (data.claimCount > 0) {
-    lines.push('<b>' + data.claimCount + ' existing claim' + (data.claimCount===1?'':'s') + '</b> on file.');
+    lines.push('<b>' + data.claimCount + ' existing claim' + (data.claimCount===1?'':'s') + '</b> on file — shown on the calendar in their type colour.');
     if (data.recentClaims && data.recentClaims.length) {
       var recent = data.recentClaims.slice(0, 5).map(function(c){
         return esc(c.date) + ' ' + esc(c.fee) + (c.claimType?' ('+esc(c.claimType)+')':'');
@@ -1868,6 +2084,66 @@ function renderLookupBanner(lb, data) {
   }
 
   lb.innerHTML = lines.join('<br>');
+
+  // v1.8 — redraw calendar so historical claims and gaps appear
+  renderCal();
+  refreshPreview();
+}
+
+// v1.8 — populate refby + icd from prior-claim defaults if those fields are empty.
+// Uses the same selectRefConfirm / selectIcdRow paths as a manual pick so the
+// confirmed chip shows and buildClaims sees the canonical values.
+function applyLookupDefaults(defaults) {
+  if (!defaults) return;
+
+  // Referring MD — only if user hasn't already typed one or picked one
+  try {
+    var refEl = document.getElementById('c-ref');
+    if (refEl && !refEl.value.trim() && !refEl.dataset.docnum && (defaults.refbyName || defaults.refby)) {
+      var num  = String(defaults.refby || '').trim();
+      var name = String(defaults.refbyName || '').trim() || ('Dr. # ' + num);
+      // Try to enrich with spec/city from the embedded BC directory if we have the number
+      var spec = '', city = '';
+      if (num && typeof BC_PHYSICIANS_LOCAL !== 'undefined') {
+        for (var i = 0; i < BC_PHYSICIANS_LOCAL.length; i++) {
+          if (String(BC_PHYSICIANS_LOCAL[i][2]) === num) {
+            if (!name || /^Dr\. # /.test(name)) name = 'Dr. ' + BC_PHYSICIANS_LOCAL[i][0] + ', ' + BC_PHYSICIANS_LOCAL[i][1];
+            spec = BC_PHYSICIANS_LOCAL[i][3] || '';
+            city = BC_PHYSICIANS_LOCAL[i][4] || '';
+            break;
+          }
+        }
+      }
+      if (typeof selectRefConfirm === 'function') selectRefConfirm(num, name, spec, city);
+    }
+  } catch(e) { /* defensive — never break on pre-fill */ }
+
+  // Diagnosis ICD — only if empty.
+  // Note: there are two selectIcdRow definitions in this file (the 1-arg one
+  // shadows the 2-arg one), so we replicate the confirmed-chip logic inline
+  // instead of calling the function. This is robust regardless of which
+  // definition wins at load time.
+  try {
+    var dxEl = document.getElementById('c-dx');
+    if (dxEl && !dxEl.value.trim() && defaults.icd) {
+      var code = String(defaults.icd).trim();
+      var desc = '';
+      if (typeof ICD9_LOCAL !== 'undefined') {
+        for (var j = 0; j < ICD9_LOCAL.length; j++) {
+          if (ICD9_LOCAL[j][0] === code) { desc = ICD9_LOCAL[j][1]; break; }
+        }
+      }
+      dxEl.value = code;
+      var confEl = document.getElementById('icd-confirmed');
+      var codeEl = document.getElementById('icd-confirmed-code');
+      var descEl = document.getElementById('icd-confirmed-desc');
+      if (confEl && codeEl && descEl) {
+        codeEl.textContent = code;
+        descEl.textContent = desc || '(description not in local list)';
+        confEl.style.display = 'flex';
+      }
+    }
+  } catch(e) { /* defensive */ }
 }
 
 
