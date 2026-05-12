@@ -112,6 +112,24 @@ v1.9  2026-05-12  PHN-first workflow: type a PHN, get the whole record back.
                     so it's obvious what the user can skip checking.
                   • No backend changes. Apps Script v2.5 already returns
                     everything this needs.
+v1.10 2026-05-12  Historical claims rendered in the Claims Preview pane.
+                  • refreshPreview now shows an "Existing claims (from
+                    Sheets)" section at the top with one row per historical
+                    claim. Primary line: fee · DD/MM/YYYY · alias. Detail
+                    line: ICD, referring MD, times, notes. "EXISTING" tag
+                    instead of fee input + delete button (these can't be
+                    edited from upload.html — they're already in the Sheet).
+                  • When new claims are being built, a "New claims (to
+                    submit)" subheader divides the two sections so it's
+                    obvious which rows will be submitted and which are
+                    just reference.
+                  • Most-recent-first sort within the historical section so
+                    the latest claim is at the top.
+                  • Empty-state message only shows when there's nothing at
+                    all (no history AND no new claims).
+                  • .ct-ccu preview chip flipped purple → red to match the
+                    calendar palette (was already changed for the calendar
+                    in v1.8 but the chip in the preview was missed).
 ===================================================================
 -->
 <html lang="en">
@@ -219,7 +237,12 @@ input[type=checkbox]{width:auto;margin-right:6px;accent-color:var(--blue)}
 .ct-daily{background:var(--green-bg);color:var(--green-t)}
 .ct-combined{background:var(--teal-bg);color:var(--teal-t)}
 .ct-directive{background:var(--blue-bg);color:var(--blue-t)}
-.ct-ccu{background:var(--purple-bg);color:var(--purple-t)}
+.ct-ccu{background:#f08585;color:#5e1414}
+/* v1.10 — historical claims section in preview pane */
+.preview-subhdr{font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;padding:8px 4px 4px;border-bottom:.5px solid var(--border);margin-bottom:4px}
+.preview-subhdr:not(:first-child){margin-top:12px}
+.claim-row.claim-row-hist{opacity:.78;background:var(--surface2);padding:8px;margin:0 -8px 4px;border-radius:var(--rsm);border-bottom:none}
+.hist-tag{font-size:9px;font-weight:800;color:var(--text3);letter-spacing:.5px;flex-shrink:0;padding:3px 7px;border:.5px solid var(--border2);border-radius:6px;align-self:flex-start;margin-top:1px;background:var(--surface)}
 .claim-info{flex:1;min-width:0}
 .claim-date-str{font-size:12px;font-weight:600}
 .claim-detail-str{font-size:11px;color:var(--text2);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -303,7 +326,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:8px">
     <div class="hdr-title">KGH Historical Billing</div>
-    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.9</div>
+    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.10</div>
   </div>
   <div class="hdr-sub" id="hdr-sub">Single card mode</div>
 </div>
@@ -1625,36 +1648,139 @@ function buildClaims() {
 // ─── Preview ─────────────────────────────────────────────────────────────────
 function refreshPreview() {
   var claims = buildClaims();
-  var list = document.getElementById('preview-list');
-  var empty = document.getElementById('preview-empty');
+  var list    = document.getElementById('preview-list');
+  var empty   = document.getElementById('preview-empty');
   var summary = document.getElementById('preview-summary');
-  // capture overrides before rebuild
-  list.querySelectorAll('.fee-inp').forEach(function(inp){ if (inp.dataset.id && inp.value) _feeOverrides[inp.dataset.id]=inp.value; });
-  claims.forEach(function(c){ if (_feeOverrides[c.id]) c.fee=_feeOverrides[c.id]; });
-  list.innerHTML = '';
-  if (!claims.length) { empty.style.display=''; summary.style.display='none'; return; }
-  empty.style.display='none'; summary.style.display='flex';
-  var missing = claims.filter(function(c){ return !c.fee; }).length;
-  summary.textContent = claims.length+' claim'+(claims.length===1?'':'s')+' · '+(missing?missing+' need fee code':'all fee codes set ✓');
-  var frag = document.createDocumentFragment();
-  claims.forEach(function(c){
-    var row=document.createElement('div'); row.className='claim-row';
-    var chip=document.createElement('span'); chip.className='ctype ct-'+c.claimType; chip.textContent=c.claimType.toUpperCase(); row.appendChild(chip);
-    var info=document.createElement('div'); info.className='claim-info';
-    var ds=document.createElement('div'); ds.className='claim-date-str'; ds.textContent=isoToDisp(c.date); info.appendChild(ds);
-    var det=[];
-    if (c.startTime&&c.endTime) det.push(c.startTime+'–'+c.endTime);
-    if (c.icd) det.push(c.icd); if (c.refbyName||c.refby) det.push(c.refbyName||c.refby); if (c.notes) det.push(c.notes);
-    if (det.length) { var dv=document.createElement('div'); dv.className='claim-detail-str'; dv.textContent=det.join(' · '); info.appendChild(dv); }
-    row.appendChild(info);
-    var fi=document.createElement('input'); fi.type='text'; fi.className='fee-inp'; fi.value=c.fee; fi.placeholder='fee'; fi.dataset.id=c.id;
-    fi.addEventListener('input',function(){ _feeOverrides[this.dataset.id]=this.value; c.fee=this.value; updateSummaryBar(); });
-    row.appendChild(fi);
-    var db=document.createElement('button'); db.className='del-btn'; db.textContent='×';
-    (function(claim){ db.addEventListener('click',function(){ deleteClaim(claim); }); })(c);
-    row.appendChild(db);
-    frag.appendChild(row);
+
+  // capture fee overrides before rebuild
+  list.querySelectorAll('.fee-inp').forEach(function(inp){
+    if (inp.dataset.id && inp.value) _feeOverrides[inp.dataset.id] = inp.value;
   });
+  claims.forEach(function(c){ if (_feeOverrides[c.id]) c.fee = _feeOverrides[c.id]; });
+  list.innerHTML = '';
+
+  var historical = (st.historicalClaims || []).slice();
+
+  // Empty state: no historical AND no new
+  if (!claims.length && !historical.length) {
+    empty.style.display = '';
+    summary.style.display = 'none';
+    return;
+  }
+  empty.style.display = 'none';
+
+  var frag = document.createDocumentFragment();
+
+  // ── Existing claims from Sheets ──────────────────────────────────────────
+  if (historical.length) {
+    var hdr = document.createElement('div');
+    hdr.className = 'preview-subhdr';
+    hdr.textContent = 'Existing claims (from Sheets) — ' + historical.length;
+    frag.appendChild(hdr);
+
+    // Most recent first
+    historical.sort(function(a, b){
+      return (dmyToIso(b.date) || '').localeCompare(dmyToIso(a.date) || '');
+    });
+
+    historical.forEach(function(c){
+      var row = document.createElement('div');
+      row.className = 'claim-row claim-row-hist';
+
+      var typeKey = String(c.claimType || '').toLowerCase() || 'consult';
+      var chip = document.createElement('span');
+      chip.className = 'ctype ct-' + typeKey;
+      chip.textContent = (c.claimType || '—').toUpperCase();
+      row.appendChild(chip);
+
+      var info = document.createElement('div');
+      info.className = 'claim-info';
+
+      // Primary line: fee · date · performing MD — matches what user asked for
+      var primary = [];
+      if (c.fee)   primary.push(c.fee);
+      if (c.date)  primary.push(c.date);
+      if (c.alias) primary.push(c.alias);
+      var ds = document.createElement('div');
+      ds.className = 'claim-date-str';
+      ds.textContent = primary.join(' · ');
+      info.appendChild(ds);
+
+      // Detail line: ICD, referring MD, times, notes
+      var det = [];
+      if (c.icd)                    det.push('ICD ' + c.icd);
+      if (c.refbyName)              det.push('ref ' + c.refbyName);
+      else if (c.refby)             det.push('ref #' + c.refby);
+      if (c.startTime && c.endTime) det.push(c.startTime + '–' + c.endTime);
+      if (c.notes)                  det.push(c.notes);
+      if (det.length) {
+        var dv = document.createElement('div');
+        dv.className = 'claim-detail-str';
+        dv.textContent = det.join(' · ');
+        info.appendChild(dv);
+      }
+      row.appendChild(info);
+
+      // EXISTING tag in place of fee input + delete button (can't edit from here)
+      var tag = document.createElement('span');
+      tag.className = 'hist-tag';
+      tag.textContent = 'EXISTING';
+      row.appendChild(tag);
+
+      frag.appendChild(row);
+    });
+  }
+
+  // ── New claims being built ───────────────────────────────────────────────
+  if (claims.length) {
+    if (historical.length) {
+      var hdr2 = document.createElement('div');
+      hdr2.className = 'preview-subhdr';
+      hdr2.textContent = 'New claims (to submit) — ' + claims.length;
+      frag.appendChild(hdr2);
+    }
+
+    summary.style.display = 'flex';
+    var missing = claims.filter(function(c){ return !c.fee; }).length;
+    summary.textContent = claims.length + ' new claim' + (claims.length===1?'':'s')
+                       + ' · ' + (missing ? missing + ' need fee code' : 'all fee codes set ✓');
+
+    claims.forEach(function(c){
+      var row = document.createElement('div'); row.className = 'claim-row';
+      var chip = document.createElement('span'); chip.className = 'ctype ct-' + c.claimType;
+      chip.textContent = c.claimType.toUpperCase(); row.appendChild(chip);
+      var info = document.createElement('div'); info.className = 'claim-info';
+      var ds = document.createElement('div'); ds.className = 'claim-date-str';
+      ds.textContent = isoToDisp(c.date); info.appendChild(ds);
+      var det = [];
+      if (c.startTime && c.endTime) det.push(c.startTime + '–' + c.endTime);
+      if (c.icd)                    det.push(c.icd);
+      if (c.refbyName || c.refby)   det.push(c.refbyName || c.refby);
+      if (c.notes)                  det.push(c.notes);
+      if (det.length) {
+        var dv = document.createElement('div'); dv.className = 'claim-detail-str';
+        dv.textContent = det.join(' · '); info.appendChild(dv);
+      }
+      row.appendChild(info);
+      var fi = document.createElement('input');
+      fi.type = 'text'; fi.className = 'fee-inp'; fi.value = c.fee;
+      fi.placeholder = 'fee'; fi.dataset.id = c.id;
+      fi.addEventListener('input', function(){
+        _feeOverrides[this.dataset.id] = this.value;
+        c.fee = this.value;
+        updateSummaryBar();
+      });
+      row.appendChild(fi);
+      var db = document.createElement('button');
+      db.className = 'del-btn'; db.textContent = '×';
+      (function(claim){ db.addEventListener('click', function(){ deleteClaim(claim); }); })(c);
+      row.appendChild(db);
+      frag.appendChild(row);
+    });
+  } else {
+    summary.style.display = 'none';
+  }
+
   list.appendChild(frag);
 }
 
