@@ -93,6 +93,25 @@ v1.8  2026-05-11  Historical claim overlay on calendar + duplicate guard +
                     has a historical CCU claim (same mutex, other direction).
                   • clearForm now also clears st.historicalClaims.
                   • Mode chip palette (CCU) updated to match calendar.
+v1.9  2026-05-12  PHN-first workflow: type a PHN, get the whole record back.
+                  • Auto-fill on PHN match now writes ALL demographics from
+                    the Patients row, not just dob/sex/ward. Adds last,
+                    first, and bed (→ f-room) to the existing fill. Every
+                    field stays editable; existing values are never
+                    overwritten — only blanks are filled, in case the user
+                    is correcting an earlier mistake.
+                  • Banner now leads with a clear status pill:
+                    "✓ Pulled from Sheets" (green) when the patient is in
+                    the Patients tab and demographics auto-filled;
+                    "⚠ Has claims but no patient record" (amber) when
+                    Uploaded Claims has entries for this PHN but the
+                    Patients tab does not — still need OCR for demographics;
+                    "• No patient found" (grey) for a clean miss — snap a
+                    photo to fill in demographics.
+                  • Banner also lists what got pulled in a compact summary
+                    so it's obvious what the user can skip checking.
+                  • No backend changes. Apps Script v2.5 already returns
+                    everything this needs.
 ===================================================================
 -->
 <html lang="en">
@@ -284,7 +303,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:8px">
     <div class="hdr-title">KGH Historical Billing</div>
-    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.8</div>
+    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.9</div>
   </div>
   <div class="hdr-sub" id="hdr-sub">Single card mode</div>
 </div>
@@ -2044,45 +2063,102 @@ function renderLookupBanner(lb, data) {
   // v1.8 — pre-fill refby + icd from defaults if those fields are blank
   if (data.defaults) applyLookupDefaults(data.defaults);
 
-  if (!data.found && data.claimCount === 0) {
-    lb.style.background='var(--surface2)';
-    lb.style.color='var(--text2)';
-    lb.style.border='.5px solid var(--border)';
-    lb.innerHTML='<b>New patient</b> — not found in Patients tab, no existing claims.';
-    renderCal(); refreshPreview();
-    return;
+  // v1.9 — three-state status: pull from Sheets, partial (claims-only), or miss
+  var state;             // 'found' | 'orphan-claims' | 'none'
+  if (data.found && data.patient) state = 'found';
+  else if (data.claimCount > 0)   state = 'orphan-claims';
+  else                            state = 'none';
+
+  // Pill styles per state
+  var pillCfg = {
+    'found':         { bg:'#1a7a35', fg:'#fff',          label:'✓ Pulled from Sheets' },
+    'orphan-claims': { bg:'#a55c00', fg:'#fff',          label:'⚠ Has claims but no patient record' },
+    'none':          { bg:'#e5e5ea', fg:'var(--text2)',  label:'• No patient found' }
+  }[state];
+
+  // Banner container styling
+  if (state === 'found') {
+    lb.style.background = 'var(--green-bg)';
+    lb.style.color      = 'var(--green-t)';
+    lb.style.border     = '.5px solid var(--green)';
+  } else if (state === 'orphan-claims') {
+    lb.style.background = 'var(--amber-bg)';
+    lb.style.color      = 'var(--amber-t)';
+    lb.style.border     = '.5px solid var(--amber)';
+  } else {
+    lb.style.background = 'var(--surface2)';
+    lb.style.color      = 'var(--text2)';
+    lb.style.border     = '.5px solid var(--border)';
   }
 
-  var lines = [];
-  if (data.found && data.patient) {
+  var pill = '<span style="display:inline-block;background:' + pillCfg.bg + ';color:' + pillCfg.fg
+           + ';font-size:11px;font-weight:700;padding:3px 9px;border-radius:10px;letter-spacing:.2px;margin-bottom:4px">'
+           + pillCfg.label + '</span>';
+
+  var lines = [pill];
+
+  if (state === 'found') {
     var p = data.patient;
-    var matchStr = data.matchedOn && data.matchedOn.length ? ' (matched on ' + data.matchedOn.join(' + ') + ')' : '';
-    lines.push('<b>Found:</b> ' + esc(p.last) + ', ' + esc(p.first) +
-               (p.dob ? ' · DOB ' + esc(p.dob) : '') +
-               (p.ward ? ' · ' + esc(p.ward) : '') + matchStr);
-    // Pre-fill any blanks the OCR missed
-    if (p.dob  && !document.getElementById('f-dob').value)  document.getElementById('f-dob').value  = p.dob;
-    if (p.sex  && !document.getElementById('f-sex').value)  document.getElementById('f-sex').value  = p.sex;
-    if (p.ward && !document.getElementById('f-ward').value) document.getElementById('f-ward').value = p.ward;
-  }
+    var matchStr = data.matchedOn && data.matchedOn.length
+      ? ' <span style="opacity:.7">(matched on ' + data.matchedOn.join(' + ') + ')</span>'
+      : '';
+    lines.push('<b>' + esc(p.last || '?') + ', ' + esc(p.first || '?') + '</b>'
+               + (p.dob  ? ' · DOB ' + esc(p.dob)  : '')
+               + (p.sex  ? ' · '     + esc(p.sex)  : '')
+               + (p.ward ? ' · '     + esc(p.ward) : '')
+               + (p.bed  ? ' '       + esc(p.bed)  : '')
+               + matchStr);
 
-  if (data.claimCount > 0) {
-    lines.push('<b>' + data.claimCount + ' existing claim' + (data.claimCount===1?'':'s') + '</b> on file — shown on the calendar in their type colour.');
+    // v1.9 — auto-fill EVERY demographic blank from the Patients row.
+    // Never overwrite existing values (user may already be correcting OCR).
+    var filled = [];
+    function fillIfBlank(elId, value, label) {
+      if (!value) return;
+      var el = document.getElementById(elId);
+      if (el && !String(el.value || '').trim()) {
+        el.value = value;
+        filled.push(label);
+      }
+    }
+    fillIfBlank('f-last',  p.last,  'last');
+    fillIfBlank('f-first', p.first, 'first');
+    fillIfBlank('f-dob',   p.dob,   'DOB');
+    fillIfBlank('f-sex',   p.sex,   'sex');
+    fillIfBlank('f-ward',  p.ward,  'ward');
+    fillIfBlank('f-room',  p.bed,   'bed');  // patient.bed → form's f-room
+
+    if (filled.length) {
+      lines.push('<span style="color:var(--text3);font-size:11px">Auto-filled: '
+                 + filled.join(', ') + ' · all fields stay editable</span>');
+    }
+
+    if (data.claimCount > 0) {
+      lines.push('<span style="color:var(--text3);font-size:11px"><b>'
+                 + data.claimCount + ' existing claim'
+                 + (data.claimCount===1?'':'s')
+                 + '</b> on file — shown on calendar in their type colour.</span>');
+    } else {
+      lines.push('<span style="color:var(--text3);font-size:11px">No prior claims on file.</span>');
+    }
+  }
+  else if (state === 'orphan-claims') {
+    lines.push('<b>' + data.claimCount + ' claim'
+               + (data.claimCount===1?'':'s')
+               + '</b> on file for this PHN, but no patient record in the Patients tab.');
+    lines.push('<span style="color:var(--text3);font-size:11px">Snap a photo to capture demographics. Existing claims are shown on the calendar.</span>');
     if (data.recentClaims && data.recentClaims.length) {
       var recent = data.recentClaims.slice(0, 5).map(function(c){
         return esc(c.date) + ' ' + esc(c.fee) + (c.claimType?' ('+esc(c.claimType)+')':'');
       });
       lines.push('<span style="color:var(--text3);font-size:11px">Most recent: ' + recent.join(' · ') + '</span>');
     }
-    lb.style.background='var(--amber-bg)';
-    lb.style.color='var(--amber-t)';
-    lb.style.border='.5px solid var(--amber)';
-  } else {
-    lb.style.background='var(--green-bg)';
-    lb.style.color='var(--green-t)';
-    lb.style.border='.5px solid var(--green)';
+  }
+  else {
+    lines.push('No matching record in Patients or claim history.');
+    lines.push('<span style="color:var(--text3);font-size:11px">Snap a photo to fill in demographics, or type them manually.</span>');
   }
 
+  lb.style.display = 'block';
   lb.innerHTML = lines.join('<br>');
 
   // v1.8 — redraw calendar so historical claims and gaps appear
