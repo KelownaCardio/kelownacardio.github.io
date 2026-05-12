@@ -130,6 +130,24 @@ v1.10 2026-05-12  Historical claims rendered in the Claims Preview pane.
                   • .ct-ccu preview chip flipped purple → red to match the
                     calendar palette (was already changed for the calendar
                     in v1.8 but the chip in the preview was missed).
+v1.11 2026-05-12  Auto-populate the performing physician (alias dropdown)
+                  from the most recent historical claim for the patient.
+                  • New helper setAliasFromHistory(alias): case-insensitive
+                    match against the dropdown options. If the alias is in
+                    the dropdown (KBrown, DPatton, JW, etc.) it's selected
+                    directly. If it's not (e.g., a legacy alias from before
+                    the dropdown was finalised), the dropdown drops to
+                    "other" and the custom-alias input is filled in.
+                  • Fires for both 'found' (patient in Patients tab) and
+                    'orphan-claims' (claims exist but no patient row) —
+                    any time there's historical data to pull from.
+                  • Banner's "Auto-filled" line now mentions performing MD
+                    when it changed, with the value so it's clear.
+                  • No change if the dropdown is already set to the same
+                    alias (no false positive in the banner).
+                  • Always overridable — Kathryn can still pick a different
+                    performing physician for the new claims after the
+                    auto-fill if she's covering for someone else.
 ===================================================================
 -->
 <html lang="en">
@@ -326,7 +344,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:8px">
     <div class="hdr-title">KGH Historical Billing</div>
-    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.10</div>
+    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.11</div>
   </div>
   <div class="hdr-sub" id="hdr-sub">Single card mode</div>
 </div>
@@ -1363,6 +1381,61 @@ function showToast(msg) {
   t._timer = setTimeout(function(){ t.style.opacity = '0'; }, 3500);
 }
 
+// v1.11 — pick the most-recent historical claim's alias from a lookup response.
+// Prefers data.recentClaims (already date-sorted by Apps Script) and falls
+// back to a date-sorted scan of data.claims.
+function pickRecentAlias(data) {
+  if (!data) return '';
+  var pools = [];
+  if (data.recentClaims && data.recentClaims.length) pools.push(data.recentClaims);
+  if (data.claims && data.claims.length) {
+    var sorted = data.claims.slice().sort(function(a, b){
+      return (dmyToIso(b.date) || '').localeCompare(dmyToIso(a.date) || '');
+    });
+    pools.push(sorted);
+  }
+  for (var p = 0; p < pools.length; p++) {
+    for (var i = 0; i < pools[p].length; i++) {
+      var a = pools[p][i] && pools[p][i].alias;
+      if (a) return String(a).trim();
+    }
+  }
+  return '';
+}
+
+// v1.11 — set the f-alias dropdown from a historical claim's alias.
+// Case-insensitive match against the dropdown options; if no match,
+// drop to "other" and fill the custom alias input. Returns
+// { changed: bool, label: string } so the banner can mention it.
+function setAliasFromHistory(alias) {
+  if (!alias) return { changed: false, label: '' };
+  var sel = document.getElementById('f-alias');
+  if (!sel) return { changed: false, label: '' };
+  var target = String(alias).trim();
+  var matched = '';
+  for (var i = 0; i < sel.options.length; i++) {
+    if (String(sel.options[i].value).toUpperCase() === target.toUpperCase()) {
+      matched = sel.options[i].value;
+      break;
+    }
+  }
+  if (matched) {
+    if (sel.value === matched) return { changed: false, label: matched };
+    sel.value = matched;
+    if (typeof onAliasChange === 'function') onAliasChange();
+    return { changed: true, label: matched };
+  }
+  // Not in dropdown — use "other" with custom field, unless it's already set there
+  var custom = document.getElementById('f-alias-custom');
+  if (sel.value === 'other' && custom && String(custom.value || '').trim().toUpperCase() === target.toUpperCase()) {
+    return { changed: false, label: target };
+  }
+  sel.value = 'other';
+  if (custom) custom.value = target;
+  if (typeof onAliasChange === 'function') onAliasChange();
+  return { changed: true, label: target };
+}
+
 
 // ─── BC Stat Holidays + Call Modifier Detection ───────────────────────────────
 // Ported directly from index.html (04_billing.js)
@@ -2253,6 +2326,13 @@ function renderLookupBanner(lb, data) {
     fillIfBlank('f-ward',  p.ward,  'ward');
     fillIfBlank('f-room',  p.bed,   'bed');  // patient.bed → form's f-room
 
+    // v1.11 — auto-populate performing physician from most recent claim
+    var recentAlias = pickRecentAlias(data);
+    if (recentAlias) {
+      var aliasResult = setAliasFromHistory(recentAlias);
+      if (aliasResult.changed) filled.push('performing MD (' + aliasResult.label + ')');
+    }
+
     if (filled.length) {
       lines.push('<span style="color:var(--text3);font-size:11px">Auto-filled: '
                  + filled.join(', ') + ' · all fields stay editable</span>');
@@ -2272,6 +2352,17 @@ function renderLookupBanner(lb, data) {
                + (data.claimCount===1?'':'s')
                + '</b> on file for this PHN, but no patient record in the Patients tab.');
     lines.push('<span style="color:var(--text3);font-size:11px">Snap a photo to capture demographics. Existing claims are shown on the calendar.</span>');
+
+    // v1.11 — auto-populate performing physician from most recent claim
+    var recentAliasOrphan = pickRecentAlias(data);
+    if (recentAliasOrphan) {
+      var aliasResultOrphan = setAliasFromHistory(recentAliasOrphan);
+      if (aliasResultOrphan.changed) {
+        lines.push('<span style="color:var(--text3);font-size:11px">Performing MD set to <b>'
+                   + esc(aliasResultOrphan.label) + '</b> from prior claim.</span>');
+      }
+    }
+
     if (data.recentClaims && data.recentClaims.length) {
       var recent = data.recentClaims.slice(0, 5).map(function(c){
         return esc(c.date) + ' ' + esc(c.fee) + (c.claimType?' ('+esc(c.claimType)+')':'');
