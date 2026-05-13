@@ -128,6 +128,15 @@ v1.10 2026-05-12  Restored historical claim overlay (lost in v1.8 rewrite)
                     edit panel scoped to that day's claims.
                   • After save/delete, st.historicalClaims is refreshed from
                     Sheets via lookupPatient and the calendar redraws.
+
+v1.11 2026-05-13  Restored auto-clear on successful Sheets push (regression
+                  from earlier rewrite). exportSheets() now calls clearForm()
+                  inside the data.ok branch so the form resets as the visual
+                  confirmation that processing is done. Status banner lives
+                  in #export-status (separate from the form) and stays
+                  visible. Applies to clean success and partial-with-
+                  duplicates; on error the form is preserved so the user
+                  can retry.
 ===================================================================
 -->
 <html lang="en">
@@ -387,7 +396,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:8px">
     <div class="hdr-title">KGH Historical Billing</div>
-    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.10</div>
+    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.11</div>
   </div>
   <div class="hdr-sub" id="hdr-sub">Single card mode</div>
 </div>
@@ -2739,6 +2748,9 @@ function exportSheets() {
           msg+=dups.map(function(d){ return '  '+d.name+' · '+d.fee+' · '+d.date+' ('+d.reason+')'; }).join('\n');
           setStatus('export-status','st-warn',msg);
         } else { setStatus('export-status','st-ok',msg); }
+        // v1.11 — clear form on successful push as visual confirmation that processing is done.
+        // Status banner is in #export-status (separate from the form) so the message stays visible.
+        clearForm();
       } else {
         setStatus('export-status','st-warn','Sheets error: '+JSON.stringify(data).slice(0,200));
       }
