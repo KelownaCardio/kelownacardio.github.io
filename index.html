@@ -1065,6 +1065,14 @@ input[type=file] { display:none; }
   </div>
 </div>
 
+<!-- ═══ LOCATION EDIT MODAL — opened by tapping the ward/bed circle ═══ -->
+<div class="overlay" id="loc-edit-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div id="loc-edit-content"></div>
+  </div>
+</div>
+
 <!-- ═══ CLAIM EDIT MODAL ═══ -->
 <div class="overlay" id="claim-edit-modal">
   <div class="modal" style="max-width:380px;margin:auto">
@@ -1816,12 +1824,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.32-2026-05-11-toast-ward-defaults';
+var BUILD_ID    = 'v3.27-2026-05-12-soft-dup-and-loc-edit';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.26';
-var APP_BUILT   = '2026-05-10 22:00 UTC';
+var APP_VERSION = 'v3.27';
+var APP_BUILT   = '2026-05-12';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -2870,7 +2878,7 @@ function wardHtml(ward) {
                 :          (i+1);
         h += '<div class="wp' + (dn ? ' done' : '') + '">' +
              '<div class="wp-pos-wrap">' +
-               '<div class="wp-pos' + (dn ? ' done' : '') + '" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(String(pos)) + '</div>' +
+               '<div class="wp-pos' + (dn ? ' done' : '') + '" data-pid="' + p.id + '" onclick="openLocationEditEl(this)" title="Tap to move patient">' + esc(String(pos)) + '</div>' +
              '</div>' +
              '<div class="wp-main">' +
                '<div class="wp-name-row">' +
@@ -3062,7 +3070,7 @@ function offRow(p) {
   var ageSex   = ageGenderShort(p);
   var row3     = (dobStr ? dobStr + ' &bull; ' : '') + esc(ageSex) + ' &bull; ' + mrpLabel(p) + lastBilledChip(p);
   return '<div class="alpha-row' + (dn ? ' done' : '') + '">' +
-    '<div class="alpha-av av-off" style="font-size:9px;font-weight:800;letter-spacing:-.3px" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(wardAbbr) + '</div>' +
+    '<div class="alpha-av av-off" style="font-size:9px;font-weight:800;letter-spacing:-.3px" data-pid="' + p.id + '" onclick="openLocationEditEl(this)" title="Tap to move patient">' + esc(wardAbbr) + '</div>' +
     '<div class="wp-main">' +
       '<div class="wp-name-row">' +
         '<span class="wp-name" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(String(p.last || '')) + ', ' + esc(String(p.first || '')) + '</span>' +
@@ -3122,7 +3130,7 @@ function alphaRow(p) {
   // Circle shows ward abbreviation (same as off-service)
   var wardAbbr = String(wardLabel(p.ward) || '').replace('Ward ', '').replace('ICU ', 'IC').slice(0, 5);
   return '<div class="alpha-row' + (dn ? ' done' : '') + '">' +
-    '<div class="alpha-av ' + avCls + '" style="font-size:9px;font-weight:800;letter-spacing:-.3px" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(wardAbbr) + '</div>' +
+    '<div class="alpha-av ' + avCls + '" style="font-size:9px;font-weight:800;letter-spacing:-.3px" data-pid="' + p.id + '" onclick="openLocationEditEl(this)" title="Tap to move patient">' + esc(wardAbbr) + '</div>' +
     '<div class="wp-main">' +
       '<div class="wp-name-row">' +
         '<span class="wp-name" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(String(p.last || '')) + ', ' + esc(String(p.first || '')) +
@@ -5250,6 +5258,168 @@ function savePatientEdit(pid) {
   showToast(p.last + ' updated');
 }
 
+// ═══════════════════════════════════════════════════════
+// Location edit — quick ward/bed/on-off-service change
+// Opened by tapping the ward/bed circle on any patient row.
+// Rule: if the new ward isn't a Cardiology MRP ward (CCU/2S/2W)
+// OR the list flips on→off, force role=consultant + mrp=Other.
+// ═══════════════════════════════════════════════════════
+function openLocationEditEl(el) {
+  var pid = el.getAttribute('data-pid') || (el.closest('[data-pid]') && el.closest('[data-pid]').getAttribute('data-pid'));
+  if (pid) openLocationEdit(pid);
+}
+
+function openLocationEdit(pid) {
+  var p = getP(pid);
+  if (!p || !p.id) return;
+
+  var html = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:13px">' +
+    '<div style="font-size:15px;font-weight:800;letter-spacing:-.3px">' + esc(p.last) + ', ' + esc(p.first) + '</div>' +
+    '<span style="font-size:10px;color:var(--text3)">Move patient</span>' +
+    '</div>';
+
+  // Current location chip
+  html += '<div style="background:var(--surface2);border-radius:var(--rsm);padding:8px 12px;margin-bottom:12px;font-size:12px;color:var(--text2)">' +
+    'Currently: <b style="color:var(--text)">' + esc((WARDS[p.ward] || {}).label || p.ward || '—') + '</b>' +
+    (p.bed ? ' &bull; ' + (p.ward === 'CCU' ? 'Bed' : 'Rm') + ' <b style="color:var(--text)">' + esc(p.bed) + '</b>' : '') +
+    ' &bull; <b style="color:var(--text)">' + (p.list === 'on' ? 'On' : 'Off') + ' service</b>' +
+    '</div>';
+
+  html += '<div class="card" style="margin-bottom:10px">';
+  html += '<div class="card-title">New location</div>';
+
+  // Row 1: Ward + Bed
+  html += '<div class="fl">';
+  html += '<div class="f1"><label>Ward</label><select id="le-ward" onchange="leWardChange()">';
+  Object.keys(WARDS).forEach(function(k) {
+    html += '<option value="' + k + '"' + (p.ward === k ? ' selected' : '') + '>' + WARDS[k].label + '</option>';
+  });
+  html += '</select></div>';
+  html += '<div class="f1"><label id="le-bed-lbl">' + (p.ward === 'CCU' ? 'Bed #' : 'Room') + '</label>' +
+          '<div style="position:relative">' +
+          '<input id="le-bed" autocorrect="off" autocomplete="off" placeholder="Select or type…" style="margin-bottom:0"' +
+          ' value="' + esc(p.bed || '') + '"' +
+          ' oninput="bedSearchEl(this,\'le-bed-dd\')" onfocus="bedSearchEl(this,\'le-bed-dd\')"' +
+          ' onblur="setTimeout(function(){hideBedDd(\'le-bed-dd\')},200)">' +
+          '<div class="bed-dd" id="le-bed-dd"></div>' +
+          '</div></div>';
+  html += '</div>';
+
+  // Row 2: On / Off service
+  html += '<div class="fl">';
+  html += '<div class="f1"><label>On / Off service</label><select id="le-list">' +
+          '<option value="on"'  + (p.list === 'on'  ? ' selected' : '') + '>On Service</option>' +
+          '<option value="off"' + (p.list === 'off' ? ' selected' : '') + '>Off Service</option>' +
+          '</select></div>';
+  html += '</div>';
+
+  html += '</div>'; // end location card
+
+  // Auto-rule hint
+  html += '<div id="le-rule-hint" style="font-size:11px;color:var(--text3);line-height:1.4;margin-bottom:12px;padding:0 4px"></div>';
+
+  // Save / Cancel
+  html += '<div class="fl" style="gap:8px">';
+  html += '<button class="btn btn-p" style="margin:0;flex:1" ' +
+          'data-pid="' + pid + '" onclick="saveLocationEdit(this.getAttribute(\'data-pid\'))">Save</button>';
+  html += '<button class="btn btn-s" style="margin:0;flex:1" onclick="hideModal(\'loc-edit-modal\')">Cancel</button>';
+  html += '</div>';
+
+  document.getElementById('loc-edit-content').innerHTML = html;
+  showModal('loc-edit-modal');
+
+  // Pre-populate bed and start rule hint
+  setTimeout(function() {
+    var bedInp = document.getElementById('le-bed');
+    if (bedInp && p.bed) bedInp.value = p.bed;
+    leUpdateRuleHint(p);
+  }, 50);
+}
+
+// Whether a ward is a Cardiology MRP ward where this group is primary
+function _isCardiologyMRPWard(ward) {
+  return ward === 'CCU' || ward === '2S' || ward === '2W';
+}
+
+function leWardChange() {
+  var ward   = (document.getElementById('le-ward') || {}).value || '';
+  var bedLbl = document.getElementById('le-bed-lbl');
+  if (bedLbl) bedLbl.textContent = ward === 'CCU' ? 'Bed #' : 'Room';
+  // Clear bed when ward changes (different room layout)
+  var bedInp = document.getElementById('le-bed');
+  if (bedInp) bedInp.value = '';
+  // Snap list to ward default (on for CCU/2S/2W; off otherwise)
+  var listSel = document.getElementById('le-list');
+  if (listSel) listSel.value = _isCardiologyMRPWard(ward) ? 'on' : 'off';
+  // Rule hint needs latest values; use null patient so we just read controls
+  leUpdateRuleHint(null);
+}
+
+function leUpdateRuleHint(p) {
+  var hint = document.getElementById('le-rule-hint');
+  if (!hint) return;
+  var newWard = (document.getElementById('le-ward') || {}).value || '';
+  var newList = (document.getElementById('le-list') || {}).value || 'on';
+  var oldList = p ? p.list : null;
+
+  var movedOff       = oldList === 'on' && newList === 'off';
+  var leftCardiology = !_isCardiologyMRPWard(newWard);
+  if (movedOff || leftCardiology) {
+    hint.innerHTML = '<b style="color:var(--amber-t)">Note:</b> role will change to ' +
+      '<b>Consulting</b> and MRP to <b>Other</b>. Open full edit if you need to keep them as MRP/Cardiology.';
+  } else {
+    hint.textContent = '';
+  }
+}
+
+function saveLocationEdit(pid) {
+  var p = getP(pid);
+  if (!p || !p.id) return;
+
+  var newWard = (document.getElementById('le-ward') || {}).value || p.ward;
+  var newBed  = (document.getElementById('le-bed')  || {}).value || '';
+  var newList = (document.getElementById('le-list') || {}).value || p.list;
+
+  var oldWard = p.ward;
+  var oldBed  = p.bed || '';
+  var oldList = p.list;
+
+  // Apply the rule: leaving cardiology wards OR going on→off → consultant + Other
+  var leftCardiology = !_isCardiologyMRPWard(newWard);
+  var movedOff       = oldList === 'on' && newList === 'off';
+  var snappedRole    = false;
+  if (leftCardiology || movedOff) {
+    if (p.role === 'mrp' || (p.mrp && p.mrp === 'Cardiology')) snappedRole = true;
+    p.role = 'consultant';
+    p.mrp  = 'Other';
+    // Care code stays user-controlled via full edit; default to directive for consultants
+    if (p.care !== 'combined') p.care = 'directive';
+  }
+
+  p.ward = newWard;
+  p.bed  = newBed;
+  p.list = newList;
+
+  saveCustomRoom(p.ward, p.bed);
+  sv('patients', st.patients);
+  if (SHEETS_URL) push('savePatient', p);
+
+  // Concise change-log entry
+  var bits = [];
+  if (oldWard !== newWard) bits.push(((WARDS[oldWard]||{}).label || oldWard || '—') + ' → ' + ((WARDS[newWard]||{}).label || newWard));
+  if (oldBed  !== newBed)  bits.push('bed ' + (oldBed || '—') + ' → ' + (newBed || '—'));
+  if (oldList !== newList) bits.push((oldList === 'on' ? 'On' : 'Off') + ' → ' + (newList === 'on' ? 'On' : 'Off') + ' service');
+  if (snappedRole)         bits.push('role→Consulting, MRP→Other');
+  logChange(p, 'Moved', bits.join('; ') || 'no change');
+
+  hideModal('loc-edit-modal');
+  render();
+  var toastBits = [];
+  if (oldWard !== newWard || oldBed !== newBed) toastBits.push((WARDS[newWard]||{}).label || newWard);
+  if (newBed) toastBits.push(newBed);
+  showToast(p.last + ' moved' + (toastBits.length ? ' → ' + toastBits.join(' ') : ''));
+}
+
 // ── 07_consult.js ──
 // ═══════════════════════════════════════════════════════
 // 07_consult.js — Consult form (33010/33012), MOST toggle,
@@ -5800,6 +5970,56 @@ function mergePatient(action) {
   }
 }
 
+// Soft duplicate check — fires when last name + DOB match an existing
+// patient but PHN differs (suggests a PHN typo). Does NOT block: gives
+// the doctor the choice to fix the PHN or proceed as a new patient.
+function openPossibleDuplicateModal(existing, withClaim) {
+  var newPhn  = gv('f-phn');
+  var typedLs = String((existing.last||'') + ', ' + (existing.first||'')).trim();
+  var dobStr  = existing.dob ? fmtClaimDate(existing.dob) : '—';
+  var status  = existing.discharged
+    ? '<span style="background:var(--amber-bg);color:var(--amber-t);padding:2px 8px;border-radius:var(--rpill);font-size:10px;font-weight:700">Previously discharged</span>'
+    : '<span style="background:var(--red-bg);color:var(--red-t);padding:2px 8px;border-radius:var(--rpill);font-size:10px;font-weight:700">Currently on list</span>';
+  var claimCount = st.claims.filter(function(c) { return samePhn(c.phn, existing.phn); }).length;
+
+  var h = status +
+    '<div style="margin:10px 0 4px;font-size:13px;font-weight:700">' + esc(typedLs) + '</div>' +
+    '<div style="font-size:11px;color:var(--text2)">DOB: ' + esc(dobStr) + ' &bull; ' + claimCount + ' claim(s)</div>' +
+    '<div style="margin-top:8px;font-size:12px;line-height:1.45">' +
+      'A patient with the <b>same last name and DOB</b> already exists with PHN ' +
+      '<b>' + esc(existing.phn || '—') + '</b>.<br>' +
+      'You entered PHN <b>' + esc(newPhn) + '</b>.' +
+    '</div>' +
+    '<div style="color:var(--amber-t);font-weight:700;font-size:12px;margin-top:8px">' +
+      '⚠ Likely PHN typo — re-check before adding as a new patient' +
+    '</div>' +
+    '<div style="margin-top:14px;display:flex;flex-direction:column;gap:8px">' +
+      '<button class="btn btn-p" style="margin:0" data-wc="' + (withClaim?'1':'0') + '" onclick="_pdRecheckPhn(this)">Re-check PHN — likely typo</button>' +
+      '<button class="btn btn-s" style="margin:0" data-wc="' + (withClaim?'1':'0') + '" onclick="_pdContinueAnyway(this)">Continue — different patient</button>' +
+    '</div>';
+
+  document.getElementById('merge-title').textContent = 'Possible duplicate patient';
+  document.getElementById('merge-body').innerHTML = h;
+  showModal('merge-modal');
+}
+
+function _pdRecheckPhn(btn) {
+  hideModal('merge-modal');
+  var phnEl = document.getElementById('f-phn');
+  if (phnEl) {
+    phnEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)';
+    phnEl.select();
+    phnEl.focus();
+  }
+  showToast('Check PHN — may be a transcription error');
+}
+
+function _pdContinueAnyway(btn) {
+  hideModal('merge-modal');
+  var withClaim = btn.getAttribute('data-wc') === '1';
+  _addPatientCore(withClaim, true);  // skip the name+DOB check this time
+}
+
 // ── Add patient — entry points ────────────────────────────
 function addPatientWithConsult() {
   // Validate consult date before proceeding
@@ -5813,7 +6033,9 @@ function addPatientOnly() {
 }
 
 // Shared patient validation, creation and optional consult claim.
-function _addPatientCore(withClaim) {
+// skipNameDobDup: set true when the user already saw the soft duplicate
+// warning and chose "Continue — different patient".
+function _addPatientCore(withClaim, skipNameDobDup) {
   var last = gv('f-last');
   var phn  = gv('f-phn');
   if (!last) { showToast('Enter patient last name'); return; }
@@ -5857,6 +6079,25 @@ function _addPatientCore(withClaim) {
   if (dischExisting) {
     openMergeModal(dischExisting, true);
     return;
+  }
+
+  // Soft duplicate check: same LAST NAME + DOB but DIFFERENT PHN.
+  // Likely a PHN typo. Warn the user but allow them to proceed.
+  if (!skipNameDobDup) {
+    var lastLc = String(last || '').trim().toLowerCase();
+    var dobFmt = fmtClaimDate(gv('f-dob') || '');
+    if (lastLc && dobFmt) {
+      var nameDobMatch = st.patients.find(function(x) {
+        if (!x || x.phn === phn) return false;
+        var xLast = String(x.last || '').trim().toLowerCase();
+        var xDob  = x.dob ? fmtClaimDate(x.dob) : '';
+        return xLast === lastLc && xDob === dobFmt;
+      });
+      if (nameDobMatch) {
+        openPossibleDuplicateModal(nameDobMatch, withClaim);
+        return;
+      }
+    }
   }
 
   var p = {
