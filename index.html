@@ -1,9 +1,23 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology Billing — main app
-  Version:    v3.32
-  Built:      2026-05-11 UTC
+  Version:    v3.33
+  Built:      2026-05-13 UTC
   Repo:       github.com/KelownaCardio/kelownacardio.github.io
+
+  Changes in this build (v3.33) — Meditech import auto-discharge:
+    - Cardiologist matchers (inferMRP, inferCare) replaced with the
+      actual app users + 'CardiologyMRP' group label. Surnames wan/
+      soon removed — those are cardiac SURGEONS, not cardiologists.
+    - New helpers isCardiologistAttending() and isCardiacSurgeonAttending()
+      with explicit CARDIOLOGIST_SURNAMES and CARDIAC_SURGEON_SURNAMES
+      constants at the top of 13_meditech.js.
+    - Meditech import now also flags discharge candidates: active
+      on-service patients who are (a) not on the imported list, or
+      (b) on the list with a cardiac surgeon as attending. Shown in
+      a pre-checked red section at the top of the import modal; MD
+      can uncheck any that should stay. Confirm processes discharges
+      first (logChange "Discharged via Meditech import"), then imports.
 
   Changes in this build (v3.32) — toast + ward defaults:
     - showToast no longer stacks. Each call removes any previous toast
@@ -656,7 +670,7 @@ input[type=file] { display:none; }
     </div>
     <div class="hdr-divider"></div>
     <div>
-      <div class="hdr-title">Kelowna Cardiology <span id="hdr-version" style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.32</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-title">Kelowna Cardiology <span id="hdr-version" style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.33</span> <span class="sync-dot" id="sync-dot"></span></div>
       <div class="hdr-sub" id="hdr-date"></div>
     </div>
   </div>
@@ -1802,6 +1816,7 @@ var _claimPid = null;   // patient id open in claim screen
 var _locPid   = null;   // patient id open in location screen
 var _locWard  = null;   // selected ward in location screen
 var _mitPats  = [];     // meditech import staging
+var _mitDisch = [];     // meditech: on-service patients flagged for discharge
 var _incUnits = 1;      // modifier increment units on consult form
 var _mostOn   = true;   // MOST toggle state
 
@@ -1824,7 +1839,7 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.27-2026-05-12-soft-dup-and-loc-edit';
+var BUILD_ID    = 'v3.33-2026-05-13-meditech-auto-discharge';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
@@ -7864,19 +7879,50 @@ function parseLocCode(locCode, roomBed) {
   return { ward:ward, room:room };
 }
 
+// ── Cardiology / Cardiac Surgery matcher constants ────
+// Cardiologists = app users + generic group MRP. Surnames must include
+// trailing comma to match Meditech "LastName,FirstName" pattern.
+var CARDIOLOGIST_SURNAMES = [
+  'halperin,', 'patton,', 'brown,',   'todd,',    'webber,',
+  'hoskin,',   'sodhi,',  'khosla,',  'massie,',  'baker,'
+];
+// Cardiac surgeons — confirmed by Kathryn 2026-05-13.
+var CARDIAC_SURGEON_SURNAMES = [
+  'schulze,', 'soon,', 'wan,', 'goubran,', 'poostizadeh,'
+];
+
+function _attHasAny(att, surnames) {
+  for (var i = 0; i < surnames.length; i++) {
+    if (att.indexOf(surnames[i]) !== -1) return true;
+  }
+  return false;
+}
+
+function isCardiologistAttending(attending) {
+  var att = (attending || '').toLowerCase();
+  // Generic group MRP — written as "CardiologyMRP" or just "Cardiology"
+  if (att.indexOf('cardiologymrp') !== -1) return true;
+  // Plain "cardiology" alone (not "cardiac surgery" or "cardiac surg")
+  if (att.indexOf('cardiology') !== -1 && att.indexOf('cardiac surg') === -1) return true;
+  return _attHasAny(att, CARDIOLOGIST_SURNAMES);
+}
+
+function isCardiacSurgeonAttending(attending) {
+  var att = (attending || '').toLowerCase();
+  if (att.indexOf('cardiac surg') !== -1) return true;
+  return _attHasAny(att, CARDIAC_SURGEON_SURNAMES);
+}
+
 // Infer On/Off service and care type from ward and attending provider string
 function inferMRP(attending) {
   var att = (attending || '').toLowerCase();
-  if (att.indexOf('cardiology') !== -1 || att.indexOf('wan,') !== -1 ||
-      att.indexOf('soon,') !== -1 || att.indexOf('brown,') !== -1 ||
-      att.indexOf('patton,') !== -1 || att.indexOf('hoskin,') !== -1 ||
-      att.indexOf('massie,') !== -1 || att.indexOf('sodhi,') !== -1)
+  if (isCardiologistAttending(attending))
     return 'Cardiology';
   if (att.indexOf('hospitalist') !== -1 || att.indexOf('internal med') !== -1)
     return 'Hospitalist';
   if (att.indexOf('ctu') !== -1 || att.indexOf('clinical teach') !== -1)
     return 'CTU';
-  if (att.indexOf('csicu') !== -1 || att.indexOf('cardiac surg') !== -1)
+  if (isCardiacSurgeonAttending(attending) || att.indexOf('csicu') !== -1)
     return 'Cardiac Surgery';
   if (att.indexOf('icu') !== -1 || att.indexOf('critical care') !== -1)
     return 'ICU';
@@ -7884,16 +7930,7 @@ function inferMRP(attending) {
 }
 
 function inferCare(ward, attending) {
-  var att = (attending || '').toLowerCase();
-  var isCardioMRP =
-    att.indexOf('cardiologymrp') !== -1 ||
-    att.indexOf('wan,')          !== -1 ||
-    att.indexOf('soon,')         !== -1 ||
-    att.indexOf('brown,')        !== -1 ||
-    att.indexOf('patton,')       !== -1 ||
-    att.indexOf('hoskin,')       !== -1 ||
-    att.indexOf('massie,')       !== -1 ||
-    att.indexOf('sodhi,')        !== -1;
+  var isCardioMRP = isCardiologistAttending(attending);
 
   if (isCardioMRP && (ward === '2S' || ward === '2W' || ward === 'CCU' || ward === 'CSICU' || ward === 'ICUA' || ward === 'ICUB')) {
     return { list:'on', care: (ward === 'CCU' || ward === 'CSICU' || ward === 'ICUA' || ward === 'ICUB') ? 'ccu' : 'daily', role:'mrp' };
@@ -7995,6 +8032,36 @@ function renderMediteachPreview(patients) {
   var offCnt = _mitPats.filter(function(p) { return p._list === 'off' && p._include; }).length;
   var exCnt  = _mitPats.filter(function(p) { return p._existing; }).length;
 
+  // ── Discharge candidates ───────────────────────────────
+  // For each currently active on-service patient, check whether they:
+  //   (a) are missing from the imported Meditech list, OR
+  //   (b) appear in the imported list but with a cardiac surgeon as attending
+  // Either case → flag as a discharge candidate (pre-checked, user can uncheck).
+  // Name match: case-insensitive last + first-token, same rule as _existing.
+  function nameKey(last, first) {
+    return String(last  || '').toLowerCase().trim() + '|' +
+           String(first || '').toLowerCase().trim().split(' ')[0];
+  }
+  var importedByKey = {};
+  _mitPats.forEach(function(p) { importedByKey[nameKey(p.last, p.first)] = p; });
+
+  _mitDisch = st.patients.filter(function(p) {
+    return !p.discharged && p.list === 'on';
+  }).map(function(p, i) {
+    var match = importedByKey[nameKey(p.last, p.first)];
+    var reason = null;
+    if (!match) {
+      reason = 'Not on Meditech list';
+    } else if (isCardiacSurgeonAttending(match.attending)) {
+      reason = '→ Cardiac Surgery (' + (match.attending || '').trim() + ')';
+    }
+    if (!reason) return null;
+    return {
+      _idx: i, pid: p.id, last: p.last, first: p.first,
+      ward: p.ward, bed: p.bed || '', reason: reason, _include: true
+    };
+  }).filter(function(x) { return x !== null; });
+
   status.textContent = 'Found ' + _mitPats.length + ' patients — ' + onCnt + ' on service, ' + offCnt + ' off service.';
 
   var sumEl = document.getElementById('mit-sum');
@@ -8002,9 +8069,41 @@ function renderMediteachPreview(patients) {
   sumEl.innerHTML = '<div class="imp-sum">' +
     _mitPats.length + ' patients &bull; ' + onCnt + ' on service &bull; ' + offCnt + ' off service' +
     (exCnt ? ' &bull; ' + exCnt + ' already on list (skipped)' : '') +
+    (_mitDisch.length ? ' &bull; ' + _mitDisch.length + ' to remove' : '') +
     '</div>';
 
-  document.getElementById('mit-rows').innerHTML = _mitPats.map(function(p) {
+  // Discharge section (above the import rows) — only rendered if any candidates
+  var dischHtml = '';
+  if (_mitDisch.length) {
+    dischHtml =
+      '<div class="sec-lbl" style="color:var(--red-t);margin-top:4px">' +
+        'Remove from on-service list (' + _mitDisch.length + ')' +
+      '</div>' +
+      '<div style="font-size:10px;color:var(--text2);margin-bottom:6px;line-height:1.4">' +
+        'Pre-checked. Uncheck any patient who should stay on the list ' +
+        '(e.g. OCR missed their row on a long list).' +
+      '</div>' +
+      _mitDisch.map(function(d) {
+        return '<div class="imp-row" id="imp-disch-row-' + d._idx + '" style="border-color:#eab8b3;background:var(--red-bg)">' +
+          '<div class="imp-chk on" id="imp-disch-chk-' + d._idx + '" ' +
+            'style="background:var(--red);border-color:var(--red)" ' +
+            'onclick="toggleImpDisch(' + d._idx + ')">' +
+            '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>' +
+          '</div>' +
+          '<div class="imp-info">' +
+            '<div class="imp-name">' + esc(d.last) + ', ' + esc(d.first) + '</div>' +
+            '<div class="imp-meta">' + wardLabel(d.ward) + (d.bed ? ' Rm ' + esc(d.bed) : '') + '</div>' +
+            '<div class="imp-meta" style="color:var(--red-t);font-weight:600">' + esc(d.reason) + '</div>' +
+          '</div>' +
+        '</div>';
+      }).join('') +
+      '<div style="height:10px"></div>' +
+      (_mitPats.length
+        ? '<div class="sec-lbl" style="margin-top:4px">Add from Meditech (' + _mitPats.filter(function(p){return !p._existing;}).length + ' new)</div>'
+        : '');
+  }
+
+  document.getElementById('mit-rows').innerHTML = dischHtml + _mitPats.map(function(p) {
     return '<div class="imp-row' + (p._existing ? ' existing' : '') + '" id="imp-row-' + p._idx + '">' +
       '<div class="imp-chk' + (p._include ? ' on' : '') + '" id="imp-chk-' + p._idx + '" onclick="toggleImpRow(' + p._idx + ')">' +
         (p._include ? '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>' : '') +
@@ -8038,8 +8137,42 @@ function toggleImpRow(idx) {
   row.classList.toggle('excluded', !p._include);
 }
 
+function toggleImpDisch(idx) {
+  var d = _mitDisch[idx];
+  d._include = !d._include;
+  var chk = document.getElementById('imp-disch-chk-' + idx);
+  var row = document.getElementById('imp-disch-row-' + idx);
+  if (d._include) {
+    chk.classList.add('on');
+    chk.style.background    = 'var(--red)';
+    chk.style.borderColor   = 'var(--red)';
+    chk.innerHTML = '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>';
+    row.classList.remove('excluded');
+  } else {
+    chk.classList.remove('on');
+    chk.style.background  = 'var(--surface)';
+    chk.style.borderColor = 'var(--border2)';
+    chk.innerHTML = '';
+    row.classList.add('excluded');
+  }
+}
+
 function confirmMediteachImport() {
   if (!checkDoc()) return;
+
+  // ── Discharges first (so re-imports of same names don't re-add them) ──
+  var toDisch = _mitDisch.filter(function(d) { return d._include; });
+  toDisch.forEach(function(d) {
+    var p = st.patients.find(function(pp) { return pp.id === d.pid; });
+    if (!p) return;
+    p.dischargeDate = TODAY;                                // DD/MM/YYYY display
+    p.dischargedAt  = Date.now();                           // epoch ms — drives "recently discharged" sort
+    p.discharged    = true;
+    if (SHEETS_URL) push('savePatient', p);
+    logChange(p, 'Discharged via Meditech import', d.reason);
+  });
+
+  // ── Imports ───────────────────────────────────────────
   var toImport = _mitPats.filter(function(p) { return p._include && !p._existing; });
   toImport.forEach(function(p) {
     var newPt = {
@@ -8068,8 +8201,14 @@ function confirmMediteachImport() {
   sv('patients', st.patients);
   hideModal('mit-modal');
   render();
-  showToast(toImport.length + ' patients imported');
-  _mitPats = [];
+
+  var msg = [];
+  if (toImport.length) msg.push(toImport.length + ' imported');
+  if (toDisch.length)  msg.push(toDisch.length  + ' discharged');
+  showToast(msg.length ? msg.join(', ') : 'Nothing to change');
+
+  _mitPats  = [];
+  _mitDisch = [];
 }
 
 // ── 14_init.js ──
