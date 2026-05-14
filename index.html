@@ -1393,171 +1393,391 @@ var LEGACY_FEE_LABELS = {
 // Grouped by category but stored flat for search.
 // Cardiology-relevant codes prioritised; common comorbidities included.
 var DIAGNOSES = [
-  { code:'391', label:'Rheumatic fever with heart involvement (391)' },
-  { code:'391.0', label:'Acute rheumatic pericarditis (391.0)' },
-  { code:'391.1', label:'Acute rheumatic endocarditis (391.1)' },
-  { code:'391.2', label:'Acute rheumatic myocarditis (391.2)' },
-  { code:'391.9', label:'Acute rheumatic heart disease unspecified (391.9)' },
-  { code:'394.0', label:'Mitral stenosis (394.0)' },
-  { code:'394.1', label:'Rheumatic mitral insufficiency (394.1)' },
-  { code:'394.2', label:'Mitral stenosis with insufficiency (394.2)' },
-  { code:'394.9', label:'Mitral valve disease other / unspecified (394.9)' },
-  { code:'395.0', label:'Rheumatic aortic stenosis (395.0)' },
-  { code:'395.1', label:'Rheumatic aortic insufficiency (395.1)' },
-  { code:'395.2', label:'Rheumatic aortic stenosis with insufficiency (395.2)' },
-  { code:'395.9', label:'Aortic valve disease other / unspecified (395.9)' },
-  { code:'396', label:'Diseases of mitral and aortic valves (396)' },
-  { code:'397.0', label:'Tricuspid valve disease (397.0)' },
-  { code:'397.1', label:'Rheumatic pulmonary valve disease (397.1)' },
-  { code:'397.9', label:'Rheumatic endocardium disease, valve unspecified (397.9)' },
-  { code:'398.0', label:'Rheumatic myocarditis (398.0)' },
-  { code:'398.9', label:'Rheumatic heart disease, other (398.9)' },
-  { code:'401.0', label:'Hypertension malignant (401.0)' },
-  { code:'401.1', label:'Hypertension benign (401.1)' },
-  { code:'401.9', label:'Hypertension unspecified (401.9)' },
-  { code:'402.0', label:'Hypertensive heart disease malignant (402.0)' },
-  { code:'402.1', label:'Hypertensive heart disease benign (402.1)' },
-  { code:'402.9', label:'Hypertensive heart disease unspecified (402.9)' },
-  { code:'403.0', label:'Hypertensive renal disease malignant (403.0)' },
-  { code:'403.1', label:'Hypertensive renal disease benign (403.1)' },
-  { code:'403.9', label:'Hypertensive renal disease unspecified (403.9)' },
-  { code:'404.0', label:'Hypertensive heart and renal disease malignant (404.0)' },
-  { code:'404.1', label:'Hypertensive heart and renal disease benign (404.1)' },
-  { code:'404.9', label:'Hypertensive heart and renal disease unspecified (404.9)' },
-  { code:'405.0', label:'Secondary hypertension malignant (405.0)' },
-  { code:'405.1', label:'Secondary hypertension benign (405.1)' },
-  { code:'405.9', label:'Secondary hypertension unspecified (405.9)' },
-  { code:'410', label:'Acute myocardial infarction (410)' },
-  { code:'410.0', label:'Acute myocardial infarction (specified site) (410.0)' },
-  { code:'411', label:'Other acute / subacute ischaemic heart disease (411)' },
-  { code:'412', label:'Old myocardial infarction (412)' },
+  { code:'4280', label:'Congestive heart failure (4280)' },
+  { code:'4281', label:'Left heart failure (4281)' },
+  { code:'4289', label:'Heart failure, unspecified (4289)' },
+  { code:'4273', label:'Atrial fibrillation / flutter (4273)' },
+  { code:'4140', label:'Coronary atherosclerosis (CAD) (4140)' },
+  { code:'4148', label:'Chronic ischemic heart disease (4148)' },
+  { code:'411', label:'NSTEMI / unstable angina (411)' },
+  { code:'4100', label:'Acute MI (4100)' },
   { code:'413', label:'Angina pectoris (413)' },
-  { code:'414.0', label:'Coronary atherosclerosis (414.0)' },
-  { code:'414.1', label:'Aneurysm of heart (414.1)' },
-  { code:'414.8', label:'Chronic ischaemic heart disease other (414.8)' },
-  { code:'414.9', label:'Chronic ischaemic heart disease unspecified (414.9)' },
-  { code:'415.0', label:'Acute cor pulmonale (415.0)' },
-  { code:'415.1', label:'Pulmonary embolism (415.1)' },
-  { code:'416.0', label:'Primary pulmonary hypertension (416.0)' },
-  { code:'416.1', label:'Kyphoscoliotic heart disease (416.1)' },
-  { code:'416.8', label:'Chronic pulmonary heart disease other (416.8)' },
-  { code:'416.9', label:'Pulmonary heart disease unspecified (416.9)' },
-  { code:'417.0', label:'Arteriovenous fistula of pulmonary vessels (417.0)' },
-  { code:'417.1', label:'Aneurysm of pulmonary artery (417.1)' },
-  { code:'417.8', label:'Pulmonary circulation disease other (417.8)' },
-  { code:'417.9', label:'Pulmonary circulation disease unspecified (417.9)' },
-  { code:'420.0', label:'Pericarditis in diseases classified elsewhere (420.0)' },
-  { code:'420.9', label:'Acute pericarditis, other / unspecified (420.9)' },
-  { code:'421.0', label:'Acute / subacute bacterial endocarditis (421.0)' },
-  { code:'421.1', label:'Acute / subacute infective endocarditis (421.1)' },
-  { code:'421.9', label:'Acute endocarditis unspecified (421.9)' },
-  { code:'422.0', label:'Acute myocarditis in diseases classified elsewhere (422.0)' },
-  { code:'422.9', label:'Acute myocarditis other / unspecified (422.9)' },
-  { code:'423.0', label:'Haemopericardium (423.0)' },
-  { code:'423.1', label:'Adhesive pericarditis (423.1)' },
-  { code:'423.2', label:'Constrictive pericarditis (423.2)' },
-  { code:'423.8', label:'Pericardium disease other (423.8)' },
-  { code:'423.9', label:'Pericardium disease unspecified (423.9)' },
-  { code:'424.0', label:'Mitral valve disorders (non-rheumatic) (424.0)' },
-  { code:'424.1', label:'Aortic valve disorders (non-rheumatic) (424.1)' },
-  { code:'424.2', label:'Tricuspid valve disorders (non-rheumatic) (424.2)' },
-  { code:'424.3', label:'Pulmonary valve disorders (non-rheumatic) (424.3)' },
-  { code:'424.9', label:'Endocarditis, valve unspecified (424.9)' },
-  { code:'425.0', label:'Endomyocardial fibrosis (425.0)' },
-  { code:'425.1', label:'Hypertrophic obstructive cardiomyopathy (HOCM) (425.1)' },
-  { code:'425.2', label:'Obscure cardiomyopathy of Africa (425.2)' },
-  { code:'425.3', label:'Endocardial fibroelastosis (425.3)' },
-  { code:'425.4', label:'Primary cardiomyopathy other (dilated) (425.4)' },
-  { code:'425.5', label:'Alcoholic cardiomyopathy (425.5)' },
-  { code:'425.7', label:'Nutritional / metabolic cardiomyopathy (425.7)' },
-  { code:'425.8', label:'Cardiomyopathy in other diseases (425.8)' },
-  { code:'425.9', label:'Secondary cardiomyopathy unspecified (425.9)' },
-  { code:'426.0', label:'Atrioventricular block, complete (426.0)' },
-  { code:'426.1', label:'Atrioventricular block, other / unspecified (426.1)' },
-  { code:'426.2', label:'Left bundle branch hemiblock (426.2)' },
-  { code:'426.3', label:'Left bundle branch block (LBBB) (426.3)' },
-  { code:'426.4', label:'Right bundle branch block (RBBB) (426.4)' },
-  { code:'426.5', label:'Bundle branch block unspecified (426.5)' },
-  { code:'426.6', label:'Other heart block (426.6)' },
-  { code:'426.7', label:'Anomalous AV excitation (WPW) (426.7)' },
-  { code:'426.8', label:'Conduction disorder other (426.8)' },
-  { code:'426.9', label:'Conduction disorder unspecified (426.9)' },
-  { code:'427.0', label:'Paroxysmal supraventricular tachycardia (PSVT) (427.0)' },
-  { code:'427.1', label:'Paroxysmal ventricular tachycardia (427.1)' },
-  { code:'427.2', label:'Paroxysmal tachycardia unspecified (427.2)' },
-  { code:'427.3', label:'Atrial fibrillation / flutter (427.3)' },
-  { code:'427.4', label:'Ventricular fibrillation / flutter (427.4)' },
-  { code:'427.5', label:'Cardiac arrest (427.5)' },
-  { code:'427.6', label:'Premature beats (427.6)' },
-  { code:'427.8', label:'Cardiac dysrhythmia other (427.8)' },
-  { code:'427.9', label:'Cardiac dysrhythmia unspecified (427.9)' },
-  { code:'428.0', label:'Congestive heart failure (CHF) (428.0)' },
-  { code:'428.1', label:'Left heart failure (428.1)' },
-  { code:'428.9', label:'Heart failure unspecified (428.9)' },
-  { code:'429.0', label:'Myocarditis unspecified (429.0)' },
-  { code:'429.1', label:'Myocardial degeneration (429.1)' },
-  { code:'429.2', label:'Cardiovascular disease unspecified (429.2)' },
-  { code:'429.3', label:'Cardiomegaly (429.3)' },
-  { code:'429.4', label:'Functional disturbance following cardiac surgery (429.4)' },
-  { code:'429.5', label:'Rupture of chordae tendinae (429.5)' },
-  { code:'429.6', label:'Rupture of papillary muscle (429.6)' },
-  { code:'429.8', label:'Heart disease other (429.8)' },
-  { code:'429.9', label:'Heart disease unspecified (429.9)' },
-  { code:'430', label:'Subarachnoid haemorrhage (430)' },
-  { code:'431', label:'Intracerebral haemorrhage (431)' },
-  { code:'433.1', label:'Carotid artery occlusion / stenosis (433.1)' },
-  { code:'434.0', label:'Cerebral thrombosis (434.0)' },
-  { code:'434.1', label:'Cerebral embolism (434.1)' },
-  { code:'434.9', label:'Cerebral artery occlusion unspecified (434.9)' },
-  { code:'435', label:'Transient cerebral ischaemia (TIA) (435)' },
-  { code:'436', label:'Acute but ill-defined cerebrovascular disease (436)' },
-  { code:'438', label:'Late effects of cerebrovascular disease (438)' },
-  { code:'440.0', label:'Atherosclerosis of aorta (440.0)' },
-  { code:'440.1', label:'Atherosclerosis of renal artery (440.1)' },
-  { code:'440.2', label:'Atherosclerosis of extremities (PVD) (440.2)' },
-  { code:'440.9', label:'Atherosclerosis generalized / unspecified (440.9)' },
-  { code:'441.0', label:'Dissecting aneurysm of aorta (441.0)' },
-  { code:'441.1', label:'Thoracic aortic aneurysm, ruptured (441.1)' },
-  { code:'441.2', label:'Thoracic aortic aneurysm without rupture (441.2)' },
-  { code:'441.3', label:'Abdominal aortic aneurysm, ruptured (441.3)' },
-  { code:'441.4', label:'Abdominal aortic aneurysm without rupture (441.4)' },
-  { code:'441.5', label:'Aortic aneurysm unspecified, ruptured (441.5)' },
-  { code:'441.6', label:'Aortic aneurysm unspecified, no rupture (441.6)' },
-  { code:'441.7', label:'Syphilitic aortic aneurysm (441.7)' },
-  { code:'443.9', label:'Peripheral vascular disease unspecified (443.9)' },
-  { code:'444.0', label:'Embolism / thrombosis of abdominal aorta (444.0)' },
-  { code:'444.1', label:'Embolism / thrombosis of other aorta (444.1)' },
-  { code:'444.2', label:'Embolism / thrombosis of extremity arteries (444.2)' },
-  { code:'451.1', label:'Phlebitis / thrombophlebitis of deep vessels lower ext (451.1)' },
-  { code:'451.2', label:'Phlebitis lower extremities unspecified (451.2)' },
-  { code:'453.9', label:'Venous embolism / thrombosis (DVT) (453.9)' },
-  { code:'458.0', label:'Orthostatic hypotension (458.0)' },
-  { code:'458.1', label:'Chronic hypotension (458.1)' },
-  { code:'458.9', label:'Hypotension unspecified (458.9)' },
-  { code:'459.0', label:'Haemorrhage unspecified (459.0)' },
-  { code:'038.9', label:'Sepsis / septicaemia unspecified (038.9)' },
-  { code:'250.0', label:'Diabetes mellitus type 2 (250.0)' },
-  { code:'272.0', label:'Hypercholesterolemia (272.0)' },
-  { code:'272.4', label:'Hyperlipidemia other / unspecified (272.4)' },
-  { code:'276.5', label:'Volume depletion / dehydration (276.5)' },
-  { code:'276.7', label:'Hyperkalemia (276.7)' },
-  { code:'276.8', label:'Hypokalemia (276.8)' },
-  { code:'285.1', label:'Acute blood loss anemia (285.1)' },
-  { code:'285.9', label:'Anemia unspecified (285.9)' },
-  { code:'414', label:'Coronary artery disease (CAD) (414)' },
-  { code:'428', label:'Heart failure (general) (428)' },
-  { code:'486', label:'Pneumonia (486)' },
-  { code:'491', label:'Chronic bronchitis (491)' },
+  { code:'4011', label:'Essential hypertension, benign (4011)' },
+  { code:'4019', label:'Essential hypertension (4019)' },
+  { code:'4254', label:'Primary cardiomyopathy, other (4254)' },
+  { code:'4251', label:'Hypertrophic obstructive cardiomyopathy (HOCM) (4251)' },
+  { code:'4271', label:'Ventricular tachycardia (4271)' },
+  { code:'4275', label:'Cardiac arrest (4275)' },
+  { code:'4279', label:'Dysrhythmia, unspecified (4279)' },
+  { code:'4240', label:'Mitral valve disorder (4240)' },
+  { code:'4241', label:'Aortic valve disorder (4241)' },
+  { code:'4292', label:'Cardiovascular disease, unspecified (4292)' },
+  { code:'4293', label:'Cardiomegaly (4293)' },
+  { code:'4439', label:'Peripheral vascular disease (4439)' },
+  { code:'4150', label:'Acute cor pulmonale (4150)' },
+  { code:'4151', label:'Pulmonary embolism / infarction (4151)' },
+  { code:'4168', label:'Chronic pulmonary heart disease (incl. pulm HTN) (4168)' },
+  { code:'5849', label:'Acute kidney failure (5849)' },
+  { code:'250', label:'Diabetes Mellitus (250)' },
+  { code:'2500', label:'Diabetes Mellitus Without Mention Of Complication (2500)' },
+  { code:'2501', label:'Diabetes With Ketoacidosis (2501)' },
+  { code:'2502', label:'Diabetes With Coma (2502)' },
+  { code:'2503', label:'Diabetes With Renal Manifestations (2503)' },
+  { code:'2504', label:'Diabetes With Ophthalmic Manifestations (2504)' },
+  { code:'2505', label:'Diabetes With Neurological Manifestations (2505)' },
+  { code:'25050', label:'Diabetes With Ocular Involvment, Adult (25050)' },
+  { code:'25051', label:'Diabetes With Ocular Involvment, Juvenile (25051)' },
+  { code:'2506', label:'Diabetes With Peripheral Circulatory Disorders (2506)' },
+  { code:'2507', label:'Diabetes With Other Specified Manifestations (2507)' },
+  { code:'2509', label:'Diabetes With Unspecified Complications (2509)' },
+  { code:'272', label:'Disorders Of Lipoid Metabolism (272)' },
+  { code:'2720', label:'Pure Hypercholesterolaemia (2720)' },
+  { code:'2721', label:'Pure Hyperglyceridaemia (2721)' },
+  { code:'2722', label:'Mixed Hyperlipidaemia (2722)' },
+  { code:'2723', label:'Hyperchylomicronaemia (2723)' },
+  { code:'2724', label:'Other And Unspecified Hyperlipidaemia (2724)' },
+  { code:'2725', label:'Lipoprotein Deficiencies (2725)' },
+  { code:'2726', label:'Lipodystrophy (2726)' },
+  { code:'2727', label:'Lipidoses (2727)' },
+  { code:'2728', label:'Other Disorders Of Lipoid Metabolism (2728)' },
+  { code:'2729', label:'Unspecified Disorders Of Lipoid Metabolism (2729)' },
+  { code:'278', label:'Obesity And Other Hyperalimentation (278)' },
+  { code:'2780', label:'Obesity (2780)' },
+  { code:'2781', label:'Localized Adiposity (2781)' },
+  { code:'2782', label:'Hypervitaminosis 'a' (2782)' },
+  { code:'2783', label:'Hypercarotinaemia (2783)' },
+  { code:'2784', label:'Hypervitaminosis 'd' (2784)' },
+  { code:'2788', label:'Other (2788)' },
+  { code:'390', label:'Rheumatic Fever Without Mention Of Heart Involvement (390)' },
+  { code:'391', label:'Rheumatic Fever With Heart Involvement (391)' },
+  { code:'3910', label:'Acute Rheumatic Pericarditis (3910)' },
+  { code:'3911', label:'Acute Rheumatic Endocarditis (3911)' },
+  { code:'3912', label:'Acute Rheumatic Myocarditis (3912)' },
+  { code:'3918', label:'Other Acute Rheumatic Heart Disease (3918)' },
+  { code:'3919', label:'Acute Rheumatic Heart Disease, Unspecified (3919)' },
+  { code:'393', label:'Chronic Rheumatic Pericarditis (393)' },
+  { code:'394', label:'Diseases Of Mitral Valve (394)' },
+  { code:'3940', label:'Mitral Stenosis (3940)' },
+  { code:'3941', label:'Rheumatic Mitral Insufficiency (3941)' },
+  { code:'3942', label:'Mitral Stenosis With Insufficiency (3942)' },
+  { code:'3949', label:'Other And Unspecified (3949)' },
+  { code:'395', label:'Diseases Of Aortic Valve (395)' },
+  { code:'3950', label:'Rheumatic Aortic Stenosis (3950)' },
+  { code:'3951', label:'Rheumatic Aortic Insufficiency (3951)' },
+  { code:'3952', label:'Rheumatic Aortic Stenosis With Insufficiency (3952)' },
+  { code:'3959', label:'Other And Unspecified (3959)' },
+  { code:'396', label:'Diseases Of Mitral And Aortic Valves (396)' },
+  { code:'397', label:'Diseases Of Other Endocardial Structures (397)' },
+  { code:'3970', label:'Diseases Of Tricuspid Valve (3970)' },
+  { code:'3971', label:'Rheumatic Diseases Of Pulmonary Valve (3971)' },
+  { code:'3979', label:'Rheumatic Diseases Of Endocardium, Valve Unspecified (3979)' },
+  { code:'398', label:'Other Rheumatic Heart Disease (398)' },
+  { code:'3980', label:'Rheumatic Myocarditis (3980)' },
+  { code:'3989', label:'Other And Unspecified (3989)' },
+  { code:'401', label:'Essential Hypertension (401)' },
+  { code:'4010', label:'Specified AS Malignant (4010)' },
+  { code:'402', label:'Hypertensive Heart Disease (402)' },
+  { code:'4020', label:'Specified AS Malignant (4020)' },
+  { code:'4021', label:'Specified AS Benign (4021)' },
+  { code:'4029', label:'Not Specified AS Malignant Or Benign (4029)' },
+  { code:'403', label:'Hypertensive Renal Disease (403)' },
+  { code:'4030', label:'Hypertensive CKD, benign (4030)' },
+  { code:'4031', label:'Specified AS Benign (4031)' },
+  { code:'4039', label:'Hypertensive CKD (4039)' },
+  { code:'404', label:'Hypertensive Heart And Renal Disease (404)' },
+  { code:'4040', label:'Specified AS Malignant (4040)' },
+  { code:'4041', label:'Specified AS Benign (4041)' },
+  { code:'4049', label:'Not Specified AS Malignant Or Benign (4049)' },
+  { code:'405', label:'Secondary Hypertension (405)' },
+  { code:'4050', label:'Specified AS Malignant (4050)' },
+  { code:'4051', label:'Specified AS Benign (4051)' },
+  { code:'4059', label:'Not Specified AS Malignant Or Benign (4059)' },
+  { code:'410', label:'Acute MI (unspecified site) (410)' },
+  { code:'412', label:'Old Myocardial Infarction (412)' },
+  { code:'414', label:'Other Forms Of Chronic Ischaemic Heart Disease (414)' },
+  { code:'4141', label:'Aneurysm Of Heart (4141)' },
+  { code:'4149', label:'Chronic ischemic heart disease, unspecified (4149)' },
+  { code:'415', label:'Acute Pulmonary Heart Disease (415)' },
+  { code:'416', label:'Chronic Pulmonary Heart Disease (416)' },
+  { code:'4160', label:'Primary Pulmonary Hypertension (4160)' },
+  { code:'4161', label:'Kyphoscoliotic Heart Disease (4161)' },
+  { code:'4169', label:'Chronic pulmonary heart disease, unspecified (4169)' },
+  { code:'417', label:'Other Diseases Of Pulmonary Circulation (417)' },
+  { code:'4170', label:'Arteriovenous Fistula Of Pulmonary Vessels (4170)' },
+  { code:'4171', label:'Aneurysm Of Pulmonary Artery (4171)' },
+  { code:'4178', label:'Other (4178)' },
+  { code:'4179', label:'Unspecified (4179)' },
+  { code:'420', label:'Acute Pericarditis (420)' },
+  { code:'4200', label:'Pericarditis In Diseases Classified Elsewhere (4200)' },
+  { code:'4209', label:'Other And Unspecified Acute Pericarditis (4209)' },
+  { code:'421', label:'Acute And Subacute Endocarditis (421)' },
+  { code:'4210', label:'Acute And Subacute Bacterial Endocarditis (4210)' },
+  { code:'4211', label:'Acute And Subacute Infective Endocarditis In Diseases Classified (4211)' },
+  { code:'4219', label:'Acute Endocarditis, Unspecified (4219)' },
+  { code:'422', label:'Acute Myocarditis (422)' },
+  { code:'4220', label:'Acute Myocarditis In Diseases Classified Elsewhere (4220)' },
+  { code:'4229', label:'Other And Unspecified Acute Myocarditis (4229)' },
+  { code:'423', label:'Other Diseases Of Pericardium (423)' },
+  { code:'4230', label:'Haemopericardium (4230)' },
+  { code:'4231', label:'Adhesive Pericarditis (4231)' },
+  { code:'4232', label:'Constrictive Pericarditis (4232)' },
+  { code:'4238', label:'Other (4238)' },
+  { code:'4239', label:'Unspecified (4239)' },
+  { code:'424', label:'Other Diseases Of Endocardium (424)' },
+  { code:'4242', label:'Tricuspid valve disorder (4242)' },
+  { code:'4243', label:'Pulmonary valve disorder (4243)' },
+  { code:'4249', label:'Endocarditis, Valve Unspecified (4249)' },
+  { code:'425', label:'Cardiomyopathy (425)' },
+  { code:'4250', label:'Endomyocardial Fibrosis (4250)' },
+  { code:'4252', label:'Obscure Cardiomyopathy Of Africa (4252)' },
+  { code:'4253', label:'Endocardial Fibroelastosis (4253)' },
+  { code:'4255', label:'Alcoholic cardiomyopathy (4255)' },
+  { code:'4256', label:'Cardiomyopathy In Chagas's Disease (4256)' },
+  { code:'4257', label:'Nutritional And Metabolic Cardiomyopathies (4257)' },
+  { code:'4258', label:'Cardiomyopathy In Other Diseases Classified Elsewhere (4258)' },
+  { code:'4259', label:'Secondary cardiomyopathy (4259)' },
+  { code:'426', label:'Conduction Disorders (426)' },
+  { code:'4260', label:'AV block, complete (3rd degree) (4260)' },
+  { code:'4261', label:'AV block, partial (4261)' },
+  { code:'4262', label:'Left Bundle Branch Hemiblock (4262)' },
+  { code:'4263', label:'Other LBBB (4263)' },
+  { code:'4264', label:'RBBB (4264)' },
+  { code:'4265', label:'Bundle branch block, other (4265)' },
+  { code:'4266', label:'Other heart block (4266)' },
+  { code:'4267', label:'Anomalous AV excitation (WPW) (4267)' },
+  { code:'4268', label:'Other (4268)' },
+  { code:'4269', label:'Unspecified (4269)' },
+  { code:'427', label:'Cardiac Dysrhythmias (427)' },
+  { code:'4270', label:'SVT (4270)' },
+  { code:'4272', label:'Paroxysmal Tachycardia, Unspecified (4272)' },
+  { code:'4274', label:'Ventricular fibrillation / flutter (4274)' },
+  { code:'4276', label:'Premature beats (4276)' },
+  { code:'4278', label:'Other dysrhythmia (4278)' },
+  { code:'428', label:'Heart Failure (428)' },
+  { code:'429', label:'Ill-defined Descriptions And Complications Of Heart Disease (429)' },
+  { code:'4290', label:'Myocarditis, Unspecified (4290)' },
+  { code:'4291', label:'Myocardial Degeneration (4291)' },
+  { code:'4294', label:'Functional Disturbances Following Cardiac Surgery (4294)' },
+  { code:'4295', label:'Rupture Of Chordae Tendinae (4295)' },
+  { code:'4296', label:'Rupture Of Papillary Muscle (4296)' },
+  { code:'4298', label:'Other heart disease (4298)' },
+  { code:'4299', label:'Heart disease, unspecified (4299)' },
+  { code:'430', label:'Subarachnoid Haemorrhage (430)' },
+  { code:'431', label:'Intracerebral Haemorrhage (431)' },
+  { code:'432', label:'Other And Unspecified Intracranial Haemorrhage (432)' },
+  { code:'4320', label:'Nontraumatic Extradural Haemorrhage (4320)' },
+  { code:'4321', label:'Subdural Haemorrhage (4321)' },
+  { code:'4329', label:'Unspecified Intracranial Haemorrhage (4329)' },
+  { code:'433', label:'Occlusion And Stenosis Of Precerebral Arteries (433)' },
+  { code:'4330', label:'Basilar Artery (4330)' },
+  { code:'4331', label:'Carotid Artery (4331)' },
+  { code:'4332', label:'Vertebral Artery (4332)' },
+  { code:'4333', label:'Multiple And Bilateral (4333)' },
+  { code:'4338', label:'Other (4338)' },
+  { code:'4339', label:'Unspecified (4339)' },
+  { code:'434', label:'Occlusion Of Cerebral Arteries (434)' },
+  { code:'4340', label:'Cerebral Thrombosis (4340)' },
+  { code:'4341', label:'Cerebral Embolism (4341)' },
+  { code:'4349', label:'Unspecified (4349)' },
+  { code:'435', label:'Transient Cerebral Ischaemia (435)' },
+  { code:'436', label:'Acute But Ill-defined Cerebrovascular Disease (436)' },
+  { code:'43600', label:' (43600)' },
+  { code:'437', label:'Other And Ill-defined Cerebrovascular Disease (437)' },
+  { code:'4370', label:'Cerebral Atherosclerosis (4370)' },
+  { code:'4371', label:'Other Generalized Ischaemic Cerebrovascular Disease (4371)' },
+  { code:'4372', label:'Hypertensive Encephalopathy (4372)' },
+  { code:'4373', label:'Cerebral Aneurysm, Nonruptured (4373)' },
+  { code:'4374', label:'Cerebral Arteritis (4374)' },
+  { code:'4375', label:'Moyamoya Disease (4375)' },
+  { code:'4376', label:'Nonpyogenic Thrombosis Of Intracranial Venous Sinus (4376)' },
+  { code:'4378', label:'Other (4378)' },
+  { code:'4379', label:'Unspecified (4379)' },
+  { code:'438', label:'Late Effects Of Cerebrovascular Disease (438)' },
+  { code:'440', label:'Atherosclerosis (440)' },
+  { code:'4400', label:'Of Aorta (4400)' },
+  { code:'4401', label:'Of Renal Artery (4401)' },
+  { code:'4402', label:'Of Arteries Of The Extremities (4402)' },
+  { code:'4408', label:'Of Other Specified Arteries (4408)' },
+  { code:'4409', label:'Generalized And Unspecified (4409)' },
+  { code:'441', label:'Aortic Aneurysm (441)' },
+  { code:'4410', label:'Dissecting Aneurysm (any Part) (4410)' },
+  { code:'4411', label:'Thoracic Aneurysm, Ruptured (4411)' },
+  { code:'4412', label:'Thoracic Aneurysm Without Mention Of Rupture (4412)' },
+  { code:'4413', label:'Abdominal Aneurysm, Ruptured (4413)' },
+  { code:'4414', label:'Abdominal Aneurysm Without Mention Of Rupture (4414)' },
+  { code:'4415', label:'Aortic Aneurysm Of Unspecified Site, Ruptured (4415)' },
+  { code:'4416', label:'Aortic Aneurysm Of Unspecified Site Without Mention Of Rupture (4416)' },
+  { code:'4417', label:'Syphilitic Aneurysm Of Aorta (4417)' },
+  { code:'442', label:'Other Aneurysm (442)' },
+  { code:'4420', label:'Of Artery Of Upper Extremity (4420)' },
+  { code:'4421', label:'Of Renal Artery (4421)' },
+  { code:'4422', label:'Of Iliac Artery (4422)' },
+  { code:'4423', label:'Of Artery Of Lower Extremity (4423)' },
+  { code:'4428', label:'Of Other Specified Artery (4428)' },
+  { code:'4429', label:'Of Unspecified Site (4429)' },
+  { code:'443', label:'Other Peripheral Vascular Disease (443)' },
+  { code:'4430', label:'Raynaud's Syndrome (4430)' },
+  { code:'4431', label:'Thromboangiitis Obliterans (buerger's Disease) (4431)' },
+  { code:'4438', label:'Other (4438)' },
+  { code:'444', label:'Arterial Embolism And Thrombosis (444)' },
+  { code:'4440', label:'Of Abdominal Aorta (4440)' },
+  { code:'4441', label:'Of Other Aorta (4441)' },
+  { code:'4442', label:'Of Arteries Of The Extremities (4442)' },
+  { code:'4448', label:'Of Other Specified Artery (4448)' },
+  { code:'4449', label:'Of Unspecified Artery (4449)' },
+  { code:'446', label:'Polyarteritis Nodosa And Allied Conditions (446)' },
+  { code:'4460', label:'Polyarteritis Nodosa (4460)' },
+  { code:'4461', label:'Acute Febrile Mucocutaneous Lymphnode Syndrome (mcls) (4461)' },
+  { code:'4462', label:'Hypersensitivity Angiitis (4462)' },
+  { code:'4463', label:'Lethal Midline Granuloma (4463)' },
+  { code:'4464', label:'Wegener's Granulomatosis (4464)' },
+  { code:'4465', label:'Giant Cell Arteritis (4465)' },
+  { code:'44650', label:'Giant Cell Arteritis (44650)' },
+  { code:'4466', label:'Thrombotic Microangiopathy (4466)' },
+  { code:'4467', label:'Takayasu Disease (4467)' },
+  { code:'447', label:'Other Disorders Of Arteries And Arterioles (447)' },
+  { code:'4470', label:'Arteriovenous Fistula, Acquired (4470)' },
+  { code:'4471', label:'Stricture Of Artery (4471)' },
+  { code:'4472', label:'Rupture Of Artery (4472)' },
+  { code:'4473', label:'Hyperplasia Of Renal Artery (4473)' },
+  { code:'4474', label:'Coeliac Artery Compression Syndrome (4474)' },
+  { code:'4475', label:'Necrosis Of Artery (4475)' },
+  { code:'4476', label:'Arteritis, Unspecified (4476)' },
+  { code:'4477', label:'Syphilitic Aortitis (4477)' },
+  { code:'4478', label:'Other (4478)' },
+  { code:'4479', label:'Unspecified (4479)' },
+  { code:'448', label:'Diseases Of Capillaries (448)' },
+  { code:'4480', label:'Hereditary Haemorrhagic Telangiectasia (4480)' },
+  { code:'4481', label:'Naevus, Non-neoplastic (4481)' },
+  { code:'4489', label:'Other And Unspecified (4489)' },
+  { code:'451', label:'Phlebitis And Thrombophlebitis (451)' },
+  { code:'4510', label:'Of Superficial Vessels Of Lower Extremities (4510)' },
+  { code:'4511', label:'Of Deep Vessels Of Lower Extremities (4511)' },
+  { code:'4512', label:'Of Lower Extremities, Unspecified (4512)' },
+  { code:'4518', label:'Of Other Sites (4518)' },
+  { code:'4519', label:'Of Unspecified Site (4519)' },
+  { code:'452', label:'Portal Vein Thrombosis (452)' },
+  { code:'453', label:'Other Venous Embolism And Thrombosis (453)' },
+  { code:'4530', label:'Budd-chiari Syndrome (4530)' },
+  { code:'4531', label:'Thrombophlebitis Migrans (4531)' },
+  { code:'4532', label:'Of Vena Cava (4532)' },
+  { code:'4533', label:'Of Renal Vein (4533)' },
+  { code:'4538', label:'Of Other Specified Veins (4538)' },
+  { code:'4539', label:'Of Unspecified Site (4539)' },
+  { code:'454', label:'Varicose Veins Of Lower Extremities (454)' },
+  { code:'4540', label:'With Ulcer (4540)' },
+  { code:'4541', label:'With Inflammation (4541)' },
+  { code:'4542', label:'With Ulcer And Inflammation (4542)' },
+  { code:'4549', label:'Without Mention Of Ulcer Or Inflammation (4549)' },
+  { code:'455', label:'Haemorrhoids (455)' },
+  { code:'4550', label:'Internal Haemorrhoids, Without Mention Of Complication (4550)' },
+  { code:'4551', label:'Internal Thrombosed Haemorrhoids (4551)' },
+  { code:'4552', label:'Internal Haemorrhoids With Other Complication (4552)' },
+  { code:'4553', label:'External Haemorrhoids Without Mention Of Complication (4553)' },
+  { code:'4554', label:'External Thrombosed Haemorrhoids (4554)' },
+  { code:'4555', label:'External Haemorrhoids With Other Complication (4555)' },
+  { code:'4556', label:'Unspecified Haemorrhoids, Without Mention Of Complication (4556)' },
+  { code:'4557', label:'Unspecified Thrombosed Haemorrhoids (4557)' },
+  { code:'4558', label:'Unspecified Haemorrhoids With Other Complication (4558)' },
+  { code:'4559', label:'Residual Haemorrhoidal Skin Tags (4559)' },
+  { code:'456', label:'Varicose Veins Of Other Sites (456)' },
+  { code:'4560', label:'Oesophageal Varices With Bleeding (4560)' },
+  { code:'4561', label:'Oesophageal Varices Without Mention Of Bleeding (4561)' },
+  { code:'4562', label:'Oesophageal Varices In Cirrhosis Of Liver (4562)' },
+  { code:'4563', label:'Sublingual Varices (4563)' },
+  { code:'4564', label:'Scrotal Varices (4564)' },
+  { code:'4565', label:'Pelvic Varices (4565)' },
+  { code:'4566', label:'Vulval Varices (4566)' },
+  { code:'4568', label:'Other (4568)' },
+  { code:'457', label:'Noninfective Disorders Of Lymphatic Channels (457)' },
+  { code:'4570', label:'Postmastectomy Lymphoedema Syndrome (4570)' },
+  { code:'4571', label:'Other Lymphoedema (4571)' },
+  { code:'4572', label:'Lymphangitis (4572)' },
+  { code:'4578', label:'Other Noninfective Disorders Of Lymphatic Channels (4578)' },
+  { code:'4579', label:'Unspecified (4579)' },
+  { code:'458', label:'Hypotension (458)' },
+  { code:'4580', label:'Orthostatic Hypotension (4580)' },
+  { code:'4581', label:'Chronic Hypotension (4581)' },
+  { code:'4589', label:'Unspecified (4589)' },
+  { code:'459', label:'Other Disorders Of Circulatory System (459)' },
+  { code:'4590', label:'Haemorrhage, Unspecified (4590)' },
+  { code:'4591', label:'Post-phlebitic Syndrome (4591)' },
+  { code:'4592', label:'Compression Of Vein (4592)' },
+  { code:'4598', label:'Other (4598)' },
+  { code:'4599', label:'Unspecified (4599)' },
+  { code:'485', label:'Bronchopneumonia, Organism Unspecified (485)' },
+  { code:'486', label:'Pneumonia, Organism Unspecified (486)' },
+  { code:'491', label:'Chronic Bronchitis (491)' },
+  { code:'4910', label:'Simple Chronic Bronchitis (4910)' },
+  { code:'4911', label:'Mucopurulent Chronic Bronchitis (4911)' },
+  { code:'4912', label:'Obstructive Chronic Bronchitis (4912)' },
+  { code:'4918', label:'Other Chronic Bronchitis (4918)' },
+  { code:'4919', label:'Unspecified (4919)' },
   { code:'492', label:'Emphysema (492)' },
-  { code:'496', label:'COPD (496)' },
-  { code:'584', label:'Acute renal failure (AKI) (584)' },
-  { code:'585', label:'Chronic kidney disease (CKD) (585)' },
-  { code:'780.2', label:'Syncope / collapse (780.2)' },
-  { code:'785.0', label:'Palpitations (785.0)' },
-  { code:'785.5', label:'Shock (785.5)' },
-  { code:'786.0', label:'Dyspnea / respiratory abnormality (786.0)' },
-  { code:'786.5', label:'Chest pain (786.5)' },
-  { code:'3062', label:'Cardiology consult (BC MSP placeholder) (3062)' },
+  { code:'4920', label:'Airway - Obstruct With Emphysema (4920)' },
+  { code:'493', label:'Asthma (493)' },
+  { code:'4930', label:'Extrinsic Asthma (4930)' },
+  { code:'4931', label:'Intrinsic Asthma (4931)' },
+  { code:'4939', label:'Asthma, Unspecified (4939)' },
+  { code:'496', label:'Chronic Airways Obstruction, Not Elsewhere Classified (496)' },
+  { code:'584', label:'Acute Renal Failure (584)' },
+  { code:'5845', label:'With Lesion Of Tubular Necrosis (5845)' },
+  { code:'5846', label:'With Lesion Of Renal Cortical Necrosis (5846)' },
+  { code:'5847', label:'With Lesion Of Renal Medullary (papillary) Necrosis (5847)' },
+  { code:'5848', label:'With Other Specified Pathological Lesion In Kidney (5848)' },
+  { code:'585', label:'Chronic Renal Failure (585)' },
+  { code:'745', label:'Bulbus Cordis Anomalies And Anomalies Of Cardiac Septal Closure (745)' },
+  { code:'7450', label:'Common Truncus (7450)' },
+  { code:'7451', label:'Transposition Of Great Vessels (7451)' },
+  { code:'7452', label:'Tetralogy Of Fallot (7452)' },
+  { code:'7453', label:'Common Ventricle (7453)' },
+  { code:'7454', label:'Ventricular Septal Defect (7454)' },
+  { code:'7455', label:'Ostium Secundum Type Atrial Septal Defect (7455)' },
+  { code:'7456', label:'Endocardial Cushion Defects (7456)' },
+  { code:'7457', label:'Cor Biloculare (7457)' },
+  { code:'7458', label:'Other (7458)' },
+  { code:'7459', label:'Unspecified Defect Of Septal Closure (7459)' },
+  { code:'746', label:'Other Congenital Anomalies Of Heart (746)' },
+  { code:'7460', label:'Anomalies Of Pulmonary Valve (7460)' },
+  { code:'7461', label:'Tricuspid Atresia And Stenosis, Congenital (7461)' },
+  { code:'7462', label:'Ebstein's Anomaly (7462)' },
+  { code:'7463', label:'Congenital Stenosis Of Aortic Valve (7463)' },
+  { code:'7464', label:'Congenital Insufficiency Of Aortic Valve (7464)' },
+  { code:'7465', label:'Congenital Mitral Stenosis (7465)' },
+  { code:'7466', label:'Congenital Mitral Insufficiency (7466)' },
+  { code:'7467', label:'Hypoplastic Left Heart Syndrome (7467)' },
+  { code:'7468', label:'Other Specified Anomalies Of Heart (7468)' },
+  { code:'7469', label:'Unspecified Anomalies Of Heart (7469)' },
+  { code:'747', label:'Other Congenital Anomalies Of Circulatory System (747)' },
+  { code:'7470', label:'Patent Ductus Arteriosus (7470)' },
+  { code:'7471', label:'Coarctation Of Aorta (7471)' },
+  { code:'7472', label:'Other Anomalies Of Aorta (7472)' },
+  { code:'7473', label:'Anomalies Of Pulmonary Artery (7473)' },
+  { code:'7474', label:'Anomalies Of Great Veins (7474)' },
+  { code:'7475', label:'Absence Or Hypoplasia Of Umbilical Artery (7475)' },
+  { code:'7476', label:'Other Anomalies Of Peripheral Vascular System (7476)' },
+  { code:'7478', label:'Other Specified Anomalies Of Circulatory System (7478)' },
+  { code:'7479', label:'Unspecified Anomalies Of Circulatory System (7479)' },
+  { code:'785', label:'Symptoms Involving Cardiovascular System (785)' },
+  { code:'7850', label:'Tachycardia, unspecified (7850)' },
+  { code:'7851', label:'Palpitations (7851)' },
+  { code:'7852', label:'Functional And Undiagnosed Cardiac Murmurs (7852)' },
+  { code:'7853', label:'Other Abnormal Heart Sounds (7853)' },
+  { code:'7854', label:'Gangrene (7854)' },
+  { code:'7855', label:'Shock Without Mention Of Trauma (7855)' },
+  { code:'7856', label:'Enlargement Of Lymph Nodes (7856)' },
+  { code:'7859', label:'Other (7859)' },
+  { code:'786', label:'Symptoms Involving Respiratory System And Other Chest Symptoms (786)' },
+  { code:'7860', label:'Dyspnoea And Respiratory Abnormalities (7860)' },
+  { code:'7861', label:'Stridor / abnormal breathing (7861)' },
+  { code:'7862', label:'Cough (7862)' },
+  { code:'7863', label:'Haemoptysis (7863)' },
+  { code:'7864', label:'Abnormal Sputum (7864)' },
+  { code:'7865', label:'Chest Pain (7865)' },
+  { code:'7866', label:'Swelling, Mass Or Lump In Chest (7866)' },
+  { code:'7867', label:'Abnormal Chest Sounds (7867)' },
+  { code:'7868', label:'Hiccough (7868)' },
+  { code:'7869', label:'Other (7869)' }
 ];
 
 // Meditech OCR: diagnosis text → ICD-9 code (first match wins)
@@ -1633,34 +1853,111 @@ function refSearchEl(inputEl) {
   refSearch(inputEl.value, ddId, hiddenId, nameId);
 }
 
-// ICD-9 search — shows ordered list filtered by query
+// ── ICD-9 search — Tier 1 local + Tier 2 remote ────────────────────────────
+//
+// Tier 1: ~186 common cardiology codes in DIAGNOSES (instant, offline)
+// Tier 2: Full 7,191 iClinic codes from Google Sheets ICD9 tab (async, wifi)
+//
+// On empty focus: shows top 12 local codes (recent first)
+// On query:       shows up to 8 local matches immediately, then appends
+//                 remote results from Sheets (deduped) after 400 ms debounce
+
+var _icdRemoteTimer = null;
+var _lastIcdQ = '';
+
 function icdSearch(query, dropdownId, hiddenId, inputId) {
   var dd = document.getElementById(dropdownId);
   if (!dd) return;
 
   var ordered = getOrderedDiagnoses();
-  var matches;
+  var recentCodes = (st.recentIcds || []).map(function(r) { return r.code; });
+
+  // Empty focus — show top 12 cardiology codes (recent first)
   if (!query || query.trim() === '') {
-    matches = ordered.slice(0, 12);
-  } else {
-    var q = query.toLowerCase();
-    matches = ordered.filter(function(d) {
-      return d.label.toLowerCase().indexOf(q) !== -1 || d.code.indexOf(q) !== -1;
-    }).slice(0, 10);
+    var top = ordered.slice(0, 12);
+    dd.style.display = 'block';
+    dd.innerHTML =
+      '<div style="padding:4px 10px;font-size:10px;color:var(--text3)">Common codes — type to search all 7,000+ iClinic codes</div>' +
+      top.map(function(d) { return buildIcdRowHtml(d, dropdownId, hiddenId, inputId, recentCodes); }).join('');
+    return;
   }
 
-  if (!matches.length) { dd.style.display = 'none'; return; }
+  // Tier 1: search local DIAGNOSES
+  var q = query.toLowerCase();
+  var local = ordered.filter(function(d) {
+    return d.label.toLowerCase().indexOf(q) !== -1 || d.code.toLowerCase().indexOf(q) !== -1;
+  }).slice(0, 8);
 
-  var recentCodes = (st.recentIcds || []).map(function(r) { return r.code; });
   dd.style.display = 'block';
-  dd.innerHTML = matches.map(function(d) {
-    var isRecent = recentCodes.indexOf(d.code) !== -1;
-    var badge = isRecent ? '<span class="recent-badge">RECENT</span>' : '';
-    // Use data attributes on row to avoid inline quote issues
-    return '<div class="ref-dd-row" data-code="' + d.code + '" data-label="' + esc(d.label) + '" ' +
-           'data-dd="' + dropdownId + '" data-hidden="' + hiddenId + '" data-inp="' + inputId + '" ' +
-           'onmousedown="event.preventDefault();selectIcdRow(this)">' + badge + esc(d.label) + '</div>';
+  dd.innerHTML = local.map(function(d) {
+    return buildIcdRowHtml(d, dropdownId, hiddenId, inputId, recentCodes);
   }).join('');
+
+  // Add "Searching…" placeholder for Tier 2
+  if (SHEETS_URL && query.length >= 2) {
+    dd.innerHTML += '<div class="icd-searching ref-dd-row" style="color:var(--text3);font-style:italic;font-size:11px">Searching full list…</div>';
+    searchICDRemote(query, dropdownId, hiddenId, inputId);
+  } else if (!local.length) {
+    dd.style.display = 'none';
+  }
+}
+
+// ── Tier 2: remote ICD search via Apps Script ──────────────────────────────
+function searchICDRemote(query, dropdownId, hiddenId, inputId) {
+  if (!SHEETS_URL || !query || query.length < 2) return;
+  clearTimeout(_icdRemoteTimer);
+  _icdRemoteTimer = setTimeout(function() {
+    _lastIcdQ = query;
+    fetch(SHEETS_URL + '?action=searchICD&q=' + encodeURIComponent(query) + '&key=' + SHARED_KEY)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (query !== _lastIcdQ) return; // stale
+        if (!Array.isArray(data) || !data.length) {
+          var ph = document.querySelector('#' + dropdownId + ' .icd-searching');
+          if (ph) ph.remove();
+          return;
+        }
+        var dd = document.getElementById(dropdownId);
+        if (!dd || dd.style.display === 'none') return;
+        // Remove placeholder
+        var ph = dd.querySelector('.icd-searching');
+        if (ph) ph.remove();
+        // Find already-shown codes
+        var shownCodes = [];
+        dd.querySelectorAll('[data-code]').forEach(function(el) { shownCodes.push(el.getAttribute('data-code')); });
+        // Append new results (deduped)
+        var recentCodes = (st.recentIcds || []).map(function(r) { return r.code; });
+        var extraHtml = data
+          .filter(function(row) { return shownCodes.indexOf(String(row[0])) === -1; })
+          .slice(0, 12)
+          .map(function(row) {
+            var code = String(row[0]);
+            var desc = String(row[1]);
+            // Title-case description
+            desc = desc.charAt(0).toUpperCase() + desc.slice(1).toLowerCase();
+            var d = { code: code, label: desc + ' (' + code + ')' };
+            return buildIcdRowHtml(d, dropdownId, hiddenId, inputId, recentCodes);
+          }).join('');
+        if (extraHtml) {
+          dd.innerHTML += extraHtml;
+        } else if (!dd.querySelectorAll('[data-code]').length) {
+          dd.style.display = 'none';
+        }
+      })
+      .catch(function() {
+        var ph = document.querySelector('#' + dropdownId + ' .icd-searching');
+        if (ph) ph.remove();
+      });
+  }, 400);
+}
+
+// ── Build a single ICD row HTML string ─────────────────────────────────────
+function buildIcdRowHtml(d, dropdownId, hiddenId, inputId, recentCodes) {
+  var isRecent = recentCodes && recentCodes.indexOf(d.code) !== -1;
+  var badge = isRecent ? '<span class="recent-badge">RECENT</span>' : '';
+  return '<div class="ref-dd-row" data-code="' + d.code + '" data-label="' + esc(d.label) + '" ' +
+         'data-dd="' + dropdownId + '" data-hidden="' + hiddenId + '" data-inp="' + inputId + '" ' +
+         'onmousedown="event.preventDefault();selectIcdRow(this)">' + badge + esc(d.label) + '</div>';
 }
 
 function selectIcdRow(el) {
@@ -1736,7 +2033,7 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.41-2026-05-14-fee-rates-from-msc-jan2026';
+var BUILD_ID    = 'v3.42-2026-05-14-icd9-iclinic-format';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
