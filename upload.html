@@ -699,6 +699,11 @@ function fmtName(s) {
 function isoToBc(iso) { if (!iso) return ''; var p=iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
 function monthLabel(d) { return d.toLocaleDateString('en-CA',{month:'long',year:'numeric'}); }
 function todayISO() { var d=new Date(); return d.getFullYear()+'-'+(d.getMonth()+1).toString().padStart(2,'0')+'-'+d.getDate().toString().padStart(2,'0'); }
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
 function getScriptKey() { var el=document.getElementById('shared-key'); return el ? el.value : 'kgh2026'; }
 function isoToDisp(iso) {
   if (!iso) return '';
