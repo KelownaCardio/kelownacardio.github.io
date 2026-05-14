@@ -1839,11 +1839,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.34-2026-05-13-fix-submitccu';
+var BUILD_ID    = 'v3.35-2026-05-13-fmtname-casing';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.28';
+var APP_VERSION = 'v3.35';
 var APP_BUILT   = '2026-05-12';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -1925,8 +1925,8 @@ async function loadLocal() {
       // Coerce string-y fields — see sync block for rationale
       if (p.phn   != null) p.phn   = String(p.phn);
       if (p.bed   != null) p.bed   = String(p.bed);
-      if (p.last  != null) p.last  = String(p.last);
-      if (p.first != null) p.first = String(p.first);
+      if (p.last  != null) p.last  = fmtName(p.last);
+      if (p.first != null) p.first = fmtName(p.first);
       var hadBadRef = looksLikeMRPService(p.refbyName);
       sanitizeReferrer(p);
       if (hadBadRef && SHEETS_URL) push('savePatient', p);  // push the clean version back to Sheets
@@ -2068,8 +2068,8 @@ async function syncFromSheets() {
         // the cell happens to be all-digits, breaking string ops like .slice and lookup keys.
         if (p.phn   != null) p.phn   = String(p.phn);
         if (p.bed   != null) p.bed   = String(p.bed);
-        if (p.last  != null) p.last  = String(p.last);
-        if (p.first != null) p.first = String(p.first);
+        if (p.last  != null) p.last  = fmtName(p.last);
+        if (p.first != null) p.first = fmtName(p.first);
         var hadBadRef = looksLikeMRPService(p.refbyName);
         sanitizeReferrer(p);
         if (hadBadRef && SHEETS_URL) push('savePatient', p);  // overwrite stale bad data on Sheets
@@ -4728,6 +4728,20 @@ function _cvFillClaim(pid, dateStr, type, note, icdOverride) {
 // Normalise claim date — Sheets may serialise DD/MM/YYYY back as
 // ISO timestamps, JS Date strings, or pandas Timestamps. Always
 // produce DD/MM/YYYY for storage and display.
+// Force Title Case on names — capitalize the first letter after each space,
+// hyphen, or apostrophe. Mirrors fmtClaimDate's normalization role but for
+// patient/claim last/first fields. Used at every layer where names enter the
+// app (sync, OCR, form input, claim creation) so we never store mixed-casing.
+// Caveat: Mc/Mac/O' prefixes are partially handled (O'Brien works, McMillan
+// becomes "Mcmillan" — manual override still possible for those).
+function fmtName(s) {
+  if (!s) return '';
+  return String(s).trim().toLowerCase().replace(
+    /(^|[\s'\-])([a-z])/g,
+    function(_, sep, c) { return sep + c.toUpperCase(); }
+  );
+}
+
 function fmtClaimDate(d) {
   if (!d) return '';
   // Already clean DD/MM/YYYY — return immediately, no further parsing
@@ -5241,8 +5255,8 @@ function savePatientEdit(pid) {
   var role = (document.getElementById('pe-role') || {}).value || 'consultant';
   var ward = (document.getElementById('pe-ward') || {}).value || p.ward;
 
-  p.last      = (document.getElementById('pe-last')  || {}).value || p.last;
-  p.first     = (document.getElementById('pe-first') || {}).value || p.first;
+  p.last      = fmtName((document.getElementById('pe-last')  || {}).value || p.last);
+  p.first     = fmtName((document.getElementById('pe-first') || {}).value || p.first);
   p.phn       = (document.getElementById('pe-phn')   || {}).value || p.phn;
   p.dob       = fmtClaimDate((document.getElementById('pe-dob') || {}).value || p.dob);
   p.sex       = (document.getElementById('pe-sex')   || {}).value || p.sex;
@@ -6118,8 +6132,8 @@ function _addPatientCore(withClaim, skipNameDobDup) {
 
   var p = {
     id:           'p' + Date.now(),
-    last:         last,
-    first:        gv('f-first'),
+    last:         fmtName(last),
+    first:        fmtName(gv('f-first')),
     phn:          phn,
     dob:          gv('f-dob'),
     sex:          gv('f-sex'),

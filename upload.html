@@ -686,6 +686,16 @@ var _cropPending = null, _cropState = null;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function uid() { return Math.random().toString(36).slice(2,10); }
+// Force Title Case on names — capitalize first letter after each space, hyphen,
+// or apostrophe. Applied at every layer where names enter the tool (OCR result,
+// batch item load, form save). Mirrors the same helper in index.html.
+function fmtName(s) {
+  if (!s) return '';
+  return String(s).trim().toLowerCase().replace(
+    /(^|[\s'\-])([a-z])/g,
+    function(_, sep, c) { return sep + c.toUpperCase(); }
+  );
+}
 function isoToBc(iso) { if (!iso) return ''; var p=iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
 function monthLabel(d) { return d.toLocaleDateString('en-CA',{month:'long',year:'numeric'}); }
 function todayISO() { var d=new Date(); return d.getFullYear()+'-'+(d.getMonth()+1).toString().padStart(2,'0')+'-'+d.getDate().toString().padStart(2,'0'); }
@@ -1680,8 +1690,8 @@ function detectCCFPP() {
 
 // ─── Build claims ─────────────────────────────────────────────────────────────
 function buildClaims() {
-  var last  = (document.getElementById('f-last').value||'').trim();
-  var first = (document.getElementById('f-first').value||'').trim();
+  var last  = fmtName((document.getElementById('f-last').value||''));
+  var first = fmtName((document.getElementById('f-first').value||''));
   var phn   = (document.getElementById('f-phn').value||'').replace(/\D/g,'');
   var dob   = (document.getElementById('f-dob').value||'').trim();
   var sex   = document.getElementById('f-sex').value;
@@ -1921,8 +1931,8 @@ function loadBatchItem(idx) {
   if (!item) return;
   batch.current = idx;
   // Patient
-  if (item.last)  document.getElementById('f-last').value  = item.last;
-  if (item.first) document.getElementById('f-first').value = item.first;
+  if (item.last)  document.getElementById('f-last').value  = fmtName(item.last);
+  if (item.first) document.getElementById('f-first').value = fmtName(item.first);
   if (item.phn)   document.getElementById('f-phn').value   = item.phn;
   if (item.dob)   document.getElementById('f-dob').value   = item.dob;
   if (item.sex)   document.getElementById('f-sex').value   = item.sex;
@@ -2089,8 +2099,8 @@ function sendSingleOCR(b64) {
   xhr.onload=function(){
     var data; try{data=JSON.parse(xhr.responseText);}catch(e){setStatus('ocr-status','st-warn','Bad response');return;}
     if (data.error){setStatus('ocr-status','st-warn','OCR: '+data.error);return;}
-    if (data.last) document.getElementById('f-last').value=data.last;
-    if (data.first) document.getElementById('f-first').value=data.first;
+    if (data.last) document.getElementById('f-last').value=fmtName(data.last);
+    if (data.first) document.getElementById('f-first').value=fmtName(data.first);
     if (data.phn) document.getElementById('f-phn').value=data.phn;
     if (data.dob) document.getElementById('f-dob').value=data.dob;
     if (data.sex) document.getElementById('f-sex').value=data.sex;
