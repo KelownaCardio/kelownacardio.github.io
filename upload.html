@@ -2275,8 +2275,86 @@ function lookupPatientFromSheets(phn, last, dob) {
     .then(function(r){ return r.json(); })
     .then(function(data){
       renderLookupBanner(lb, data);
+      // v1.14: After the exact-PHN lookup finishes, ALSO check the local
+      // patient cache for off-by-one PHN matches. Fires only when the exact
+      // lookup returned "not found" — supports the "type PHN to see if
+      // patient is in the database, catch typos" workflow.
+      if (phn && (!data || !data.found)) {
+        checkClosePhnMatches(phn, lb);
+      }
     })
     .catch(function(){ lb.style.display='none'; });
+}
+
+// v1.14: Lazy-load and cache the full patient list (one fetch per session).
+// Used by the close-PHN search below.
+var _patientCache = null;
+var _patientCachePromise = null;
+function ensurePatientCache() {
+  if (_patientCache) return Promise.resolve(_patientCache);
+  if (_patientCachePromise) return _patientCachePromise;
+  var url = document.getElementById('script-url').value.trim();
+  if (!url) return Promise.reject('No Apps Script URL');
+  _patientCachePromise = fetch(url + '?action=getAll&key=' + getScriptKey())
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      _patientCache = (data && Array.isArray(data.patients)) ? data.patients : [];
+      _patientCachePromise = null;
+      return _patientCache;
+    })
+    .catch(function(){ _patientCachePromise = null; return []; });
+  return _patientCachePromise;
+}
+
+// v1.14: Find patients whose 10-digit PHN differs by 1-2 digits.
+function findClosePhnMatches(phn, patients) {
+  var typed = String(phn || '').replace(/\D/g, '');
+  if (typed.length !== 10) return [];
+  var matches = [];
+  patients.forEach(function(p) {
+    var pp = String(p.phn || '').replace(/\D/g, '');
+    if (pp.length !== 10 || pp === typed) return;
+    var diffs = 0;
+    for (var i = 0; i < 10; i++) if (typed[i] !== pp[i]) diffs++;
+    if (diffs >= 1 && diffs <= 2) {
+      matches.push({ phn: pp, last: p.last || '', first: p.first || '',
+                     dob: p.dob || '', diffs: diffs });
+    }
+  });
+  matches.sort(function(a, b) { return a.diffs - b.diffs; });
+  return matches.slice(0, 5);
+}
+
+function checkClosePhnMatches(phn, lb) {
+  ensurePatientCache().then(function(patients) {
+    var matches = findClosePhnMatches(phn, patients);
+    if (!matches.length) return;
+    var html = '<div style="background:var(--amber-bg);color:var(--amber-t);padding:8px;' +
+               'border-radius:var(--rsm);font-weight:600;margin-top:6px;' +
+               'border:1px solid var(--amber)">' +
+               '🔍 <b>' + matches.length + ' close match' + (matches.length===1?'':'es') +
+               '</b> — possible PHN typo?' +
+               matches.map(function(m) {
+                 return '<div style="margin-top:6px;padding:6px;background:#fff;border-radius:6px;font-weight:normal;color:var(--text)">' +
+                        '<b>' + esc(m.last) + ', ' + esc(m.first) + '</b>' +
+                        (m.dob ? ' · DOB ' + esc(m.dob) : '') +
+                        ' · PHN <code>' + esc(m.phn) + '</code> ' +
+                        '<span style="color:var(--text3)">(' + m.diffs +
+                        ' digit' + (m.diffs===1?'':'s') + ' off)</span>' +
+                        ' <button onclick="fixPhnTypo(\'' + esc(m.phn) + '\')" ' +
+                        'style="margin-left:6px;padding:3px 8px;border-radius:5px;border:none;' +
+                        'background:var(--blue);color:#fff;font-weight:600;cursor:pointer;font-size:11px">' +
+                        'Use this</button></div>';
+               }).join('') +
+               '</div>';
+    lb.style.display='block';
+    lb.innerHTML = (lb.innerHTML || '') + html;
+  });
+}
+
+function fixPhnTypo(correct) {
+  var el = document.getElementById('f-phn');
+  if (el) { el.value = correct; lookupPatientFromSheets(correct, '', ''); refreshPreview(); }
 }
 
 function renderLookupBanner(lb, data) {
@@ -2307,9 +2385,35 @@ function renderLookupBanner(lb, data) {
   }
 
   var lines = [];
+  var phnTypoDetected = false;
   if (data.found && data.patient) {
     var p = data.patient;
     var matchStr = data.matchedOn && data.matchedOn.length ? ' (matched on ' + data.matchedOn.join(' + ') + ')' : '';
+
+    // v1.13: PHN-typo warning. If the patient was matched by name/dob but
+    // the typed PHN differs from the patient's actual PHN, this is almost
+    // certainly a transcription typo (e.g. one digit off). Surface it loud
+    // so the doctor fixes the PHN before saving. Same defence the main app
+    // does client-side via st.patients; upload.html relies on the Apps
+    // Script's lookupPatient name-fallback match.
+    var typedPhn = (document.getElementById('f-phn')||{}).value || '';
+    typedPhn = String(typedPhn).replace(/\D/g,'');
+    var actualPhn = String(p.phn || '').replace(/\D/g,'');
+    if (typedPhn && actualPhn && typedPhn !== actualPhn) {
+      phnTypoDetected = true;
+      lines.push(
+        '<div style="background:var(--red-bg);color:var(--red-t);padding:8px;' +
+        'border-radius:var(--rsm);font-weight:700;margin-bottom:6px">' +
+        '⚠ PHN typo? You typed <code>' + esc(typedPhn) + '</code> but ' +
+        esc(p.last) + ', ' + esc(p.first) + ' is on file as <code>' +
+        esc(actualPhn) + '</code>. ' +
+        '<button onclick="fixPhnTypo(\'' + esc(actualPhn) + '\')" ' +
+        'style="margin-left:8px;padding:4px 10px;border-radius:6px;border:none;' +
+        'background:var(--red-t);color:#fff;font-weight:700;cursor:pointer">' +
+        'Use ' + esc(actualPhn) + '</button></div>'
+      );
+    }
+
     lines.push('<b>Found:</b> ' + esc(p.last) + ', ' + esc(p.first) +
                (p.dob ? ' · DOB ' + esc(p.dob) : '') +
                (p.ward ? ' · ' + esc(p.ward) : '') + matchStr);
@@ -2328,6 +2432,12 @@ function renderLookupBanner(lb, data) {
     lb.style.background='var(--green-bg)';
     lb.style.color='var(--green-t)';
     lb.style.border='.5px solid var(--green)';
+  }
+  // v1.13: PHN-typo warning overrides green/amber with red border
+  if (phnTypoDetected) {
+    lb.style.background='#fff';
+    lb.style.color='var(--text)';
+    lb.style.border='1px solid var(--red-t)';
   }
 
   lb.style.display='block';

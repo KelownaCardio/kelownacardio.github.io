@@ -1839,11 +1839,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.36-2026-05-13-await-savepatient-orphan-healer';
+var BUILD_ID    = 'v3.37-2026-05-13-typo-phn-catcher';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.36';
+var APP_VERSION = 'v3.37';
 var APP_BUILT   = '2026-05-12';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -6169,6 +6169,32 @@ async function _addPatientCore(withClaim, skipNameDobDup) {
       });
       if (nameDobMatch) {
         openPossibleDuplicateModal(nameDobMatch, withClaim);
+        return;
+      }
+    }
+
+    // v3.37: Typo-PHN catcher. Same last+first name as an existing patient,
+    // PHN differs by 1-2 digits → almost certainly a transcription error
+    // (e.g. 9050828076 vs 9050328076 — single-digit '8' vs '3'). Catches
+    // typos even when DOB is missing or also typo'd, which the name+DOB
+    // check above doesn't. Still soft — the doctor can override if the
+    // similar PHN is genuinely a different person.
+    var firstLc = String(gv('f-first') || '').trim().toLowerCase();
+    if (lastLc && firstLc && phn && phn.length === 10) {
+      var phnTypoMatch = st.patients.find(function(x) {
+        if (!x || !x.phn || x.phn === phn) return false;
+        var xPhn = String(x.phn);
+        if (xPhn.length !== phn.length) return false;
+        var xLast  = String(x.last  || '').trim().toLowerCase();
+        var xFirst = String(x.first || '').trim().toLowerCase();
+        if (xLast !== lastLc || xFirst !== firstLc) return false;
+        // Count digit differences
+        var diffs = 0;
+        for (var i = 0; i < phn.length; i++) if (phn[i] !== xPhn[i]) diffs++;
+        return diffs >= 1 && diffs <= 2;
+      });
+      if (phnTypoMatch) {
+        openPossibleDuplicateModal(phnTypoMatch, withClaim);
         return;
       }
     }
