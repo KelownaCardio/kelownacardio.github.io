@@ -1839,11 +1839,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.35-2026-05-13-fmtname-casing';
+var BUILD_ID    = 'v3.36-2026-05-13-await-savepatient-orphan-healer';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.35';
+var APP_VERSION = 'v3.36';
 var APP_BUILT   = '2026-05-12';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -2218,6 +2218,50 @@ async function syncFromSheets() {
         if (changed && SHEETS_URL) push('saveClaim', c);
       });
       st.claims = mergedClaims;
+    }
+
+    // v3.36: Orphan-claim self-healer. If main-app claims (c-prefix IDs) exist
+    // for a PHN that has NO patient row, reconstruct a minimal patient stub
+    // from the claim data and push savePatient. This recovers from the race
+    // bug fixed above for any pre-existing orphans, and provides defence in
+    // depth for future races. Upload-tool claims (8-char IDs) are skipped —
+    // historical billing is allowed to lack a patient row by design.
+    if (Array.isArray(st.patients) && Array.isArray(st.claims)) {
+      var phnHasPatient = {};
+      st.patients.forEach(function(p) { if (p.phn) phnHasPatient[String(p.phn)] = true; });
+      var orphansByPhn = {};
+      st.claims.forEach(function(c) {
+        var phn = String(c.phn || '');
+        if (!phn || phnHasPatient[phn]) return;
+        if (!String(c.id || '').startsWith('c')) return; // skip upload-tool claims
+        if (!orphansByPhn[phn]) orphansByPhn[phn] = c;
+      });
+      Object.keys(orphansByPhn).forEach(function(phn) {
+        var src = orphansByPhn[phn];
+        var stub = {
+          id:           'p' + Date.now() + Math.floor(Math.random() * 9999),
+          last:         fmtName(src.last || ''),
+          first:        fmtName(src.first || ''),
+          phn:          phn,
+          dob:          '',
+          sex:          '',
+          ward:         '',
+          bed:          '',
+          fac:          'OA040',
+          refby:        src.refby || '',
+          refbyName:    src.refbyName || '',
+          role:         'consultant',
+          mrp:          'Other',
+          list:         'off',
+          care:         'directive',
+          icd:          src.icd || '3062',
+          admitDate:    src.date || '',
+          roundedToday: null
+        };
+        st.patients.push(stub);
+        if (SHEETS_URL) push('savePatient', stub);
+        console.warn('Orphan-claim healer: recreated missing patient row for PHN ' + phn + ' (' + stub.last + ', ' + stub.first + ')');
+      });
     }
 
     if (d.doctors)   st.doctors   = d.doctors;
@@ -6065,7 +6109,7 @@ function addPatientOnly() {
 // Shared patient validation, creation and optional consult claim.
 // skipNameDobDup: set true when the user already saw the soft duplicate
 // warning and chose "Continue — different patient".
-function _addPatientCore(withClaim, skipNameDobDup) {
+async function _addPatientCore(withClaim, skipNameDobDup) {
   var last = gv('f-last');
   var phn  = gv('f-phn');
   if (!last) { showToast('Enter patient last name'); return; }
@@ -6153,7 +6197,20 @@ function _addPatientCore(withClaim, skipNameDobDup) {
   saveCustomRoom(ward, p.bed);
   st.patients.push(p);
   sv('patients', st.patients);
-  if (SHEETS_URL) push('savePatient', p);
+
+  // v3.36: AWAIT savePatient before creating claims. If the patient-row push
+  // fails (e.g. wifi hiccup), we'll know immediately and can refuse to write
+  // orphan claims. Previously this was fire-and-forget and a transient
+  // network failure would leave claims on Sheets but no matching patient row.
+  if (SHEETS_URL) {
+    var ok = await push('savePatient', p);
+    if (!ok) {
+      // Push failed — back the local state out and warn the user.
+      st.patients = st.patients.filter(function(x) { return x.id !== p.id; });
+      showToast('Could not save patient — check wifi and try again');
+      return;
+    }
+  }
   logChange(p, 'Admitted', ward + (p.bed ? ' Bed/Rm ' + p.bed : ''));
 
   // OCR corrections capture — if this patient was OCR'd, diff what the OCR
