@@ -2720,6 +2720,61 @@ function bcToISO(bc) {
   return p[2] + '-' + p[1].padStart(2,'0') + '-' + p[0].padStart(2,'0');
 }
 
+// v1.12: Group claims by PHN and build one historical patient row per PHN.
+// admitDate = earliest claim date, dischargeDate = latest. Marked discharged
+// so the patient lives in the Recently Discharged list (searchable, ready for
+// readmit) but doesn't clutter active rounding.
+function buildPatientsFromClaims(claims) {
+  var byPhn = {};  // PHN → { earliest, latest, sample }
+  function bcDateMs(s) {
+    if (!s) return 0;
+    var p = String(s).split('/');
+    if (p.length !== 3) return 0;
+    return new Date(parseInt(p[2]), parseInt(p[1])-1, parseInt(p[0])).getTime();
+  }
+  claims.forEach(function(c) {
+    var phn = String(c.phn || '').trim();
+    if (!phn) return;
+    var ms = bcDateMs(c.date);
+    if (!byPhn[phn]) {
+      byPhn[phn] = { earliest: c, latest: c, earlyMs: ms, lateMs: ms };
+    } else {
+      if (ms && ms < byPhn[phn].earlyMs) { byPhn[phn].earliest = c; byPhn[phn].earlyMs = ms; }
+      if (ms && ms > byPhn[phn].lateMs)  { byPhn[phn].latest   = c; byPhn[phn].lateMs  = ms; }
+    }
+  });
+  var rows = [];
+  Object.keys(byPhn).forEach(function(phn, i) {
+    var entry = byPhn[phn];
+    var first = entry.earliest;
+    var last  = entry.latest;
+    rows.push({
+      id:            'p' + Date.now() + i,
+      last:          fmtName(first.last || ''),
+      first:         fmtName(first.first || ''),
+      phn:           phn,
+      dob:           first.dob || '',
+      sex:           first.sex || '',
+      ward:          first.ward || '',
+      bed:           first.room || '',
+      fac:           'OA040',
+      refby:         first.refby || '',
+      refbyName:     first.refbyName || '',
+      role:          'consultant',
+      mrp:           'Other',
+      list:          'off',
+      care:          'directive',
+      icd:           first.icd || '3062',
+      admitDate:     first.date || '',
+      discharged:    true,
+      dischargedAt:  entry.lateMs ? entry.lateMs + (17 * 3600 * 1000) : Date.now(),
+      dischargeDate: last.date || '',
+      roundedToday:  null
+    });
+  });
+  return rows;
+}
+
 function exportSheets() {
   var url=document.getElementById('script-url').value.trim();
   if (!url){ setStatus('export-status','st-warn','No Apps Script URL configured.'); return; }
@@ -2737,9 +2792,39 @@ function exportSheets() {
     if (inp) { inp.focus(); inp.scrollIntoView({block:'center',behavior:'smooth'}); }
     return;
   }
-  setStatus('export-status','st-info','Sending to Sheets…');
+  setStatus('export-status','st-info','Saving patients…');
   var sampleClaim = claims[0] || {};
   var corrections = buildCorrections(sampleClaim.phn, sampleClaim.last, sampleClaim.first);
+
+  // v1.12: Build one patient row per unique PHN and push savePatient for each
+  // BEFORE saveHistorical, so the patient row exists when claims arrive.
+  // Upload-tool patients are added as DISCHARGED (admitDate = earliest claim,
+  // dischargeDate = latest). If readmitted, the main app's PHN duplicate
+  // check surfaces them in the restore/re-admit modal. All three entry
+  // points (main app, Meditech import, upload tool) now create patient rows.
+  var patientsToSave = buildPatientsFromClaims(claims);
+
+  // Sequentially push savePatient — Apps Script handles dedup by id.
+  // Payload format follows upload.html convention: action/key flat in body
+  // along with patient fields (not wrapped in a 'body' field).
+  function pushOnePatient(idx) {
+    if (idx >= patientsToSave.length) return Promise.resolve();
+    setStatus('export-status','st-info',
+      'Saving patient '+(idx+1)+' of '+patientsToSave.length+'…');
+    var pp = Object.assign({}, patientsToSave[idx],
+                           { action:'savePatient', key:getScriptKey() });
+    return fetch(url, { method:'POST', body: JSON.stringify(pp) })
+      .then(function() { return pushOnePatient(idx+1); })
+      .catch(function() { return pushOnePatient(idx+1); });
+  }
+
+  pushOnePatient(0).then(function() {
+    setStatus('export-status','st-info',
+      'Sending '+claims.length+' claim'+(claims.length===1?'':'s')+'…');
+    sendHistoricalClaims();
+  });
+
+  function sendHistoricalClaims() {
   var payload=JSON.stringify({action:'saveHistorical', key:getScriptKey(),
     claims:claimsToPayload(sortClaimsForExport(claims)),
     corrections:corrections});
@@ -2770,6 +2855,7 @@ function exportSheets() {
       if (err.name==='AbortError') return;
       setStatus('export-status','st-warn','Network error: '+err.message);
     });
+  }  // end sendHistoricalClaims
 }
 
 // Combined iClinic export: fetches ALL unsubmitted claims from both tabs,
