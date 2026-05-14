@@ -137,6 +137,45 @@ v1.11 2026-05-13  Restored auto-clear on successful Sheets push (regression
                   visible. Applies to clean success and partial-with-
                   duplicates; on error the form is preserved so the user
                   can retry.
+
+v1.12 2026-05-14  ICD-9 search: tiered (Tier 1 local cardiology codes,
+                  Tier 2 remote fallback to Sheets ICD9 tab via Apps
+                  Script searchICD action — full 7,000+ iClinic codes).
+                  Layout: existing claims history moved out of Patient
+                  card into its own card below the calendar; auto-
+                  expanded (no longer collapsed by default).
+                  Edit strip upgraded: ICD-9 field now uses the same
+                  tiered search; Referring MD uses the physician search
+                  widget; start/end time fields added.
+                  ── Regressions audited and fixed in v1.12 (post-launch):
+                  All of these functions lived in the old ICD function
+                  block that was deleted during the ICD search rewrite.
+                  Their absence threw ReferenceErrors on page load that
+                  silently killed every downstream listener.
+                  • esc() — HTML-entity escape helper. Without it, every
+                    new search widget threw on first render → PHN
+                    lookup on blur broke, the entire script halted.
+                  • clearIcd() / clearRef() — ✕ buttons on the ICD and
+                    referrer confirmation chips.
+                  • selectRefConfirm() — referrer chip population
+                    (called by applyLookupDefaults for prior-claim
+                    pre-fill, and now by the main-form ref dropdown).
+                  • isValidIcd9() — preview-row validation and export
+                    pre-flight; without it claims would silently skip
+                    the ICD-format check.
+                  • searchRefFromOCR() — batch OCR autofill flow that
+                    resolves OCR'd referrer text against the directory.
+                  • onRefInput() / closeRefDdDelayed() / buildRefRow() /
+                    refSearchRemote() / selectRefFromEl() — main-form
+                    referring MD search widget (Tier 1 local +
+                    Tier 2 Apps Script). The c-ref input's oninput/
+                    onblur handlers reference these directly in HTML
+                    attributes — without them the field accepted typing
+                    but showed no dropdown.
+                  Lesson: when removing a function block during a
+                  refactor, audit all callers (including HTML inline
+                  handlers) before deleting. A function search across
+                  the file is the cheapest sanity check.
 ===================================================================
 -->
 <html lang="en">
@@ -396,7 +435,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:8px">
     <div class="hdr-title">KGH Historical Billing</div>
-    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.11</div>
+    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.12</div>
   </div>
   <div class="hdr-sub" id="hdr-sub">Single card mode</div>
 </div>
@@ -702,6 +741,181 @@ function todayISO() { var d=new Date(); return d.getFullYear()+'-'+(d.getMonth()
 function esc(s) {
   if (s === null || s === undefined) return '';
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+
+// ─── ICD chip clear ────────────────────────────────────────────────
+function clearIcd() {
+  var inp  = document.getElementById('c-dx');
+  var conf = document.getElementById('icd-confirmed');
+  if (inp)  inp.value = '';
+  if (conf) conf.style.display = 'none';
+  refreshPreview();
+}
+
+// ─── Referrer chip: select + clear ────────────────────────────────
+// selectRefConfirm: called by applyLookupDefaults and any referrer row click
+function selectRefConfirm(num, name, spec, city) {
+  var inp  = document.getElementById('c-ref');
+  var conf = document.getElementById('ref-confirmed');
+  var cnam = document.getElementById('ref-confirmed-name');
+  var cnum = document.getElementById('ref-confirmed-num');
+  if (inp) {
+    inp.value = name || num || '';
+    inp.dataset.docnum  = num  || '';
+    inp.dataset.refname = name || '';
+  }
+  if (cnam) cnam.textContent = name || '';
+  if (cnum) cnum.textContent = num  ? '#' + num : '';
+  if (conf) conf.style.display = 'flex';
+  var dd = document.getElementById('ref-dd');
+  if (dd) { dd.classList.remove('open'); dd.innerHTML = ''; }
+  refreshPreview();
+}
+
+function clearRef() {
+  var inp  = document.getElementById('c-ref');
+  var conf = document.getElementById('ref-confirmed');
+  if (inp) {
+    inp.value = '';
+    inp.dataset.docnum  = '';
+    inp.dataset.refname = '';
+  }
+  if (conf) conf.style.display = 'none';
+  refreshPreview();
+}
+
+
+// ─── ICD9 code validity ────────────────────────────────────────────
+// Used by preview rendering and export pre-flight to flag rows that
+// have free-text in the ICD field ("Angina", "NSTEMI") instead of a
+// real code. Accepts digit codes (with or without period), V-codes,
+// and E-codes. iClinic strips the period on export.
+function isValidIcd9(code) {
+  if (!code) return false;
+  var s = String(code).trim();
+  return /^[VvEe]?\d[\d.]*$/.test(s);
+}
+
+// ─── OCR-driven referrer search ───────────────────────────────────
+// Called after batch OCR fills `c-ref` with a raw name fragment.
+// Best-effort: tries to resolve to a known physician and chip the
+// match. Silent fail if no match — user can correct manually.
+function searchRefFromOCR(raw) {
+  if (!raw) return;
+  var q = String(raw).toLowerCase().trim();
+  if (q.length < 2) return;
+  // Try local cache first
+  if (typeof BC_PHYSICIANS_LOCAL !== 'undefined' && BC_PHYSICIANS_LOCAL.length) {
+    for (var i = 0; i < BC_PHYSICIANS_LOCAL.length; i++) {
+      var p = BC_PHYSICIANS_LOCAL[i];
+      var full = ((p[0]||'') + ' ' + (p[1]||'')).toLowerCase();
+      if (full.indexOf(q) !== -1 || (q.length >= 3 && q.indexOf(String(p[0]||'').toLowerCase()) !== -1)) {
+        selectRefConfirm(String(p[2]||''), 'Dr. ' + p[0] + (p[1] ? ', '+p[1] : ''), p[3]||'', p[4]||'');
+        return;
+      }
+    }
+  }
+  // Fall through to remote search via Apps Script
+  var url = (document.getElementById('script-url')||{}).value || '';
+  if (!url) return;
+  fetch(url + '?action=searchPhysicians&q=' + encodeURIComponent(q) + '&key=' + getScriptKey())
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if (Array.isArray(data) && data.length) {
+        var hit = data[0];
+        var num  = String(hit.num || '');
+        var name = 'Dr. ' + (hit.last||'') + (hit.first ? ', '+hit.first : '');
+        selectRefConfirm(num, name, hit.spec||'', hit.city||'');
+      }
+    })
+    .catch(function(){});
+}
+
+
+// ─── Main consult form: Referring MD search (c-ref input, ref-dd dropdown) ──
+// Tiered: Tier 1 BC_PHYSICIANS_LOCAL (instant), Tier 2 Apps Script searchPhysicians (remote).
+// Mirrors the heRef* pattern in the edit strip but operates on the main consult form.
+
+var _refCloseTimer = null;
+var _refRemoteTimer = null;
+var _lastRefQ = '';
+
+function buildRefRow(p) {
+  var num  = String(p.num || p[2] || '');
+  var last = String(p.last || p[0] || '');
+  var first= String(p.first|| p[1] || '');
+  var spec = String(p.spec || p[3] || '');
+  var city = String(p.city || p[4] || '');
+  var disp = 'Dr. ' + last + (first ? ', ' + first : '');
+  var sub  = spec + (city ? (spec ? ' \u2022 ' : '') + city : '');
+  return '<div class="ref-dd-row" data-num="' + esc(num) + '" data-name="' + esc(disp) + '" ' +
+         'data-spec="' + esc(spec) + '" data-city="' + esc(city) + '" ' +
+         'onmousedown="event.preventDefault();selectRefFromEl(this)">' +
+         esc(disp) + ' <span style="color:var(--text3)">#' + esc(num) + '</span>' +
+         (sub ? '<div style="font-size:10px;color:var(--text2)">' + esc(sub) + '</div>' : '') +
+         '</div>';
+}
+
+function selectRefFromEl(el) {
+  var num  = el.getAttribute('data-num');
+  var name = el.getAttribute('data-name');
+  var spec = el.getAttribute('data-spec') || '';
+  var city = el.getAttribute('data-city') || '';
+  selectRefConfirm(num, name, spec, city);
+}
+
+function onRefInput() {
+  var inp = document.getElementById('c-ref');
+  var dd  = document.getElementById('ref-dd');
+  if (!inp || !dd) return;
+  var q = (inp.value || '').trim();
+  if (!q) { dd.classList.remove('open'); dd.innerHTML = ''; return; }
+  var ql = q.toLowerCase(), local = [];
+  if (typeof BC_PHYSICIANS_LOCAL !== 'undefined') {
+    for (var i = 0; i < BC_PHYSICIANS_LOCAL.length && local.length < 8; i++) {
+      var p = BC_PHYSICIANS_LOCAL[i];
+      if ((p[0] + ' ' + p[1]).toLowerCase().indexOf(ql) !== -1 || String(p[2]).indexOf(ql) !== -1)
+        local.push({last:p[0], first:p[1], num:p[2], spec:p[3]||'', city:p[4]||''});
+    }
+  }
+  dd.innerHTML = local.map(buildRefRow).join('');
+  if (q.length >= 2) {
+    dd.innerHTML += '<div class="ref-dd-row ref-searching" style="color:var(--text3);font-style:italic;font-size:11px">Searching\u2026</div>';
+    refSearchRemote(q);
+  } else if (!local.length) {
+    dd.innerHTML = '<div style="padding:8px 10px;font-size:11px;color:var(--text2)">No results</div>';
+  }
+  dd.classList.add('open');
+}
+
+function refSearchRemote(query) {
+  clearTimeout(_refRemoteTimer);
+  _refRemoteTimer = setTimeout(function() {
+    _lastRefQ = query;
+    var url = (document.getElementById('script-url') || {}).value || '';
+    if (!url) return;
+    fetch(url + '?action=searchPhysicians&q=' + encodeURIComponent(query) + '&key=' + getScriptKey())
+      .then(function(r){ return r.json(); })
+      .then(function(data) {
+        if (query !== _lastRefQ) return;
+        var dd = document.getElementById('ref-dd');
+        if (!dd || !dd.classList.contains('open')) return;
+        var ph = dd.querySelector('.ref-searching'); if (ph) ph.remove();
+        if (!Array.isArray(data) || !data.length) return;
+        var shown = []; dd.querySelectorAll('[data-num]').forEach(function(el){ shown.push(el.getAttribute('data-num')); });
+        var extra = data.filter(function(p){ return shown.indexOf(String(p.num||p[2]||'')) === -1; }).slice(0,8).map(buildRefRow).join('');
+        if (extra) dd.innerHTML += extra;
+      })
+      .catch(function(){ var ph = document.querySelector('#ref-dd .ref-searching'); if (ph) ph.remove(); });
+  }, 400);
+}
+
+function closeRefDdDelayed() {
+  _refCloseTimer = setTimeout(function(){
+    var dd = document.getElementById('ref-dd');
+    if (dd) { dd.classList.remove('open'); dd.innerHTML = ''; }
+  }, 200);
 }
 
 function getScriptKey() { var el=document.getElementById('shared-key'); return el ? el.value : 'kgh2026'; }
