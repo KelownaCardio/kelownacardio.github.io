@@ -177,6 +177,19 @@ v1.12 2026-05-14  ICD-9 search: tiered (Tier 1 local cardiology codes,
                   handlers) before deleting. A function search across
                   the file is the cheapest sanity check.
 
+v1.15 2026-05-14  Existing claims list: row visibility fix. The wrapper
+                  card and "(N claims)" title were rendering, but the
+                  rows themselves stayed hidden because the inner
+                  #hist-panel element kept a stale display:none from
+                  an earlier lookup (the new-patient and error paths
+                  in renderLookupBanner set display:none on the inner
+                  panel, but renderHistPanel only managed the outer
+                  card — so once hidden, the rows never came back even
+                  when a matched patient with claims was looked up).
+                  Fix: renderHistPanel now also clears display and
+                  re-adds the open class on the inner panel before
+                  populating the rows.
+
 v1.14 2026-05-14  ICD9_LOCAL rebuilt from the iClinic xlsx (385 codes,
                   no periods). Previously the local Tier 1 list had
                   158 codes WITH periods (e.g. 410.0, 428.20) — these
@@ -474,7 +487,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:8px">
     <div class="hdr-title">KGH Historical Billing</div>
-    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.14</div>
+    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.15</div>
   </div>
   <div class="hdr-sub" id="hdr-sub">Single card mode</div>
 </div>
@@ -2535,6 +2548,7 @@ function renderHistPanel() {
   var hpc = document.getElementById('hist-panel-card');
   var hpb = document.getElementById('hist-panel-body');
   var lbl = document.getElementById('hist-panel-label');
+  var hp  = document.getElementById('hist-panel');
   if (!hpb) return;
 
   if (!st.historicalClaims || !st.historicalClaims.length) {
@@ -2543,6 +2557,10 @@ function renderHistPanel() {
     return;
   }
 
+  // v1.15: ensure the inner panel is visible. A previous lookup may have set
+  // display:none on #hist-panel (new-patient or error path); without this
+  // reset, the wrapper card and title show but the rows stay invisible.
+  if (hp)  { hp.style.display = 'block'; hp.classList.add('open'); }
   if (hpc) hpc.style.display = 'block';
   if (lbl) lbl.textContent = '(' + st.historicalClaims.length + ' claim' + (st.historicalClaims.length===1?'':'s') + ')';
 
