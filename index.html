@@ -1168,26 +1168,25 @@ var OCR_WORKER_URL = 'https://kgh-ocr.kathrynb77.workers.dev';
 
 // ── BC MSP 2025 Fee Values (cardiology) ──────────────
 // Used only for motivational daily total display — not for billing submission
+// Rates from BC MSC Payment Schedule effective January 31, 2026.
 var FEE_RATES = {
-  // Confirmed by physician — current BC MSP rates
-  '33010': 186.14,  // Cardiology consultation — full
-  '33008':  63.95,  // Daily in-hospital care / combined daily
-  '33006':  82.42,  // Directive visit
-  '33005':  97.15,  // Emergency visit
-  // Unconfirmed — DO NOT display until physician provides correct values
-  '33012':    0,    // Cardiology consultation — limited (rate unknown)
-  '78717':    0,    // Complex discharge (rate unknown)
-  '78720':    0,    // MOST advance care planning (rate unknown)
-  '1411':     0,    // CCU critical care day 1 (rate unknown)
-  '1421':     0,    // CCU critical care days 2-7 (rate unknown)
-  '1431':     0,    // CCU critical care days 8-30 (rate unknown)
-  'CCU_DAILY': 0,   // raw tap — rate unknown until CCU codes confirmed
-  '1200':     0,    // Evening call base (rate unknown)
-  '1205':     0,    // Evening call increment (rate unknown)
-  '1201':     0,    // Night call base (rate unknown)
-  '1206':     0,    // Night call increment (rate unknown)
-  '1202':     0,    // Weekend/stat base (rate unknown)
-  '1207':     0,    // Weekend/stat increment (rate unknown)
+  '33010':   186.14,  // Cardiology consultation — full
+  '33012':    93.08,  // Cardiology consultation — repeat/limited (within 6mo)
+  '33008':    63.95,  // Subsequent hospital visit
+  '33006':    82.42,  // Directive care
+  '33005':    97.15,  // Emergency visit when specially called
+  '78717':    82.19,  // G78717 Specialist Discharge Care Plan for Complex Patients
+  '78720':    43.82,  // G78720 Specialist Advance Care Planning Discussion (MOST)
+  '1411':    347.74,  // CCU critical care — day 1
+  '1421':    174.38,  // CCU critical care — days 2–7 (per diem)
+  '1431':    133.01,  // CCU critical care — days 8–30
+  'CCU_DAILY': 0,     // synthetic raw tap — excluded from daily total (consolidated at export)
+  '1200':     79.08,  // Evening call-out base (1800–2300)
+  '1205':     72.69,  // Evening continuing care surcharge — per half hour
+  '1201':    111.05,  // Night call-out base (2300–0800)
+  '1206':     99.40,  // Night continuing care surcharge — per half hour
+  '1202':     79.08,  // Saturday/Sunday/Stat call-out base
+  '1207':     72.69,  // Saturday/Sunday/Stat continuing care surcharge — per half hour
 };
 
 function calcDailyTotal() {
@@ -1737,11 +1736,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.40-2026-05-13-icd9-no-period';
+var BUILD_ID    = 'v3.41-2026-05-14-fee-rates-from-msc-jan2026';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.40';
+var APP_VERSION = 'v3.41';
 var APP_BUILT   = '2026-05-12';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
