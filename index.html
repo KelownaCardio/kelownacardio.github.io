@@ -1839,11 +1839,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.37-2026-05-13-typo-phn-catcher';
+var BUILD_ID    = 'v3.38-2026-05-13-meditech-conflict-detection';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.37';
+var APP_VERSION = 'v3.38';
 var APP_BUILT   = '2026-05-12';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -8107,10 +8107,15 @@ function renderMediteachPreview(patients) {
     var loc  = parseLocCode(p.locationCode, p.roomBed);
     var care = inferCare(loc.ward, p.attending);
     var icd  = diagToIcd(p.reason);
-    var existing = !!st.patients.find(function(ep) {
+    // v3.38: instead of a boolean "existing", collect ALL local patients
+    // that match this Meditech entry by name. If there's exactly 1 match,
+    // standard "already on list" behaviour. If >1, this is a duplicate in
+    // the local DB (typo) — surface for cleanup. If 0, it's a new import.
+    var matches = st.patients.filter(function(ep) {
       return String(ep.last || '').toLowerCase() === String(p.last || '').toLowerCase() &&
              String(ep.first || '').toLowerCase().split(' ')[0] === String(p.first || '').toLowerCase().split(' ')[0];
     });
+    var existing = matches.length > 0;
     // MRP field rules:
     //   Cardiology MRP (role=mrp) → always 'Cardiology'
     //   Consulting (role=consultant) → recognised service ('Hospitalist',
@@ -8122,9 +8127,53 @@ function renderMediteachPreview(patients) {
     return Object.assign({}, p, {
       _idx: i, _ward: loc.ward, _room: loc.room,
       _list: care.list, _care: care.care, _role: care.role,
-      _icd: icd, _mrp: _mrp, _include: !existing, _existing: existing
+      _icd: icd, _mrp: _mrp, _include: !existing, _existing: existing,
+      _matches: matches  // v3.38: full match list for conflict detection
     });
   });
+
+  // v3.38: Detect demographic conflicts surfaced by the Meditech list.
+  // Meditech is authoritative for name + age + ward. Any of these is a
+  // cleanup signal:
+  //   - Multiple local patients match one Meditech entry → typo duplicates
+  //     in our DB (e.g. Cull at two PHNs differing by one digit)
+  //   - Local patient has DOB that disagrees with Meditech's age (off by
+  //     more than 1 year — allows for birthday slippage)
+  //   - Local patient is on a different ward than Meditech (informational,
+  //     usually means transfer, but worth showing)
+  var _mitConflicts = [];
+  _mitPats.forEach(function(p) {
+    if (p._matches && p._matches.length > 1) {
+      _mitConflicts.push({
+        kind: 'duplicate',
+        meditech: p,
+        locals: p._matches
+      });
+    }
+    if (p._matches && p._matches.length === 1 && p.age) {
+      var ep = p._matches[0];
+      if (ep.dob) {
+        // Parse DOB DD/MM/YYYY → age now
+        var parts = String(ep.dob).split('/');
+        if (parts.length === 3) {
+          var yr = parseInt(parts[2], 10);
+          var now = new Date();
+          var ageFromDob = now.getFullYear() - yr;
+          var mitAge = parseInt(p.age, 10);
+          if (!isNaN(ageFromDob) && !isNaN(mitAge) && Math.abs(ageFromDob - mitAge) > 1) {
+            _mitConflicts.push({
+              kind: 'age_mismatch',
+              meditech: p,
+              local: ep,
+              meditechAge: mitAge,
+              localAge: ageFromDob
+            });
+          }
+        }
+      }
+    }
+  });
+  window._mitConflicts = _mitConflicts;  // for console inspection
 
   var onCnt  = _mitPats.filter(function(p) { return p._list === 'on'  && p._include; }).length;
   var offCnt = _mitPats.filter(function(p) { return p._list === 'off' && p._include; }).length;
@@ -8201,7 +8250,54 @@ function renderMediteachPreview(patients) {
         : '');
   }
 
-  document.getElementById('mit-rows').innerHTML = dischHtml + _mitPats.map(function(p) {
+  // v3.38: Build conflicts banner — shown at the top of the modal before
+  // the discharge and import sections.
+  var conflictHtml = '';
+  if (_mitConflicts.length) {
+    conflictHtml =
+      '<div class="sec-lbl" style="color:var(--red-t);margin-bottom:6px">⚠ Demographic conflicts (' + _mitConflicts.length + ')</div>' +
+      _mitConflicts.map(function(cf) {
+        if (cf.kind === 'duplicate') {
+          var phns = cf.locals.map(function(l) { return String(l.phn || '?'); });
+          return '<div class="imp-row" style="background:var(--red-bg);border:1px solid var(--red-t)">' +
+            '<div class="imp-info">' +
+              '<div class="imp-name" style="color:var(--red-t)">' +
+                'Duplicate in DB: ' + esc(cf.meditech.last) + ', ' + esc(cf.meditech.first) +
+              '</div>' +
+              '<div class="imp-meta">Meditech shows one patient; local DB has ' + cf.locals.length + ':</div>' +
+              cf.locals.map(function(l) {
+                return '<div class="imp-meta" style="color:var(--text);margin-top:2px">' +
+                       '· PHN <code>' + esc(l.phn || '(blank)') + '</code>' +
+                       (l.dob ? ' · DOB ' + esc(l.dob) : '') +
+                       (l.ward ? ' · ' + esc(l.ward) : '') +
+                       ' · ' + (l.discharged ? 'discharged' : 'active') +
+                       '</div>';
+              }).join('') +
+              '<div class="imp-meta" style="color:var(--red-t);font-weight:600;margin-top:4px">' +
+                'Action: keep one, discharge the other(s) and reassign their claims.' +
+              '</div>' +
+            '</div>' +
+          '</div>';
+        } else if (cf.kind === 'age_mismatch') {
+          return '<div class="imp-row" style="background:var(--amber-bg);border:1px solid var(--amber-t)">' +
+            '<div class="imp-info">' +
+              '<div class="imp-name" style="color:var(--amber-t)">' +
+                'Age mismatch: ' + esc(cf.meditech.last) + ', ' + esc(cf.meditech.first) +
+              '</div>' +
+              '<div class="imp-meta">Meditech says age ' + cf.meditechAge +
+                ', local DOB ' + esc(cf.local.dob) + ' implies age ' + cf.localAge + '.</div>' +
+              '<div class="imp-meta" style="color:var(--amber-t);font-weight:600;margin-top:4px">' +
+                'Action: verify DOB on the patient sticker and edit if wrong.' +
+              '</div>' +
+            '</div>' +
+          '</div>';
+        }
+        return '';
+      }).join('') +
+      '<div style="height:10px"></div>';
+  }
+
+  document.getElementById('mit-rows').innerHTML = conflictHtml + dischHtml + _mitPats.map(function(p) {
     return '<div class="imp-row' + (p._existing ? ' existing' : '') + '" id="imp-row-' + p._idx + '">' +
       '<div class="imp-chk' + (p._include ? ' on' : '') + '" id="imp-chk-' + p._idx + '" onclick="toggleImpRow(' + p._idx + ')">' +
         (p._include ? '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>' : '') +
