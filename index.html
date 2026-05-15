@@ -158,12 +158,14 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 .ward-hdr { display:flex; align-items:center; justify-content:space-between; margin-bottom:7px; }
 .ward-lbl { font-size:11px; font-weight:700; color:var(--text2); text-transform:uppercase; letter-spacing:.5px; display:flex; align-items:center; gap:5px; }
 .chip { font-size:10px; padding:2px 7px; border-radius:var(--rpill); font-weight:600; }
-.chip-red  { background:var(--red-bg);   color:var(--red-t); }
-.chip-blue { background:var(--blue-bg);  color:var(--blue-t); }
-.chip-amber{ background:var(--amber-bg); color:var(--amber-t); }
-.chip-green{ background:var(--green-bg); color:var(--green-t); }
-.chip-teal { background:var(--teal-bg);  color:var(--teal-t); }
-.chip-grey { background:var(--surface2); color:var(--text2); }
+.chip-red    { background:var(--red-bg);   color:var(--red-t); }
+.chip-blue   { background:var(--blue-bg);  color:var(--blue-t); }
+.chip-amber  { background:var(--amber-bg); color:var(--amber-t); }
+.chip-green  { background:var(--green-bg); color:var(--green-t); }
+.chip-teal   { background:var(--teal-bg);  color:var(--teal-t); }
+.chip-grey   { background:var(--surface2); color:var(--text2); }
+.chip-yellow { background:#fff0c4;         color:#5a2700; }
+.chip-skyblue{ background:#dbe7fc;         color:#002461; }
 .ward-add { padding:4px 10px; font-size:11px; border:.5px solid var(--border2); border-radius:var(--rpill); background:none; cursor:pointer; font-family:inherit; color:var(--text2); }
 .ward-add:hover { background:var(--surface2); }
 
@@ -186,7 +188,7 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 
 /* WARD LIST */
 .ward-list { display:flex; flex-direction:column; gap:5px; }
-.wp { display:flex; align-items:flex-start; gap:8px; padding:9px 10px; border:.5px solid var(--border); border-radius:var(--r); background:var(--surface); cursor:pointer; }
+.wp { display:flex; align-items:flex-start; gap:8px; padding:8px 10px; border:.5px solid var(--border); border-radius:var(--r); background:var(--surface); cursor:pointer; }
 .wp.done      { border-color:#7ec49a; background:var(--green-bg); }
 .wp.directive { border-color:#d4a84a; }
 .wp-pos { min-width:24px; height:22px; padding:0 6px; border-radius:11px; background:var(--surface2); display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:var(--text2); flex-shrink:0; margin-top:2px; letter-spacing:-.2px; }
@@ -201,15 +203,20 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 /* On/Off service pills on add-patient location card */
 .ap-list-pill { flex:1; padding:7px 8px; border-radius:var(--rpill); border:1.5px solid var(--border2); background:var(--surface2); font-size:11px; font-weight:700; font-family:inherit; cursor:pointer; transition:all .15s; color:var(--text2); }
 .ap-list-pill.on { background:var(--blue-bg); border-color:var(--blue); color:var(--blue-t); }
+/* Off-service pills go amber when active (on=blue, off=amber convention) */
+.ap-list-pill.tone-amber.on { background:var(--amber-bg); border-color:var(--amber); color:var(--amber-t); }
+/* Top list-selector tabs: blue when On, amber when Off */
+#ls-on.on  { color:var(--blue-t);  background:var(--blue-bg);  box-shadow:0 1px 3px rgba(46,26,110,.18); }
+#ls-off.on { color:var(--amber-t); background:var(--amber-bg); box-shadow:0 1px 3px rgba(160,96,16,.18); }
 
 .wp-pos-wrap { position:relative; flex-shrink:0; margin-top:2px; }
 .wp-pos-badge { position:absolute; top:-4px; right:-4px; width:11px; height:11px; border-radius:50%; background:var(--green); display:flex; align-items:center; justify-content:center; border:1.5px solid var(--surface); }
 .wp-pos-badge svg { width:6px; height:6px; stroke:#fff; fill:none; stroke-width:3; }
 .wp-info { flex:1; min-width:0; }
-.wp-name { font-size:13px; font-weight:700; }
-.wp-meta { font-size:10px; color:var(--text2); margin-top:2px; }
-.wp-chips{ display:flex; gap:4px; margin-top:4px; flex-wrap:wrap; }
-.wp-acts { display:flex; gap:4px; margin-top:6px; flex-wrap:wrap; }
+.wp-name { font-size:13px; font-weight:700; letter-spacing:-.1px; line-height:1.25; }
+.wp-meta { font-size:10px; color:var(--text2); margin-top:1px; }
+.wp-chips{ display:flex; gap:4px; margin-top:3px; flex-wrap:wrap; }
+.wp-acts { display:flex; gap:4px; margin-top:5px; flex-wrap:wrap; }
 .ro-col { display:flex; flex-direction:column; gap:3px; flex-shrink:0; padding-top:4px; }
 .ro { width:20px; height:20px; border:.5px solid var(--border2); border-radius:4px; background:none; cursor:pointer; font-size:10px; color:var(--text2); display:flex; align-items:center; justify-content:center; font-family:inherit; }
 .ro:hover { background:var(--surface2); }
@@ -451,7 +458,6 @@ input[type=file] { display:none; }
 
 /* Patient row name + pencil inline */
 .wp-name-row { display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
-.wp-name { font-size:14px; font-weight:700; }
 .wp-rm   { font-size:10px; color:var(--text2); font-weight:700; margin-left:2px; }
 
 /* Pencil inline with name */
@@ -782,7 +788,11 @@ input[type=file] { display:none; }
     <div class="fl">
       <div class="f1"><label>DOB (DD/MM/YYYY)</label><input id="f-dob" autocorrect="off" placeholder="DD/MM/YYYY"></div>
       <div class="f1"><label>Sex</label>
-        <select id="f-sex"><option value="">—</option><option value="M">M</option><option value="F">F</option></select>
+        <div class="fl" style="gap:6px">
+          <button class="ap-list-pill" id="f-sex-m" onclick="apSexPill('M')">M</button>
+          <button class="ap-list-pill" id="f-sex-f" onclick="apSexPill('F')">F</button>
+        </div>
+        <input id="f-sex" type="hidden" value="">
       </div>
     </div>
   </div>
@@ -866,7 +876,7 @@ input[type=file] { display:none; }
       <label style="margin-top:8px">On / Off service</label>
       <div class="fl" style="gap:8px;margin-top:4px">
         <button class="ap-list-pill on" id="ap-pill-on" onclick="apListPill('on')">On service</button>
-        <button class="ap-list-pill" id="ap-pill-off" onclick="apListPill('off')">Off service</button>
+        <button class="ap-list-pill tone-amber" id="ap-pill-off" onclick="apListPill('off')">Off service</button>
       </div>
       <input id="f-list" type="hidden" value="on">
       <input id="f-care" type="hidden" value="daily">
@@ -1288,15 +1298,15 @@ function updateDailyTotal() {
 // the relevant codes from the MSC 2026 audit document.
 // ─────────────────────────────────────────────────────────────────────────
 var FEES = [
-  // ── Consultations ────────────────────────────────────────────────
-  { code:'33010',  desc:'Cardiology consultation — full',                                 amount:'$186.14', cat:'Consult',   clr:'chip-blue'  },
-  { code:'33012',  desc:'Repeat / limited consultation (same illness, within 6 months)',  amount:'$93.08',  cat:'Consult',   clr:'chip-blue'  },
-  { code:'33014',  desc:'Prolonged visit for counselling (max 4/year)',                   amount:'$66.47',  cat:'Consult',   clr:'chip-blue'  },
-  { code:'33005',  desc:'Emergency visit when specially called',                          amount:'$97.15',  cat:'Consult',   clr:'chip-red'   },
+  // ── Consultations (yellow — matches calendar) ───────────────────
+  { code:'33010',  desc:'Cardiology consultation — full',                                 amount:'$186.14', cat:'Consult',   clr:'chip-yellow' },
+  { code:'33012',  desc:'Repeat / limited consultation (same illness, within 6 months)',  amount:'$93.08',  cat:'Consult',   clr:'chip-yellow' },
+  { code:'33014',  desc:'Prolonged visit for counselling (max 4/year)',                   amount:'$66.47',  cat:'Consult',   clr:'chip-yellow' },
+  { code:'33005',  desc:'Emergency visit when specially called',                          amount:'$97.15',  cat:'Consult',   clr:'chip-red'    },
 
   // ── Continuing care by consultant ────────────────────────────────
-  { code:'33006',  desc:'Directive visit (max 2 per Sun–Sat week; 3rd requires note)',    amount:'$82.42',  cat:'Directive', clr:'chip-amber' },
-  { code:'33008',  desc:'Subsequent hospital visit / MRP daily / combined daily care',    amount:'$63.95',  cat:'Daily',     clr:'chip-blue'  },
+  { code:'33006',  desc:'Directive visit (max 2 per Sun–Sat week; 3rd requires note)',    amount:'$82.42',  cat:'Directive', clr:'chip-skyblue'},
+  { code:'33008',  desc:'Subsequent hospital visit / MRP daily / combined daily care',    amount:'$63.95',  cat:'Daily',     clr:'chip-green'  },
 
   // ── Cardiology procedures performed by the group ─────────────────
   { code:'Y33025', desc:'Cardioversion (operation only)',                                 amount:'$105.70', cat:'Procedure', clr:'chip-red'   },
@@ -1312,13 +1322,13 @@ var FEES = [
   { code:'1431',   desc:'CCU / ICU critical care — Days 8–30',                            amount:'$133.01', cat:'CCU',       clr:'chip-red'   },
   { code:'1441',   desc:'CCU / ICU critical care — Day 31 onward',                        amount:'$138.53', cat:'CCU',       clr:'chip-red'   },
 
-  // ── Call-out modifiers (Evening / Night / Weekend) ───────────────
-  { code:'1200',   desc:'Evening call modifier — base 30 min',                            amount:'$79.08',  cat:'Modifier',  clr:'chip-amber' },
-  { code:'1201',   desc:'Night call modifier — base 30 min',                              amount:'$111.05', cat:'Modifier',  clr:'chip-red'   },
-  { code:'1202',   desc:'Weekend/stat call modifier — base 30 min',                       amount:'$79.08',  cat:'Modifier',  clr:'chip-teal'  },
-  { code:'1205',   desc:'Evening call — increment per 30 min',                            amount:'$72.69',  cat:'Modifier',  clr:'chip-amber' },
-  { code:'1206',   desc:'Night call — increment per 30 min',                              amount:'$99.40',  cat:'Modifier',  clr:'chip-red'   },
-  { code:'1207',   desc:'Weekend/stat call — increment per 30 min',                       amount:'$72.69',  cat:'Modifier',  clr:'chip-teal'  }
+  // ── Call-out modifiers (all blue — matches MOST/calendar logic) ──
+  { code:'1200',   desc:'Evening call modifier — base 30 min',                            amount:'$79.08',  cat:'Modifier',  clr:'chip-blue' },
+  { code:'1201',   desc:'Night call modifier — base 30 min',                              amount:'$111.05', cat:'Modifier',  clr:'chip-blue' },
+  { code:'1202',   desc:'Weekend/stat call modifier — base 30 min',                       amount:'$79.08',  cat:'Modifier',  clr:'chip-blue' },
+  { code:'1205',   desc:'Evening call — increment per 30 min',                            amount:'$72.69',  cat:'Modifier',  clr:'chip-blue' },
+  { code:'1206',   desc:'Night call — increment per 30 min',                              amount:'$99.40',  cat:'Modifier',  clr:'chip-blue' },
+  { code:'1207',   desc:'Weekend/stat call — increment per 30 min',                       amount:'$72.69',  cat:'Modifier',  clr:'chip-blue' }
 ];
 
 // Legacy fee codes that appeared in older versions of this app but were
@@ -1976,11 +1986,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.49-2026-05-15-smaller-pills';
+var BUILD_ID    = 'v3.53-2026-05-15-ccfpp-interval-overlap';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.49';
+var APP_VERSION = 'v3.53';
 var APP_BUILT   = '2026-05-14';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -3938,7 +3948,7 @@ function buildOtherClaimForm(p) {
   h += '<input id="oc-refby-name" type="hidden" value="' + esc(refVal) + '">';
 
   // Notes
-  h += '<label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(CCFPP, etc.)</span></label>';
+  h += '<label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(optional — CCFPP auto-added)</span></label>';
   h += '<input id="oc-notes" placeholder="Optional" autocorrect="off">';
 
   h += buildPerformingPhysSelector();
@@ -4327,7 +4337,7 @@ function openPatientSummary(pid) {
                 '<path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
               '</button>' +
               '</div>';
-  if (p.dob)  html += '<div style="font-size:12px;color:var(--blue-t);opacity:.8;margin-top:2px">DOB ' + esc(p.dob) + (p.sex ? ' &bull; ' + p.sex : '') + '</div>';
+  if (p.dob)  html += '<div style="font-size:12px;color:var(--blue-t);opacity:.8;margin-top:2px">DOB ' + esc(dispDate(p.dob)) + (p.sex ? ' &bull; ' + p.sex : '') + '</div>';
   if (p.phn)  html += '<div style="font-size:12px;color:var(--blue-t);opacity:.8;margin-top:1px">PHN ' + esc(p.phn) + '</div>';
   html +=   '</div>';
   // Discharge badge if applicable
@@ -4444,13 +4454,12 @@ function _ptSummaryListHTML(p, claims) {
       var dxLabel  = icdShortLabel(c.icd);
       if (dxLabel.length > 45) dxLabel = dxLabel.slice(0, 42) + '…';
       var isCCU = c.fee === 'CCU_DAILY' || c.fee === '1411' || c.fee === '1421' || c.fee === '1431';
+      var feeMeta  = FEES.find(function(f) { return f.code === c.fee; });
+      var feeChip  = (isCCU ? 'chip-red' : (feeMeta && feeMeta.clr) || 'chip-grey');
 
       html += '<div style="display:flex;align-items:flex-start;gap:9px;padding:7px 0;border-bottom:.5px solid var(--border)">';
       html +=   '<div style="min-width:52px;flex-shrink:0">';
-      html +=     '<span style="font-size:11px;font-weight:700;font-family:monospace;' +
-                  'background:' + (isCCU ? 'var(--red-bg)' : 'var(--blue-bg)') + ';' +
-                  'color:' + (isCCU ? 'var(--red-t)' : 'var(--blue-t)') + ';' +
-                  'padding:2px 6px;border-radius:4px">' + esc(c.fee === 'CCU_DAILY' ? '1411/21/31' : c.fee) + '</span>';
+      html +=     '<span class="' + feeChip + '" style="font-size:11px;font-weight:700;font-family:monospace;padding:2px 6px;border-radius:4px;display:inline-block">' + esc(c.fee === 'CCU_DAILY' ? '1411/21/31' : c.fee) + '</span>';
       if (c.units && c.units > 1) html += '<div style="font-size:9px;color:var(--text3);margin-top:2px">×' + c.units + '</div>';
       html +=   '</div>';
       html +=   '<div style="flex:1;min-width:0">';
@@ -4741,13 +4750,16 @@ function _cvShowDayDetails(pid, dateStr, dayClaims) {
     var dxLabel  = icdShortLabel(c.icd);
     if (dxLabel.length > 45) dxLabel = dxLabel.slice(0, 42) + '…';
     var typeColor = 'var(--text)';
-    if (c.fee === '33010' || c.fee === '33012' || c.fee === '33005' || c.fee === '33014') typeColor = 'var(--amber-t)';
-    else if (c.fee === 'CCU_DAILY' || c.fee === '1411' || c.fee === '1421' || c.fee === '1431' || c.fee === '1441') typeColor = 'var(--purple-t)';
-    else if (c.fee === '33006') typeColor = 'var(--blue-t)';
-    else if (c.fee === '33008' && c.notes) typeColor = 'var(--teal-t)';
-    else if (c.fee === '33008') typeColor = 'var(--green-t)';
-    else if (c.fee === 'Y33025' || c.fee === '00751') typeColor = 'var(--red-t)';
-    else if (c.fee === '78717' || c.fee === '78720') typeColor = 'var(--green-t)';
+    // Match calendar legend: Consult=yellow, Daily=green, Combined=teal, Directive=skyblue, CCU=red, Modifier=blue, Procedure=red, Discharge plan=green
+    if (c.fee === '33010' || c.fee === '33012' || c.fee === '33014') typeColor = '#5a2700';            // consult yellow
+    else if (c.fee === '33005')                                       typeColor = 'var(--red-t)';       // emergency consult
+    else if (c.fee === 'CCU_DAILY' || c.fee === '1411' || c.fee === '1421' || c.fee === '1431' || c.fee === '1441') typeColor = 'var(--red-t)'; // CCU
+    else if (c.fee === '33006')                                       typeColor = '#002461';            // directive sky-blue
+    else if (c.fee === '33008' && c.notes)                            typeColor = 'var(--teal-t)';      // combined daily
+    else if (c.fee === '33008')                                       typeColor = 'var(--green-t)';     // daily
+    else if (c.fee === 'Y33025' || c.fee === '00751')                 typeColor = 'var(--red-t)';       // procedure
+    else if (c.fee === '78717' || c.fee === '78720')                  typeColor = 'var(--green-t)';     // MOST / discharge plan
+    else if (['1200','1201','1202','1205','1206','1207'].indexOf(c.fee) !== -1) typeColor = 'var(--blue-t)'; // modifiers
     return (
       '<div style="background:var(--surface2);border-radius:8px;padding:10px 12px;margin-bottom:8px">' +
         '<div style="display:flex;justify-content:space-between;font-weight:700;font-size:13px;color:' + typeColor + '">' +
@@ -5284,11 +5296,13 @@ function openPatientEdit(pid) {
   html += '<div class="f1"><label>DOB</label><input id="pe-dob" value="' + esc(p.dob||'') + '" autocorrect="off" placeholder="DD/MM/YYYY"></div>';
   html += '</div>';
   html += '<div class="fl">';
-  html += '<div class="f1"><label>Sex</label><select id="pe-sex">' +
-          '<option value=""' + (!p.sex ? ' selected' : '') + '>—</option>' +
-          '<option value="M"' + (p.sex==='M' ? ' selected' : '') + '>M</option>' +
-          '<option value="F"' + (p.sex==='F' ? ' selected' : '') + '>F</option>' +
-          '</select></div>';
+  html += '<div class="f1"><label>Sex</label>' +
+          '<div class="fl" style="gap:6px">' +
+            '<button class="ap-list-pill' + (p.sex==='M'?' on':'') + '" id="pe-sex-m" onclick="peSexPill(\'M\')">M</button>' +
+            '<button class="ap-list-pill' + (p.sex==='F'?' on':'') + '" id="pe-sex-f" onclick="peSexPill(\'F\')">F</button>' +
+          '</div>' +
+          '<input id="pe-sex" type="hidden" value="' + esc(p.sex||'') + '">' +
+          '</div>';
   html += '</div>';
   html += '</div>'; // end demographics card
 
@@ -5335,7 +5349,7 @@ function openPatientEdit(pid) {
   html += '<label style="margin-top:8px">On / Off service</label>';
   html += '<div class="fl" style="gap:8px;margin-top:4px">';
   html += '<button class="ap-list-pill' + (peList==='on'?' on':'') + '" id="pe-pill-on" onclick="pePill(\'on\')">On service</button>';
-  html += '<button class="ap-list-pill' + (peList==='off'?' on':'') + '" id="pe-pill-off" onclick="pePill(\'off\')">Off service</button>';
+  html += '<button class="ap-list-pill tone-amber' + (peList==='off'?' on':'') + '" id="pe-pill-off" onclick="pePill(\'off\')">Off service</button>';
   html += '</div>';
   html += '<input id="pe-list" type="hidden" value="' + peList + '">';
 
@@ -5373,7 +5387,7 @@ function pePill(val) {
   var on  = document.getElementById('pe-pill-on');
   var off = document.getElementById('pe-pill-off');
   if (on)  on.className  = 'ap-list-pill' + (val === 'on'  ? ' on' : '');
-  if (off) off.className = 'ap-list-pill' + (val === 'off' ? ' on' : '');
+  if (off) off.className = 'ap-list-pill tone-amber' + (val === 'off' ? ' on' : '');
 }
 
 function peWardChange(opts) {
@@ -5560,7 +5574,7 @@ function openLocationEdit(pid) {
   html += '<label style="margin-top:8px">On / Off service</label>';
   html += '<div class="fl" style="gap:8px;margin-top:4px">';
   html += '<button class="ap-list-pill' + (curList==='on'?' on':'') + '" id="le-pill-on" onclick="lePill(\'on\')">On service</button>';
-  html += '<button class="ap-list-pill' + (curList==='off'?' on':'') + '" id="le-pill-off" onclick="lePill(\'off\')">Off service</button>';
+  html += '<button class="ap-list-pill tone-amber' + (curList==='off'?' on':'') + '" id="le-pill-off" onclick="lePill(\'off\')">Off service</button>';
   html += '</div>';
   html += '<input id="le-list" type="hidden" value="' + curList + '">';
   html += '<input id="le-care" type="hidden" value="' + esc(p.care||'directive') + '">';
@@ -5588,7 +5602,7 @@ function lePill(val) {
   var on  = document.getElementById('le-pill-on');
   var off = document.getElementById('le-pill-off');
   if (on)  on.className  = 'ap-list-pill' + (val === 'on'  ? ' on' : '');
-  if (off) off.className = 'ap-list-pill' + (val === 'off' ? ' on' : '');
+  if (off) off.className = 'ap-list-pill tone-amber' + (val === 'off' ? ' on' : '');
 }
 
 function leMrpChange() {
@@ -5902,7 +5916,10 @@ function submitConsult() {
   var code    = document.getElementById('cb-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
   var dateISO = gv('cb-date');
   var start   = gv('cb-start');
+  var end     = gv('cb-end');
   if (!dateISO) { showToast('Enter date'); return; }
+  if (!start)   { showToast('Start time required for ' + code); return; }
+  if (!end)     { showToast('End time required for ' + code); return; }
 
   var dateFmt = fmtD(parseISODate(dateISO));
   var loc     = p.ward === 'ED' ? 'E' : 'I';
@@ -5911,26 +5928,40 @@ function submitConsult() {
   updatePatientFromClaimForm(p);
   if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
 
-  // CCFPP detection — did this doctor start another consult today
-  // whose window overlaps with this one? Build the note FIRST so it
-  // can be applied to ALL claim parts: consult, base modifier, increment.
+  // CCFPP detection — proper interval overlap.
+  // Triggers ONLY when:
+  //   1. This 33010/33012 consult falls in a modifier (call-out) window
+  //   2. Another same-doctor 33010/33012 same-day consult also has a modifier
+  //   3. The two [start,end] intervals actually overlap
+  // NOT applicable to 1411/1421/1431 CCU codes (different billing rules).
   var ccfppNote = '';
-  if (start) {
+  var _thisMod  = getModifier(start, dateISO);
+  if (start && end && _thisMod) {
     var thisStartM = t2m(start);
-    st.claims.forEach(function(c) {
-      if (c.alias !== alias)    return;  // compare against performing doc
-      if (c.date  !== dateFmt)  return;
-      if (c.phn   === p.phn)    return; // same patient
-      if (c.fee !== '33010' && c.fee !== '33012') return;
-      if (!c.startTime) return;
+    var thisEndM   = t2m(end);
+    if (thisEndM < thisStartM) thisEndM += 24 * 60; // crosses midnight
+
+    for (var _i = 0; _i < st.claims.length; _i++) {
+      var c = st.claims[_i];
+      if (c.alias !== alias)    continue;  // same performing doc
+      if (c.date  !== dateFmt)  continue;  // same day
+      if (c.phn   === p.phn)    continue;  // not same patient
+      if (c.fee !== '33010' && c.fee !== '33012') continue; // consults only — excludes 1411/1421/1431 CCU
+      if (!c.startTime || !c.endTime) continue;
+      if (!getModifier(c.startTime, dateISO)) continue; // other consult also needs a modifier
+
       var prevStartM = t2m(c.startTime);
-      var diff = (thisStartM - prevStartM + 24 * 60) % (24 * 60);
-      if (diff <= 75) {
-        // Include last name, first name and PHN as required
-        var _ccfppPat = (st.patients||[]).find(function(_pp){return _pp.phn===c.phn;}) || {};
-        ccfppNote = 'CCFPP ' + (_ccfppPat.last||'') + ', ' + (_ccfppPat.first||'') + ' (' + c.phn + ')';
+      var prevEndM   = t2m(c.endTime);
+      if (prevEndM < prevStartM) prevEndM += 24 * 60;
+
+      // Interval overlap: [a,b] and [c,d] overlap iff a < d && c < b
+      if (thisStartM < prevEndM && prevStartM < thisEndM) {
+        var _ccfppPat = (st.patients || []).find(function(_pp) { return _pp.phn === c.phn; }) || {};
+        var _ccfppName = ((_ccfppPat.first || '') + ' ' + (_ccfppPat.last || '')).trim() || '(unknown)';
+        ccfppNote = 'CCFPP ' + _ccfppName + ' (' + (c.phn || '—') + ')';
+        break;
       }
-    });
+    }
   }
 
   // Combine user-entered notes with CCFPP auto-note (if any)
@@ -5943,7 +5974,6 @@ function submitConsult() {
   // MOST — standalone item, no CCFPP
   if (_mostOn) addClaim(p, '78720', '78720', 1, dateFmt, loc, null, null, null, alias);
 
-  var end      = gv('cb-end');
   var modBase  = getModifier(start, dateISO);
   var incUnits = consultIncUnits(start, end);
   var hasInc   = incUnits > 0;
@@ -6226,7 +6256,7 @@ function openMergeModal(existing, isReadmit) {
 
   var h = statusBadge +
     '<div style="margin:10px 0 4px;font-size:13px;font-weight:700">' + esc(existing.last) + ', ' + esc(existing.first) + '</div>' +
-    '<div style="font-size:11px;color:var(--text2)">PHN: ' + esc(existing.phn) + ' &bull; DOB: ' + esc(existing.dob || '—') + ' &bull; ' + claimCount + ' claim(s)</div>' +
+    '<div style="font-size:11px;color:var(--text2)">PHN: ' + esc(existing.phn) + ' &bull; DOB: ' + esc(existing.dob ? dispDate(existing.dob) : '—') + ' &bull; ' + claimCount + ' claim(s)</div>' +
     matchBadge +
     '<div style="margin-top:14px;display:flex;flex-direction:column;gap:8px">';
 
@@ -6296,7 +6326,7 @@ function mergePatient(action) {
 function openPossibleDuplicateModal(existing, withClaim) {
   var newPhn  = gv('f-phn');
   var typedLs = String((existing.last||'') + ', ' + (existing.first||'')).trim();
-  var dobStr  = existing.dob ? fmtClaimDate(existing.dob) : '—';
+  var dobStr  = existing.dob ? dispDate(existing.dob) : '—';
   var status  = existing.discharged
     ? '<span style="background:var(--amber-bg);color:var(--amber-t);padding:2px 8px;border-radius:var(--rpill);font-size:10px;font-weight:700">Previously discharged</span>'
     : '<span style="background:var(--red-bg);color:var(--red-t);padding:2px 8px;border-radius:var(--rpill);font-size:10px;font-weight:700">Currently on list</span>';
@@ -6842,13 +6872,31 @@ function _buildApRefIcdHtml() {
   return h;
 }
 
+function apSexPill(val) {
+  var hid = document.getElementById('f-sex');
+  if (hid) hid.value = val;
+  var m = document.getElementById('f-sex-m');
+  var f = document.getElementById('f-sex-f');
+  if (m) m.className = 'ap-list-pill' + (val === 'M' ? ' on' : '');
+  if (f) f.className = 'ap-list-pill' + (val === 'F' ? ' on' : '');
+}
+
+function peSexPill(val) {
+  var hid = document.getElementById('pe-sex');
+  if (hid) hid.value = val;
+  var m = document.getElementById('pe-sex-m');
+  var f = document.getElementById('pe-sex-f');
+  if (m) m.className = 'ap-list-pill' + (val === 'M' ? ' on' : '');
+  if (f) f.className = 'ap-list-pill' + (val === 'F' ? ' on' : '');
+}
+
 function apListPill(val) {
   var listEl = document.getElementById('f-list');
   if (listEl) listEl.value = val;
   var pillOn  = document.getElementById('ap-pill-on');
   var pillOff = document.getElementById('ap-pill-off');
   if (pillOn)  pillOn.className  = 'ap-list-pill' + (val === 'on'  ? ' on' : '');
-  if (pillOff) pillOff.className = 'ap-list-pill' + (val === 'off' ? ' on' : '');
+  if (pillOff) pillOff.className = 'ap-list-pill tone-amber' + (val === 'off' ? ' on' : '');
 }
 
 // Role pills — toggling auto-fills MRP service:
@@ -6905,7 +6953,9 @@ async function apSubmit(addToList, _skipDupCheck) {
   if (!gv('f-refby-num') && !gv('f-refby'))   addMissing.push('refby');
   if (!icd)                                    addMissing.push('icd');
   if (_apClaimType === 'consult' || _apClaimType === 'lmtd') {
-    if (!(document.getElementById('f-c-date') || {}).value) addMissing.push('date');
+    if (!(document.getElementById('f-c-date')  || {}).value) addMissing.push('date');
+    if (!(document.getElementById('f-c-start') || {}).value) addMissing.push('start time');
+    if (!(document.getElementById('f-c-end')   || {}).value) addMissing.push('end time');
   } else if (_apClaimType === 'other') {
     if (!gv('ap-oc-fee')) addMissing.push('fee');
     if (!(document.getElementById('ap-oc-date') || {}).value) addMissing.push('date');
@@ -6928,8 +6978,10 @@ async function apSubmit(addToList, _skipDupCheck) {
     if (addMissing.indexOf('phn')   !== -1) msgs.push('PHN');
     if (addMissing.indexOf('refby') !== -1) msgs.push('referring MD');
     if (addMissing.indexOf('icd')   !== -1) msgs.push('diagnosis');
-    if (addMissing.indexOf('fee')   !== -1) msgs.push('fee code');
-    if (addMissing.indexOf('date')  !== -1) msgs.push('date');
+    if (addMissing.indexOf('fee')        !== -1) msgs.push('fee code');
+    if (addMissing.indexOf('date')       !== -1) msgs.push('date');
+    if (addMissing.indexOf('start time') !== -1) msgs.push('start time');
+    if (addMissing.indexOf('end time')   !== -1) msgs.push('end time');
     showToast('Required: ' + msgs.join(', '));
     return;
   }
@@ -7105,6 +7157,8 @@ function clearAddForm() {
     var el = document.getElementById(id); if (el) el.value = '';
   });
   var sx = document.getElementById('f-sex'); if (sx) sx.value = '';
+  var sxm = document.getElementById('f-sex-m'); if (sxm) sxm.className = 'ap-list-pill';
+  var sxf = document.getElementById('f-sex-f'); if (sxf) sxf.className = 'ap-list-pill';
   var ocr = document.getElementById('ocr-bar'); if (ocr) ocr.style.display = 'none';
   // Reset claim type to consult and rebuild claim area
   _apClaimType = 'consult';
@@ -7557,7 +7611,7 @@ function handleOCRResult(data, bar) {
   if (p.first) document.getElementById('f-first').value = p.first;
   if (p.phn)   document.getElementById('f-phn').value   = (p.phn + '').replace(/\D/g,'').slice(0,10);
   if (p.dob)   document.getElementById('f-dob').value   = p.dob;
-  if (p.sex)   { var s = document.getElementById('f-sex'); if (s) s.value = p.sex; }
+  if (p.sex)   { apSexPill(p.sex); }
   if (p.ward && WARDS[p.ward]) { document.getElementById('f-ward').value = p.ward; wardChange(); }
   if (p.mrp) {
     var mrpSel = document.getElementById('f-mrp');
@@ -9151,7 +9205,7 @@ function setView(v) {
 // ── Doctor Modal ───────────────────────────────────────
 function openCombinedReasonModal(pid, onConfirm) {
   var p   = getP(pid);
-  var dx  = p.icd ? (p.icd + (p.icdDesc ? ' — ' + p.icdDesc : '')) : '(no diagnosis on file)';
+  var dx  = p.icd ? icdShortLabel(p.icd) : '(no diagnosis on file)';
   var h   = '<div style="margin-bottom:10px;font-size:13px;color:var(--text2)">' +
               '<strong>Diagnosis on file:</strong> ' + esc(dx) +
             '</div>' +
