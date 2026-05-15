@@ -178,6 +178,32 @@ v1.12 2026-05-14  ICD-9 search: tiered (Tier 1 local cardiology codes,
                   handlers) before deleting. A function search across
                   the file is the cheapest sanity check.
 
+v1.17 2026-05-15  Data Check tab — Stage A (read-only detection).
+                  New "🔍 Data Check" mode-tab loads Patients + Claims +
+                  Uploaded Claims in one round-trip via the new
+                  getAllForDataCheck Apps Script action. Runs a per-
+                  patient audit detecting 14 issue types across three
+                  severities (🔴 blocking / 🟠 audit / 🟡 conflicts)
+                  plus orphan-claim cards for claims without a Patients
+                  row. Each card shows patient-row issues, claims-with-
+                  issues with the specific fee/date/source, and a
+                  collapsed "healthy claims" count.
+                  Filter chips (All / Blocking / Audit / Conflicts /
+                  Orphans) + name/PHN search. Severity-sorted listing.
+                  CCU banding mismatch detector recomputes 1411/1421/
+                  1431 per consecutive episode position and flags any
+                  claim whose stored fee disagrees — catches stale
+                  bands after backfills/edits. Legacy CCU_DAILY rows
+                  (manually cleaned by user; PWA v3.59 guards against
+                  new writes) also surface here as a defence-in-depth
+                  red flag if any slip through.
+                  Stage A is detection ONLY — no fix UI. Stage B
+                  (v1.18) will add inline fixes, propagation, PHN-less
+                  queue, and the 3-month-care prompt for orphan claims.
+                  Backend partner: Apps Script v2.21 (new
+                  getAllForDataCheck action — paste-in code delivered
+                  alongside this build).
+
 v1.16 2026-05-15  MOST fee code fix: 03701 -> 78720. The MOST advance
                   care claim was being written with the wrong fee code
                   (03701 is not a valid BC MSP code; 78720 is the
@@ -497,6 +523,60 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 .kgh-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .kgh-toast.warn{background:#7c4000}
 .kgh-toast.err{background:#b3201a}
+
+/* v1.17 — Data Check tab styles */
+.dc-summary{display:flex;gap:8px;flex-wrap:wrap;padding:10px 14px;background:var(--surface);border-bottom:.5px solid var(--border);position:sticky;top:91px;z-index:48}
+.dc-summary-pill{font-size:11px;font-weight:700;padding:4px 10px;border-radius:12px;background:var(--surface2);color:var(--text2);display:inline-flex;align-items:center;gap:4px}
+.dc-summary-pill.red{background:var(--red-bg);color:var(--red-t)}
+.dc-summary-pill.amber{background:var(--amber-bg);color:var(--amber-t)}
+.dc-summary-pill.yellow{background:#fff8d6;color:#806000}
+.dc-summary-pill.teal{background:var(--teal-bg);color:var(--teal-t)}
+.dc-filters{display:flex;gap:6px;flex-wrap:wrap;padding:8px 14px;background:var(--surface);border-bottom:.5px solid var(--border)}
+.dc-chip{font-size:11px;font-weight:600;padding:5px 11px;border-radius:14px;background:var(--surface2);color:var(--text2);cursor:pointer;border:.5px solid transparent;user-select:none;-webkit-user-select:none}
+.dc-chip.act{background:var(--blue-bg);color:var(--blue-t);border-color:var(--blue)}
+.dc-search{padding:8px 14px;background:var(--surface);border-bottom:.5px solid var(--border)}
+.dc-search input{width:100%;padding:8px 10px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:13px;background:var(--surface2);font-family:inherit;color:var(--text)}
+.dc-list{padding:10px 14px}
+.dc-empty{padding:40px 14px;text-align:center;color:var(--text3);font-size:13px}
+.dc-loading{padding:40px 14px;text-align:center;color:var(--text2);font-size:13px}
+.dc-error{padding:14px;margin:14px;background:var(--red-bg);color:var(--red-t);border-radius:var(--rsm);font-size:12px;white-space:pre-line}
+
+.dc-card{background:var(--surface);border-radius:var(--r);padding:12px;margin-bottom:10px;border:.5px solid var(--border);border-left:3px solid var(--text3)}
+.dc-card.sev-red{border-left-color:var(--red)}
+.dc-card.sev-amber{border-left-color:var(--amber)}
+.dc-card.sev-yellow{border-left-color:#e6c000}
+.dc-card.sev-teal{border-left-color:var(--teal)}
+
+.dc-card-hdr{display:flex;align-items:baseline;gap:8px;margin-bottom:4px;flex-wrap:wrap}
+.dc-card-name{font-size:14px;font-weight:700;color:var(--text)}
+.dc-card-phn{font-size:11px;font-family:ui-monospace,monospace;color:var(--text3)}
+.dc-card-count{font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;background:var(--surface2);color:var(--text2);margin-left:auto}
+.dc-card-count.red{background:var(--red-bg);color:var(--red-t)}
+.dc-card-count.amber{background:var(--amber-bg);color:var(--amber-t)}
+.dc-card-count.yellow{background:#fff8d6;color:#806000}
+.dc-card-meta{font-size:11px;color:var(--text2);margin-bottom:8px}
+
+.dc-section{margin-top:8px;padding-top:8px;border-top:.5px solid var(--border)}
+.dc-section-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:4px}
+
+.dc-issue{display:flex;gap:6px;font-size:12px;line-height:1.45;padding:3px 0;color:var(--text)}
+.dc-issue-icon{flex-shrink:0;width:14px;text-align:center;font-size:11px}
+.dc-issue.red .dc-issue-icon{color:var(--red-t)}
+.dc-issue.amber .dc-issue-icon{color:var(--amber-t)}
+.dc-issue.yellow .dc-issue-icon{color:#806000}
+.dc-issue-body{flex:1}
+.dc-issue-detail{color:var(--text2);font-size:11px;margin-top:1px}
+
+.dc-claim-row{padding:6px 8px;background:var(--surface2);border-radius:6px;margin-top:4px;font-size:11px}
+.dc-claim-meta{display:flex;gap:6px;align-items:baseline;flex-wrap:wrap;color:var(--text2)}
+.dc-claim-fee{font-family:ui-monospace,monospace;font-weight:700;color:var(--text)}
+.dc-claim-source{font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:var(--surface);color:var(--text3);text-transform:uppercase}
+
+.dc-collapsed{font-size:11px;color:var(--text3);cursor:pointer;padding:4px 0;user-select:none;-webkit-user-select:none}
+.dc-collapsed:hover{color:var(--text2)}
+
+.dc-reload-btn{font-size:11px;font-weight:600;padding:6px 12px;border-radius:var(--rsm);background:var(--surface2);color:var(--text);border:.5px solid var(--border2);cursor:pointer;font-family:inherit;margin-left:auto}
+.dc-reload-btn:hover{background:var(--surface)}
 </style>
 </head>
 <body>
@@ -504,7 +584,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:8px">
     <div class="hdr-title">KGH Historical Billing</div>
-    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.16</div>
+    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.17</div>
   </div>
   <div class="hdr-sub" id="hdr-sub">Single card mode</div>
 </div>
@@ -512,6 +592,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <div class="mode-bar">
   <div class="mode-tab active" id="tab-single" onclick="switchMode('single')">Single card</div>
   <div class="mode-tab" id="tab-batch" onclick="switchMode('batch')">Batch scan</div>
+  <div class="mode-tab" id="tab-datacheck" onclick="switchMode('datacheck')">🔍 Data Check</div>
 </div>
 
 <div class="container">
@@ -570,6 +651,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <!-- ═══════════════════════════════════════════════════
      SHARED: Patient + Billing form (used by both modes)
 ═══════════════════════════════════════════════════ -->
+<div id="shared-form">
 
 <!-- Patient -->
 <div class="card">
@@ -738,6 +820,24 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
   <button class="btn btn-g" style="margin-top:8px" onclick="exportCombinedIclinic()">② Download combined iClinic CSV &amp; mark submitted</button>
   <div id="export-status" class="status-bar" style="margin-top:8px"></div>
 </div>
+
+</div><!-- /shared-form -->
+
+<!-- ═══════════════════════════════════════════════════
+     DATA CHECK MODE (v1.17 — Stage A read-only detection)
+═══════════════════════════════════════════════════ -->
+<div id="datacheck-mode" style="display:none">
+
+<div id="dc-summary-bar" class="dc-summary" style="display:none"></div>
+<div id="dc-filters-bar" class="dc-filters" style="display:none"></div>
+<div id="dc-search-bar" class="dc-search" style="display:none">
+  <input id="dc-search-input" type="text" placeholder="Search name or PHN…" oninput="dcOnSearch()" autocomplete="off">
+</div>
+<div id="dc-content" class="dc-list">
+  <div class="dc-loading">Tap Data Check to load.</div>
+</div>
+
+</div><!-- /datacheck-mode -->
 
 </div><!-- /container -->
 
@@ -1109,12 +1209,23 @@ function setStatus(id,cls,msg) {
 // ─── Mode switch ──────────────────────────────────────────────────────────────
 function switchMode(m) {
   appMode = m;
+  // v1.17: shared form (Patient/Consult/Calendar/Preview/Export) is for entry
+  // modes only — hide it during data check
+  var inEntry = (m === 'single' || m === 'batch');
+  document.getElementById('shared-form').style.display = inEntry ? '' : 'none';
   document.getElementById('single-mode').style.display = m==='single' ? '' : 'none';
   document.getElementById('batch-mode').style.display  = m==='batch'  ? '' : 'none';
+  document.getElementById('datacheck-mode').style.display = m==='datacheck' ? '' : 'none';
   document.getElementById('tab-single').classList.toggle('active', m==='single');
   document.getElementById('tab-batch').classList.toggle('active', m==='batch');
-  document.getElementById('hdr-sub').textContent = m==='single' ? 'Single card mode' : 'Batch scan mode';
+  document.getElementById('tab-datacheck').classList.toggle('active', m==='datacheck');
+  var sub = m==='single' ? 'Single card mode'
+          : m==='batch'  ? 'Batch scan mode'
+          : 'Data check mode';
+  document.getElementById('hdr-sub').textContent = sub;
   updateConfirmedBar();
+  // v1.17: lazy-load data check on first activation
+  if (m === 'datacheck' && !dc.loaded && !dc.loading) loadDataCheck();
 }
 
 
@@ -3189,11 +3300,640 @@ function cropUse() {
   var p=_cropPending;_cropPending=null;_cropState=null;if(p&&p.onUse)p.onUse(dataUrl);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.17 — Data Check Stage A (read-only detection)
+// ═══════════════════════════════════════════════════════════════════════════
+// Loads Patients + Claims + Uploaded Claims via Apps Script's new
+// getAllForDataCheck action. Runs a per-patient audit detecting 14 issue
+// types, renders severity-sorted issue cards. Stage A is detection only —
+// no fix UI yet (that's Stage B in v1.18).
+//
+// CCU_DAILY rows are no longer expected in the fee column (manually cleaned
+// + PWA v3.59 prevents new writes). If any slip through, they're surfaced
+// as a banding mismatch.
+
+var dc = {
+  loaded:  false,
+  loading: false,
+  error:   null,
+  patients: [],
+  claims:   [],
+  uploaded: [],
+  audit:    null,   // {patientCards, orphanCards, counts}
+  filter:   'all',  // 'all' | 'red' | 'amber' | 'yellow' | 'orphan'
+  search:   ''
+};
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function dcCleanStr(v) { return String(v == null ? '' : v).trim(); }
+function dcCleanPhn(v) { return dcCleanStr(v).replace(/\D/g, ''); }
+function dcSamePhn(a, b) {
+  var aa = dcCleanPhn(a), bb = dcCleanPhn(b);
+  return aa && bb && aa === bb;
+}
+// Names that look like nothing — empty, single char, OCR garbage routing codes,
+// punctuation-only. Garbage codes we've seen: MOS, REN, AGG, EDC, ACIN, MHL.
+function dcLooksGarbageName(s) {
+  var t = dcCleanStr(s).toUpperCase();
+  if (!t) return true;
+  if (t.length <= 1) return true;
+  if (/^[^A-Z]+$/.test(t)) return true;  // no letters at all
+  if (/^(MOS|REN|AGG|EDC|ACIN|MHL)\b/.test(t)) return true;
+  return false;
+}
+// DOB format check — expects DD/MM/YYYY
+function dcIsValidDobFormat(v) {
+  var s = dcCleanStr(v);
+  if (!s) return false;
+  return /^\d{2}\/\d{2}\/\d{4}$/.test(s);
+}
+// Date parsing for episode logic — DD/MM/YYYY to epoch ms
+function dcParseDate(s) {
+  var t = dcCleanStr(s);
+  if (!t) return 0;
+  var m = t.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return 0;
+  return new Date(parseInt(m[3]), parseInt(m[2]) - 1, parseInt(m[1])).getTime();
+}
+// Sunday of the ISO week containing date (BC billing weeks are Sun-Sat)
+function dcWeekStartSun(ms) {
+  var d = new Date(ms);
+  d.setHours(0,0,0,0);
+  d.setDate(d.getDate() - d.getDay());
+  return d.getTime();
+}
+
+// Severity ranking for sorting cards
+var DC_SEV = { red:3, amber:2, yellow:1, teal:0 };
+
+// ─── Issue definitions ───────────────────────────────────────────────────────
+// Each detector returns an array of issue objects:
+//   { sev:'red'|'amber'|'yellow', code, label, detail? }
+// Detectors are pure — no side effects, no DOM access.
+
+function auditPatLastName(p) {
+  var v = dcCleanStr(p.last);
+  if (!v) return [{ sev:'red', code:'pat-last-blank', label:'Patient last name is blank' }];
+  if (dcLooksGarbageName(v)) return [{ sev:'red', code:'pat-last-garbage', label:'Patient last name looks like OCR garbage', detail:'value: "' + v + '"' }];
+  return [];
+}
+function auditPatFirstName(p) {
+  if (!dcCleanStr(p.first)) return [{ sev:'amber', code:'pat-first-blank', label:'Patient first name is blank' }];
+  return [];
+}
+function auditPatPhn(p) {
+  var v = dcCleanPhn(p.phn);
+  if (!v) return [{ sev:'red', code:'pat-phn-blank', label:'Patient PHN is blank' }];
+  if (v.length !== 10) return [{ sev:'red', code:'pat-phn-len', label:'Patient PHN is not 10 digits', detail:'value: ' + v + ' (' + v.length + ' digits)' }];
+  return [];
+}
+function auditPatDob(p) {
+  var v = dcCleanStr(p.dob);
+  if (!v) return [{ sev:'amber', code:'pat-dob-blank', label:'Patient DOB is blank' }];
+  if (!dcIsValidDobFormat(v)) return [{ sev:'amber', code:'pat-dob-format', label:'Patient DOB format is not DD/MM/YYYY', detail:'value: "' + v + '"' }];
+  return [];
+}
+function auditPatSex(p) {
+  var v = dcCleanStr(p.sex).toUpperCase();
+  if (!v) return [{ sev:'amber', code:'pat-sex-blank', label:'Patient sex is blank' }];
+  if (v !== 'M' && v !== 'F' && v !== 'X') return [{ sev:'amber', code:'pat-sex-val', label:'Patient sex is not M/F/X', detail:'value: "' + v + '"' }];
+  return [];
+}
+function auditPatAudit(p) {
+  // Audit trail metadata — won't block export but should be present going forward
+  if (!dcCleanStr(p.createdBy) && !dcCleanStr(p.createdAt)) {
+    return [{ sev:'amber', code:'pat-audit', label:'No createdBy / createdAt on patient row' }];
+  }
+  return [];
+}
+
+// Claim-level detectors. `p` may be null (orphan claim).
+function auditClaimRequiredByFee(c) {
+  var fee = dcCleanStr(c.fee);
+  var icd = dcCleanStr(c.icd);
+  var rby = dcCleanStr(c.refby) || dcCleanStr(c.refbyName);
+  var start = dcCleanStr(c.startTime);
+  var end = dcCleanStr(c.endTime);
+  var issues = [];
+  // Full consult 33010: needs refby, ICD, start, end
+  // Limited consult 33012: needs refby, ICD, start, end
+  if (fee === '33010' || fee === '33012') {
+    if (!rby)   issues.push({ sev:'red', code:'cl-consult-refby',  label:'Consult ' + fee + ' missing referring MD' });
+    if (!icd)   issues.push({ sev:'red', code:'cl-consult-icd',    label:'Consult ' + fee + ' missing ICD code' });
+    if (!start) issues.push({ sev:'red', code:'cl-consult-start',  label:'Consult ' + fee + ' missing start time' });
+    if (!end)   issues.push({ sev:'red', code:'cl-consult-end',    label:'Consult ' + fee + ' missing end time' });
+  }
+  // Other tracked fees just need ICD; refby strongly recommended
+  else if (['33008','33006','1411','1421','1431','78717','78720'].indexOf(fee) !== -1) {
+    if (!icd) issues.push({ sev:'red', code:'cl-claim-icd', label:'Claim ' + fee + ' missing ICD code' });
+    if (!rby) issues.push({ sev:'amber', code:'cl-claim-refby', label:'Claim ' + fee + ' missing referring MD' });
+  }
+  // Unknown fee codes — flag it
+  else if (fee && ['33010','33012','33008','33006','1411','1421','1431','78717','78720','CCU_DAILY'].indexOf(fee) === -1) {
+    issues.push({ sev:'amber', code:'cl-fee-unknown', label:'Unrecognised fee code', detail:'value: "' + fee + '"' });
+  }
+  // Legacy CCU_DAILY catch (should be impossible after manual cleanup + v3.59 guard)
+  if (fee === 'CCU_DAILY') {
+    issues.push({ sev:'red', code:'cl-ccu-daily-legacy', label:'Legacy CCU_DAILY in fee column — needs rebanding to 1411/1421/1431' });
+  }
+  return issues;
+}
+function auditClaimNameMismatch(c, p) {
+  if (!p) return [];
+  var cLast = dcCleanStr(c.last).toUpperCase();
+  var pLast = dcCleanStr(p.last).toUpperCase();
+  // Compare last name as primary; ignore if either side blank (other detector flags blank).
+  if (cLast && pLast && cLast !== pLast) {
+    return [{ sev:'yellow', code:'cl-name-mismatch', label:'Claim last name differs from Patients tab', detail:'claim: "' + dcCleanStr(c.last) + '" vs patient: "' + dcCleanStr(p.last) + '"' }];
+  }
+  return [];
+}
+
+// CCU banding detector — per-patient, looks at all 1411/1421/1431/CCU_DAILY
+// rows and recomputes the expected band for each based on consecutive
+// episode position. Returns issues attached to specific claim ids.
+// Returns a map: { claimId: [issues] }
+function auditCcuBands(claimsForPatient) {
+  var DAY_MS = 86400000;
+  var ccu = claimsForPatient
+    .filter(function(c) { return ['CCU_DAILY','1411','1421','1431'].indexOf(dcCleanStr(c.fee)) !== -1; })
+    .map(function(c) { return { c: c, ms: dcParseDate(c.date) }; })
+    .filter(function(x) { return x.ms; })
+    .sort(function(a, b) { return a.ms - b.ms; });
+  if (!ccu.length) return {};
+  // Split into episodes — gap > 1 day starts a new episode
+  var episodes = [];
+  var ep = [ccu[0]];
+  for (var i = 1; i < ccu.length; i++) {
+    var gap = Math.round((ccu[i].ms - ccu[i-1].ms) / DAY_MS);
+    if (gap === 0) { ep.push(ccu[i]); } // duplicate-tap on same day; treat as same episode
+    else if (gap === 1) { ep.push(ccu[i]); }
+    else { episodes.push(ep); ep = [ccu[i]]; }
+  }
+  episodes.push(ep);
+  // For each episode, expected band per day-in-episode
+  var out = {};
+  episodes.forEach(function(episode) {
+    episode.forEach(function(entry, idx) {
+      var dayN = idx + 1;
+      var expected = (dayN === 1) ? '1411' : (dayN <= 7) ? '1421' : '1431';
+      var actual = dcCleanStr(entry.c.fee);
+      if (actual === 'CCU_DAILY') {
+        out[entry.c.id] = [{ sev:'red', code:'cl-ccu-legacy', label:'Legacy CCU_DAILY — should be ' + expected + ' for day ' + dayN + ' of episode', detail:'date: ' + entry.c.date }];
+      } else if (actual !== expected) {
+        out[entry.c.id] = [{ sev:'amber', code:'cl-ccu-band', label:'CCU band mismatch — is ' + actual + ', should be ' + expected + ' (day ' + dayN + ' of episode)', detail:'date: ' + entry.c.date }];
+      }
+    });
+  });
+  return out;
+}
+
+// Directive weekly limit — max 6 directives (33006) per Sun-Sat week per patient.
+// Returns map { claimId: [issues] } for any 33006 claim past the 6-per-week limit.
+function auditDirectiveLimit(claimsForPatient) {
+  var dir = claimsForPatient
+    .filter(function(c) { return dcCleanStr(c.fee) === '33006'; })
+    .map(function(c) { return { c:c, ms: dcParseDate(c.date) }; })
+    .filter(function(x) { return x.ms; })
+    .sort(function(a, b) { return a.ms - b.ms; });
+  if (!dir.length) return {};
+  var byWeek = {};
+  dir.forEach(function(x) {
+    var wk = dcWeekStartSun(x.ms);
+    if (!byWeek[wk]) byWeek[wk] = [];
+    byWeek[wk].push(x);
+  });
+  var out = {};
+  Object.keys(byWeek).forEach(function(wk) {
+    var wkClaims = byWeek[wk];
+    if (wkClaims.length > 6) {
+      // Flag every claim past position 6
+      wkClaims.forEach(function(x, idx) {
+        if (idx >= 6) {
+          out[x.c.id] = [{ sev:'amber', code:'cl-directive-over', label:'Directive #' + (idx+1) + ' in Sun-Sat week — exceeds 6/week limit', detail:'date: ' + x.c.date }];
+        }
+      });
+    }
+  });
+  return out;
+}
+
+// ─── Audit orchestrator ──────────────────────────────────────────────────────
+// Builds patient cards + orphan claim cards from raw Sheets data.
+function runAudit(patients, claims, uploaded) {
+  // Index patients by normalised PHN. If a PHN appears twice, the second is
+  // surfaced as a 'pat-dup' issue under the first.
+  var patByPhn = {};
+  var dupPats = [];
+  patients.forEach(function(p) {
+    var phn = dcCleanPhn(p.phn);
+    if (!phn) {
+      // Blank-PHN patient still gets a card (under a synthetic "blank-phn" bucket)
+      patByPhn['__noPhn_' + (p._rowIdx || Math.random())] = p;
+      return;
+    }
+    if (patByPhn[phn]) {
+      dupPats.push({ existing: patByPhn[phn], duplicate: p });
+    } else {
+      patByPhn[phn] = p;
+    }
+  });
+
+  // Tag every claim with its source so cards can show provenance.
+  var allClaims = [];
+  claims.forEach(function(c)   { allClaims.push(Object.assign({}, c, { _src:'Claims' })); });
+  uploaded.forEach(function(c) { allClaims.push(Object.assign({}, c, { _src:'Uploaded Claims' })); });
+
+  // Group claims by PHN
+  var claimsByPhn = {};
+  var orphanClaims = [];
+  allClaims.forEach(function(c) {
+    var phn = dcCleanPhn(c.phn);
+    if (!phn) {
+      orphanClaims.push({ claim:c, why:'blank PHN' });
+      return;
+    }
+    if (!patByPhn[phn]) {
+      orphanClaims.push({ claim:c, why:'no patient row for PHN ' + phn });
+      return;
+    }
+    if (!claimsByPhn[phn]) claimsByPhn[phn] = [];
+    claimsByPhn[phn].push(c);
+  });
+
+  // Build patient cards
+  var patientCards = [];
+  Object.keys(patByPhn).forEach(function(key) {
+    var p = patByPhn[key];
+    var phn = dcCleanPhn(p.phn);
+
+    // Demographic issues
+    var demoIssues = [].concat(
+      auditPatLastName(p),
+      auditPatFirstName(p),
+      auditPatPhn(p),
+      auditPatDob(p),
+      auditPatSex(p),
+      auditPatAudit(p)
+    );
+
+    // Duplicate-pat issue gets attached here if this is the "primary"
+    var dupHit = dupPats.find(function(d) { return dcSamePhn(d.existing.phn, p.phn); });
+    if (dupHit) {
+      demoIssues.push({ sev:'amber', code:'pat-dup', label:'Duplicate Patients row for this PHN', detail:'second row: ' + dcCleanStr(dupHit.duplicate.last) + ', ' + dcCleanStr(dupHit.duplicate.first) });
+    }
+
+    // Claims for this patient — run per-claim + per-episode detectors
+    var ptClaims = (claimsByPhn[phn] || []).slice();
+    var ccuMap = auditCcuBands(ptClaims);
+    var dirMap = auditDirectiveLimit(ptClaims);
+    var claimRecords = ptClaims.map(function(c) {
+      var issues = [].concat(
+        auditClaimRequiredByFee(c),
+        auditClaimNameMismatch(c, p),
+        ccuMap[c.id] || [],
+        dirMap[c.id] || []
+      );
+      return { claim:c, issues:issues, healthy: issues.length === 0 };
+    });
+
+    var totalIssues = demoIssues.length + claimRecords.reduce(function(n, r) { return n + r.issues.length; }, 0);
+    if (totalIssues === 0) return; // skip healthy patients
+
+    // Card severity = highest individual issue
+    var allIssues = demoIssues.concat(claimRecords.reduce(function(a, r) { return a.concat(r.issues); }, []));
+    var maxSev = allIssues.reduce(function(m, i) { return DC_SEV[i.sev] > DC_SEV[m] ? i.sev : m; }, 'yellow');
+
+    patientCards.push({
+      kind: 'patient',
+      patient: p,
+      phn: phn,
+      demoIssues: demoIssues,
+      claimRecords: claimRecords,
+      totalIssues: totalIssues,
+      severity: maxSev,
+      _sortKey: dcCleanStr(p.last).toUpperCase() + '|' + dcCleanStr(p.first).toUpperCase()
+    });
+  });
+
+  // Orphan claim cards — group by PHN (or by an "unknown" bucket for blank-PHN orphans)
+  var orphanByPhn = {};
+  orphanClaims.forEach(function(o) {
+    var key = dcCleanPhn(o.claim.phn) || '__blank__';
+    if (!orphanByPhn[key]) orphanByPhn[key] = { phn:key, claims:[], why:o.why };
+    orphanByPhn[key].claims.push(o.claim);
+  });
+  var orphanCards = Object.keys(orphanByPhn).map(function(k) {
+    var o = orphanByPhn[k];
+    return {
+      kind: 'orphan',
+      phn: k === '__blank__' ? '' : k,
+      claims: o.claims,
+      why: o.why,
+      severity: 'red',
+      totalIssues: o.claims.length,
+      _sortKey: dcCleanStr((o.claims[0]||{}).last).toUpperCase() + '|' + dcCleanStr((o.claims[0]||{}).first).toUpperCase()
+    };
+  });
+
+  // Sort: severity desc, then last name asc
+  function sevSort(a, b) {
+    var d = DC_SEV[b.severity] - DC_SEV[a.severity];
+    if (d) return d;
+    return a._sortKey < b._sortKey ? -1 : a._sortKey > b._sortKey ? 1 : 0;
+  }
+  patientCards.sort(sevSort);
+  orphanCards.sort(sevSort);
+
+  // Counts for summary bar
+  var counts = { red:0, amber:0, yellow:0, orphan: orphanCards.length, total: patientCards.length + orphanCards.length };
+  patientCards.forEach(function(c) { counts[c.severity] = (counts[c.severity] || 0) + 1; });
+
+  return { patientCards: patientCards, orphanCards: orphanCards, counts: counts };
+}
+
+// ─── Data load ───────────────────────────────────────────────────────────────
+function loadDataCheck(force) {
+  if (dc.loading) return;
+  if (dc.loaded && !force) return;
+  dc.loading = true;
+  dc.error = null;
+  renderDataCheck();
+  var url = document.getElementById('script-url').value.trim();
+  if (!url) {
+    dc.loading = false;
+    dc.error = 'Apps Script URL not configured.';
+    renderDataCheck();
+    return;
+  }
+  var ctrl = new AbortController();
+  var timer = setTimeout(function(){ ctrl.abort(); }, 60000);
+  fetch(url, {
+    method: 'POST',
+    body: JSON.stringify({ action:'getAllForDataCheck', key:getScriptKey() }),
+    signal: ctrl.signal
+  })
+  .then(function(r){ return r.text(); })
+  .then(function(text) {
+    clearTimeout(timer);
+    var data; try { data = JSON.parse(text); } catch(e) { data = null; }
+    if (!data || !data.ok) {
+      dc.error = 'Apps Script response: ' + (text || '').slice(0, 200);
+      dc.loading = false;
+      renderDataCheck();
+      return;
+    }
+    dc.patients = Array.isArray(data.patients) ? data.patients : [];
+    dc.claims   = Array.isArray(data.claims)   ? data.claims   : [];
+    dc.uploaded = Array.isArray(data.uploadedClaims) ? data.uploadedClaims : (Array.isArray(data.uploaded) ? data.uploaded : []);
+    try {
+      dc.audit = runAudit(dc.patients, dc.claims, dc.uploaded);
+    } catch (e) {
+      dc.error = 'Audit error: ' + (e && e.message ? e.message : e);
+      dc.loading = false;
+      renderDataCheck();
+      return;
+    }
+    dc.loaded = true;
+    dc.loading = false;
+    renderDataCheck();
+  })
+  .catch(function(err) {
+    clearTimeout(timer);
+    dc.error = 'Network error: ' + (err && err.message ? err.message : err);
+    dc.loading = false;
+    renderDataCheck();
+  });
+}
+
+// ─── Filter & search wiring ──────────────────────────────────────────────────
+function dcSetFilter(f) { dc.filter = f; renderDataCheck(); }
+function dcOnSearch() {
+  var el = document.getElementById('dc-search-input');
+  dc.search = (el ? el.value : '').trim().toLowerCase();
+  renderDataCheck();
+}
+function dcCardMatchesSearch(card, q) {
+  if (!q) return true;
+  if (card.kind === 'patient') {
+    var p = card.patient;
+    var hay = (dcCleanStr(p.last) + ' ' + dcCleanStr(p.first) + ' ' + dcCleanStr(p.phn)).toLowerCase();
+    return hay.indexOf(q) !== -1;
+  }
+  if (card.kind === 'orphan') {
+    var hay2 = card.phn + ' ' + card.claims.map(function(c){ return dcCleanStr(c.last) + ' ' + dcCleanStr(c.first); }).join(' ');
+    return hay2.toLowerCase().indexOf(q) !== -1;
+  }
+  return false;
+}
+function dcCardMatchesFilter(card, f) {
+  if (f === 'all') return true;
+  if (f === 'orphan') return card.kind === 'orphan';
+  if (f === 'red')    return card.severity === 'red'    || card.kind === 'orphan';
+  if (f === 'amber')  return card.severity === 'amber';
+  if (f === 'yellow') return card.severity === 'yellow';
+  return true;
+}
+
+// ─── Rendering ───────────────────────────────────────────────────────────────
+function dcEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function dcSevIcon(sev) {
+  return sev === 'red' ? '🔴' : sev === 'amber' ? '🟠' : sev === 'yellow' ? '🟡' : '⚫';
+}
+function dcRenderIssue(iss) {
+  return '<div class="dc-issue ' + iss.sev + '">' +
+           '<div class="dc-issue-icon">' + dcSevIcon(iss.sev) + '</div>' +
+           '<div class="dc-issue-body">' +
+             dcEsc(iss.label) +
+             (iss.detail ? '<div class="dc-issue-detail">' + dcEsc(iss.detail) + '</div>' : '') +
+           '</div>' +
+         '</div>';
+}
+function dcRenderClaimMeta(c) {
+  var fee = dcCleanStr(c.fee) || '—';
+  var date = dcCleanStr(c.date) || '—';
+  var src = dcCleanStr(c._src) || dcCleanStr(c.source) || '';
+  return '<div class="dc-claim-meta">' +
+           '<span class="dc-claim-fee">' + dcEsc(fee) + '</span>' +
+           '<span>' + dcEsc(date) + '</span>' +
+           (c.startTime ? '<span>' + dcEsc(c.startTime) + (c.endTime ? '–' + dcEsc(c.endTime) : '') + '</span>' : '') +
+           (src ? '<span class="dc-claim-source">' + dcEsc(src) + '</span>' : '') +
+         '</div>';
+}
+
+function dcRenderPatientCard(card) {
+  var p = card.patient;
+  var sev = card.severity;
+  var countCls = sev === 'red' ? 'red' : sev === 'amber' ? 'amber' : sev === 'yellow' ? 'yellow' : '';
+  var last = dcCleanStr(p.last) || '<i style="color:var(--text3)">(no last name)</i>';
+  var first = dcCleanStr(p.first) || '';
+  var phnDisp = dcCleanPhn(p.phn) || '<i style="color:var(--text3)">no PHN</i>';
+  var meta = [
+    dcCleanStr(p.dob) ? 'DOB ' + dcEsc(dcCleanStr(p.dob)) : '',
+    dcCleanStr(p.sex) ? dcEsc(dcCleanStr(p.sex)) : '',
+    dcCleanStr(p.ward) ? dcEsc(dcCleanStr(p.ward)) + (dcCleanStr(p.room) ? ' ' + dcEsc(dcCleanStr(p.room)) : '') : ''
+  ].filter(function(s){return s;}).join(' · ');
+
+  var html = '<div class="dc-card sev-' + sev + '">' +
+    '<div class="dc-card-hdr">' +
+      '<div class="dc-card-name">' + dcEsc(last) + (first ? ', ' + dcEsc(first) : '') + '</div>' +
+      '<div class="dc-card-phn">' + phnDisp + '</div>' +
+      '<div class="dc-card-count ' + countCls + '">' + card.totalIssues + ' issue' + (card.totalIssues === 1 ? '' : 's') + '</div>' +
+    '</div>' +
+    (meta ? '<div class="dc-card-meta">' + meta + '</div>' : '');
+
+  // Demo issues
+  if (card.demoIssues.length) {
+    html += '<div class="dc-section">' +
+      '<div class="dc-section-lbl">Patient row</div>' +
+      card.demoIssues.map(dcRenderIssue).join('') +
+    '</div>';
+  }
+
+  // Claims with issues
+  var problemClaims = card.claimRecords.filter(function(r){ return !r.healthy; });
+  var healthyCount  = card.claimRecords.length - problemClaims.length;
+  if (problemClaims.length) {
+    html += '<div class="dc-section">' +
+      '<div class="dc-section-lbl">Claims (' + problemClaims.length + ' with issues)</div>' +
+      problemClaims.map(function(r) {
+        return '<div class="dc-claim-row">' +
+          dcRenderClaimMeta(r.claim) +
+          r.issues.map(dcRenderIssue).join('') +
+        '</div>';
+      }).join('') +
+    '</div>';
+  }
+  if (healthyCount > 0) {
+    html += '<div class="dc-collapsed">✓ ' + healthyCount + ' healthy claim' + (healthyCount === 1 ? '' : 's') + ' (hidden)</div>';
+  }
+
+  html += '</div>';
+  return html;
+}
+
+function dcRenderOrphanCard(card) {
+  var phnDisp = card.phn || '<i style="color:var(--text3)">no PHN</i>';
+  var nameHint = '';
+  var firstClaim = card.claims[0] || {};
+  if (firstClaim.last || firstClaim.first) {
+    nameHint = dcCleanStr(firstClaim.last) + (firstClaim.first ? ', ' + dcCleanStr(firstClaim.first) : '');
+  }
+  var html = '<div class="dc-card sev-red">' +
+    '<div class="dc-card-hdr">' +
+      '<div class="dc-card-name">🔧 ' + (nameHint ? dcEsc(nameHint) : 'Orphan claims') + '</div>' +
+      '<div class="dc-card-phn">' + phnDisp + '</div>' +
+      '<div class="dc-card-count red">' + card.claims.length + ' orphan claim' + (card.claims.length === 1 ? '' : 's') + '</div>' +
+    '</div>' +
+    '<div class="dc-card-meta">' + dcEsc(card.why) + '</div>' +
+    '<div class="dc-section">' +
+      '<div class="dc-section-lbl">Stranded claims</div>' +
+      card.claims.map(function(c) {
+        return '<div class="dc-claim-row">' +
+          dcRenderClaimMeta(c) +
+          '<div class="dc-issue red">' +
+            '<div class="dc-issue-icon">🔴</div>' +
+            '<div class="dc-issue-body">No patient row to anchor this claim<div class="dc-issue-detail">name on claim: ' + dcEsc(dcCleanStr(c.last) + (c.first ? ', ' + dcCleanStr(c.first) : '') || '(blank)') + '</div></div>' +
+          '</div>' +
+        '</div>';
+      }).join('') +
+    '</div>' +
+  '</div>';
+  return html;
+}
+
+function renderDataCheck() {
+  var content = document.getElementById('dc-content');
+  var summary = document.getElementById('dc-summary-bar');
+  var filters = document.getElementById('dc-filters-bar');
+  var search  = document.getElementById('dc-search-bar');
+  if (!content) return;
+
+  // Loading state
+  if (dc.loading) {
+    summary.style.display = 'none';
+    filters.style.display = 'none';
+    search.style.display  = 'none';
+    content.innerHTML = '<div class="dc-loading">Loading Patients + Claims + Uploaded Claims from Sheets…</div>';
+    return;
+  }
+  // Error state
+  if (dc.error) {
+    summary.style.display = 'none';
+    filters.style.display = 'none';
+    search.style.display  = 'none';
+    content.innerHTML = '<div class="dc-error">⚠ ' + dcEsc(dc.error) + '\n\n' +
+      'Apps Script needs the new <b>getAllForDataCheck</b> action. ' +
+      'If you haven\'t deployed v2.21 yet, that\'s expected. Paste-in code provided separately.' +
+      '</div>' +
+      '<div style="text-align:center;margin-top:14px"><button class="dc-reload-btn" onclick="loadDataCheck(true)">↻ Try again</button></div>';
+    return;
+  }
+  // Not-yet-loaded state
+  if (!dc.loaded) {
+    summary.style.display = 'none';
+    filters.style.display = 'none';
+    search.style.display  = 'none';
+    content.innerHTML = '<div class="dc-loading">Tap to load data check.<br><br>' +
+      '<button class="dc-reload-btn" onclick="loadDataCheck(true)">↻ Load now</button></div>';
+    return;
+  }
+
+  // Audit complete — render summary + filters + cards
+  var a = dc.audit;
+  var c = a.counts;
+  var totalAll = c.total;
+  summary.innerHTML =
+    '<div class="dc-summary-pill">' + totalAll + ' card' + (totalAll === 1 ? '' : 's') + '</div>' +
+    (c.red    > 0 ? '<div class="dc-summary-pill red">🔴 ' + c.red + ' blocking</div>'  : '') +
+    (c.amber  > 0 ? '<div class="dc-summary-pill amber">🟠 ' + c.amber + ' audit</div>' : '') +
+    (c.yellow > 0 ? '<div class="dc-summary-pill yellow">🟡 ' + c.yellow + ' conflicts</div>' : '') +
+    (c.orphan > 0 ? '<div class="dc-summary-pill red">🔧 ' + c.orphan + ' orphan</div>' : '') +
+    '<button class="dc-reload-btn" onclick="loadDataCheck(true)">↻ Refresh</button>';
+  summary.style.display = '';
+
+  filters.innerHTML =
+    '<div class="dc-chip ' + (dc.filter==='all'?'act':'')    + '" onclick="dcSetFilter(\'all\')">All</div>' +
+    '<div class="dc-chip ' + (dc.filter==='red'?'act':'')    + '" onclick="dcSetFilter(\'red\')">🔴 Blocking</div>' +
+    '<div class="dc-chip ' + (dc.filter==='amber'?'act':'')  + '" onclick="dcSetFilter(\'amber\')">🟠 Audit</div>' +
+    '<div class="dc-chip ' + (dc.filter==='yellow'?'act':'') + '" onclick="dcSetFilter(\'yellow\')">🟡 Conflicts</div>' +
+    '<div class="dc-chip ' + (dc.filter==='orphan'?'act':'') + '" onclick="dcSetFilter(\'orphan\')">🔧 Orphans</div>';
+  filters.style.display = '';
+  search.style.display = '';
+
+  // Combine + filter
+  var allCards = a.orphanCards.concat(a.patientCards);  // orphans first
+  var visible = allCards.filter(function(card) {
+    return dcCardMatchesFilter(card, dc.filter) && dcCardMatchesSearch(card, dc.search);
+  });
+
+  if (!visible.length) {
+    if (totalAll === 0) {
+      content.innerHTML = '<div class="dc-empty">✓ No issues found across ' + dc.patients.length + ' patients and ' + (dc.claims.length + dc.uploaded.length) + ' claims.<br><span style="font-size:11px">All caught up.</span></div>';
+    } else {
+      content.innerHTML = '<div class="dc-empty">No cards match the current filter / search.</div>';
+    }
+    return;
+  }
+
+  // Per-card try/catch so one bad record can't blow up the render
+  content.innerHTML = visible.map(function(card) {
+    try {
+      return card.kind === 'orphan' ? dcRenderOrphanCard(card) : dcRenderPatientCard(card);
+    } catch (e) {
+      return '<div class="dc-card sev-red"><div class="dc-card-hdr"><div class="dc-card-name">Render error</div></div>' +
+             '<div class="dc-card-meta">' + dcEsc((e && e.message) || e) + '</div></div>';
+    }
+  }).join('');
+}
+
 // ─── Init ─────────────────────────────────────────────────────────────────────
 renderCal();
 refreshPreview();
-
-
 
 </script>
 
