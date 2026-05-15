@@ -189,7 +189,7 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 .wp { display:flex; align-items:flex-start; gap:8px; padding:9px 10px; border:.5px solid var(--border); border-radius:var(--r); background:var(--surface); cursor:pointer; }
 .wp.done      { border-color:#7ec49a; background:var(--green-bg); }
 .wp.directive { border-color:#d4a84a; }
-.wp-pos { width:21px; height:21px; border-radius:50%; background:var(--surface2); display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:var(--text2); flex-shrink:0; margin-top:2px; }
+.wp-pos { min-width:24px; height:22px; padding:0 6px; border-radius:11px; background:var(--surface2); display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:var(--text2); flex-shrink:0; margin-top:2px; letter-spacing:-.2px; }
 .wp-pos.done { background:#7ec49a; color:#fff; }
 /* Card tints — persist across screens for visual continuity */
 .card-patient  { background:#f4f2f9; border-color:rgba(46,26,110,.10); }
@@ -1979,11 +1979,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.46-2026-05-15-card-tints';
+var BUILD_ID    = 'v3.47-2026-05-15-room-pills';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.46';
+var APP_VERSION = 'v3.47';
 var APP_BUILT   = '2026-05-14';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
