@@ -1444,9 +1444,9 @@ var DIAGNOSES = [
   { code:'278', label:'Obesity And Other Hyperalimentation (278)' },
   { code:'2780', label:'Obesity (2780)' },
   { code:'2781', label:'Localized Adiposity (2781)' },
-  { code:'2782', label:'Hypervitaminosis 'a' (2782)' },
+  { code:'2782', label:'Hypervitaminosis \'a\' (2782)' },
   { code:'2783', label:'Hypercarotinaemia (2783)' },
-  { code:'2784', label:'Hypervitaminosis 'd' (2784)' },
+  { code:'2784', label:'Hypervitaminosis \'d\' (2784)' },
   { code:'2788', label:'Other (2788)' },
   { code:'390', label:'Rheumatic Fever Without Mention Of Heart Involvement (390)' },
   { code:'391', label:'Rheumatic Fever With Heart Involvement (391)' },
@@ -1532,7 +1532,7 @@ var DIAGNOSES = [
   { code:'4252', label:'Obscure Cardiomyopathy Of Africa (4252)' },
   { code:'4253', label:'Endocardial Fibroelastosis (4253)' },
   { code:'4255', label:'Alcoholic cardiomyopathy (4255)' },
-  { code:'4256', label:'Cardiomyopathy In Chagas's Disease (4256)' },
+  { code:'4256', label:'Cardiomyopathy In Chagas\'s Disease (4256)' },
   { code:'4257', label:'Nutritional And Metabolic Cardiomyopathies (4257)' },
   { code:'4258', label:'Cardiomyopathy In Other Diseases Classified Elsewhere (4258)' },
   { code:'4259', label:'Secondary cardiomyopathy (4259)' },
@@ -1616,8 +1616,8 @@ var DIAGNOSES = [
   { code:'4428', label:'Of Other Specified Artery (4428)' },
   { code:'4429', label:'Of Unspecified Site (4429)' },
   { code:'443', label:'Other Peripheral Vascular Disease (443)' },
-  { code:'4430', label:'Raynaud's Syndrome (4430)' },
-  { code:'4431', label:'Thromboangiitis Obliterans (buerger's Disease) (4431)' },
+  { code:'4430', label:'Raynaud\'s Syndrome (4430)' },
+  { code:'4431', label:'Thromboangiitis Obliterans (buerger\'s Disease) (4431)' },
   { code:'4438', label:'Other (4438)' },
   { code:'444', label:'Arterial Embolism And Thrombosis (444)' },
   { code:'4440', label:'Of Abdominal Aorta (4440)' },
@@ -1630,7 +1630,7 @@ var DIAGNOSES = [
   { code:'4461', label:'Acute Febrile Mucocutaneous Lymphnode Syndrome (mcls) (4461)' },
   { code:'4462', label:'Hypersensitivity Angiitis (4462)' },
   { code:'4463', label:'Lethal Midline Granuloma (4463)' },
-  { code:'4464', label:'Wegener's Granulomatosis (4464)' },
+  { code:'4464', label:'Wegener\'s Granulomatosis (4464)' },
   { code:'4465', label:'Giant Cell Arteritis (4465)' },
   { code:'44650', label:'Giant Cell Arteritis (44650)' },
   { code:'4466', label:'Thrombotic Microangiopathy (4466)' },
@@ -1740,7 +1740,7 @@ var DIAGNOSES = [
   { code:'746', label:'Other Congenital Anomalies Of Heart (746)' },
   { code:'7460', label:'Anomalies Of Pulmonary Valve (7460)' },
   { code:'7461', label:'Tricuspid Atresia And Stenosis, Congenital (7461)' },
-  { code:'7462', label:'Ebstein's Anomaly (7462)' },
+  { code:'7462', label:'Ebstein\'s Anomaly (7462)' },
   { code:'7463', label:'Congenital Stenosis Of Aortic Valve (7463)' },
   { code:'7464', label:'Congenital Insufficiency Of Aortic Valve (7464)' },
   { code:'7465', label:'Congenital Mitral Stenosis (7465)' },
@@ -2033,12 +2033,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.42-2026-05-14-icd9-iclinic-format';
+var BUILD_ID    = 'v3.43-2026-05-14-icd9-quote-escape-fix';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.41';
-var APP_BUILT   = '2026-05-12';
+var APP_VERSION = 'v3.43';
+var APP_BUILT   = '2026-05-14';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
