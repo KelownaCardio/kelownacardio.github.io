@@ -1,9 +1,23 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology Billing — main app
-  Version:    v3.33
-  Built:      2026-05-13 UTC
+  Version:    v3.58
+  Built:      2026-05-15 UTC
   Repo:       github.com/KelownaCardio/kelownacardio.github.io
+
+  Changes in this build (v3.58) — Patient card style improvements:
+    - DOB removed from patient card meta line (age+sex already shown).
+    - Dx (ICD description + code) added after MRP on all card views
+      (ward list, alphabetical, off-service). Format: "Dx: Description (code)".
+    - Quick-tap action buttons (Directive / Combined daily / + Claim) now
+      share a single full-width row using flex:1 on each button (nowrap).
+    - CCU/CSICU/ICU consulting patients now correctly show Directive +
+      Combined daily quick-tap buttons (not CCU daily — we only claim CCU
+      daily when Cardiology is MRP). showsCCUDaily() now checks role===mrp
+      exclusively (dropped legacy care===ccu fallback).
+    - Ward room-number circle centered vertically in card (align-items:center
+      on .wp). Room number font reduced 10px→8px for clearer name hierarchy.
+      Removed margin-top offsets on .wp-pos and .wp-pos-wrap.
 
   Changes in this build (v3.33) — Meditech import auto-discharge:
     - Cardiologist matchers (inferMRP, inferCare) replaced with the
@@ -188,10 +202,10 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 
 /* WARD LIST */
 .ward-list { display:flex; flex-direction:column; gap:5px; }
-.wp { display:flex; align-items:flex-start; gap:8px; padding:8px 10px; border:.5px solid var(--border); border-radius:var(--r); background:var(--surface); cursor:pointer; }
+.wp { display:flex; align-items:center; gap:8px; padding:8px 10px; border:.5px solid var(--border); border-radius:var(--r); background:var(--surface); cursor:pointer; }
 .wp.done      { border-color:#7ec49a; background:var(--green-bg); }
 .wp.directive { border-color:#d4a84a; }
-.wp-pos { min-width:24px; height:22px; padding:0 6px; border-radius:11px; background:var(--surface2); display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:var(--text2); flex-shrink:0; margin-top:2px; letter-spacing:-.2px; }
+.wp-pos { min-width:24px; height:22px; padding:0 6px; border-radius:11px; background:var(--surface2); display:flex; align-items:center; justify-content:center; font-size:8px; font-weight:700; color:var(--text2); flex-shrink:0; margin-top:0; letter-spacing:-.2px; }
 .wp-pos.done { background:#7ec49a; color:#fff; }
 /* Card tints — persist across screens for visual continuity */
 .card-patient  { background:#f4f2f9; border-color:rgba(46,26,110,.10); }
@@ -209,14 +223,15 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 #ls-on.on  { color:var(--blue-t);  background:var(--blue-bg);  box-shadow:0 1px 3px rgba(46,26,110,.18); }
 #ls-off.on { color:var(--amber-t); background:var(--amber-bg); box-shadow:0 1px 3px rgba(160,96,16,.18); }
 
-.wp-pos-wrap { position:relative; flex-shrink:0; margin-top:2px; }
+.wp-pos-wrap { position:relative; flex-shrink:0; margin-top:0; }
 .wp-pos-badge { position:absolute; top:-4px; right:-4px; width:11px; height:11px; border-radius:50%; background:var(--green); display:flex; align-items:center; justify-content:center; border:1.5px solid var(--surface); }
 .wp-pos-badge svg { width:6px; height:6px; stroke:#fff; fill:none; stroke-width:3; }
 .wp-info { flex:1; min-width:0; }
 .wp-name { font-size:13px; font-weight:700; letter-spacing:-.1px; line-height:1.25; }
 .wp-meta { font-size:10px; color:var(--text2); margin-top:1px; }
 .wp-chips{ display:flex; gap:4px; margin-top:3px; flex-wrap:wrap; }
-.wp-acts { display:flex; gap:4px; margin-top:5px; flex-wrap:wrap; }
+.wp-acts { display:flex; gap:4px; margin-top:5px; flex-wrap:nowrap; }
+.wp-acts .bb { flex:1; min-width:0; text-align:center; }
 .ro-col { display:flex; flex-direction:column; gap:3px; flex-shrink:0; padding-top:4px; }
 .ro { width:20px; height:20px; border:.5px solid var(--border2); border-radius:4px; background:none; cursor:pointer; font-size:10px; color:var(--text2); display:flex; align-items:center; justify-content:center; font-family:inherit; }
 .ro:hover { background:var(--surface2); }
@@ -3299,7 +3314,7 @@ function wardHtml(ward) {
                    '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
                  '</button>' +
                '</div>' +
-               '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + '</div>' +
+               '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + (p.icd ? ' &bull; Dx: ' + esc(icdShortLabel(p.icd)) : '') + '</div>' +
                '<div class="wp-acts">' +
                  wardActBtns(p) +
                  '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
@@ -3477,10 +3492,9 @@ function offRow(p) {
   // Row 2: room number (prominent) + last-seen chip
   var roomStr  = p.bed ? esc(String(p.bed)) : (esc(wardLabel(p.ward) || '—'));
   var lastSeen = lastSeenByGroup(p);
-  // Row 3: DOB · Age (Sex) · MRP
-  var dobStr   = p.dob ? esc(dispDate(p.dob)) : '';
+  // Row 3: Age (Sex) · MRP · Dx
   var ageSex   = ageGenderShort(p);
-  var row3     = (dobStr ? dobStr + ' &bull; ' : '') + esc(ageSex) + ' &bull; ' + mrpLabel(p) + lastBilledChip(p);
+  var row3     = esc(ageSex) + ' &bull; ' + mrpLabel(p) + (p.icd ? ' &bull; Dx: ' + esc(icdShortLabel(p.icd)) : '') + lastBilledChip(p);
   return '<div class="alpha-row' + (dn ? ' done' : '') + '">' +
     '<div class="alpha-av av-off" style="font-size:9px;font-weight:800;letter-spacing:-.3px" data-pid="' + p.id + '" onclick="openLocationEditEl(this)" title="Tap to move patient">' + esc(wardAbbr) + '</div>' +
     '<div class="wp-main">' +
@@ -3496,7 +3510,7 @@ function offRow(p) {
       '</div>' +
       '<div class="wp-meta">' + row3 + '</div>' +
       '<div class="wp-acts">' + quickActBtns(p) +
-        '<div style="width:100%"><button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button></div>' +
+        '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
       '</div>' +
     '</div>' +
     '<div class="wp-side-btns">' +
@@ -3528,12 +3542,9 @@ function calcAgeGender(p) {
       if (!isNaN(yr) && yr >= 0 && yr < 130) age = String(yr);
     }
   }
-  // Format: DOB · AgeGender  e.g. "15/03/1948 · 77M"
+  // Format: AgeGender  e.g. "77M"  (DOB removed — age+gender already shown)
   var ageGender = (age + (p.sex || '')) || '';
-  if (p.dob && ageGender) return esc(dispDate(dobClean)) + ' &bull; ' + ageGender;
-  if (p.dob)              return esc(dispDate(dobClean));
-  if (ageGender)          return ageGender;
-  return '—';
+  return ageGender || '—';
 }
 
 function alphaRow(p) {
@@ -3552,7 +3563,7 @@ function alphaRow(p) {
           '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
         '</button>' +
       '</div>' +
-      '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + lastBilledChip(p) + '</div>' +
+      '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + (p.icd ? ' &bull; Dx: ' + esc(icdShortLabel(p.icd)) : '') + lastBilledChip(p) + '</div>' +
       '<div class="wp-acts">' + quickActBtns(p) +
         '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
       '</div>' +
@@ -3607,10 +3618,10 @@ function wardActBtns(p) {
 }
 
 function showsCCUDaily(p) {
-  // CCU daily shows when cardiology is MRP (role=mrp) on CCU/ICU wards
+  // CCU daily only when Cardiology is MRP — consulting cardiologists get Directive/Combined daily
   var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
   if (icuWards.indexOf(p.ward) === -1) return false;
-  return p.role === 'mrp' || p.care === 'ccu'; // support both old and new field
+  return p.role === 'mrp';
 }
 
 // Instantly style a quick-tap button as done (dark green ✓) before render().
