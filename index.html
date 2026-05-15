@@ -2892,9 +2892,9 @@ function parseDischargedAt(v) {
   // ISO string: "2026-05-06T21:39:57.176Z" or "2026-05-06T21:39:57Z"
   var n = Number(new Date(String(v)));
   if (!isNaN(n) && n > 1000000000000) return n; // sanity: must be after year 2001
-  // Plain number stored as string: "1778078397176"
-  var direct = Number(String(v).replace(/[^0-9]/g,''));
-  if (!isNaN(direct) && direct > 1000000000000) return direct;
+  // Plain number stored as string: "1778078397176" or "1778702261108.0"
+  var direct = parseFloat(String(v));
+  if (!isNaN(direct) && direct > 1000000000000) return Math.round(direct);
   return 0;
 }
 
@@ -4226,8 +4226,9 @@ function toEpochMs(v) {
   if (v == null || v === '') return 0;
   if (typeof v === 'number') return v > 1e12 ? v : 0;
   var s = String(v).trim();
-  // Numeric string like "1778182118783"
-  if (/^\d{13,}$/.test(s)) return Number(s);
+  // Numeric string like "1778182118783" or "1778702261108.0"
+  var pf = parseFloat(s);
+  if (!isNaN(pf) && pf > 1e12) return Math.round(pf);
   // ISO date string
   var d = Date.parse(s);
   return isNaN(d) ? 0 : d;
