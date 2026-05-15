@@ -199,7 +199,7 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 .card-location { background:var(--teal-bg); border-color:rgba(14,110,110,.20); }
 .card-location .card-title { color:var(--teal-t); }
 /* On/Off service pills on add-patient location card */
-.ap-list-pill { flex:1; padding:9px; border-radius:var(--rpill); border:1.5px solid var(--border2); background:var(--surface2); font-size:13px; font-weight:700; font-family:inherit; cursor:pointer; transition:all .15s; color:var(--text2); }
+.ap-list-pill { flex:1; padding:7px 8px; border-radius:var(--rpill); border:1.5px solid var(--border2); background:var(--surface2); font-size:11px; font-weight:700; font-family:inherit; cursor:pointer; transition:all .15s; color:var(--text2); }
 .ap-list-pill.on { background:var(--blue-bg); border-color:var(--blue); color:var(--blue-t); }
 
 .wp-pos-wrap { position:relative; flex-shrink:0; margin-top:2px; }
@@ -843,29 +843,26 @@ input[type=file] { display:none; }
           </div>
         </div>
       </div>
-      <div class="fl">
-        <div class="f1"><label>MRP service</label>
-          <select id="f-mrp" onchange="mrpChange()">
-            <option value="Cardiology">Cardiology</option>
-            <option value="Other">Other</option>
-            <option value="Hospitalist">Hospitalist</option>
-            <option value="CTU">CTU</option>
-            <option value="ICU">ICU</option>
-            <option value="CSICU">CSICU</option>
-            <option value="Cardiac Surgery">Cardiac Surgery</option>
-            <option value="General Surgery">General Surgery</option>
-            <option value="Orthopedics">Orthopedics</option>
-            <option value="Neurology">Neurology</option>
-            <option value="Nephrology">Nephrology</option>
-          </select>
-        </div>
-        <div class="f1"><label>Cardiology role</label>
-          <select id="f-role" onchange="roleChange()">
-            <option value="consultant">Consulting</option>
-            <option value="mrp">MRP</option>
-          </select>
-        </div>
+      <label style="margin-top:8px">Cardiology role</label>
+      <div class="fl" style="gap:8px;margin-top:4px">
+        <button class="ap-list-pill" id="ap-role-mrp"  onclick="apRolePill('mrp')">MRP</button>
+        <button class="ap-list-pill on" id="ap-role-con" onclick="apRolePill('consultant')">Consulting</button>
       </div>
+      <input id="f-role" type="hidden" value="consultant">
+      <label style="margin-top:8px">MRP service</label>
+      <select id="f-mrp" onchange="mrpChange()">
+        <option value="Cardiology">Cardiology</option>
+        <option value="Other">Other</option>
+        <option value="Hospitalist">Hospitalist</option>
+        <option value="CTU">CTU</option>
+        <option value="ICU">ICU</option>
+        <option value="CSICU">CSICU</option>
+        <option value="Cardiac Surgery">Cardiac Surgery</option>
+        <option value="General Surgery">General Surgery</option>
+        <option value="Orthopedics">Orthopedics</option>
+        <option value="Neurology">Neurology</option>
+        <option value="Nephrology">Nephrology</option>
+      </select>
       <label style="margin-top:8px">On / Off service</label>
       <div class="fl" style="gap:8px;margin-top:4px">
         <button class="ap-list-pill on" id="ap-pill-on" onclick="apListPill('on')">On service</button>
@@ -1979,11 +1976,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.47-2026-05-15-room-pills';
+var BUILD_ID    = 'v3.49-2026-05-15-smaller-pills';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.47';
+var APP_VERSION = 'v3.49';
 var APP_BUILT   = '2026-05-14';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -5315,20 +5312,23 @@ function openPatientEdit(pid) {
           '</div></div>';
   html += '</div>';
 
-  // Row 2: Cardiology role + MRP service
-  html += '<div class="fl">';
-  html += '<div class="f1"><label>Cardiology role</label><select id="pe-role" onchange="peRoleChange()">' +
-          '<option value="consultant"' + (p.role !== 'mrp' ? ' selected' : '') + '>Consulting</option>' +
-          '<option value="mrp"'        + (p.role === 'mrp' ? ' selected' : '') + '>MRP</option>' +
-          '</select></div>';
-  html += '<div class="f1"><label>MRP service</label><select id="pe-mrp" onchange="peMrpChange()">' +
+  // Row 2: Cardiology role pills
+  var peCurRole = p.role === 'mrp' ? 'mrp' : 'consultant';
+  html += '<label style="margin-top:8px">Cardiology role</label>';
+  html += '<div class="fl" style="gap:8px;margin-top:4px">';
+  html += '<button class="ap-list-pill' + (peCurRole==='mrp'?' on':'') + '" id="pe-role-mrp" onclick="peRolePill(\'mrp\')">MRP</button>';
+  html += '<button class="ap-list-pill' + (peCurRole==='consultant'?' on':'') + '" id="pe-role-con" onclick="peRolePill(\'consultant\')">Consulting</button>';
+  html += '</div>';
+  html += '<input id="pe-role" type="hidden" value="' + peCurRole + '">';
+  // Row 3: MRP service dropdown
+  html += '<label style="margin-top:8px">MRP service</label>';
+  html += '<select id="pe-mrp" onchange="peMrpChange()">' +
           ['Cardiology','Other','Hospitalist','CTU','ICU','CSICU',
            'Cardiac Surgery','General Surgery','Orthopedics','Neurology','Nephrology']
           .map(function(s) {
             return '<option value="' + s + '"' + ((p.mrp||'Other') === s ? ' selected' : '') + '>' + s + '</option>';
           }).join('') +
-          '</select></div>';
-  html += '</div>';
+          '</select>';
 
   // Row 3: On/Off service pills
   var peList = p.list === 'on' ? 'on' : 'off';
@@ -5386,12 +5386,13 @@ function peWardChange(opts) {
   // edit on an existing patient to clobber their saved values.
   if (!opts || !opts.preserveAll) {
     applyWardDefaults(ward, { list:'pe-list', role:'pe-role', mrp:'pe-mrp', care:'pe-care' });
-    // Sync pe pills
+    // Sync pe pills (list + role)
     var peListVal = (document.getElementById('pe-list') || {}).value || 'on';
     var peOn  = document.getElementById('pe-pill-on');
     var peOff = document.getElementById('pe-pill-off');
     if (peOn)  peOn.className  = 'ap-list-pill' + (peListVal === 'on'  ? ' on' : '');
     if (peOff) peOff.className = 'ap-list-pill' + (peListVal === 'off' ? ' on' : '');
+    syncPeRolePills();
   }
 }
 
@@ -5443,6 +5444,32 @@ function peMrpChange() {
     roleSel.value = 'consultant';
     if (careFld) careFld.value = 'directive';
   }
+  syncPeRolePills();
+}
+
+function peRolePill(val) {
+  var roleEl = document.getElementById('pe-role');
+  if (roleEl) roleEl.value = val;
+  syncPeRolePills();
+  var mrpEl  = document.getElementById('pe-mrp');
+  var careEl = document.getElementById('pe-care');
+  var ward   = (document.getElementById('pe-ward') || {}).value || '';
+  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
+  if (val === 'mrp') {
+    if (mrpEl)  mrpEl.value  = 'Cardiology';
+    if (careEl) careEl.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
+  } else {
+    if (mrpEl && mrpEl.value === 'Cardiology') mrpEl.value = 'Other';
+    if (careEl) careEl.value = 'directive';
+  }
+}
+
+function syncPeRolePills() {
+  var val = (document.getElementById('pe-role') || {}).value || 'consultant';
+  var mrp = document.getElementById('pe-role-mrp');
+  var con = document.getElementById('pe-role-con');
+  if (mrp) mrp.className = 'ap-list-pill' + (val === 'mrp'        ? ' on' : '');
+  if (con) con.className = 'ap-list-pill' + (val === 'consultant' ? ' on' : '');
 }
 
 function savePatientEdit(pid) {
@@ -5513,17 +5540,20 @@ function openLocationEdit(pid) {
           '</div></div>';
   html += '</div>';
 
-  // Row 2: MRP service + Cardiology role
-  var mrpOpts = ['Cardiology','Other','Hospitalist','CTU','ICU','CSICU','Cardiac Surgery','General Surgery','Orthopedics','Neurology','Nephrology'];
-  html += '<div class="fl">';
-  html += '<div class="f1"><label>MRP service</label><select id="le-mrp" onchange="leMrpChange()">' +
-          mrpOpts.map(function(s) { return '<option value="' + s + '"' + ((p.mrp||'Other')===s?' selected':'') + '>' + s + '</option>'; }).join('') +
-          '</select></div>';
-  html += '<div class="f1"><label>Cardiology role</label><select id="le-role" onchange="leRoleChange()">' +
-          '<option value="consultant"' + (p.role !== 'mrp' ? ' selected' : '') + '>Consulting</option>' +
-          '<option value="mrp"'        + (p.role === 'mrp' ? ' selected' : '') + '>MRP</option>' +
-          '</select></div>';
+  // Row 2: Cardiology role pills
+  var curRole = p.role === 'mrp' ? 'mrp' : 'consultant';
+  html += '<label style="margin-top:8px">Cardiology role</label>';
+  html += '<div class="fl" style="gap:8px;margin-top:4px">';
+  html += '<button class="ap-list-pill' + (curRole==='mrp'?' on':'') + '" id="le-role-mrp" onclick="leRolePill(\'mrp\')">MRP</button>';
+  html += '<button class="ap-list-pill' + (curRole==='consultant'?' on':'') + '" id="le-role-con" onclick="leRolePill(\'consultant\')">Consulting</button>';
   html += '</div>';
+  html += '<input id="le-role" type="hidden" value="' + curRole + '">';
+  // Row 3: MRP service dropdown
+  var mrpOpts = ['Cardiology','Other','Hospitalist','CTU','ICU','CSICU','Cardiac Surgery','General Surgery','Orthopedics','Neurology','Nephrology'];
+  html += '<label style="margin-top:8px">MRP service</label>';
+  html += '<select id="le-mrp" onchange="leMrpChange()">' +
+          mrpOpts.map(function(s) { return '<option value="' + s + '"' + ((p.mrp||'Other')===s?' selected':'') + '>' + s + '</option>'; }).join('') +
+          '</select>';
 
   // Row 3: On/Off service pills
   var curList = p.list === 'on' ? 'on' : 'off';
@@ -5575,23 +5605,34 @@ function leMrpChange() {
     if (role) role.value = 'consultant';
     if (care) care.value = 'directive';
   }
+  syncLeRolePills();
   leUpdateRuleHint(null);
 }
 
-function leRoleChange() {
-  var role = (document.getElementById('le-role') || {}).value || '';
-  var mrp  = document.getElementById('le-mrp');
-  var care = document.getElementById('le-care');
+function leRolePill(val) {
+  var roleEl = document.getElementById('le-role');
+  if (roleEl) roleEl.value = val;
+  syncLeRolePills();
+  var mrpEl = document.getElementById('le-mrp');
+  var careEl = document.getElementById('le-care');
   var ward = (document.getElementById('le-ward') || {}).value || '';
   var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
-  if (role === 'mrp') {
-    if (mrp)  mrp.value  = 'Cardiology';
-    if (care) care.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
+  if (val === 'mrp') {
+    if (mrpEl)  mrpEl.value  = 'Cardiology';
+    if (careEl) careEl.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
   } else {
-    if (mrp && mrp.value === 'Cardiology') mrp.value = 'Other';
-    if (care) care.value = 'directive';
+    if (mrpEl && mrpEl.value === 'Cardiology') mrpEl.value = 'Other';
+    if (careEl) careEl.value = 'directive';
   }
   leUpdateRuleHint(null);
+}
+
+function syncLeRolePills() {
+  var val = (document.getElementById('le-role') || {}).value || 'consultant';
+  var mrp = document.getElementById('le-role-mrp');
+  var con = document.getElementById('le-role-con');
+  if (mrp) mrp.className = 'ap-list-pill' + (val === 'mrp'        ? ' on' : '');
+  if (con) con.className = 'ap-list-pill' + (val === 'consultant' ? ' on' : '');
 }
 
 // Whether a ward is a Cardiology MRP ward where this group is primary
@@ -5615,6 +5656,7 @@ function leWardChange() {
   if (roleEl) roleEl.value = isMRP ? 'mrp' : 'consultant';
   if (careEl) careEl.value = isMRP ? (icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily') : 'directive';
   lePill(isMRP ? 'on' : 'off');
+  syncLeRolePills();
   leUpdateRuleHint(null);
 }
 
@@ -6525,6 +6567,7 @@ function mrpChange() {
     roleSel.value = 'consultant';
     if (careFld) careFld.value = 'directive';
   }
+  syncApRolePills();
 }
 
 function roleChange() {
@@ -6808,10 +6851,45 @@ function apListPill(val) {
   if (pillOff) pillOff.className = 'ap-list-pill' + (val === 'off' ? ' on' : '');
 }
 
+// Role pills — toggling auto-fills MRP service:
+//   MRP        → Cardiology
+//   Consulting → preserve current non-Cardiology mrp (from Meditech import etc.) else Other
+function apRolePill(val) {
+  var roleEl = document.getElementById('f-role');
+  if (roleEl) roleEl.value = val;
+  var mrpRole = document.getElementById('ap-role-mrp');
+  var conRole = document.getElementById('ap-role-con');
+  if (mrpRole) mrpRole.className = 'ap-list-pill' + (val === 'mrp'        ? ' on' : '');
+  if (conRole) conRole.className = 'ap-list-pill' + (val === 'consultant' ? ' on' : '');
+  // Auto-fill MRP service
+  var mrpEl  = document.getElementById('f-mrp');
+  var careEl = document.getElementById('f-care');
+  var ward   = gv('f-ward');
+  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
+  if (val === 'mrp') {
+    if (mrpEl)  mrpEl.value  = 'Cardiology';
+    if (careEl) careEl.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
+  } else {
+    if (mrpEl && mrpEl.value === 'Cardiology') mrpEl.value = 'Other';
+    // else leave existing non-Cardiology value (Meditech import preserved)
+    if (careEl) careEl.value = 'directive';
+  }
+}
+
+// Sync role pills with current f-role value (for ward changes etc.)
+function syncApRolePills() {
+  var val = gv('f-role') || 'consultant';
+  var mrpRole = document.getElementById('ap-role-mrp');
+  var conRole = document.getElementById('ap-role-con');
+  if (mrpRole) mrpRole.className = 'ap-list-pill' + (val === 'mrp'        ? ' on' : '');
+  if (conRole) conRole.className = 'ap-list-pill' + (val === 'consultant' ? ' on' : '');
+}
+
 // Sync pills after ward defaults applied
 function syncApListPills() {
   var val = gv('f-list') || 'on';
   apListPill(val);
+  syncApRolePills();
 }
 
 async function apSubmit(addToList, _skipDupCheck) {
