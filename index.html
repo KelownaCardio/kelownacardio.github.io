@@ -230,8 +230,8 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 .wp-name { font-size:13px; font-weight:700; letter-spacing:-.1px; line-height:1.25; }
 .wp-meta { font-size:10px; color:var(--text2); margin-top:1px; }
 .wp-chips{ display:flex; gap:4px; margin-top:3px; flex-wrap:wrap; }
-.wp-acts { display:flex; gap:4px; margin-top:5px; flex-wrap:nowrap; }
-.wp-acts .bb { flex:1; min-width:0; text-align:center; }
+.wp-acts { display:flex; gap:3px; margin-top:5px; flex-wrap:nowrap; }
+.wp-acts .bb { flex:1; min-width:0; text-align:center; padding:4px 2px; font-size:clamp(8px,1.15vw,10px); overflow:hidden; text-overflow:ellipsis; }
 .ro-col { display:flex; flex-direction:column; gap:3px; flex-shrink:0; padding-top:4px; }
 .ro { width:20px; height:20px; border:.5px solid var(--border2); border-radius:4px; background:none; cursor:pointer; font-size:10px; color:var(--text2); display:flex; align-items:center; justify-content:center; font-family:inherit; }
 .ro:hover { background:var(--surface2); }
@@ -3314,7 +3314,7 @@ function wardHtml(ward) {
                    '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
                  '</button>' +
                '</div>' +
-               '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + (p.icd ? ' &bull; Dx: ' + esc(icdShortLabel(p.icd)) : '') + '</div>' +
+               '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + (p.icd ? ' &bull; Dx: ' + esc(icdDescOnly(p.icd)) : '') + '</div>' +
                '<div class="wp-acts">' +
                  wardActBtns(p) +
                  '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
@@ -3494,7 +3494,7 @@ function offRow(p) {
   var lastSeen = lastSeenByGroup(p);
   // Row 3: Age (Sex) · MRP · Dx
   var ageSex   = ageGenderShort(p);
-  var row3     = esc(ageSex) + ' &bull; ' + mrpLabel(p) + (p.icd ? ' &bull; Dx: ' + esc(icdShortLabel(p.icd)) : '') + lastBilledChip(p);
+  var row3     = esc(ageSex) + ' &bull; ' + mrpLabel(p) + (p.icd ? ' &bull; Dx: ' + esc(icdDescOnly(p.icd)) : '') + lastBilledChip(p);
   return '<div class="alpha-row' + (dn ? ' done' : '') + '">' +
     '<div class="alpha-av av-off" style="font-size:9px;font-weight:800;letter-spacing:-.3px" data-pid="' + p.id + '" onclick="openLocationEditEl(this)" title="Tap to move patient">' + esc(wardAbbr) + '</div>' +
     '<div class="wp-main">' +
@@ -3505,7 +3505,7 @@ function offRow(p) {
         '</button>' +
       '</div>' +
       '<div style="display:flex;align-items:baseline;gap:7px;margin-top:1px;margin-bottom:2px">' +
-        '<span style="font-size:14px;font-weight:700;color:var(--text)">' + roomStr + '</span>' +
+        '<span style="font-size:11px;font-weight:700;color:var(--text2)">' + roomStr + '</span>' +
         lastSeen +
       '</div>' +
       '<div class="wp-meta">' + row3 + '</div>' +
@@ -3563,7 +3563,7 @@ function alphaRow(p) {
           '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
         '</button>' +
       '</div>' +
-      '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + (p.icd ? ' &bull; Dx: ' + esc(icdShortLabel(p.icd)) : '') + lastBilledChip(p) + '</div>' +
+      '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + (p.icd ? ' &bull; Dx: ' + esc(icdDescOnly(p.icd)) : '') + lastBilledChip(p) + '</div>' +
       '<div class="wp-acts">' + quickActBtns(p) +
         '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
       '</div>' +
@@ -5251,6 +5251,12 @@ function icdShortLabel(code) {
   var dx = DIAGNOSES.find(function(d) { return String(d.code).trim() === c; });
   if (dx) return dx.label; // already "Description (code)" format
   return 'ICD-9 ' + c;    // fallback for custom/unknown codes
+}
+
+// Returns only the text description, no code suffix — e.g. "Heart Failure"
+function icdDescOnly(code) {
+  var full = icdShortLabel(code);
+  return full.replace(/\s*\([^)]+\)\s*$/, '').trim() || full;
 }
 
 // Get short human label for a fee code
