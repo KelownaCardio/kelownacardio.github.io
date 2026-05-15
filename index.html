@@ -1,9 +1,35 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology Billing — main app
-  Version:    v3.58
+  Version:    v3.59
   Built:      2026-05-15 UTC
   Repo:       github.com/KelownaCardio/kelownacardio.github.io
+
+  Changes in this build (v3.59) — CCU_DAILY elimination:
+    - CCU_DAILY was a synthetic intermediate fee tag (banded at export-time
+      by ccuConsolidate). It is no longer written to the fee column anywhere.
+      All CCU billing paths now write the correct 1411/1421/1431 band
+      directly at tap time.
+    - Trigger: a phantom CCU_DAILY claim appeared in change history that
+      the user did not deliberately enter. Two write paths were hard-coding
+      CCU_DAILY: (1) calendar gap-fill picker, (2) discharge modal "CCU
+      Daily" button (pre-styled as blue default for CCU/ICU MRP — easy to
+      mistap on iPad). Both now compute the correct band at render time.
+    - New ccuFeeForDate(p, dateStr) — generalised from ccuFeeForToday.
+      Counts consecutive CCU days STRICTLY before the target date (excludes
+      the target itself) and returns day 1 → 1411, days 2–7 → 1421,
+      day 8+ → 1431. ccuFeeForToday kept as a thin wrapper.
+    - Hard guard added at the top of addClaim: if fee or feeCode equals
+      'CCU_DAILY', it is rebanded via ccuFeeForDate(p, date) and a
+      console.warn is logged. Defence in depth — catches any future
+      regression or call site we missed.
+    - Claim edit fee dropdown: 'CCU daily tap' option removed (can no
+      longer be selected as a fee).
+    - ccuConsolidate left intact as a no-op safety net for any legacy
+      CCU_DAILY rows already in the Sheet — will be removed once a
+      future migration re-bands those rows in place.
+    - Bonus: upload.html v1.16 corrects MOST fee code 03701 → 78720
+      (was wrong since v1.8). PWA was always correct on 78720.
 
   Changes in this build (v3.58) — Patient card style improvements:
     - DOB removed from patient card meta line (age+sex already shown).
@@ -2001,12 +2027,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.57-2026-05-15-validation-hardening';
+var BUILD_ID    = 'v3.59-2026-05-15-no-more-ccu-daily';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.57';
-var APP_BUILT   = '2026-05-14';
+var APP_VERSION = 'v3.59';
+var APP_BUILT   = '2026-05-15';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -2944,24 +2970,30 @@ function ccuConsolidate() {
   return out;
 }
 
-// Returns the correct CCU fee code for today based on consecutive episode length.
+// Returns the correct CCU fee code for a given date based on consecutive
+// episode length ending at that date.
 //   Day 1 of episode → 1411 | Days 2–7 → 1421 | Days 8+ → 1431
 // Episode resets on any gap > 1 calendar day in CCU claims.
-function ccuFeeForToday(p) {
+// dateStr is DD/MM/YYYY (Sheet storage format). Defaults to TODAY.
+// v3.59: generalized from ccuFeeForToday; CCU_DAILY is now a deprecated tag
+// (still recognized in history scan so existing rows don't break banding logic).
+function ccuFeeForDate(p, dateStr) {
   var CCU_FEES = ['CCU_DAILY','1411','1421','1431'];
   var DAY_MS   = 86400000;
+  var targetMs = parseDMYsafe(dateStr || TODAY);
+  if (!targetMs) return '1411';
   var taps = st.claims
-    .filter(function(c) { return samePhn(c.phn, p.phn) && CCU_FEES.indexOf(c.fee) !== -1; })
-    .sort(function(a, b) { return parseDMYsafe(a.date) - parseDMYsafe(b.date); });
+    .filter(function(c) { return samePhn(c.phn, p.phn) && CCU_FEES.indexOf(c.fee) !== -1; });
   if (!taps.length) return '1411';
-  var todayMs = parseDMYsafe(TODAY);
   var dateMsSet = {};
   taps.forEach(function(c) {
     var ms = parseDMYsafe(c.date);
-    if (ms && ms < todayMs) dateMsSet[ms] = true;
+    // Only count days STRICTLY before the target — we're computing the
+    // band FOR the target date, so it doesn't count itself.
+    if (ms && ms < targetMs) dateMsSet[ms] = true;
   });
   var consec = 0;
-  var checkMs = todayMs - DAY_MS;
+  var checkMs = targetMs - DAY_MS;
   while (dateMsSet[checkMs]) { consec++; checkMs -= DAY_MS; }
   var dayNum = consec + 1;
   if (dayNum === 1) return '1411';
@@ -2969,8 +3001,22 @@ function ccuFeeForToday(p) {
   return '1431';
 }
 
+// Backward-compat wrapper — TODAY band for patient p.
+function ccuFeeForToday(p) { return ccuFeeForDate(p, TODAY); }
+
 // ── Add Claim Helper ───────────────────────────────────
 function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, performingAlias) {
+  // v3.59: CCU_DAILY is not a real fee code. Recompute to the correct
+  // 1411/1421/1431 band based on consecutive episode days ending at `date`.
+  // Defence in depth — all call sites should already pass a banded fee,
+  // but this catches any legacy paths or future regressions.
+  if (fee === 'CCU_DAILY' || feeCode === 'CCU_DAILY') {
+    var banded = ccuFeeForDate(p, date);
+    console.warn('[addClaim] CCU_DAILY intercepted -> rebanded to ' + banded +
+                 ' for ' + (p.last || p.phn) + ' on ' + date);
+    fee     = banded;
+    feeCode = banded;
+  }
   // Guard: never write an MRP service string into refby/refbyName
   if (looksLikeMRPService(p.refbyName)) {
     p.refbyName = '';
@@ -5131,7 +5177,9 @@ function _cvFillClaim(pid, dateStr, type, note, icdOverride) {
 
   var alias = st.doc.alias;
   if (type === 'ccu') {
-    addClaim(p, 'CCU_DAILY', 'CCU_DAILY', 1, dateStr, 'I', null, note || null, null, alias);
+    // v3.59: compute correct band for backfilled date instead of writing CCU_DAILY.
+    var ccuFee = ccuFeeForDate(p, dateStr);
+    addClaim(p, ccuFee, ccuFee, 1, dateStr, 'I', null, note || null, null, alias);
   } else if (type === 'daily') {
     addClaim(p, '33008', '33008', 1, dateStr, 'I', null, note || null, null, alias);
   } else if (type === 'directive') {
@@ -5339,7 +5387,7 @@ function openClaimEdit(btn) {
     { code:'33012', label:'Limited consultation (33012)' },
     { code:'33008', label:'Daily rounds / MRP (33008)' },
     { code:'33006', label:'Directive visit (33006)' },
-    { code:'CCU_DAILY', label:'CCU daily tap' },
+    // v3.59: CCU_DAILY removed — not a real fee code, was synthetic pre-rollup
     { code:'1411',  label:'CCU day 1 (1411)' },
     { code:'1421',  label:'CCU days 2–7 (1421)' },
     { code:'1431',  label:'CCU days 8–30 (1431)' },
@@ -8173,13 +8221,17 @@ function _dischStep1(pid) {
   var btns = '';
   if (isCCUWard && isMRP) {
     // CCU/ICU ward, MRP role → CCU Daily default
-    btns += vbtn('CCU Daily',      'CCU_DAILY', 'CCU_DAILY', true);
+    // v3.59: compute correct CCU band at render time (was hard-coded 'CCU_DAILY')
+    var todayCcuFee = ccuFeeForDate(p, TODAY);
+    btns += vbtn('CCU Daily',      todayCcuFee, todayCcuFee, true);
     btns += vbtn('Daily\n33008',   '33008',     '33008',     false);
     btns += vbtn('Directive',      '33006',     '33006',     false);
   } else if (isMRP) {
     // Ward MRP → Daily 33008 default always
     btns += vbtn('Daily\n33008',   '33008',     '33008',     true);
-    btns += vbtn('CCU Daily',      'CCU_DAILY', 'CCU_DAILY', false);
+    // v3.59: compute correct CCU band at render time (was hard-coded 'CCU_DAILY')
+    var todayCcuFee2 = ccuFeeForDate(p, TODAY);
+    btns += vbtn('CCU Daily',      todayCcuFee2, todayCcuFee2, false);
     btns += vbtn('Directive',      '33006',     '33006',     false);
   } else {
     // Consultant role → Combined Daily or Directive only (no CCU Daily)

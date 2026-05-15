@@ -24,144 +24,203 @@ This file tracks every feature, fix, and architectural decision across all chat 
 ---
 
 ## In progress
-*(empty at session end)*
+
+### index.html v3.58 — Patient card style improvements (Kathryn's work, version constants bumped retroactively)
+
+UI changes Kathryn made directly:
+- DOB removed from patient card meta line (age+sex already shown — DOB was redundant noise).
+- Dx (ICD description + code) added after MRP on all card views (ward list, alphabetical, off-service). Format: "Dx: Description (code)" via new `icdDescOnly()` helper that strips the trailing `(code)` from `icdShortLabel()`.
+- Quick-tap action buttons (Directive / Combined daily / + Claim) now share a single full-width row using `flex:1` on each button (`nowrap`). New CSS rule `.wp-acts .bb { flex:1; min-width:0; text-align:center; padding:4px 2px; font-size:clamp(8px,1.15vw,10px); overflow:hidden; text-overflow:ellipsis; }`. Wrapper `<div style="width:100%">` around the `+ Claim` button removed.
+- `showsCCUDaily()` tightened: now returns `p.role === 'mrp'` only. Dropped the legacy `|| p.care === 'ccu'` fallback. CCU/CSICU/ICU consulting cardiologists now correctly see Directive + Combined daily quick-tap buttons (not CCU Daily — we only claim CCU daily when Cardiology is MRP).
+- Ward room-number circle vertically centered in card (`align-items:center` on `.wp`, removed `margin-top:2px` on `.wp-pos` and `.wp-pos-wrap`). Room number font reduced 10px → 8px for clearer name hierarchy. Color shifted text → text2.
+
+**Note:** Kathryn had already authored these changes and updated the file header comment to v3.58, but the `BUILD_ID` and `APP_VERSION` constants were left at v3.57 — meaning these changes never flushed device caches. The v3.59 work below bumps the constants properly so both v3.58 UI changes AND v3.59 CCU_DAILY work go out together.
+
+### index.html v3.59 — CCU_DAILY elimination
+
+CCU_DAILY was a synthetic intermediate fee tag (banded at export-time by `ccuConsolidate()`). It is **no longer written** to the fee column anywhere. All CCU billing paths now write the correct 1411/1421/1431 band directly at tap time using a new date-aware helper.
+
+**Trigger:** a phantom CCU_DAILY claim appeared in change history (yesterday 10:08 via "App") that the user did not deliberately enter. Investigation found two write paths that hard-coded `CCU_DAILY`:
+  1. `_cvFillClaim()` calendar gap-fill picker
+  2. `dischAddVisit()` discharge modal "CCU Daily" button — pre-styled as the blue default for CCU/ICU MRP patients, easily mistapped on iPad
+The user confirmed: CCU_DAILY is not a real fee code; only 1411/1421/1431 are valid. `quickCCUBtn` already wrote banded fees correctly — these two paths were the laggards.
+
+**Changes:**
+- New `ccuFeeForDate(p, dateStr)` — generalized from `ccuFeeForToday()`. Counts consecutive CCU days STRICTLY before the target date (excludes the target itself) and returns the correct band: day 1 → 1411, days 2–7 → 1421, day 8+ → 1431. `dateStr` is DD/MM/YYYY (Sheet storage format).
+- `ccuFeeForToday(p)` kept as a thin wrapper for backward compatibility.
+- Hard guard added at the top of `addClaim()` — if `fee === 'CCU_DAILY'` or `feeCode === 'CCU_DAILY'`, recompute via `ccuFeeForDate(p, date)`, log a console.warn, and substitute. Defence in depth: catches any future regression or call site we missed.
+- `_cvFillClaim('ccu', …)` now computes `ccuFeeForDate(p, dateStr)` and writes that.
+- Discharge modal CCU Daily buttons (both branches: CCU/ICU MRP default + ward MRP non-default) compute `ccuFeeForDate(p, TODAY)` at render time and embed it in `data-fee`. The user-facing label still reads "CCU Daily" — the band is invisible at the tap surface but correct in the saved row.
+- Claim edit fee dropdown no longer includes `{code:'CCU_DAILY', label:'CCU daily tap'}` — can't be selected as a fee from the edit modal anymore.
+
+**What was NOT changed:**
+- `ccuConsolidate()` is left intact. It is now effectively a no-op because no new CCU_DAILY rows are written, but legacy CCU_DAILY rows already in the Sheet still pass through it correctly at export. A future migration (to land with Data Check Stage B) will re-band the legacy rows in place; until then, `ccuConsolidate` handles them.
+- Display-side CCU_DAILY recognition (feeDesc lookup, alreadyBilledToday filters, claimedTodayFee CCU_FEES array, etc.) is left intact so legacy rows render correctly in the daily list, daily claims modal, calendar, etc.
+
+**Files:** `index.html` (BUILD_ID `v3.59-2026-05-15-no-more-ccu-daily`, APP_VERSION `v3.59`, APP_BUILT `2026-05-15`)
+
+### upload.html v1.16 — MOST fee code correction (03701 → 78720)
+
+One-line fix to `upload.html` consult submit handler. The MOST add-on claim was being written with `fee:'03701'` which is not a valid BC MSP fee code. The PWA `index.html` correctly uses `78720` (the actual MOST advance care code) — this brings the upload tool into alignment. The mistake had been baked in since v1.8 (2026-05-12).
+
+**Files:** `upload.html` (v1.15 → v1.16, version badge bumped, two changelog notes updated to mark the correction)
+**Backend:** Apps Script v2.20 unchanged.
 
 ---
 
-## Session 2026-05-10 — v3.29 (FEES trimmed to actual usage)
+## Session 2026-05-15 — index.html v3.43 → v3.57 + Apps Script v2.16 → v2.20 + upload.html v1.13 → v1.16
 
-### v3.29 — Trimmed FEES from 56 codes to 20
-- Per team confirmation, the cardiology group only bills the following service classes — everything else is billed by the hospital or other specialty groups (echo lab, EP, imaging, etc.). FEES picker now reflects exactly what gets billed.
-- **Kept (20 codes):**
-  - **Consultations** — 33010, 33012, 33014, 33005
-  - **Continuing care** — 33006 (directive), 33008 (subseq hospital / MRP daily / combined)
-  - **Procedures** — Y33025 (cardioversion), 00751 (pericardiocentesis)
-  - **Discharge / planning** — 78717 (complex discharge), 78720 (advance care planning / MOST)
-  - **CCU** — 1411, 1421, 1431, 1441
-  - **Out-of-office hours** — 1200, 1201, 1202, 1205, 1206, 1207 (renamed in the picker from "Out-of-office hours premiums" to "Call-out modifiers"; descriptions restored to the older shorter style — "Evening call modifier — base 30 min", "Night call — increment per 30 min", etc. — to match team convention from earlier versions).
-- **Removed (36 codes added in the v3.28 audit but not used by this group):**
-  - All echo codes (33091, 08638, 08679, 08662, 33094, 33093) — billed by hospital echo lab
-  - All ECG / Holter codes (33016, 33017, 33018, 33047, 33048)
-  - All stress test codes (33034, 33035, 33036)
-  - All pacemaker codes (33026, 33053, 33028, 33054, 33030, 33032, 33033) — billed by EP / device clinic
-  - All remote monitoring codes (33174, 33175, 33176, 33177)
-  - All event / loop recorder codes (33062, 33069, 33092)
-  - Cardiac rehab (33020)
-  - All telehealth variants (33110, 33112, 33106, 33107, 33108)
-  - Subseq office visit (33007) and subseq home visit (33009)
-- **LEGACY_FEE_LABELS unchanged** — still explains 14101/14105/14113 in case they appear in historical claims.
-- **BUILD_ID** bumped to `v3.29-2026-05-10-fees-trimmed`. Header version label updated to v3.29.
+This session was a major UX/architecture polish pass plus validation hardening across the whole stack.
 
-### v3.28 outstanding items — resolved
-- ~~Default ICD `3062` in `addClaim()`~~ → **Confirmed intentional by the team.** No change. (The ICD-9 decode of `306.2` is "cardiovascular malfunction in mental origin" but it is being used as a deliberate placeholder by the team and is acceptable.)
-- ~~50% reduction rule for stress + exercise echo same-day~~ → **Not applicable** since the group doesn't bill stress tests or echo. Removing the follow-up.
+### index.html v3.44 — Major Add Patient redesign
+- **New layout**: PHN first (full width, larger font), Last/First row, DOB/Sex row. No more MRP field on the patient demographics section.
+- **Claim card** with three toggle buttons: [Consult] [Lmtd Consult] [Other Claim] — swaps the form area dynamically. Consult/Lmtd pre-select 33010/33012.
+- **Two submit paths**:
+  - Primary blue: "Submit claim and add patient to list" → `apSubmit(true)` (creates patient + claim, navigates to Rounds)
+  - Secondary: "Submit claim only — not following" → `apSubmit(false)` (creates claim, marks patient `discharged: true, trueDischarge: true, consultOnly: true`, navigates to Recently Discharged)
+- **Location card always visible** when add-to-list path is chosen, with Ward/Bed, MRP service, Cardiology Role, and On/Off pills.
+- New `apSubmit(addToList, _skipDupCheck)` async function handles everything end-to-end.
+- Pencil-icon patient edit modal simplified — removed consult info section.
+- Ward-badge tap → location modal now has MRP/Role/pills (was Ward/Bed/On-Off only).
 
-### Notes for future
-- If the group ever takes over billing for any of the removed services, the codes can be restored from `MSC_2026_audit.md` (kept in the repo as the canonical MSC 2026 reference).
-- The MSC schedule moves annually (typically January 31). When the 2027 schedule releases, re-run the audit and adjust amounts where they've changed.
+### v3.45 — Default to add-to-list
+- Swapped button order: top primary is "Submit claim and add patient to list"; bottom secondary is "Submit claim only — not following".
+- Location card always visible (no more toggle).
+- Performing physician injection refactored into `injectApPerformingDoc()` helper. Explicitly sets `select.value = curAlias` after rendering options so the logged-in doctor always defaults correctly.
 
----
+### v3.46 — Card tints for visual continuity
+- Three CSS classes: `.card-patient` (pale lavender #f4f2f9), `.card-claim` (soft cream #fff8e8 + amber border), `.card-location` (teal).
+- Applied across Add Patient pane, pencil-edit modal, and ward-badge → location modal so the same card color appears regardless of how you arrived.
 
-## Session 2026-05-10 — v3.28 (MSC fee schedule corrections)
+### v3.47 — Room badge → dynamic pill
+- `.wp-pos` converted from fixed 21px circle to flexible pill: `min-width:24px; height:22px; padding:0 6px; border-radius:11px; letter-spacing:-.2px`.
+- Short rooms ("2", "6") still appear round; long rooms ("208A", "226B", "1C17A") expand horizontally without truncation.
 
-### v3.28 — FEES array rebuilt against MSC Payment Schedule, January 31, 2026
-- **Audited every code** in `FEES` against MSC 2026 Cardiology (§12), Critical Care (§6), and Out-of-Office Hours premiums (§2). Found 13 mis-labelled codes and 3 invalid codes.
-- **Removed invalid codes:**
-  - `14101` / `14105` — were labelled "Cardioversion elective/emergency DC". These are not real cardiology codes in MSC 2026. Real code is **Y33025** at $105.70.
-  - `14113` — was labelled "Pacemaker insertion temporary transvenous". Real code is **33030** at $180.05.
-- **Fixed mis-labelled codes** (kept the code, corrected description to MSC truth):
-  - `33007` — was "Out-of-office visit"; **is** Subsequent office visit ($82.51).
-  - `33008` — was "Daily in-hospital care / combined daily"; **is** Subsequent hospital visit ($63.95) — note this is the SAME procedure used for MRP daily AND combined daily, but description now reflects the official MSC name.
-  - `33016` — was "Holter monitor — interpretation"; **is** ECG and interpretation — office, each ($25.08).
-  - `33018` — was "Nuclear cardiology — interpretation"; **is** ECG — professional fee, in-hospital read ($9.01).
-  - `33028` — was "Treadmill stress test — interpretation only"; **is** Dual chamber pacemaker testing — professional fee ($70.93).
-  - `33035` — was "Exercise stress test — supervision + interpretation"; **is** Graded exercise — professional fee only ($47.11). The supervision+interpretation code is **33034** ($79.42), now added separately.
-  - `33047` — was "ECG — interpretation only"; **is** Holter monitor (24h ECG scan) — professional fee ($67.63).
-  - `33062` — was "Echocardiogram — M-mode + 2D"; **is** Event/loop recorder (first strip) — professional fee ($37.03). Real echo is **33091** at $148.61, now added.
-  - `33069` — was "Echocardiogram — Doppler addition"; **is** Event/loop recorder — each additional strip ($18.51). Real Doppler echo is **08679** at $47.78, now added.
-  - `33107` — was "Pacemaker check — single chamber"; **is** Telehealth subsequent office visit ($82.51). Real single chamber pacemaker check is **33026** at $52.32, now added.
-  - `33110` — was "Subsequent cardiology consultation"; **is** Telehealth consultation full ($186.14).
-  - `33174` — was "Ambulatory BP monitoring — interpretation"; **is** Remote monitoring of single chamber implantable cardiac device — professional fee ($47.29).
-  - `33176` — was "Ambulatory BP monitoring — technical only"; **is** Remote monitoring of dual chamber implantable cardiac device — professional fee ($70.93).
-- **Added the real codes** for procedures whose labels were previously wrong: **Y33025** (cardioversion), **33030** (temp RV pacemaker), **33032/33033** (pacemaker standby / generator placement), **33091/08638/08679/08662/33093/33094** (echo variants), **33034/33036** (treadmill stress test full + technical), **33026/33053/33054** (single/dual chamber pacemaker testing tech fees), **33092** (event recorder tech fee).
-- **Added other useful real codes:** **33014** (prolonged counselling, max 4/yr), **33017** (ECG home), **33009** (subsequent home visit), **33020** (cardiac rehab supervision per week), **33106/33108/33112** (telehealth directive / hospital subseq / repeat consult), **33175/33177** (remote monitoring technical fees), **01441** (CCU day 31 onward, $138.53).
-- **Every fee in `FEES` now has an `amount` field**, displayed in the fee-search picker (right-aligned) and the claim preview (green, after the units). Doctors can see the $ they'll be paid before submitting.
-- **`getFeeLabel()` refactored** to source from `FEES` first, then `LEGACY_FEE_LABELS` for historical claims that used 14101/14105/14113 — so old claims in Sheets still display with a meaningful explanation rather than a bare code.
-- **New helper `getFeeAmount(code)`** returns `'$xx.xx'` or empty string for any code.
-- **BUILD_ID** bumped to `v3.28-2026-05-10-msc-fee-corrections`. Forces all device caches to wipe on next load — important because FEES changed shape (new `amount` field).
-- Header version label updated to v3.28. Top-of-file comment block updated with full v3.28 notes.
+### v3.48 — Cardiology role pills
+- Location card: replaced role dropdown with [MRP] / [Consulting] pill toggle in all three contexts (Add Patient, pencil edit, ward-badge edit).
+- Tap MRP → MRP service snaps to "Cardiology", care snaps to ccu/daily based on ward.
+- Tap Consulting → if MRP service is Cardiology, switch to "Other"; if it's non-Cardiology (e.g. Hospitalist from Meditech), preserve existing value.
+- New `apRolePill`, `leRolePill`, `peRolePill` functions plus matching sync helpers. `mrpChange` calls `syncApRolePills` so manual MRP service changes update the pill.
 
-### Outstanding from v3.27 — addressed in v3.29
-- ~~Default ICD `3062` in `addClaim()`~~ — confirmed intentional by team in v3.29 session.
-- ~~MSC 50% rule for stress + exercise echo~~ — not applicable; group doesn't bill those services (v3.29).
+### v3.49 — Smaller pill buttons
+- `.ap-list-pill` shrunk ~20%: padding 9→7px, font 13→11px. All On/Off, role, and sex pills affected.
 
-### Confirmed from older outstanding work
-- ~~Confirm 1202 weekend/stat base rate~~ → **$79.08** (same as 01200 evening base).
-- ~~Confirm cardioversion 14101/14105 rates~~ → those codes don't exist as cardiology. Real code is **Y33025** at $105.70.
+### v3.50 — Polish pass: dates, colors, ICDs, spacing
+- **All DOB displays** flow through `dispDate()` → "31 May 1945" format. Storage and CSV stay DD/MM/YYYY. Fixed three raw-DOB leaks (recently-discharged row, merge modal, soft-duplicate modal).
+- **Claim chip colors match calendar legend** — added `.chip-yellow` and `.chip-skyblue` classes. FEES array now uses: Consult=yellow (33010/33012/33014), Daily=green (33008), Directive=skyblue (33006), CCU=red (1411/1421/1431/1441), MOST/Discharge plan=green (78717/78720), Modifiers=blue (1200/1201/1202/1205/1206/1207), Procedures=red (Y33025/00751), Emergency consult=red (33005).
+- **List view and day-details color mapping** synchronized so calendar and list show identical colors per fee code.
+- **ICD displays** use `icdShortLabel()` everywhere → "Description (code)" format. Fixed combined-daily reason modal which was showing raw code.
+- **Patient row spacing tightened**: `.wp-name` 14→13px, removed duplicate definition. wp-meta/wp-chips/wp-acts margins reduced 1-2px. Row padding 9→8px.
+- **Sex selection → pills**: M/F dropdown replaced with pill toggle in both Add Patient and Patient Edit. OCR auto-fill activates the right pill.
 
----
+### v3.51 — On/Off color convention + CCFPP simplification
+- **Blue = On, Amber = Off everywhere**: top tabs (`#ls-on` blue tint, `#ls-off` amber tint when active) and all pills (new `.tone-amber.on` modifier class for the Off pill). Role and Sex pills stay blue when active (not on/off indicators).
+- **CCFPP note text simplified**: was `'CCFPP added for overlapping claims'`, became dynamic per actual peer detected.
 
-## Session 2026-05-10 — v3.27 (calendar view release)
+### v3.52 — CCFPP names the preceding patient
+- CCFPP note format: `CCFPP <first> <last> (<PHN>)` for the overlapped patient (BC billing requirement). Loop only matches when prev consult starts before new one, so identification is correct.
 
-### v3.27 — Calendar view in patient summary
-- **Patient summary modal now opens on a calendar view by default**, with a List/Calendar toggle at the top of the claims section. List view is preserved verbatim — one tap away.
-- **Calendar grid** renders the patient's month with one colour per day based on the dominant claim:
-  - Amber = Consult (33010 / 33012)
-  - Purple = CCU (CCU_DAILY / 1411 / 1421 / 1431), shows the band as a tag under the date
-  - Green = Daily (33008 without notes)
-  - Teal = Combined daily (33008 with notes)
-  - Blue = Directive (33006)
-  - Grey = gap day inside admission span (only when patient has a gap rule)
-  - Blue ring = today; Red ring = discharge date
-- **Gap rule** (only patients matching this get grey gap shading and the warning banner):
-  - `p.ward ∈ {CCU, CSICU, ICUA, ICUB, ICUD}` AND `p.role === 'mrp'` → expects CCU each day
-  - `p.role === 'mrp'` on any other ward → expects 33008 daily
-  - All other patients (consultants, off-service) → no gap shading; calendar still works for tap-to-add
-- **Tap a coloured day** → bottom sheet showing every claim on that date with inline Edit / Delete buttons that route through the existing `openClaimEdit` / `deleteClaimBtn` handlers.
-- **Tap a gap (or any empty in-admit) day** → 4-button picker: CCU / Daily / Directive / Combined daily. The rule-recommended type wears an amber "RECOMMENDED" ribbon and a coloured border, but all 4 are tappable so the doctor can override.
-  - CCU: auto-computes 1411/1421/1431 from consecutive prior CCU days, one tap → claim created via `addClaim(p, 'CCU_DAILY', ...)`.
-  - Daily: one tap → `addClaim(p, '33008', ...)`.
-  - Directive: one tap → `addClaim(p, '33006', ...)`.
-  - Combined daily: opens a sub-form requiring **ICD-9 code** (pre-filled from `p.icd`, editable) AND **reason text**. Saved as `33008` with `notes = "ICD — reason"`. Both fields validate red on save if blank.
-- **Discharge integration:** new `_dischCheckGaps()` runs ahead of the existing `_dischStep1` today's-visit prompt. If the patient has a gap rule AND any historical admit days are unbilled, the discharge modal opens on a banner listing the missed days with two options:
-  - **Fix gaps first** → closes discharge modal, opens patient summary on the calendar so the doctor can tap each gap day.
-  - **Discharge anyway** → falls straight through to the original `_dischStep1` (today's-visit prompt → LOS>4 prompt → confirm discharge).
-  - Patients with no gap rule skip the check entirely; existing flow unchanged.
-- **BUILD_ID** bumped to `v3.27-2026-05-10-calendar-view` (forces device localStorage wipe on next load — important since this release touches the patient summary modal that depends on `st.claims` shape).
-- Header version label updated to `v3.27`. File top-comment block updated.
+### v3.53 — Real interval overlap, mandatory times
+- **Start/end times mandatory** on 33010/33012. Both `submitConsult` and `apSubmit` block submission with toast if either is empty (they auto-fill but can't be empty).
+- **Interval overlap math** replaces the old 75-min proxy: ranges `[a,b]` and `[c,d]` overlap iff `a<d AND c<b`. Past-midnight handled by `+1440` shift. 1411/1421/1431 CCU codes excluded (filtered by fee).
 
-### Schema reference unchanged
-No new patient/claim columns. Calendar reads existing fields:
-- `p.admitDate`, `p.dischargeDate` (DD/MM/YYYY)
-- `p.ward`, `p.role`, `p.care` (gap rule)
-- `c.phn`, `c.date`, `c.fee`, `c.notes` (cell colour + day details)
+### v3.54 — Cross-midnight CCFPP
+- Fixed gap: prev `c.date === dateFmt` filter excluded cross-midnight cases. New logic builds prev/next date strings via `parseDMY ± 86400000ms` and normalises all ranges into the new consult's minute-frame.
+- Patient A 23:30→00:20 May 11 and Patient B 00:10 May 12 now correctly flag as overlapping regardless of which gets entered first.
 
-### New JS functions added (all prefixed `_cv` or `tapCalDay` / `togglePtSummaryView` so they're easy to grep for)
-`togglePtSummaryView`, `_ptSummaryListHTML`, `_ptSummaryCalendarHTML`, `_cvGapRuleForPatient`, `_cvAdmitSpan`, `_cvDominantType`, `_cvGapDays`, `_cvCcuFeeForDate`, `_cvChangeMonth`, `tapCalDay`, `_cvShowDayDetails`, `_cvEditFromSheet`, `_cvDeleteFromSheet`, `_cvShowPicker`, `_cvPickType`, `_cvShowCombinedForm`, `_cvBackFromCombined`, `_cvConfirmCombined`, `_cvFillClaim`, `_dischCheckGaps`, `_dischIgnoreGaps`, `_dischFixGaps`.
+### v3.55 — CCFPP retroactive peer updates
+- Extracted `ccfppDetectAndUpdate(newP, alias, dateISO, dateFmt, startStr, endStr)` helper.
+- Collects ALL overlapping peers (deduplicated by PHN) — not just the first.
+- New claim's note lists every peer found, joined by ` | `.
+- **Retroactively updates** each peer's existing consult + modifier claims (fees: 33010/33012/1200/1201/1202/1205/1206/1207 — NOT MOST/78720 or CCU) with `'CCFPP <newP first> <newP last> (<newP phn>)'`. Idempotent — checks `existing.indexOf(reverseNote) !== -1` before appending. Pushes each update via `push('saveClaim', c)`.
+- Helper called from both `submitConsult` and `apSubmit` consult branch.
 
-### New HTML
-- One new modal: `<div id="cv-picker-modal">` sits next to `pt-summary-modal`. Uses the existing `.overlay` / `.modal` / `.modal-handle` classes — same bottom-sheet pattern as every other modal in the app.
+### v3.56 — Audit trail (createdBy / createdAt)
+- Every new claim stamped in `addClaim` with `createdBy = st.doc.alias` and `createdAt = Date.now()`.
+- Every new patient stamped at both creation points (`_addPatientCore`, `apSubmit`).
+- New `auditTs(ms)` formatter — "today HH:MM" for today, "DD Mon YYYY HH:MM" otherwise.
+- Displayed in day-details claim list ("Submitted by KBrown · today 14:32") and patient edit modal footer ("Added by KBrown · 14 May 2026").
+- Fields immutable once set; never overwritten on subsequent edits.
 
-### New CSS
-- ~70 lines under `/* ═══ v3.27 — calendar view in patient summary ═══ */` immediately before `</style>`. All class names prefixed `cv-` for clean grep / future cleanup.
+### v3.57 — Validation hardening (frontend)
+- **`apSubmit` and `_addPatientCore`** now reject PHNs that aren't exactly 10 digits. Visual amber border + toast "PHN must be 10 digits".
+- **Orphan-claim healer** in sync code: skips creating stub patients when source claim has no last name (was silently inserting nameless stubs as "fix" for data inconsistency).
 
 ---
 
-## Sessions 2026-05-07 → 2026-05-10 — v2.96 through v3.26
-*(placeholder — versions bumped across multiple sessions without CHANGELOG entries)*
+### Apps Script v2.17 — Server-side validation hardening
+- **`saveRow` for Patients** requires `last` AND a 10-digit PHN. Previous validation accepted `last OR first OR phn` — too loose. Rejects nameless rows with a specific per-field error message.
+- **`bulkUpsertPatients`** skips rows missing last name or with non-10-digit PHN, with per-row error messages.
+- **`runDataCheck`** new `MISSING_NAME` HIGH-severity check flags any existing nameless patient row.
+- Root cause investigation found 8 weird patient rows from upload.html OCR-fast-tap edge cases (PHN/DOB/ward filled but no name; 3 of them duplicates of PHN 9089051589).
 
-Live BUILD_ID prior to v3.27 was `v3.26-2026-05-10-meditech-detection-broader`. Known major work in this gap based on the in-file comment block at the top of `index.html`:
-- **v3.20** — OCR corrections capture.
-- **v3.21** — Debug panel + version-aware Service Worker.
-- **v3.22** — Debug panel minimisable (small pill in corner).
-- **v3.23** — Meditech-aware empty-OCR ward/room corrections logged with rawText.
-- **v3.24** — Multi-pass Tesseract (paper + screen preprocessing).
-- **v3.25** — ocr_offline.js v1.2 (Meditech parser fixes — HCN# variant, inline DD/MM/YYYY DOB, bare M/F sex, edge-artifact prefix strip).
-- **v3.26** — Meditech detection broader (per BUILD_ID string).
+### v2.18 — Cleanup tool for existing data
+- New menu item: **"🩹 Clean up nameless patients"**.
+- For each nameless patient row, looks in Claims tab for a same-PHN claim with a name; copies it over.
+- Removes PHN-duplicate patient rows (keeps earliest, deletes the rest).
+- Result dialog summarises recovered / duplicates / unrecoverable.
 
-Other intermediate changes (v2.96 → v3.19) are not tracked here; reconstruct from git history if needed.
+### v2.19 — Meditech demographic healing + smarter cleanup
+- **`bulkUpsertPatients`** now fills blank `last/first/dob/sex` on existing rows from Meditech payload. Already-populated values are NEVER overwritten. Meditech import becomes a passive cleanup tool for incomplete rows.
+- **`cleanupNamelessPatients`** now:
+  - Skips OCR routing-code garbage as a "last name" source (blacklist: MOS/REN/AGG/EDC/ACIN/MHL with or without digit suffix)
+  - Strips trailing punctuation from recovered names ("Keith :" → "Keith")
+  - Also recovers DOB and sex from Claims tab when those exist on a claim
+
+### v2.20 — Cleanup tool also heals nameless claims
+- Third pass added to `cleanupNamelessPatients`: scans Claims tab for rows with blank `last`/`first` whose PHN matches a named patient on the (now-cleaned) Patients tab, and backfills the name.
+- Common case: historical upload pushed claims to Sheets before patient row got its name filled in.
+- Menu item renamed to **"🩹 Clean up nameless patients & claims"**.
+- Result dialog: patients healed / duplicates removed / claims healed / still-nameless count.
 
 ---
+
+### upload.html v1.16 — Validation hardening
+- **`exportSheets` blocks submit** if any claim has no last name. Clear toast: "X claims missing patient last name (PHN ...). Fill in the patient last name before exporting."
+- **`exportSheets` blocks submit** if any PHN isn't exactly 10 digits.
+- **"New patient — not found" banner** now amber + bold with explicit instruction to type the name themselves (was subtle grey, easy to miss — this is what allowed the 8 nameless rows to slip through).
+
+### Root cause of nameless rows (investigation)
+- Apps Script `lookupPatient` only searches Patients tab. If PHN exists in Claims tab but not yet in Patients (e.g. previously uploaded historical claim), lookup returns `found: false`.
+- Pre-fill `_fill('f-last', p.last)` doesn't run (no `p`).
+- Old subtle banner read "New patient — not found in Patients tab, no existing claims." Easy to miss.
+- User submits with empty name field, assuming the lookup had it.
+- `buildClaims` creates claims with `last:''`, `first:''`.
+- `buildPatientsFromClaims` creates patient row with empty name.
+- Old `savePatient` validation only required ONE of last/first/phn → saved.
+
+---
+
+## Key engineering principles reinforced this session
+
+- **Server validation is authoritative**: tight validation in Apps Script protects against any frontend hole. v2.17 hardening + v2.20 cleanup tool together make data corruption nearly impossible.
+- **Three-layer defense**: client input validation (visual feedback) + client submit check (toast) + server save guard (rejection with specific error message).
+- **Heal, don't overwrite**: Meditech bulkUpsert fills only blank fields. Patient names from upload.html user-typed input are preserved.
+- **Cleanup tools are idempotent**: re-running the cleanup is safe — checks for already-present values, doesn't duplicate notes.
+- **CCFPP requires both consults to have modifiers**: not just any overlap, but overlapping CALL-OUT windows.
+- **Date-range overlap math**: `a<d AND c<b` is the canonical formula. Past-midnight handled by minute-frame normalisation, not date logic.
+- **Audit fields are immutable**: `createdBy`/`createdAt` set once at creation, never overwritten.
+
+---
+
+## Schema reference (current as of v3.57 + v2.20)
+
+**Patients (incremental from prior):** add `createdBy`, `createdAt` columns when ready. v2.20 doesn't yet write them but `addClaim` and `apSubmit` set them in the JS object. They'll flow through `push('savePatient', p)` and `push('saveClaim', c)` — Apps Script `saveRow` writes whatever fields match the column headers. Add the columns to your Patients and Claims tabs when ready to capture going forward.
+
+**Claims columns (current):** `id, alias, docnum, last, first, phn, dob, sex, fee, feeCode, icd, units, date, loc, fac, refby, refbyName, notes, startTime, endTime, ward, room, claimType, createdAt, submitted, submittedAt, source, savedAt` — note `createdAt` already in schema.
+
+---
+
+## Outstanding work
+- [ ] Add `createdBy` column to Claims tab (Apps Script HEADERS array)
+- [ ] Add `createdBy` and `createdAt` columns to Patients tab
+- [ ] After deploying v2.20: re-run "🩹 Clean up nameless patients & claims" to heal the 24 nameless claims
+- [ ] After deploying v2.19+: do a Meditech import to heal Ehman/Vagar/Colletti DOB/sex (if still admitted)
+- [ ] Manual lookup of PHN 9011235231 (OCR captured routing code "Mos 99" only)
+- [ ] Manual strip of trailing " :" on Colletti row OR re-run cleanup (v2.19+ does this automatically)
+- [ ] Rotate Anthropic API key (Cloudflare Worker)
+- [ ] Build `email_intake.gs` for email-based patient intake
+- [ ] Decide: email-added patients live immediately or pending-review state?
 
 ## Session 2026-05-07 — v2.82
 

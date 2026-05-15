@@ -66,8 +66,9 @@ v1.7  2026-05-11  Referring MD search parity with main app: 3-tier system.
                   ICD-9 list already matched index.html as of v1.6.
 
 v1.8  2026-05-12  Three claim-data cleanups:
-                  • 'MOST add-on' note removed from 03701 modifier claims —
+                  • 'MOST add-on' note removed from MOST modifier claims —
                     the fee code itself already communicates the modifier.
+                    [v1.16: corrected fee code 03701 -> 78720]
                   • 'CCU day N' note removed from 1411/1421/1431 claims —
                     the fee code already encodes the band (1411 = day 1,
                     1421 = days 2–7, 1431 = day 8+). User-typed notes still
@@ -176,6 +177,15 @@ v1.12 2026-05-14  ICD-9 search: tiered (Tier 1 local cardiology codes,
                   refactor, audit all callers (including HTML inline
                   handlers) before deleting. A function search across
                   the file is the cheapest sanity check.
+
+v1.16 2026-05-15  MOST fee code fix: 03701 -> 78720. The MOST advance
+                  care claim was being written with the wrong fee code
+                  (03701 is not a valid BC MSP code; 78720 is the
+                  correct MOST code). One-line fix in the consult
+                  submit handler; nothing else changed. The PWA
+                  index.html already used 78720 correctly — this just
+                  brings upload.html into alignment.
+                  Backend partner: Apps Script v2.20 (unchanged).
 
 v1.15 2026-05-14  Existing claims list: row visibility fix. The wrapper
                   card and "(N claims)" title were rendering, but the
@@ -494,7 +504,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:8px">
     <div class="hdr-title">KGH Historical Billing</div>
-    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.15</div>
+    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.16</div>
   </div>
   <div class="hdr-sub" id="hdr-sub">Single card mode</div>
 </div>
@@ -1792,8 +1802,8 @@ function buildClaims() {
     var fullNote = [ccfppNote, extraNotes].filter(function(s){return s;}).join(' | ');
     claims.push(Object.assign({},base,{ id:uid(), claimType:st.consultType, date:cDate, fee:fee, icd:dx, refby:refNum, refbyName:refName, startTime:start, endTime:end, notes:fullNote, _sortDate:cDate, _sortSub:0 }));
     if (document.getElementById('c-most').checked)
-      // v1.8: 'MOST add-on' note removed — was redundant with the 03701 fee code itself
-      claims.push(Object.assign({},base,{ id:uid(), claimType:'most', date:cDate, fee:'03701', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:'', _sortDate:cDate, _sortSub:1 }));
+      // v1.16: corrected fee code 03701 -> 78720 (03701 was wrong; 78720 is the actual MOST advance care code)
+      claims.push(Object.assign({},base,{ id:uid(), claimType:'most', date:cDate, fee:'78720', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:'', _sortDate:cDate, _sortSub:1 }));
     // Modifier claims (night / weekend+stat / evening)
     var modBase  = getModifier(start, cDate);
     var incUnits = consultIncUnits(start, end);
