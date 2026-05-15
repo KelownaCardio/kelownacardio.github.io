@@ -3167,10 +3167,12 @@ function wardHtml(ward) {
   }
 
   var notYet = pts.filter(function(p) { return !claimedToday(p); }).length;
-  h += '<button class="batch-btn" style="margin-top:8px" onclick="batchRoundWard(this)" data-ward="' + ward + '">' +
-       '<span>Round all ' + wdef.label + (notYet ? ' (' + notYet + ' pending)' : ' \u2713 all done') + '</span>' +
-       '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>' +
-       '</button>';
+  if (isCCU) {
+    h += '<button class="batch-btn" style="margin-top:8px" onclick="batchRoundWard(this)" data-ward="' + ward + '">' +
+         '<span>Round all ' + wdef.label + (notYet ? ' (' + notYet + ' pending)' : ' \u2713 all done') + '</span>' +
+         '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>' +
+         '</button>';
+  }
 
   return h + '</div>';
 }
