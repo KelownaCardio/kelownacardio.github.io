@@ -216,6 +216,13 @@ v1.14 2026-05-14  ICD9_LOCAL rebuilt from the iClinic xlsx (385 codes,
                   is the single source of truth for the full 7,000+
                   iClinic codes.
 
+v1.16 2026-05-15  Validation hardening: exportSheets blocks submit if
+                  any claim is missing a last name OR has a PHN that
+                  is not exactly 10 digits. Previously empty-name claims
+                  got pushed to Sheets and ended up as nameless patient
+                  rows (8 such rows found in the live workbook). Also:
+                  "new patient" lookup banner now amber + bold telling
+                  the user to type the name themselves before export.
 v1.13 2026-05-14  Lookup pre-fill: matched patient's name, DOB, sex,
                   ward, AND bed are now copied into the form when the
                   PHN/last/DOB lookup finds a record. Previously only
@@ -2442,10 +2449,11 @@ function renderLookupBanner(lb, data) {
 
   if (!data.found && data.claimCount === 0) {
     lb.style.display='block';
-    lb.style.background='var(--surface2)';
-    lb.style.color='var(--text2)';
-    lb.style.border='.5px solid var(--border)';
-    lb.innerHTML='<b>New patient</b> — not found in Patients tab, no existing claims.';
+    lb.style.background='var(--amber-bg)';
+    lb.style.color='var(--amber-t)';
+    lb.style.border='.5px solid var(--amber)';
+    // v1.16: louder banner — make it clear the user MUST type the name themselves
+    lb.innerHTML='<b>New patient</b> — not in Patients tab. <b>Type the patient\'s last name and first name yourself</b> before exporting; the lookup found nothing to auto-fill.';
     var hp=document.getElementById('hist-panel'); if(hp){hp.style.display='none';hp.classList.remove('open');}
     renderCal(); refreshPreview();
     return;

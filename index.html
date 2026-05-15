@@ -1986,11 +1986,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.53-2026-05-15-ccfpp-interval-overlap';
+var BUILD_ID    = 'v3.57-2026-05-15-validation-hardening';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.53';
+var APP_VERSION = 'v3.57';
 var APP_BUILT   = '2026-05-14';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -2385,6 +2385,11 @@ async function syncFromSheets() {
       });
       Object.keys(orphansByPhn).forEach(function(phn) {
         var src = orphansByPhn[phn];
+        // v3.57: don't create a nameless stub — bad data into Sheets
+        if (!String(src.last || '').trim()) {
+          console.warn('Orphan-claim healer: SKIPPED stub for PHN ' + phn + ' — source claim has no last name');
+          return;
+        }
         var stub = {
           id:           'p' + Date.now() + Math.floor(Math.random() * 9999),
           last:         fmtName(src.last || ''),
@@ -2557,6 +2562,203 @@ function isWeekendOrStat(dateStr) {
   if (!dateStr) return false;
   var d = new Date(dateStr); var dow = d.getDay();
   return dow === 0 || dow === 6 || isBCStat(dateStr);
+}
+
+// ── CCFPP detection + retroactive peer note update ─────
+// When a same-doctor 33010/33012 consult overlaps another same-doctor
+// 33010/33012 consult (both in a modifier window), CCFPP applies in
+// BOTH directions:
+//   - new patient gets a note listing each overlapping peer
+//   - each peer's consult + modifier claims get a retro note added
+// Returns the CCFPP note string for the new patient (empty if no overlap).
+// Side effect: mutates and pushes peer claims to Sheets.
+function ccfppDetectAndUpdate(newP, alias, dateISO, dateFmt, startStr, endStr) {
+  if (!startStr || !endStr) return '';
+  var thisMod = getModifier(startStr, dateISO);
+  if (!thisMod) return '';
+
+  var thisStartM = t2m(startStr);
+  var thisEndM   = t2m(endStr);
+  if (thisEndM < thisStartM) thisEndM += 1440;
+
+  var curD  = parseDMY(dateFmt);
+  var prevD = new Date(curD.getTime() - 86400000);
+  var nextD = new Date(curD.getTime() + 86400000);
+  var prevDateFmt = pad(prevD.getDate()) + '/' + pad(prevD.getMonth() + 1) + '/' + prevD.getFullYear();
+  var nextDateFmt = pad(nextD.getDate()) + '/' + pad(nextD.getMonth() + 1) + '/' + nextD.getFullYear();
+
+  var peers = [];
+  var seenPhn = {};
+
+  for (var i = 0; i < st.claims.length; i++) {
+    var c = st.claims[i];
+    if (c.alias !== alias) continue;
+    if (c.phn === newP.phn) continue;
+    if (c.fee !== '33010' && c.fee !== '33012') continue;
+    if (!c.startTime || !c.endTime) continue;
+
+    var isSame = c.date === dateFmt;
+    var isPrev = c.date === prevDateFmt;
+    var isNext = c.date === nextDateFmt;
+    if (!isSame && !isPrev && !isNext) continue;
+
+    var pStartM = t2m(c.startTime);
+    var pEndM   = t2m(c.endTime);
+    if (pEndM < pStartM) pEndM += 1440;
+
+    if (isPrev) {
+      if (pEndM <= 1440) continue; // didn't cross midnight
+      pStartM -= 1440; pEndM -= 1440;
+    } else if (isNext) {
+      if (thisEndM <= 1440) continue; // new claim doesn't cross midnight
+      pStartM += 1440; pEndM += 1440;
+    }
+
+    var pRefD = parseDMY(c.date);
+    var pISO  = pRefD.getFullYear() + '-' + pad(pRefD.getMonth() + 1) + '-' + pad(pRefD.getDate());
+    if (!getModifier(c.startTime, pISO)) continue;
+
+    // Real interval overlap
+    if (thisStartM < pEndM && pStartM < thisEndM) {
+      if (seenPhn[c.phn]) continue;
+      seenPhn[c.phn] = true;
+      peers.push(c);
+    }
+  }
+
+  if (!peers.length) return '';
+
+  // Build new patient's CCFPP note (one entry per peer)
+  var noteParts = peers.map(function(c) {
+    var pp = (st.patients || []).find(function(_pp) { return _pp.phn === c.phn; }) || {};
+    var name = ((pp.first || '') + ' ' + (pp.last || '')).trim() || '(unknown)';
+    return 'CCFPP ' + name + ' (' + (c.phn || '—') + ')';
+  });
+  var newPatientNote = noteParts.join(' | ');
+
+  // Retroactively add note to each peer's consult + modifier claims
+  var newName = ((newP.first || '') + ' ' + (newP.last || '')).trim() || '(unknown)';
+  var newFragment = 'CCFPP ' + newName + ' (' + (newP.phn || '—') + ')';
+  var peerFees = ['33010', '33012', '1200', '1201', '1202', '1205', '1206', '1207'];
+
+  peers.forEach(function(peer) {
+    st.claims.forEach(function(c) {
+      if (c.phn !== peer.phn) return;
+      if (c.alias !== alias) return;
+      if (c.date !== peer.date) return;
+      if (peerFees.indexOf(c.fee) === -1) return;
+      if (c.notes && c.notes.indexOf(newFragment) !== -1) return; // already noted
+      c.notes = c.notes ? c.notes + ' | ' + newFragment : newFragment;
+      if (SHEETS_URL) push('saveClaim', c);
+    });
+  });
+  sv('claims', st.claims);
+
+  return newPatientNote;
+}
+
+// ── CCFPP overlap detection + retroactive peer update ──
+// Returns the CCFPP note string for the NEW consult's claims, and
+// retroactively appends a CCFPP note to each overlapping peer's
+// existing consult + modifier claims, pushing the updates to Sheets.
+//
+// Triggers ONLY when:
+//   1. The new 33010/33012 consult falls in a modifier (call-out) window
+//   2. An existing same-doctor 33010/33012 consult also has a modifier
+//   3. The two [start,end] intervals overlap (including cross-midnight)
+// NOT applicable to 1411/1421/1431 CCU codes.
+//
+// newP        — the new patient object (must have first/last/phn)
+// alias       — performing physician alias
+// dateISO     — new consult's date (YYYY-MM-DD)
+// dateFmt     — new consult's date (DD/MM/YYYY)
+// startStr    — new consult's HH:MM start
+// endStr      — new consult's HH:MM end
+function ccfppDetectAndUpdate(newP, alias, dateISO, dateFmt, startStr, endStr) {
+  if (!startStr || !endStr) return '';
+  if (!getModifier(startStr, dateISO)) return '';
+
+  // New consult range in minutes from midnight of dateFmt
+  var thisStartM = t2m(startStr);
+  var thisEndM   = t2m(endStr);
+  if (thisEndM < thisStartM) thisEndM += 1440; // new consult crosses midnight
+
+  // Compute DD/MM/YYYY strings for prev and next dates
+  var _curDateD  = parseDMY(dateFmt);
+  var _prevDateD = new Date(_curDateD.getTime() - 86400000);
+  var _nextDateD = new Date(_curDateD.getTime() + 86400000);
+  var prevDateFmt = pad(_prevDateD.getDate()) + '/' + pad(_prevDateD.getMonth() + 1) + '/' + _prevDateD.getFullYear();
+  var nextDateFmt = pad(_nextDateD.getDate()) + '/' + pad(_nextDateD.getMonth() + 1) + '/' + _nextDateD.getFullYear();
+
+  // Collect all overlapping peer PHNs (deduplicated)
+  var peerPhns = [];
+  for (var _i = 0; _i < st.claims.length; _i++) {
+    var c = st.claims[_i];
+    if (c.alias !== alias) continue;
+    if (c.phn   === newP.phn) continue;
+    if (c.fee !== '33010' && c.fee !== '33012') continue;
+    if (!c.startTime || !c.endTime) continue;
+
+    var _isSame = c.date === dateFmt;
+    var _isPrev = c.date === prevDateFmt;
+    var _isNext = c.date === nextDateFmt;
+    if (!_isSame && !_isPrev && !_isNext) continue;
+
+    var prevStartM = t2m(c.startTime);
+    var prevEndM   = t2m(c.endTime);
+    if (prevEndM < prevStartM) prevEndM += 1440;
+
+    if (_isPrev) {
+      if (prevEndM <= 1440) continue;
+      prevStartM -= 1440;
+      prevEndM   -= 1440;
+    } else if (_isNext) {
+      if (thisEndM <= 1440) continue;
+      prevStartM += 1440;
+      prevEndM   += 1440;
+    }
+
+    // Prev claim must also be in a modifier window (use its own date)
+    var _prevRefD = parseDMY(c.date);
+    var _prevISO  = _prevRefD.getFullYear() + '-' + pad(_prevRefD.getMonth() + 1) + '-' + pad(_prevRefD.getDate());
+    if (!getModifier(c.startTime, _prevISO)) continue;
+
+    // Interval overlap
+    if (thisStartM < prevEndM && prevStartM < thisEndM) {
+      if (peerPhns.indexOf(c.phn) === -1) peerPhns.push(c.phn);
+    }
+  }
+
+  if (!peerPhns.length) return '';
+
+  // Build CCFPP note string for the NEW consult — one entry per peer
+  var newClaimNote = peerPhns.map(function(peerPhn) {
+    var pat = (st.patients || []).find(function(pp) { return pp.phn === peerPhn; }) || {};
+    var name = ((pat.first || '') + ' ' + (pat.last || '')).trim() || '(unknown)';
+    return 'CCFPP ' + name + ' (' + peerPhn + ')';
+  }).join(' | ');
+
+  // RETROACTIVELY update each peer's existing consult + modifier claims
+  // Append "CCFPP <newP first> <newP last> (<newP phn>)" to their notes.
+  var reverseNote = 'CCFPP ' + ((newP.first || '') + ' ' + (newP.last || '')).trim() + ' (' + (newP.phn || '—') + ')';
+  var feesForCcfpp = ['33010','33012','1200','1201','1202','1205','1206','1207'];
+  var dateMatches = [dateFmt, prevDateFmt, nextDateFmt];
+
+  peerPhns.forEach(function(peerPhn) {
+    st.claims.forEach(function(c) {
+      if (c.phn   !== peerPhn) return;
+      if (c.alias !== alias)   return;
+      if (dateMatches.indexOf(c.date) === -1) return;
+      if (feesForCcfpp.indexOf(c.fee) === -1) return;
+      var existing = c.notes || '';
+      if (existing.indexOf(reverseNote) !== -1) return; // idempotent
+      c.notes = existing ? existing + ' | ' + reverseNote : reverseNote;
+      if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL) push('saveClaim', c);
+    });
+  });
+  sv('claims', st.claims);
+
+  return newClaimNote;
 }
 
 // ── Call-out Modifier Detection ────────────────────────
@@ -2784,7 +2986,9 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, 
     refbyName: p.refbyName || '',
     notes:     notes       || '',
     startTime: _start,
-    endTime:   endTime || ''
+    endTime:   endTime || '',
+    createdBy: (st.doc && st.doc.alias) || '',
+    createdAt: Date.now()
   };
   // Dedup guard: never create two claims with same phn+date+fee+alias
   var _dupCheck = st.claims.some(function(x) {
@@ -4768,6 +4972,7 @@ function _cvShowDayDetails(pid, dateStr, dayClaims) {
         '</div>' +
         '<div style="font-size:11px;color:var(--text2);margin-top:4px">' + esc(dxLabel) + '</div>' +
         (c.notes ? '<div style="font-size:11px;color:var(--amber-t);margin-top:4px;font-style:italic">' + esc(c.notes) + '</div>' : '') +
+        (c.createdBy ? '<div style="font-size:10px;color:var(--text3);margin-top:4px">Submitted by ' + esc(c.createdBy) + (c.createdAt ? ' &middot; ' + auditTs(c.createdAt) : '') + '</div>' : '') +
         '<div style="display:flex;gap:6px;margin-top:8px">' +
           '<button class="claim-action-btn claim-edit-btn" data-cid="' + c.id + '" data-pid="' + pid + '" onclick="_cvEditFromSheet(this)" title="Edit">✎ Edit</button>' +
           '<button class="claim-action-btn claim-del-btn"  data-cid="' + c.id + '" data-pid="' + pid + '" onclick="_cvDeleteFromSheet(this)" title="Delete">✕ Delete</button>' +
@@ -5356,6 +5561,14 @@ function openPatientEdit(pid) {
   html += '<input id="pe-care" type="hidden" value="' + esc(p.care||'daily') + '">';
   html += '</div>'; // end location card
 
+  // ── Audit footer (who added the patient) ─────────────
+  if (p.createdBy || p.createdAt) {
+    html += '<div style="font-size:10px;color:var(--text3);text-align:center;margin:8px 0 12px">' +
+            'Added by ' + esc(p.createdBy || '—') +
+            (p.createdAt ? ' &middot; ' + auditTs(p.createdAt) : '') +
+            '</div>';
+  }
+
   // ── Save / Cancel ────────────────────────────────────
   html += '<div class="fl" style="gap:8px">';
   html += '<button class="btn btn-p" style="margin:0;flex:1" ' +
@@ -5928,41 +6141,8 @@ function submitConsult() {
   updatePatientFromClaimForm(p);
   if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
 
-  // CCFPP detection — proper interval overlap.
-  // Triggers ONLY when:
-  //   1. This 33010/33012 consult falls in a modifier (call-out) window
-  //   2. Another same-doctor 33010/33012 same-day consult also has a modifier
-  //   3. The two [start,end] intervals actually overlap
-  // NOT applicable to 1411/1421/1431 CCU codes (different billing rules).
-  var ccfppNote = '';
-  var _thisMod  = getModifier(start, dateISO);
-  if (start && end && _thisMod) {
-    var thisStartM = t2m(start);
-    var thisEndM   = t2m(end);
-    if (thisEndM < thisStartM) thisEndM += 24 * 60; // crosses midnight
-
-    for (var _i = 0; _i < st.claims.length; _i++) {
-      var c = st.claims[_i];
-      if (c.alias !== alias)    continue;  // same performing doc
-      if (c.date  !== dateFmt)  continue;  // same day
-      if (c.phn   === p.phn)    continue;  // not same patient
-      if (c.fee !== '33010' && c.fee !== '33012') continue; // consults only — excludes 1411/1421/1431 CCU
-      if (!c.startTime || !c.endTime) continue;
-      if (!getModifier(c.startTime, dateISO)) continue; // other consult also needs a modifier
-
-      var prevStartM = t2m(c.startTime);
-      var prevEndM   = t2m(c.endTime);
-      if (prevEndM < prevStartM) prevEndM += 24 * 60;
-
-      // Interval overlap: [a,b] and [c,d] overlap iff a < d && c < b
-      if (thisStartM < prevEndM && prevStartM < thisEndM) {
-        var _ccfppPat = (st.patients || []).find(function(_pp) { return _pp.phn === c.phn; }) || {};
-        var _ccfppName = ((_ccfppPat.first || '') + ' ' + (_ccfppPat.last || '')).trim() || '(unknown)';
-        ccfppNote = 'CCFPP ' + _ccfppName + ' (' + (c.phn || '—') + ')';
-        break;
-      }
-    }
-  }
+  // CCFPP — detect + retroactively update overlapping peer claims
+  var ccfppNote = ccfppDetectAndUpdate(p, alias, dateISO, dateFmt, start, end);
 
   // Combine user-entered notes with CCFPP auto-note (if any)
   var userNote = (gv('cb-notes') || '').trim();
@@ -6396,6 +6576,7 @@ async function _addPatientCore(withClaim, skipNameDobDup) {
 
   var addMissing = [];
   if (!phn)                                    addMissing.push('phn');
+  else if (String(phn).replace(/\D/g,'').length !== 10) addMissing.push('phn-len');
   if (!gv('f-refby-num') && !gv('f-refby'))   addMissing.push('refby');
   if (!icd)                                    addMissing.push('icd');
   if (addMissing.length) {
@@ -6412,9 +6593,10 @@ async function _addPatientCore(withClaim, skipNameDobDup) {
       if (icdEl) { icdEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; icdEl.placeholder = 'Required — type diagnosis or code'; if (addMissing.indexOf('phn') === -1 && addMissing.indexOf('refby') === -1) icdEl.focus(); }
     }
     var msgs = [];
-    if (addMissing.indexOf('phn')   !== -1) msgs.push('PHN');
-    if (addMissing.indexOf('refby') !== -1) msgs.push('referring MD');
-    if (addMissing.indexOf('icd')   !== -1) msgs.push('diagnosis');
+    if (addMissing.indexOf('phn')     !== -1) msgs.push('PHN');
+    if (addMissing.indexOf('phn-len') !== -1) msgs.push('PHN must be 10 digits');
+    if (addMissing.indexOf('refby')   !== -1) msgs.push('referring MD');
+    if (addMissing.indexOf('icd')     !== -1) msgs.push('diagnosis');
     showToast('Required: ' + msgs.join(', '));
     return;
   }
@@ -6494,7 +6676,9 @@ async function _addPatientCore(withClaim, skipNameDobDup) {
     list:         gv('f-list')   || 'on',
     care:         gv('f-care')   || (gv('f-role') === 'mrp' ? 'daily' : 'directive'),
     icd:          icd,
-    roundedToday: null
+    roundedToday: null,
+    createdBy:    (st.doc && st.doc.alias) || '',
+    createdAt:    Date.now()
   };
 
   saveCustomRoom(ward, p.bed);
@@ -6950,6 +7134,7 @@ async function apSubmit(addToList, _skipDupCheck) {
   // Validate required fields
   var addMissing = [];
   if (!phn)                                    addMissing.push('phn');
+  else if (String(phn).replace(/\D/g,'').length !== 10) addMissing.push('phn-len');
   if (!gv('f-refby-num') && !gv('f-refby'))   addMissing.push('refby');
   if (!icd)                                    addMissing.push('icd');
   if (_apClaimType === 'consult' || _apClaimType === 'lmtd') {
@@ -6962,7 +7147,7 @@ async function apSubmit(addToList, _skipDupCheck) {
   }
 
   if (addMissing.length) {
-    if (addMissing.indexOf('phn') !== -1) {
+    if (addMissing.indexOf('phn') !== -1 || addMissing.indexOf('phn-len') !== -1) {
       var phnEl = document.getElementById('f-phn');
       if (phnEl) { phnEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; phnEl.focus(); }
     }
@@ -6975,9 +7160,10 @@ async function apSubmit(addToList, _skipDupCheck) {
       if (icdEl2) { icdEl2.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; icdEl2.placeholder = 'Required — type diagnosis or code'; }
     }
     var msgs = [];
-    if (addMissing.indexOf('phn')   !== -1) msgs.push('PHN');
-    if (addMissing.indexOf('refby') !== -1) msgs.push('referring MD');
-    if (addMissing.indexOf('icd')   !== -1) msgs.push('diagnosis');
+    if (addMissing.indexOf('phn')        !== -1) msgs.push('PHN');
+    if (addMissing.indexOf('phn-len')    !== -1) msgs.push('PHN must be 10 digits');
+    if (addMissing.indexOf('refby')      !== -1) msgs.push('referring MD');
+    if (addMissing.indexOf('icd')        !== -1) msgs.push('diagnosis');
     if (addMissing.indexOf('fee')        !== -1) msgs.push('fee code');
     if (addMissing.indexOf('date')       !== -1) msgs.push('date');
     if (addMissing.indexOf('start time') !== -1) msgs.push('start time');
@@ -7022,7 +7208,9 @@ async function apSubmit(addToList, _skipDupCheck) {
     phn: phn, dob: gv('f-dob'), sex: gv('f-sex'),
     refby:     gv('f-refby-num') || gv('f-refby'),
     refbyName: gv('f-refby-name'),
-    icd: icd
+    icd: icd,
+    createdBy: (st.doc && st.doc.alias) || '',
+    createdAt: Date.now()
   };
 
   if (addToList) {
@@ -7080,16 +7268,19 @@ async function apSubmit(addToList, _skipDupCheck) {
       if (cDateISO) {
         var cDateFmt = fmtD(parseISODate(cDateISO));
         var cLoc     = p.ward === 'ED' ? 'E' : 'I';
-        addClaim(p, cCode, cCode, 1, cDateFmt, cLoc, cStart, cNotes, cEnd, cAlias);
+        // CCFPP — detect + retroactively update peer claims
+        var ccfppN   = ccfppDetectAndUpdate(p, cAlias, cDateISO, cDateFmt, cStart, cEnd);
+        var fullN    = [cNotes, ccfppN].filter(function(s) { return s; }).join(' | ');
+        addClaim(p, cCode, cCode, 1, cDateFmt, cLoc, cStart, fullN, cEnd, cAlias);
         if (_apMostOn) addClaim(p, '78720', '78720', 1, cDateFmt, cLoc, null, null, null, cAlias);
         var cModBase  = getModifier(cStart, cDateISO);
         var cIncUnits = consultIncUnits(cStart, cEnd);
         var cModInc   = cIncUnits > 0 ? getModifierForIncrement(cStart, cDateISO) : null;
         if (cModBase) {
-          addClaim(p, cModBase.base, cModBase.base, 1, cDateFmt, cLoc, cStart, cNotes, cEnd, cAlias);
+          addClaim(p, cModBase.base, cModBase.base, 1, cDateFmt, cLoc, cStart, fullN, cEnd, cAlias);
           if (cModInc) {
             var cIncStart = minsToTime((t2m(cStart) + 30) % (24 * 60));
-            addClaim(p, cModInc.inc, cModInc.inc, cIncUnits, cDateFmt, cLoc, cIncStart, cNotes, null, cAlias);
+            addClaim(p, cModInc.inc, cModInc.inc, cIncUnits, cDateFmt, cLoc, cIncStart, fullN, null, cAlias);
           }
         }
         sv('claims', st.claims);
@@ -9373,6 +9564,21 @@ function dispDate(d) {
 function parseDMY(s) {
   var p = s.split('/');
   return new Date(parseInt(p[2]), parseInt(p[1])-1, parseInt(p[0]));
+}
+
+// Format an epoch-ms timestamp as a compact audit display: "14 May 2026 14:32"
+// For "today", show just "today HH:MM" for brevity.
+function auditTs(ms) {
+  if (!ms) return '';
+  var n = Number(ms);
+  if (!isFinite(n) || n <= 0) return '';
+  var d = new Date(n);
+  var todayKey = localISODate();
+  var thisKey  = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+  var hhmm = pad(d.getHours()) + ':' + pad(d.getMinutes());
+  if (thisKey === todayKey) return 'today ' + hhmm;
+  var mon = _MONTHS[d.getMonth()];
+  return d.getDate() + ' ' + mon + ' ' + d.getFullYear() + ' ' + hhmm;
 }
 
 function pad(n) { return String(n).padStart(2, '0'); }
