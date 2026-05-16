@@ -178,6 +178,30 @@ v1.12 2026-05-14  ICD-9 search: tiered (Tier 1 local cardiology codes,
                   handlers) before deleting. A function search across
                   the file is the cheapest sanity check.
 
+v1.18.2 2026-05-16 CCU placeholder approach restored (matches PWA v3.60).
+                  CCU_DAILY is the canonical placeholder; export-time
+                  consolidation handles banding. Three Data Check
+                  changes:
+                  1. CCU band mismatch detector (auditCcuBands)
+                     neutralized to a no-op stub. The band stored on
+                     each row no longer needs to match its position-in-
+                     episode — the Apps Script ccuConsolidateForExport()
+                     handles it.
+                  2. CCU_DAILY moved into the tracked-fees bucket
+                     (needs ICD; recommends refby). Treated like any
+                     other claim fee.
+                  3. The "Legacy CCU_DAILY in fee column" red flag
+                     removed — CCU_DAILY is no longer "legacy", it's
+                     the expected state for new CCU days.
+                  Patient banding rows from earlier manual cleanup
+                  (1411/1421/1431) export correctly via the existing
+                  ccuConsolidateForExport pass-through path; they
+                  produce one CSV row per day (verbose but valid).
+                  To consolidate them, run the new revertCcuBandsToCcuDaily
+                  cleanup function from the Apps Script editor — converts
+                  every banded CCU row in the Claims tab back to
+                  CCU_DAILY so they roll up on next export.
+
 v1.18.1 2026-05-16 CCFPP modifier codes added to recognized fee list.
                   v1.18 surfaced 46 amber "Unrecognised fee code"
                   warnings — all of them were legitimate CCFPP codes
@@ -621,7 +645,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:8px">
     <div class="hdr-title">KGH Historical Billing</div>
-    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.18.1</div>
+    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.18.2</div>
   </div>
   <div class="hdr-sub" id="hdr-sub">Single card mode</div>
 </div>
@@ -3487,8 +3511,11 @@ function auditClaimRequiredByFee(c) {
   // bases) and 1205/1206/1207 (their >45min consult increments). These are
   // pushed automatically by the consult submit handler when applicable; they
   // inherit ICD and refby from the parent consult.
+  // v1.18.2: CCU_DAILY restored as a valid tracked fee — it's the canonical
+  // CCU placeholder that the export-time consolidation operates on.
   else if (['33008','33006','1411','1421','1431','78717','78720',
-            '1200','1201','1202','1205','1206','1207'].indexOf(fee) !== -1) {
+            '1200','1201','1202','1205','1206','1207',
+            'CCU_DAILY'].indexOf(fee) !== -1) {
     if (!icd) issues.push({ sev:'red', code:'cl-claim-icd', label:'Claim ' + fee + ' missing ICD code' });
     if (!rby) issues.push({ sev:'amber', code:'cl-claim-refby', label:'Claim ' + fee + ' missing referring MD' });
   }
@@ -3497,10 +3524,11 @@ function auditClaimRequiredByFee(c) {
                    '1200','1201','1202','1205','1206','1207'].indexOf(fee) === -1) {
     issues.push({ sev:'amber', code:'cl-fee-unknown', label:'Unrecognised fee code', detail:'value: "' + fee + '"' });
   }
-  // Legacy CCU_DAILY catch (should be impossible after manual cleanup + v3.59 guard)
-  if (fee === 'CCU_DAILY') {
-    issues.push({ sev:'red', code:'cl-ccu-daily-legacy', label:'Legacy CCU_DAILY in fee column — needs rebanding to 1411/1421/1431' });
-  }
+  // v1.18.2: CCU_DAILY is the canonical placeholder for CCU days as of
+  // PWA v3.60 — export-time consolidation in Apps Script rolls these up
+  // into properly-banded 1411/1421/1431 rows. No longer flagged.
+  // (The "tracked fees" block above already treats CCU_DAILY like the
+  // other claim fees: needs ICD, recommends refby.)
   return issues;
 }
 function auditClaimNameMismatch(c, p) {
@@ -3518,39 +3546,15 @@ function auditClaimNameMismatch(c, p) {
 // rows and recomputes the expected band for each based on consecutive
 // episode position. Returns issues attached to specific claim ids.
 // Returns a map: { claimId: [issues] }
+// v1.18.2: NEUTRALIZED. With CCU_DAILY restored as the canonical placeholder
+// (PWA v3.60), the band stored on each row is no longer expected to match
+// its position-in-episode — the Apps Script ccuConsolidateForExport() handles
+// banding at export time. Any 1411/1421/1431 still in the Sheet from prior
+// manual cleanup will export as-is (verbose but valid). New rows will be
+// CCU_DAILY and roll up correctly. Kept as a no-op stub to preserve the
+// audit chain shape and allow future re-enable if needed.
 function auditCcuBands(claimsForPatient) {
-  var DAY_MS = 86400000;
-  var ccu = claimsForPatient
-    .filter(function(c) { return ['CCU_DAILY','1411','1421','1431'].indexOf(dcCleanStr(c.fee)) !== -1; })
-    .map(function(c) { return { c: c, ms: dcParseDate(c.date) }; })
-    .filter(function(x) { return x.ms; })
-    .sort(function(a, b) { return a.ms - b.ms; });
-  if (!ccu.length) return {};
-  // Split into episodes — gap > 1 day starts a new episode
-  var episodes = [];
-  var ep = [ccu[0]];
-  for (var i = 1; i < ccu.length; i++) {
-    var gap = Math.round((ccu[i].ms - ccu[i-1].ms) / DAY_MS);
-    if (gap === 0) { ep.push(ccu[i]); } // duplicate-tap on same day; treat as same episode
-    else if (gap === 1) { ep.push(ccu[i]); }
-    else { episodes.push(ep); ep = [ccu[i]]; }
-  }
-  episodes.push(ep);
-  // For each episode, expected band per day-in-episode
-  var out = {};
-  episodes.forEach(function(episode) {
-    episode.forEach(function(entry, idx) {
-      var dayN = idx + 1;
-      var expected = (dayN === 1) ? '1411' : (dayN <= 7) ? '1421' : '1431';
-      var actual = dcCleanStr(entry.c.fee);
-      if (actual === 'CCU_DAILY') {
-        out[entry.c.id] = [{ sev:'red', code:'cl-ccu-legacy', label:'Legacy CCU_DAILY — should be ' + expected + ' for day ' + dayN + ' of episode', detail:'date: ' + entry.c.date }];
-      } else if (actual !== expected) {
-        out[entry.c.id] = [{ sev:'amber', code:'cl-ccu-band', label:'CCU band mismatch — is ' + actual + ', should be ' + expected + ' (day ' + dayN + ' of episode)', detail:'date: ' + entry.c.date }];
-      }
-    });
-  });
-  return out;
+  return {};
 }
 
 // Directive weekly limit — max 6 directives (33006) per Sun-Sat week per patient.

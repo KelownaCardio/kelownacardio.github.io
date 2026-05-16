@@ -1,35 +1,37 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology Billing — main app
-  Version:    v3.59
-  Built:      2026-05-15 UTC
+  Version:    v3.60
+  Built:      2026-05-16 UTC
   Repo:       github.com/KelownaCardio/kelownacardio.github.io
 
-  Changes in this build (v3.59) — CCU_DAILY elimination:
-    - CCU_DAILY was a synthetic intermediate fee tag (banded at export-time
-      by ccuConsolidate). It is no longer written to the fee column anywhere.
-      All CCU billing paths now write the correct 1411/1421/1431 band
-      directly at tap time.
-    - Trigger: a phantom CCU_DAILY claim appeared in change history that
-      the user did not deliberately enter. Two write paths were hard-coding
-      CCU_DAILY: (1) calendar gap-fill picker, (2) discharge modal "CCU
-      Daily" button (pre-styled as blue default for CCU/ICU MRP — easy to
-      mistap on iPad). Both now compute the correct band at render time.
-    - New ccuFeeForDate(p, dateStr) — generalised from ccuFeeForToday.
-      Counts consecutive CCU days STRICTLY before the target date (excludes
-      the target itself) and returns day 1 → 1411, days 2–7 → 1421,
-      day 8+ → 1431. ccuFeeForToday kept as a thin wrapper.
-    - Hard guard added at the top of addClaim: if fee or feeCode equals
-      'CCU_DAILY', it is rebanded via ccuFeeForDate(p, date) and a
-      console.warn is logged. Defence in depth — catches any future
-      regression or call site we missed.
-    - Claim edit fee dropdown: 'CCU daily tap' option removed (can no
-      longer be selected as a fee).
-    - ccuConsolidate left intact as a no-op safety net for any legacy
-      CCU_DAILY rows already in the Sheet — will be removed once a
-      future migration re-bands those rows in place.
-    - Bonus: upload.html v1.16 corrects MOST fee code 03701 → 78720
-      (was wrong since v1.8). PWA was always correct on 78720.
+  Changes in this build (v3.60) — CCU placeholder approach restored:
+    - REVERTS v3.59. CCU_DAILY is now the canonical placeholder fee for
+      every CCU day. The Apps Script ccuConsolidateForExport() rolls
+      groups of CCU_DAILY taps into properly-banded 1411/1421/1431 rows
+      with units at export time. This eliminates the band-at-rest
+      correctness problem and matches the BC MSP standard form
+      (one row per band with units, not one row per day).
+    - All CCU write paths reverted: batchRound (ward sweep),
+      quickCCUBtn, claim-screen CCU button, calendar gap-fill picker,
+      discharge modal CCU Daily buttons (both branches). They all
+      write 'CCU_DAILY' and addClaim no longer intercepts it.
+    - CCU_DAILY restored in the claim edit fee dropdown as
+      "CCU day (placeholder, export bands)".
+    - The ccuFeeForDate(p, dateStr) and ccuFeeForToday(p) helpers
+      remain in the file but are no longer called from billing paths.
+      Kept in case future work needs them (e.g. showing the projected
+      band on a confirmation screen before submit). Effectively dead
+      code for now.
+    - User-facing label simplified: quickCCUBtn shows "CCU day" toast
+      instead of the per-band label ("CCU day 1 (1411)" etc), since
+      the per-day band is meaningless until export.
+
+  Changes in this build (v3.59) — CCU_DAILY elimination [REVERTED in v3.60]:
+    - Briefly switched to band-on-write (compute 1411/1421/1431 at tap
+      time). Created band-at-rest correctness issues after manual
+      edits and mid-episode backfills. Reverted by user request in
+      favour of the placeholder + export-consolidation approach.
 
   Changes in this build (v3.58) — Patient card style improvements:
     - DOB removed from patient card meta line (age+sex already shown).
@@ -2027,12 +2029,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.59-2026-05-15-no-more-ccu-daily';
+var BUILD_ID    = 'v3.60-2026-05-16-ccu-placeholder-restored';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.59';
-var APP_BUILT   = '2026-05-15';
+var APP_VERSION = 'v3.60';
+var APP_BUILT   = '2026-05-16';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -3006,17 +3008,12 @@ function ccuFeeForToday(p) { return ccuFeeForDate(p, TODAY); }
 
 // ── Add Claim Helper ───────────────────────────────────
 function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, performingAlias) {
-  // v3.59: CCU_DAILY is not a real fee code. Recompute to the correct
-  // 1411/1421/1431 band based on consecutive episode days ending at `date`.
-  // Defence in depth — all call sites should already pass a banded fee,
-  // but this catches any legacy paths or future regressions.
-  if (fee === 'CCU_DAILY' || feeCode === 'CCU_DAILY') {
-    var banded = ccuFeeForDate(p, date);
-    console.warn('[addClaim] CCU_DAILY intercepted -> rebanded to ' + banded +
-                 ' for ' + (p.last || p.phn) + ' on ' + date);
-    fee     = banded;
-    feeCode = banded;
-  }
+  // v3.60: CCU_DAILY is the canonical placeholder for CCU days. The
+  // Apps Script ccuConsolidateForExport() groups them by patient+alias,
+  // segments into consecutive episodes, and emits properly-banded
+  // 1411/1421/1431 rows with units at export time. So we DELIBERATELY
+  // do not re-band CCU_DAILY at write time anymore — the per-day band
+  // is meaningless until consolidation runs. Reverts the v3.59 guard.
   // Guard: never write an MRP service string into refby/refbyName
   if (looksLikeMRPService(p.refbyName)) {
     p.refbyName = '';
@@ -3690,7 +3687,9 @@ function batchRound(ward) {
   });
   if (!pts.length) { showToast('All ' + wardLabel(ward) + ' patients already rounded'); return; }
   pts.forEach(function(p) {
-    var fee = ward === 'CCU' ? ccuFeeForToday(p) : '33008';
+    // v3.60: CCU_DAILY placeholder for CCU ward. Export-time consolidation
+    // assigns the correct 1411/1421/1431 band based on episode position.
+    var fee = ward === 'CCU' ? 'CCU_DAILY' : '33008';
     addClaim(p, fee, fee, 1, TODAY, 'I');
   });
   sv('patients', st.patients);
@@ -3945,14 +3944,16 @@ function quickCCUBtn(btn) {
     return;
   }
   var p   = getP(pid);
-  var fee = ccuFeeForToday(p);
-  var feeLabels = { '1411':'CCU day 1 (1411)', '1421':'CCU days 2–7 (1421)', '1431':'CCU days 8+ (1431)' };
-  bbDone(btn, feeLabels[fee] || fee);
+  // v3.60: write CCU_DAILY placeholder; export consolidates to 1411/1421/1431
+  // based on consecutive episode position. The user-facing label stays
+  // friendly ("CCU day") since the per-day band isn't meaningful until export.
+  var fee = 'CCU_DAILY';
+  bbDone(btn, 'CCU day');
   addClaim(p, fee, fee, 1, TODAY, 'I');
-  p.lastBilled   = feeLabels[fee] || fee;
+  p.lastBilled   = 'CCU day';
   sv('patients', st.patients);
   sv('claims', st.claims);
-  showToast('✓ ' + (feeLabels[fee] || fee) + ' — ' + p.last);
+  showToast('✓ CCU day — ' + p.last);
   requestAnimationFrame(render);
 }
 
@@ -5177,9 +5178,8 @@ function _cvFillClaim(pid, dateStr, type, note, icdOverride) {
 
   var alias = st.doc.alias;
   if (type === 'ccu') {
-    // v3.59: compute correct band for backfilled date instead of writing CCU_DAILY.
-    var ccuFee = ccuFeeForDate(p, dateStr);
-    addClaim(p, ccuFee, ccuFee, 1, dateStr, 'I', null, note || null, null, alias);
+    // v3.60: write CCU_DAILY placeholder; export consolidates to 1411/1421/1431.
+    addClaim(p, 'CCU_DAILY', 'CCU_DAILY', 1, dateStr, 'I', null, note || null, null, alias);
   } else if (type === 'daily') {
     addClaim(p, '33008', '33008', 1, dateStr, 'I', null, note || null, null, alias);
   } else if (type === 'directive') {
@@ -5387,7 +5387,8 @@ function openClaimEdit(btn) {
     { code:'33012', label:'Limited consultation (33012)' },
     { code:'33008', label:'Daily rounds / MRP (33008)' },
     { code:'33006', label:'Directive visit (33006)' },
-    // v3.59: CCU_DAILY removed — not a real fee code, was synthetic pre-rollup
+    // v3.60: CCU daily placeholder restored — export consolidates to 1411/1421/1431.
+    { code:'CCU_DAILY', label:'CCU day (placeholder, export bands)' },
     { code:'1411',  label:'CCU day 1 (1411)' },
     { code:'1421',  label:'CCU days 2–7 (1421)' },
     { code:'1431',  label:'CCU days 8–30 (1431)' },
@@ -6466,8 +6467,8 @@ function submitCCU(isDuplicate) {
   updatePatientFromClaimForm(p);
   if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
   var alias = getPerformingAlias();
-  var fee = ccuFeeForToday(p);
-  addClaim(p, fee, fee, 1, TODAY, 'I', null, null, null, alias);
+  // v3.60: write CCU_DAILY placeholder; export consolidates.
+  addClaim(p, 'CCU_DAILY', 'CCU_DAILY', 1, TODAY, 'I', null, null, null, alias);
   sv('patients', st.patients); sv('claims', st.claims);
   showToast('CCU daily recorded' + (isDuplicate ? ' (duplicate)' : '') + ' — ' + p.last);
   closeClaimScreen();
@@ -8221,17 +8222,15 @@ function _dischStep1(pid) {
   var btns = '';
   if (isCCUWard && isMRP) {
     // CCU/ICU ward, MRP role → CCU Daily default
-    // v3.59: compute correct CCU band at render time (was hard-coded 'CCU_DAILY')
-    var todayCcuFee = ccuFeeForDate(p, TODAY);
-    btns += vbtn('CCU Daily',      todayCcuFee, todayCcuFee, true);
+    // v3.60: write CCU_DAILY placeholder; export consolidates.
+    btns += vbtn('CCU Daily',      'CCU_DAILY', 'CCU_DAILY', true);
     btns += vbtn('Daily\n33008',   '33008',     '33008',     false);
     btns += vbtn('Directive',      '33006',     '33006',     false);
   } else if (isMRP) {
     // Ward MRP → Daily 33008 default always
     btns += vbtn('Daily\n33008',   '33008',     '33008',     true);
-    // v3.59: compute correct CCU band at render time (was hard-coded 'CCU_DAILY')
-    var todayCcuFee2 = ccuFeeForDate(p, TODAY);
-    btns += vbtn('CCU Daily',      todayCcuFee2, todayCcuFee2, false);
+    // v3.60: write CCU_DAILY placeholder; export consolidates.
+    btns += vbtn('CCU Daily',      'CCU_DAILY', 'CCU_DAILY', false);
     btns += vbtn('Directive',      '33006',     '33006',     false);
   } else {
     // Consultant role → Combined Daily or Directive only (no CCU Daily)
