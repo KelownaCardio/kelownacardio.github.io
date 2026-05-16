@@ -178,6 +178,32 @@ v1.12 2026-05-14  ICD-9 search: tiered (Tier 1 local cardiology codes,
                   handlers) before deleting. A function search across
                   the file is the cheapest sanity check.
 
+v1.18 2026-05-16  Data Check signal-to-noise + consult endTime hardening:
+                  1. Dropped the createdBy/createdAt detector (was 95+
+                     amber warnings on historical patient rows that
+                     pre-date the audit-trail rollout — pure noise that
+                     drowned out real issues). auditPatAudit is now a
+                     no-op stub, kept in the chain for future re-enable
+                     with smarter date-aware logic.
+                  2. Softened the consult missing-endTime detector.
+                     The Apps Script csvEndTime() auto-computes end
+                     time at export when startTime is present (start
+                     + 50min for 33010/33012). So missing endTime
+                     alone doesn't block iClinic acceptance. Now
+                     flagged only when BOTH start AND end are missing
+                     (which actually breaks export).
+                  3. Tightened consult submit handler with belt-and-
+                     suspenders endTime autofill: at submit time, if
+                     startTime is present but endTime is blank,
+                     auto-fills end = start + 50min and reflects in
+                     the UI. Mirrors the PWA v3.57 hardening. Prevents
+                     the OCR-populated form race that caused Marcetta
+                     and Osman to land with blank endTime (oninput
+                     wasn't firing on programmatic value sets, so the
+                     passive autofill in onStartTimeChange() never
+                     ran). Also adds a hard guard: consult with no
+                     start time refuses to submit with a toast.
+
 v1.17 2026-05-15  Data Check tab — Stage A (read-only detection).
                   New "🔍 Data Check" mode-tab loads Patients + Claims +
                   Uploaded Claims in one round-trip via the new
@@ -584,7 +610,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:8px">
     <div class="hdr-title">KGH Historical Billing</div>
-    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.17</div>
+    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.18</div>
   </div>
   <div class="hdr-sub" id="hdr-sub">Single card mode</div>
 </div>
@@ -1908,6 +1934,21 @@ function buildClaims() {
     var fee   = st.consultType === 'consult' ? '33010'
                 : st.consultType === 'limited' ? '33012'
                 : '';
+    // v1.18: belt-and-suspenders endTime handling.
+    // The passive autofill in onStartTimeChange() only fires when the user
+    // TYPES a start time. OCR-populated forms set the value programmatically
+    // and oninput may not fire — leaving end blank at submit. This caused
+    // the Marcetta + Osman missing-endTime claims surfaced by Data Check.
+    // Mirrors PWA v3.57 hardening: every consult that lands in Sheets has
+    // both start and end times.
+    if (start && !end) {
+      end = minsToTime(t2m(start) + 50);          // default 50-min consult
+      document.getElementById('c-end').value = end; // reflect in UI for transparency
+    }
+    if (!start) {
+      showToast('Consult requires a start time — fill it in before submitting.', 'warn');
+      return;
+    }
     var ccfppNote = (document.getElementById('c-ccfpp-note')||{value:''}).value.trim();
     var extraNotes = (document.getElementById('c-notes')||{value:''}).value.trim();
     var fullNote = [ccfppNote, extraNotes].filter(function(s){return s;}).join(' | ');
@@ -3400,10 +3441,12 @@ function auditPatSex(p) {
   return [];
 }
 function auditPatAudit(p) {
-  // Audit trail metadata — won't block export but should be present going forward
-  if (!dcCleanStr(p.createdBy) && !dcCleanStr(p.createdAt)) {
-    return [{ sev:'amber', code:'pat-audit', label:'No createdBy / createdAt on patient row' }];
-  }
+  // v1.18: NEUTRALIZED — createdBy/createdAt are forward-only audit fields
+  // that didn't exist when most historical patient rows were created.
+  // Flagging absence here generated 95+ amber warnings that drowned out
+  // real signal. Kept as a no-op stub so the audit chain in runAudit()
+  // stays intact and can be re-enabled with smarter logic later (e.g.
+  // only flag rows updated after the field rollout date).
   return [];
 }
 
@@ -3415,13 +3458,18 @@ function auditClaimRequiredByFee(c) {
   var start = dcCleanStr(c.startTime);
   var end = dcCleanStr(c.endTime);
   var issues = [];
-  // Full consult 33010: needs refby, ICD, start, end
-  // Limited consult 33012: needs refby, ICD, start, end
+  // Full consult 33010: needs refby, ICD, start
+  // Limited consult 33012: needs refby, ICD, start
+  // (endTime is auto-computed at export time by Apps Script csvEndTime when
+  //  startTime is present, so we don't block on missing endTime alone — we
+  //  only flag when BOTH start and end are missing, which makes export fail.)
   if (fee === '33010' || fee === '33012') {
     if (!rby)   issues.push({ sev:'red', code:'cl-consult-refby',  label:'Consult ' + fee + ' missing referring MD' });
     if (!icd)   issues.push({ sev:'red', code:'cl-consult-icd',    label:'Consult ' + fee + ' missing ICD code' });
-    if (!start) issues.push({ sev:'red', code:'cl-consult-start',  label:'Consult ' + fee + ' missing start time' });
-    if (!end)   issues.push({ sev:'red', code:'cl-consult-end',    label:'Consult ' + fee + ' missing end time' });
+    if (!start && !end) issues.push({ sev:'red', code:'cl-consult-times', label:'Consult ' + fee + ' missing both start and end time' });
+    else if (!start)    issues.push({ sev:'red',   code:'cl-consult-start', label:'Consult ' + fee + ' missing start time' });
+    // v1.18: if start present but end blank, export computes end = start + 50min.
+    // No issue flagged — the export pipeline handles it.
   }
   // Other tracked fees just need ICD; refby strongly recommended
   else if (['33008','33006','1411','1421','1431','78717','78720'].indexOf(fee) !== -1) {
