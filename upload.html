@@ -178,6 +178,52 @@ v1.12 2026-05-14  ICD-9 search: tiered (Tier 1 local cardiology codes,
                   handlers) before deleting. A function search across
                   the file is the cheapest sanity check.
 
+v1.23 2026-05-16  Generic "+claim" pill replaces "No consult" — the
+                  third option on the Consult / first visit card.
+                  Use case: first-visit billing that isn't a 33010/33012
+                  consult — procedures (33015 ECG, 33060 echo, 33075
+                  Holter, 33027 pacemaker, etc), complex discharge
+                  78717, or any standalone non-consult fee.
+
+                  When "+claim" is selected:
+                    - A fee-code text input appears at the top of the
+                      section (placeholder lists common procedure codes)
+                    - Date / Diagnosis / Referring MD / Notes remain
+                      visible (re-used from the consult layout)
+                    - Start time / End time, +MOST toggle, CCFPP
+                      modifier section, and mod-banner are hidden
+                  buildClaims's consult block split into two branches:
+                    - consult/limited → existing 33010/33012 + MOST +
+                      CCFPP modifier logic, unchanged
+                    - claim → single push of {fee, date, icd, refby,
+                      notes} with claimType='procedure'. Fee input
+                      blank ⇒ section pushes nothing, equivalent to
+                      the old No-consult skip.
+                  Internal state: legacy 'none' value remapped to
+                  'claim' on entry for backward compatibility (no other
+                  caller currently uses 'none', but the alias prevents
+                  surprises).
+                  Fee codes for CCU day 1 specifically should still be
+                  entered via the calendar in CCU mode — that writes
+                  CCU_DAILY and the export-time consolidation rolls
+                  consecutive days into proper 1411/1421/1431 bands.
+
+v1.22 2026-05-16  Removed combined CSV export button — upload.html is
+                  data-entry-and-review only, not a submission gateway.
+                  Per Kathryn's workflow: write claims back to the
+                  Sheet from this dashboard (Accept & clear / Send to
+                  Google Sheet), then export iClinic CSV exclusively
+                  from the Sheet menu (⬇ Export now). One commit
+                  surface, fewer ways to accidentally double-submit.
+                  Removed:
+                    - The green "② Download combined iClinic CSV &
+                      mark submitted" button
+                    - The orphaned exportCombinedIclinic() function
+                  Card title renamed from "Export" → "Save to Sheet"
+                  to match the new scope. Intro text reminds the user
+                  that CSV export happens in the Sheet, not here.
+
+v1.21 (existing — photo backup to Drive with Downloads fallback)
 v1.20 2026-05-16  Photo backup system — hedge against silent data loss.
                   Triggered by Ravestein bug: her CCU claim never landed
                   in the Sheet despite the upload-tool save flow
@@ -745,7 +791,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:8px">
     <div class="hdr-title">KGH Historical Billing</div>
-    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.21</div>
+    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.23</div>
   </div>
   <div class="hdr-sub" id="hdr-sub">Single card mode</div>
 </div>
@@ -866,9 +912,17 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
   <div class="ctype-pick">
     <div class="ctype-pill sel" id="ct-consult" onclick="setConsultType('consult')">Consult</div>
     <div class="ctype-pill" id="ct-limited" onclick="setConsultType('limited')">Lmtd consult</div>
-    <div class="ctype-pill" id="ct-none" onclick="setConsultType('none')">No consult</div>
+    <div class="ctype-pill" id="ct-claim" onclick="setConsultType('claim')">+claim</div>
   </div>
   <div id="consult-fields">
+    <!-- v1.23: generic fee-code input, only shown in +claim mode (for procedures
+         or non-consult first visits like a standalone CCU day, MOST advance care,
+         complex discharge, etc). -->
+    <div id="claim-only-fields" style="display:none;margin-bottom:10px">
+      <label>Fee code <span style="font-weight:400;color:var(--text3)">(e.g. 33015 ECG, 33060 echo, 33075 Holter, 78717 complex d/c)</span></label>
+      <input id="c-claim-fee" type="text" placeholder="Enter fee code" oninput="refreshPreview()" autocomplete="off"
+             style="font-family:ui-monospace,'SF Mono',monospace;text-transform:uppercase">
+    </div>
     <div class="row">
       <div><label>Date</label><input id="c-date" type="date" onchange="onConsultDateChange()"></div>
       <div>
@@ -884,11 +938,14 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
         </div>
       </div>
     </div>
-    <div class="row">
-      <div><label>Start time</label><input id="c-start" type="time" oninput="onStartTimeChange()"></div>
-      <div><label>End time</label><input id="c-end" type="time" oninput="updateModifierBanner()"></div>
+    <!-- v1.23: consult-only fields (times + modifier banner). Hidden in +claim mode. -->
+    <div id="consult-only-fields-top">
+      <div class="row">
+        <div><label>Start time</label><input id="c-start" type="time" oninput="onStartTimeChange()"></div>
+        <div><label>End time</label><input id="c-end" type="time" oninput="updateModifierBanner()"></div>
+      </div>
+      <div id="mod-banner"></div>
     </div>
-    <div id="mod-banner"></div>
     <label>Referring MD</label>
     <div class="ref-wrap" id="ref-wrap">
       <input id="c-ref" type="text" placeholder="Search by last name…" oninput="onRefInput()" onblur="closeRefDdDelayed()" autocomplete="off">
@@ -901,6 +958,8 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
       </div>
       <button class="ref-confirmed-clear" onclick="clearRef()" title="Clear">✕</button>
     </div>
+    <!-- v1.23: consult-only fields (+MOST toggle + CCFPP). Hidden in +claim mode. -->
+    <div id="consult-only-fields-bottom">
     <div class="tgl-row" style="margin-top:10px">
       <div><div class="tgl-lbl">+MOST</div><div class="tgl-sub">MOST claim same day</div></div>
       <label class="tgl"><input type="checkbox" id="c-most" onchange="refreshPreview()"><div class="tgl-track"></div><div class="tgl-thumb"></div></label>
@@ -911,6 +970,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
              style="font-size:12px;font-family:ui-monospace,'SF Mono',monospace">
       <div id="ccfpp-note-hint" style="font-size:10px;color:var(--text3);margin-top:3px;display:none"></div>
     </div>
+    </div><!-- /consult-only-fields-bottom -->
     <div style="margin-top:10px">
       <label>Notes <span style="font-weight:400;color:var(--text3)">(added to all claims)</span></label>
       <textarea id="c-notes" rows="2" oninput="refreshPreview()" style="width:100%;padding:9px 10px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:13px;font-family:inherit;resize:vertical;background:var(--surface)" placeholder="e.g. Post-cath monitoring, transferred from Vernon"></textarea>
@@ -969,18 +1029,22 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 
 <!-- Export -->
 <div class="card">
-  <div class="card-title">Export</div>
+  <div class="card-title">Save to Sheet</div>
   <div id="confirmed-count-bar" style="display:none" class="confirmed-count"></div>
   <div style="font-size:12px;color:var(--text2);margin-bottom:10px">
     Every action below auto-saves the card photo to your <strong>KGH Card Thumbnails</strong> Google Drive folder
-    as <code>PHN.YYYYMMDD-HHmm.jpg</code> for audit. Use <strong>Accept &amp; clear</strong> when the patient's claims are
-    already in the Sheet correctly. Use <strong>Send to Google Sheet</strong> when you've added or edited claims that need to push.
+    as <code>PHN.YYYY-MM-DD-HHmm.jpg</code> for audit. Use <strong>Accept &amp; clear</strong> when the patient's
+    claims are already in the Sheet correctly. Use <strong>Send to Google Sheet</strong> when you've added or
+    edited claims that need to push.
+    <div style="margin-top:6px;font-size:11px;color:var(--text3)">
+      CSV export to iClinic happens from the Sheet itself — open the spreadsheet and use
+      <em>KGH Billing → ⬇ Export now (iClinic CSV)</em>. This dashboard is only for entry, search, and review.
+    </div>
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
     <button class="btn btn-s" style="margin:0" onclick="acceptAndClear()">Accept &amp; clear<br><span style="font-size:10px;color:var(--text3);font-weight:400">(no claim changes)</span></button>
     <button class="btn btn-p" style="margin:0" onclick="exportSheets()">Send to Google Sheet<br><span style="font-size:10px;color:rgba(255,255,255,.8);font-weight:400">(push changes)</span></button>
   </div>
-  <button class="btn btn-g" style="margin-top:8px" onclick="exportCombinedIclinic()">② Download combined iClinic CSV &amp; mark submitted</button>
   <div id="export-status" class="status-bar" style="margin-top:8px"></div>
 </div>
 
@@ -1651,13 +1715,32 @@ function heRefSelect(id, num, name) {
 }
 
 // ─── Consult type / CCFPP ────────────────────────────────────────────────────
+// v1.23: three states now —
+//   'consult' / 'limited' → builds a 33010/33012 consult claim (with times,
+//                            optional MOST, CCFPP modifiers)
+//   'claim'              → builds a generic single-fee claim (procedure,
+//                            standalone first-visit billing not a consult).
+//                            Hides times/MOST/CCFPP; shows fee-code input.
+//                            If fee field is left blank, this section pushes
+//                            nothing (same effect as the old "No consult").
 function setConsultType(t) {
+  // Accept legacy 'none' as alias for new 'claim' state
+  if (t === 'none') t = 'claim';
   st.consultType = t;
-  ['consult','limited','none'].forEach(function(x){
-    document.getElementById('ct-'+x).classList.toggle('sel', x===t);
+  ['consult','limited','claim'].forEach(function(x){
+    var el = document.getElementById('ct-'+x);
+    if (el) el.classList.toggle('sel', x===t);
   });
-  var show = t !== 'none';
-  document.getElementById('consult-fields').style.display = show ? '' : 'none';
+  // consult-fields wrapper always visible now (used by all three modes)
+  document.getElementById('consult-fields').style.display = '';
+  // Toggle the consult-specific sections (times + modifier banner + MOST + CCFPP)
+  var isConsult = (t === 'consult' || t === 'limited');
+  var topEl = document.getElementById('consult-only-fields-top');
+  var botEl = document.getElementById('consult-only-fields-bottom');
+  var claimEl = document.getElementById('claim-only-fields');
+  if (topEl)   topEl.style.display   = isConsult ? '' : 'none';
+  if (botEl)   botEl.style.display   = isConsult ? '' : 'none';
+  if (claimEl) claimEl.style.display = isConsult ? 'none' : '';
   refreshPreview();
 }
 
@@ -1957,7 +2040,7 @@ function updateModifierBanner() {
   var end     = (document.getElementById('c-end')||{}).value;
   var dateISO = (document.getElementById('c-date')||{}).value;
   var el      = document.getElementById('mod-banner');
-  if (!el || st.consultType === 'none') { if(el) el.innerHTML=''; return; }
+  if (!el || st.consultType === 'claim') { if(el) el.innerHTML=''; return; }
   if (!start && !dateISO) { el.innerHTML = ''; return; }
 
   var modBase  = getModifier(start, dateISO);
@@ -2065,12 +2148,11 @@ function buildClaims() {
   var claims = [];
   var cDate = consultDateISO();
 
-  if (st.consultType !== 'none' && cDate) {
+  // v1.23 — Consult/limited path: builds 33010/33012 with times + optional MOST + CCFPP modifiers
+  if ((st.consultType === 'consult' || st.consultType === 'limited') && cDate) {
     var start = document.getElementById('c-start').value;
     var end   = document.getElementById('c-end').value;
-    var fee   = st.consultType === 'consult' ? '33010'
-                : st.consultType === 'limited' ? '33012'
-                : '';
+    var fee   = st.consultType === 'consult' ? '33010' : '33012';
     // v1.18: belt-and-suspenders endTime handling.
     // The passive autofill in onStartTimeChange() only fires when the user
     // TYPES a start time. OCR-populated forms set the value programmatically
@@ -2103,6 +2185,32 @@ function buildClaims() {
         var incStart = minsToTime((t2m(start) + 30) % 1440);
         claims.push(Object.assign({},base,{ id:uid(), claimType:'modifier-inc', date:cDate, fee:modInc.inc, icd:dx, refby:refNum, refbyName:refName, startTime:incStart, endTime:'', notes:fullNote, _sortDate:cDate, _sortSub:2, _units:incUnits }));
       }
+    }
+  }
+
+  // v1.23 — Generic +claim path: single fee on the consult/first-visit date.
+  // For procedures (33015 ECG, 33060 echo, 33075 Holter, 33027 pacemaker,
+  // 78717 complex discharge, etc) or any non-consult first visit. If the
+  // fee field is left blank, nothing is pushed from this section — same
+  // effect as the old "No consult" state.
+  if (st.consultType === 'claim' && cDate) {
+    var claimFee = ((document.getElementById('c-claim-fee')||{}).value || '').trim().toUpperCase();
+    if (claimFee) {
+      var claimNotes = (document.getElementById('c-notes')||{value:''}).value.trim();
+      claims.push(Object.assign({},base,{
+        id: uid(),
+        claimType: 'procedure',
+        date: cDate,
+        fee: claimFee,
+        icd: dx,
+        refby: refNum,
+        refbyName: refName,
+        startTime: '',
+        endTime: '',
+        notes: claimNotes,
+        _sortDate: cDate,
+        _sortSub: 0
+      }));
     }
   }
 
@@ -2271,7 +2379,7 @@ function deleteClaim(c) {
 
 // ─── Clear form ───────────────────────────────────────────────────────────────
 function clearForm() {
-  ['f-last','f-first','f-phn','f-dob','f-ward','f-room','c-date','c-dx','c-ref','c-start','c-end','c-ccfpp-note','combined-reason'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
+  ['f-last','f-first','f-phn','f-dob','f-ward','f-room','c-date','c-dx','c-ref','c-start','c-end','c-ccfpp-note','c-claim-fee','combined-reason'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
   document.getElementById('f-sex').value='';
   document.getElementById('c-most').checked=false;
   clearIcd();
@@ -3623,50 +3731,6 @@ function exportSheets() {
     });
   }  // end sendHistoricalClaims
 }
-
-// Combined iClinic export: fetches ALL unsubmitted claims from both tabs,
-// deduplicates, downloads one CSV, then marks everything as submitted.
-function exportCombinedIclinic() {
-  var url = document.getElementById('script-url').value.trim();
-  if (!url){ setStatus('export-status','st-warn','Apps Script URL not configured.'); return; }
-  setStatus('export-status','st-info','Fetching unsubmitted claims from Sheets…');
-  var ctrl=new AbortController();
-  var timer=setTimeout(function(){ ctrl.abort(); }, 90000);
-  fetch(url, {
-    method:'POST',
-    body: JSON.stringify({ action:'getCombinedExport', key:getScriptKey() }),
-    signal: ctrl.signal
-  })
-  .then(function(r){ return r.text(); })
-  .then(function(text){
-    clearTimeout(timer);
-    var data; try{ data=JSON.parse(text); }catch(e){ data={}; }
-    if (!data.ok || !data.csv) {
-      setStatus('export-status','st-warn','No unsubmitted claims found, or Sheets error: '+JSON.stringify(data).slice(0,120));
-      return;
-    }
-    // Download the CSV
-    var a = document.createElement('a');
-    a.href = 'data:text/csv;charset=utf-8,'+encodeURIComponent(data.csv);
-    a.download = 'iClinic_KGH_combined_'+todayISO()+'.csv';
-    a.click();
-    var fromClaims   = data.fromClaims   || 0;
-    var fromUploaded = data.fromUploaded || 0;
-    var total        = data.total        || 0;
-    var dups         = data.duplicates   || 0;
-    setStatus('export-status','st-ok',
-      'Downloaded '+total+' claims'
-      +' ('+fromClaims+' from Claims, '+fromUploaded+' from Uploaded Claims)'
-      +(dups?' · '+dups+' cross-tab duplicate'+(dups===1?'':'s')+' removed':'')
-      +' — all marked submitted ✓');
-  })
-  .catch(function(err){
-    clearTimeout(timer);
-    if (err.name==='AbortError'){ setStatus('export-status','st-warn','Request timed out.'); return; }
-    setStatus('export-status','st-warn','Network error: '+err.message);
-  });
-}
-
 
 // ─── Crop modal ───────────────────────────────────────────────────────────────
 function openCropModal(dataUrl,onUse,onCancel) {
