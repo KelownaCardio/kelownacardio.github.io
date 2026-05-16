@@ -178,6 +178,62 @@ v1.12 2026-05-14  ICD-9 search: tiered (Tier 1 local cardiology codes,
                   handlers) before deleting. A function search across
                   the file is the cheapest sanity check.
 
+v1.19 2026-05-16  Save reliability hardening — diagnosed via Ravestein
+                  bug (CCU day 1 added but missing from Sheet). Five
+                  silent-failure paths fixed in exportSheets:
+
+                  1. CCU now writes CCU_DAILY placeholder in buildClaims
+                     (matches PWA v3.60). Previously upload.html
+                     computed 1411/1421/1431 at submit time using
+                     ccuUnion logic, which conflicted with PWA's
+                     placeholder approach AND bypassed the Apps Script
+                     ccuConsolidateForExport rollup (which only
+                     operates on CCU_DAILY rows). So upload-tool CCU
+                     claims shipped as one row per day to iClinic
+                     instead of the BC MSP standard one row per band
+                     with units.
+
+                  2. ICD validation failure now LOUD — instead of just
+                     a quiet status banner that's easily missed, shows
+                     "⛔ NOTHING SAVED — N claims have invalid ICD"
+                     with per-claim breakdown (fee + date + bad ICD
+                     value) plus a 6-second toast. User cannot
+                     accidentally think the save succeeded when it
+                     was aborted.
+
+                  3. Patient save errors no longer swallowed. The
+                     pushOnePatient chain now collects {name, phn,
+                     error} for every savePatient call that returned
+                     {ok:false} or threw a network error, and surfaces
+                     them in the final status. Previously these were
+                     silently caught and ignored; if Apps Script
+                     blocked a patient row (e.g. bad DOB format), the
+                     user had no way to know.
+
+                  4. Duplicate-skip feedback made unmissable. Apps
+                     Script returns a `duplicates` array when
+                     saveHistoricalBatch's phn|fee|date|alias dedup
+                     skips an incoming claim. Previously appended to
+                     the same status string and easy to miss.
+                     Now split into its own labeled section with each
+                     skipped claim listed (name + fee + date + alias).
+                     If inserted=0, prepends "⚠ ZERO claims saved" to
+                     the top of the status with a warning toast.
+
+                  5. Form no longer clears when inserted=0. If every
+                     claim was skipped/failed, keep the form populated
+                     so the user can review and fix without re-entry.
+                     Form clears only on partial or full success.
+
+                  Also fixed outdated "Uploaded Claims tab" message —
+                  that tab is archived post-migration; claims write to
+                  the Claims tab now.
+
+                  Edit (saveHistEdit) and Delete (deleteHist) paths
+                  audited and confirmed correctly wired — they POST
+                  saveClaim/deleteClaim with full merged claim objects
+                  preserving createdAt/ward/room. No changes needed.
+
 v1.18.2 2026-05-16 CCU placeholder approach restored (matches PWA v3.60).
                   CCU_DAILY is the canonical placeholder; export-time
                   consolidation handles banding. Three Data Check
@@ -645,7 +701,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:8px">
     <div class="hdr-title">KGH Historical Billing</div>
-    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.18.2</div>
+    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.19</div>
   </div>
   <div class="hdr-sub" id="hdr-sub">Single card mode</div>
 </div>
@@ -2019,15 +2075,15 @@ function buildClaims() {
     claims.push(Object.assign({},base,{ id:uid(), claimType:'directive', date:iso, fee:'33006', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:extraNotes, _sortDate:iso, _sortSub:5 }));
   });
 
-  // v1.10 — CCU day numbering counts historical CCU dates as priors.
-  // Union of historical + new selections, sorted by date; index → day number.
-  var ccuUnion = ccuDateUnion();
+  // v1.19 — CCU now writes CCU_DAILY placeholder (matches PWA v3.60).
+  // Apps Script ccuConsolidateForExport() rolls up consecutive CCU_DAILY days
+  // per patient+alias into properly-banded 1411 × 1 + 1421 × N + 1431 × M
+  // rows at export time. This produces the BC MSP standard one-row-per-band
+  // form instead of one row per day, AND eliminates the band-at-rest
+  // correctness problem when adding mid-episode dates.
   st.ccuDates.slice().sort().forEach(function(iso){
-    var dn = ccuUnion.indexOf(iso) + 1;   // 1-based index in the chronological union
-    if (dn < 1) dn = 1;
-    var fee = dn===1 ? '1411' : dn<=7 ? '1421' : '1431';
     var ccuNote = extraNotes || '';
-    claims.push(Object.assign({},base,{ id:uid(), claimType:'ccu', date:iso, fee:fee, icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:ccuNote, _sortDate:iso, _sortSub:6 }));
+    claims.push(Object.assign({},base,{ id:uid(), claimType:'ccu', date:iso, fee:'CCU_DAILY', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:ccuNote, _sortDate:iso, _sortSub:6 }));
   });
 
   claims.sort(function(a,b){ return a._sortDate<b._sortDate?-1:a._sortDate>b._sortDate?1:a._sortSub-b._sortSub; });
@@ -3190,14 +3246,21 @@ function exportSheets() {
   if (!url){ setStatus('export-status','st-warn','No Apps Script URL configured.'); return; }
   var claims=getExportClaims();
   if (!claims.length){ setStatus('export-status','st-warn','No claims to export.'); return; }
-  // v1.8: block submit if any claim has free-text ICD (e.g. "Angina", "NSTEMI").
-  // ICD9 must come from the dropdown so iClinic accepts it.
+  // v1.19 — LOUD ICD validation. Any one invalid ICD aborts the entire export.
+  // Make it impossible to miss: per-claim breakdown + toast + clear "NOTHING SAVED" message.
   var bad = claims.filter(function(c){ return !isValidIcd9(c.icd); });
   if (bad.length) {
-    var sample = bad[0].icd || '(empty)';
+    var summary = bad.slice(0, 5).map(function(c){
+      var fee = c.fee || '?';
+      var dt  = c.date || '?';
+      return '  • ' + fee + ' on ' + dt + ' — ICD "' + (c.icd || '(blank)') + '"';
+    }).join('\n');
+    if (bad.length > 5) summary += '\n  ... and ' + (bad.length - 5) + ' more';
     setStatus('export-status','st-warn',
-      bad.length + ' claim' + (bad.length===1?'':'s') + ' have invalid ICD9 code "' + sample + '". ' +
-      'Pick the diagnosis from the dropdown — free text is not accepted.');
+      '⛔ NOTHING SAVED — ' + bad.length + ' of ' + claims.length + ' claim' +
+      (claims.length===1?'':'s') + ' have invalid ICD9 codes:\n\n' + summary +
+      '\n\nPick the diagnosis from the dropdown (free text not accepted) and resubmit.');
+    showToast('⛔ Export blocked — ' + bad.length + ' claim(s) have bad ICD codes. See status for details.', 'err', 6000);
     var inp = document.getElementById('c-dx');
     if (inp) { inp.focus(); inp.scrollIntoView({block:'center',behavior:'smooth'}); }
     return;
@@ -3214,6 +3277,10 @@ function exportSheets() {
   // points (main app, Meditech import, upload tool) now create patient rows.
   var patientsToSave = buildPatientsFromClaims(claims);
 
+  // v1.19 — track failed patient saves so they can be surfaced in the final
+  // status message instead of swallowed silently.
+  var patientFailures = [];
+
   // Sequentially push savePatient — Apps Script handles dedup by id.
   // Payload format follows upload.html convention: action/key flat in body
   // along with patient fields (not wrapped in a 'body' field).
@@ -3221,11 +3288,32 @@ function exportSheets() {
     if (idx >= patientsToSave.length) return Promise.resolve();
     setStatus('export-status','st-info',
       'Saving patient '+(idx+1)+' of '+patientsToSave.length+'…');
-    var pp = Object.assign({}, patientsToSave[idx],
-                           { action:'savePatient', key:getScriptKey() });
+    var pat = patientsToSave[idx];
+    var pp = Object.assign({}, pat, { action:'savePatient', key:getScriptKey() });
     return fetch(url, { method:'POST', body: JSON.stringify(pp) })
-      .then(function() { return pushOnePatient(idx+1); })
-      .catch(function() { return pushOnePatient(idx+1); });
+      .then(function(r){ return r.text(); })
+      .then(function(text) {
+        // v1.19 — capture {ok:false, error:...} responses from Apps Script
+        try {
+          var resp = JSON.parse(text);
+          if (resp && resp.ok === false && resp.error) {
+            patientFailures.push({
+              name: (pat.last || '?') + ', ' + (pat.first || ''),
+              phn:  pat.phn || '?',
+              error: resp.error
+            });
+          }
+        } catch(e) {}
+        return pushOnePatient(idx+1);
+      })
+      .catch(function(err) {
+        patientFailures.push({
+          name: (pat.last || '?') + ', ' + (pat.first || ''),
+          phn:  pat.phn || '?',
+          error: 'Network error: ' + (err && err.message ? err.message : err)
+        });
+        return pushOnePatient(idx+1);
+      });
   }
 
   pushOnePatient(0).then(function() {
@@ -3247,23 +3335,60 @@ function exportSheets() {
       var data; try{ data=JSON.parse(text); }catch(e){ data={}; }
       if (data.ok) {
         var ins=data.inserted||0, dups=data.duplicates||[];
-        var msg='Saved '+ins+' claim'+(ins===1?'':'s')+' to Uploaded Claims tab ✓'+(corrections.length?' · '+corrections.length+' OCR correction'+(corrections.length===1?'':'s')+' logged':'');
+        // v1.19 — build a loud structured status combining all three outcomes:
+        // inserted / patient-failures / duplicates. Make duplicate-skip
+        // unmissable since that was the Ravestein silent-fail path.
+        var lines = [];
+        if (ins > 0) {
+          lines.push('✓ Saved ' + ins + ' claim' + (ins===1?'':'s') + ' to Claims tab');
+        }
+        if (corrections.length) {
+          lines.push('  ' + corrections.length + ' OCR correction' + (corrections.length===1?'':'s') + ' logged');
+        }
+        var hadIssues = false;
+        if (patientFailures.length) {
+          hadIssues = true;
+          lines.push('');
+          lines.push('⚠ ' + patientFailures.length + ' patient row save' + (patientFailures.length===1?'':'s') + ' FAILED:');
+          patientFailures.slice(0, 5).forEach(function(p){
+            lines.push('  • ' + p.name + ' (PHN ' + p.phn + ') — ' + p.error);
+          });
+          if (patientFailures.length > 5) lines.push('  ... and ' + (patientFailures.length - 5) + ' more');
+        }
         if (dups.length) {
-          msg+='\n\n⚠ '+dups.length+' duplicate'+(dups.length===1?'':'s')+' skipped:\n';
-          msg+=dups.map(function(d){ return '  '+d.name+' · '+d.fee+' · '+d.date+' ('+d.reason+')'; }).join('\n');
-          setStatus('export-status','st-warn',msg);
-        } else { setStatus('export-status','st-ok',msg); }
+          hadIssues = true;
+          lines.push('');
+          lines.push('⚠ ' + dups.length + ' claim' + (dups.length===1?'':'s') + ' SKIPPED as duplicates — already in Claims tab with same patient/fee/date/doctor:');
+          dups.slice(0, 10).forEach(function(d){
+            lines.push('  • ' + d.name + ' — ' + d.fee + ' on ' + d.date + ' (alias ' + d.alias + ')');
+          });
+          if (dups.length > 10) lines.push('  ... and ' + (dups.length - 10) + ' more');
+        }
+        // v1.19 — if NOTHING saved (zero inserts), make that crystal clear at top
+        if (ins === 0) {
+          lines.unshift('⚠ ZERO claims saved — see details below');
+          setStatus('export-status','st-warn', lines.join('\n'));
+          showToast('⚠ No claims saved — check status message', 'warn', 6000);
+        } else if (hadIssues) {
+          setStatus('export-status','st-warn', lines.join('\n'));
+          showToast('Saved ' + ins + ', but ' + (dups.length + patientFailures.length) + ' issue(s) — see status', 'warn', 5000);
+        } else {
+          setStatus('export-status','st-ok', lines.join('\n'));
+        }
         // v1.11 — clear form on successful push as visual confirmation that processing is done.
-        // Status banner is in #export-status (separate from the form) so the message stays visible.
-        clearForm();
+        // v1.19 — only clear form if we actually inserted something. If everything was
+        // skipped or failed, keep the form so user can review and fix.
+        if (ins > 0) clearForm();
       } else {
-        setStatus('export-status','st-warn','Sheets error: '+JSON.stringify(data).slice(0,200));
+        setStatus('export-status','st-warn','⛔ Sheets error — nothing saved: '+JSON.stringify(data).slice(0,300));
+        showToast('⛔ Sheets error — nothing saved', 'err', 5000);
       }
     })
     .catch(function(err){
       clearTimeout(timer);
       if (err.name==='AbortError') return;
-      setStatus('export-status','st-warn','Network error: '+err.message);
+      setStatus('export-status','st-warn','⛔ Network error — nothing saved: '+err.message);
+      showToast('⛔ Network error — nothing saved', 'err', 5000);
     });
   }  // end sendHistoricalClaims
 }
