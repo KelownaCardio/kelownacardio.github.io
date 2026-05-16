@@ -178,6 +178,17 @@ v1.12 2026-05-14  ICD-9 search: tiered (Tier 1 local cardiology codes,
                   handlers) before deleting. A function search across
                   the file is the cheapest sanity check.
 
+v1.18.1 2026-05-16 CCFPP modifier codes added to recognized fee list.
+                  v1.18 surfaced 46 amber "Unrecognised fee code"
+                  warnings — all of them were legitimate CCFPP codes
+                  (1200/1201/1202 evening/night/weekend bases, and
+                  1205/1206/1207 their >45-min consult increments)
+                  that the consult submit handler pushes automatically
+                  whenever applicable. They're now included in the
+                  tracked-fee bucket (same ICD-required + refby-
+                  recommended treatment as other claim fees) and
+                  removed from the "unrecognised" trip-wire.
+
 v1.18 2026-05-16  Data Check signal-to-noise + consult endTime hardening:
                   1. Dropped the createdBy/createdAt detector (was 95+
                      amber warnings on historical patient rows that
@@ -610,7 +621,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:8px">
     <div class="hdr-title">KGH Historical Billing</div>
-    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.18</div>
+    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.18.1</div>
   </div>
   <div class="hdr-sub" id="hdr-sub">Single card mode</div>
 </div>
@@ -3471,13 +3482,19 @@ function auditClaimRequiredByFee(c) {
     // v1.18: if start present but end blank, export computes end = start + 50min.
     // No issue flagged — the export pipeline handles it.
   }
-  // Other tracked fees just need ICD; refby strongly recommended
-  else if (['33008','33006','1411','1421','1431','78717','78720'].indexOf(fee) !== -1) {
+  // Other tracked fees just need ICD; refby strongly recommended.
+  // v1.18.1: CCFPP modifier codes added — 1200/1201/1202 (evening/night/weekend
+  // bases) and 1205/1206/1207 (their >45min consult increments). These are
+  // pushed automatically by the consult submit handler when applicable; they
+  // inherit ICD and refby from the parent consult.
+  else if (['33008','33006','1411','1421','1431','78717','78720',
+            '1200','1201','1202','1205','1206','1207'].indexOf(fee) !== -1) {
     if (!icd) issues.push({ sev:'red', code:'cl-claim-icd', label:'Claim ' + fee + ' missing ICD code' });
     if (!rby) issues.push({ sev:'amber', code:'cl-claim-refby', label:'Claim ' + fee + ' missing referring MD' });
   }
   // Unknown fee codes — flag it
-  else if (fee && ['33010','33012','33008','33006','1411','1421','1431','78717','78720','CCU_DAILY'].indexOf(fee) === -1) {
+  else if (fee && ['33010','33012','33008','33006','1411','1421','1431','78717','78720','CCU_DAILY',
+                   '1200','1201','1202','1205','1206','1207'].indexOf(fee) === -1) {
     issues.push({ sev:'amber', code:'cl-fee-unknown', label:'Unrecognised fee code', detail:'value: "' + fee + '"' });
   }
   // Legacy CCU_DAILY catch (should be impossible after manual cleanup + v3.59 guard)
