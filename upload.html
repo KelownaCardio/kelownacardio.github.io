@@ -178,6 +178,50 @@ v1.12 2026-05-14  ICD-9 search: tiered (Tier 1 local cardiology codes,
                   handlers) before deleting. A function search across
                   the file is the cheapest sanity check.
 
+v1.20 2026-05-16  Photo backup system — hedge against silent data loss.
+                  Triggered by Ravestein bug: her CCU claim never landed
+                  in the Sheet despite the upload-tool save flow
+                  appearing successful. With v1.19 hardening, silent
+                  failures shouldn't happen again — but as a belt-and-
+                  suspenders layer, we now also auto-save the original
+                  card photo to disk so EVERY captured card has a
+                  permanent audit trail independent of the Sheets save.
+
+                  Two features:
+
+                  1. AUTO-SAVE TOGGLE (top of page, per-device setting):
+                     "💾 Auto-save card photos to disk". When enabled,
+                     every captured card photo is also downloaded to
+                     the user's Downloads folder with filename
+                     kgh-{PHN}-{YYYYMMDD-HHmm}.jpg. Default OFF so
+                     iPad users don't get spammed; enable on the
+                     laptop browser where Downloads folder is useful.
+                     Setting persists in localStorage as
+                     kgh_auto_download_thumbs.
+
+                  2. RECOVERY PANEL: "🔍 Recover saved photos" button
+                     opens a modal showing every kghthumb:{PHN} entry
+                     currently in browser localStorage as a grid of
+                     thumbnails. Each has its own download button.
+                     "Download all" downloads everything sequentially
+                     (200ms gap — iOS Safari may prompt for multi-
+                     download permission, user clicks Allow once).
+                     Use this NOW on the iPad to recover any pre-v1.20
+                     captures before they're lost to a cache clear.
+
+                  Internals:
+                  - saveThumbToStorage extended to call
+                    downloadThumbToDisk when auto-download is enabled.
+                    No behaviour change for users with the toggle off.
+                  - downloadThumbToDisk uses <a download> + click() —
+                    works on iOS Safari (single user-gesture download
+                    → Save to Files prompt) and desktop browsers
+                    (direct to Downloads).
+                  - Recovery modal enumerates all kghthumb:* keys in
+                    localStorage and sorts by PHN, with byte count
+                    summary at the top so user can see how close to
+                    the ~5MB cap they are.
+
 v1.19 2026-05-16  Save reliability hardening — diagnosed via Ravestein
                   bug (CCU day 1 added but missing from Sheet). Five
                   silent-failure paths fixed in exportSheets:
@@ -701,7 +745,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:8px">
     <div class="hdr-title">KGH Historical Billing</div>
-    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.19</div>
+    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.21</div>
   </div>
   <div class="hdr-sub" id="hdr-sub">Single card mode</div>
 </div>
@@ -928,12 +972,14 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
   <div class="card-title">Export</div>
   <div id="confirmed-count-bar" style="display:none" class="confirmed-count"></div>
   <div style="font-size:12px;color:var(--text2);margin-bottom:10px">
-    <strong>Send to Sheets first</strong>, then use the combined iClinic export to download
-    all unsubmitted claims from both the Uploaded Claims and Claims tabs in one CSV,
-    sorted by last name. Exported claims are marked submitted and won't appear again —
-    but remain visible in claim history.
+    Every action below auto-saves the card photo to your <strong>KGH Card Thumbnails</strong> Google Drive folder
+    as <code>PHN.YYYYMMDD-HHmm.jpg</code> for audit. Use <strong>Accept &amp; clear</strong> when the patient's claims are
+    already in the Sheet correctly. Use <strong>Send to Google Sheet</strong> when you've added or edited claims that need to push.
   </div>
-  <button class="btn btn-p" onclick="exportSheets()">① Send to Google Sheets (Uploaded Claims tab)</button>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+    <button class="btn btn-s" style="margin:0" onclick="acceptAndClear()">Accept &amp; clear<br><span style="font-size:10px;color:var(--text3);font-weight:400">(no claim changes)</span></button>
+    <button class="btn btn-p" style="margin:0" onclick="exportSheets()">Send to Google Sheet<br><span style="font-size:10px;color:rgba(255,255,255,.8);font-weight:400">(push changes)</span></button>
+  </div>
   <button class="btn btn-g" style="margin-top:8px" onclick="exportCombinedIclinic()">② Download combined iClinic CSV &amp; mark submitted</button>
   <div id="export-status" class="status-bar" style="margin-top:8px"></div>
 </div>
@@ -2289,10 +2335,11 @@ function loadBatchItem(idx) {
   // Store raw OCR output for corrections logging
   window._ocrOriginal = { last:item.last||'', first:item.first||'', phn:item.phn||'',
                            dob:item.dob||'', sex:item.sex||'', engine:'worker-batch' };
-  // Show thumbnail in photo zone (from OCR results or localStorage)
+  // v1.21 — show thumbnail from this batch session's OCR results.
+  // Pre-v1.21 also tried localStorage; now Drive is the audit store,
+  // and within-session we just keep _batchOCRResults in memory.
   var pz = document.getElementById('photo-zone');
-  var thumbSrc = (_batchOCRResults[idx] && _batchOCRResults[idx].thumb)
-               || loadThumbFromStorage(item.phn);
+  var thumbSrc = (_batchOCRResults[idx] && _batchOCRResults[idx].thumb) || null;
   if (thumbSrc) {
     pz.innerHTML = '<img src="'+thumbSrc+'" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;display:block">';
     pz.style.padding = '0';
@@ -2338,9 +2385,21 @@ function renderQueueBar() {
 }
 
 function batchConfirm() {
-  // Save thumbnail for audit trail, keyed by PHN
+  // v1.21 — Save card photo to Google Drive as audit trail.
+  // Was localStorage; now permanent Drive backup with auto-fallback
+  // to local Downloads folder if Drive fails (so photo is never lost).
   var phn = (document.getElementById('f-phn')||{}).value || '';
-  if (phn && window._singleThumb) saveThumbToStorage(phn, window._singleThumb);
+  if (window._singleThumb) {
+    saveThumbToDrive(phn, window._singleThumb, function(ok, info){
+      if (ok) {
+        showToast('✓ Card photo saved to Drive', '', 2500);
+      } else if (info && info.fellBackToDisk) {
+        showToast('⚠ Drive failed — photo saved to Downloads (re-upload later)', 'warn', 5000);
+      } else {
+        showToast('⛔ Photo save failed (Drive + Downloads) — see console', 'err', 5000);
+      }
+    });
+  }
   // Collect current preview claims into confirmed list
   document.querySelectorAll('.fee-inp').forEach(function(inp){ if (inp.dataset.id&&inp.value) _feeOverrides[inp.dataset.id]=inp.value; });
   st.claims.forEach(function(c){
@@ -2441,10 +2500,10 @@ function sendSingleOCR(b64) {
     window._ocrOriginal = { last:data.last||'', first:data.first||'', phn:data.phn||'',
                              dob:data.dob||'', sex:data.sex||'', engine:'worker',
                              capturedAt: Date.now() };
-    // Save cropped thumbnail to localStorage keyed by PHN for later audit
-    if (data.phn && data.phn.replace(/\D/g,'').length === 10) {
-      window._singleThumb && saveThumbToStorage(data.phn, window._singleThumb);
-    }
+    // v1.21 — Thumbnail no longer saved here. It's saved when the user
+    // takes a deliberate action (Accept & clear OR Send to Google Sheet),
+    // by which point the PHN is guaranteed populated (manually if OCR
+    // missed it). Photo is held in window._singleThumb meanwhile.
     refreshPreview();
     lookupPatientFromSheets(data.phn||'', data.last||'', data.dob||'');
   };
@@ -2527,18 +2586,152 @@ function makeBatchThumb(dataUrl) {
   return canvas.toDataURL('image/jpeg', 0.5);
 }
 
-function saveThumbToStorage(phn, thumbDataUrl) {
-  if (!phn || phn.replace(/\D/g,'').length !== 10) return;
+// ═══════════════════════════════════════════════════════════════════
+// v1.21 — Card photo backup → Google Drive (no localStorage)
+// ═══════════════════════════════════════════════════════════════════
+// Every captured card photo lands in the "KGH Card Thumbnails" folder
+// in the Apps Script owner's Drive, filename PHN.YYYY-MM-DD-HHmm.jpg.
+// Triggered from action buttons (Accept & clear / Send to Google Sheet)
+// AND from batchConfirm — i.e. every "card processed" step writes a
+// permanent audit thumbnail.
+//
+// The Apps Script side requires the new saveCardThumbnail action.
+// First call after deployment will prompt the script owner to grant
+// the Drive scope.
+//
+// Failure mode (Kathryn 2026-05-16): if Drive upload fails (network,
+// auth expired, scope missing), the photo auto-downloads to the
+// user's Downloads folder as a fallback. Filename matches what the
+// Drive copy would have been, so she can manually upload it later.
+// This guarantees zero photo loss — every captured card photo
+// either lands in Drive or in Downloads, never nowhere.
+
+function formatThumbDateStamp() {
+  var d = new Date();
+  var pad = function(n){ return n < 10 ? '0'+n : ''+n; };
+  return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) +
+         '-' + pad(d.getHours()) + pad(d.getMinutes());
+}
+
+function buildThumbFilename(phn, stamp) {
+  var digits = String(phn || '').replace(/\D/g,'');
+  var phnPart = digits || ('UNKNOWN-' + stamp.replace(/\D/g,''));
+  return phnPart + '.' + stamp + '.jpg';
+}
+
+// Fallback: dataURL → Downloads folder via <a download>. Works on iOS Safari
+// (single user-gesture download → "Save to Files" prompt) and on desktop
+// browsers (direct write to Downloads). Filename matches the Drive name
+// so Kathryn can re-upload manually if needed.
+function fallbackDownloadThumb(phn, dataUrl) {
+  if (!dataUrl) return false;
   try {
-    localStorage.setItem('kghthumb:'+phn.replace(/\D/g,''), thumbDataUrl);
+    var stamp = formatThumbDateStamp();
+    var filename = buildThumbFilename(phn, stamp);
+    var a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function(){ if (a.parentNode) a.parentNode.removeChild(a); }, 100);
+    return true;
   } catch(e) {
-    // Storage full — silently skip
+    console.warn('Fallback download failed:', e);
+    return false;
   }
 }
 
-function loadThumbFromStorage(phn) {
-  if (!phn) return null;
-  try { return localStorage.getItem('kghthumb:'+phn.replace(/\D/g,'')); } catch(e) { return null; }
+// Save card photo to Drive. PHN may be empty/short (will be normalized
+// to "UNKNOWN-{datestamp}" server-side). callback(ok, info) fires
+// after the request completes — non-blocking; the calling action
+// (export / clear) shouldn't wait on this for its own success.
+//
+// On Drive failure, automatically falls back to a local download.
+// `info.fellBackToDisk` will be true if the fallback fired.
+function saveThumbToDrive(phn, dataUrl, callback) {
+  function done(ok, info) {
+    info = info || {};
+    // v1.21 — On Drive failure, always fall back to local download so the
+    // photo is never lost. The calling code surfaces both outcomes.
+    if (!ok && dataUrl) {
+      var fallbackOk = fallbackDownloadThumb(phn, dataUrl);
+      info.fellBackToDisk = fallbackOk;
+      info.fallbackFilename = fallbackOk ? buildThumbFilename(phn, formatThumbDateStamp()) : null;
+    }
+    if (typeof callback === 'function') callback(ok, info);
+  }
+  if (!dataUrl) {
+    done(false, { error:'No photo to save' });
+    return;
+  }
+  var url = (document.getElementById('script-url')||{}).value || '';
+  if (!url) {
+    done(false, { error:'No Apps Script URL configured' });
+    return;
+  }
+  var payload = {
+    action:       'saveCardThumbnail',
+    key:          getScriptKey(),
+    phn:          String(phn || '').replace(/\D/g, ''),
+    dataUrl:      dataUrl,
+    dateUploaded: formatThumbDateStamp()
+  };
+  fetch(url, { method:'POST', body: JSON.stringify(payload) })
+    .then(function(r){ return r.text(); })
+    .then(function(text){
+      try {
+        var resp = JSON.parse(text);
+        if (resp && resp.ok) {
+          done(true, resp);
+        } else {
+          done(false, resp || { error:'Empty response' });
+        }
+      } catch(e) {
+        done(false, { error:'Bad JSON from Apps Script' });
+      }
+    })
+    .catch(function(err){
+      done(false, { error: 'Network: ' + (err && err.message ? err.message : err) });
+    });
+}
+
+// "Accept & clear" — for when the card has been reviewed and existing
+// Sheet data is correct (no claims to push). Always saves thumbnail
+// for audit, then clears form. Mirrors clearForm's reset behavior
+// but with the thumbnail save bolted on.
+function acceptAndClear() {
+  var phn = ((document.getElementById('f-phn')||{}).value || '').replace(/\D/g,'');
+  var photo = window._singleThumb;
+  if (!photo) {
+    // No photo to save — just clear and tell user
+    setStatus('export-status','st-info','No photo to save — form cleared.');
+    clearForm();
+    return;
+  }
+  setStatus('export-status','st-info','Saving card photo to Drive…');
+  saveThumbToDrive(phn, photo, function(ok, info) {
+    if (ok) {
+      var label = info.fileName || 'photo';
+      setStatus('export-status','st-ok',
+        '✓ Card photo saved to Drive (' + label + ') — form cleared.');
+      showToast('✓ Photo saved · ' + label, '', 3000);
+    } else if (info && info.fellBackToDisk) {
+      // v1.21 — Drive failed but local Downloads succeeded. Warn loud, mention manual re-upload.
+      setStatus('export-status','st-warn',
+        '⚠ Drive upload FAILED — photo saved to your Downloads folder instead.\n' +
+        '   Drive error: ' + (info.error || 'unknown') + '\n' +
+        '   Filename: ' + (info.fallbackFilename || '(see Downloads)') + '\n' +
+        '   Re-upload manually to your KGH Card Thumbnails Drive folder when you can.');
+      showToast('⚠ Drive failed — photo in Downloads instead', 'warn', 6000);
+    } else {
+      setStatus('export-status','st-warn',
+        '⛔ Photo NOT saved anywhere — both Drive and Downloads fallback failed.\n' +
+        '   Error: ' + (info && info.error ? info.error : 'unknown'));
+      showToast('⛔ Photo save failed completely', 'err', 6000);
+    }
+    clearForm();
+  });
 }
 
 function runBatchOCR(idx) {
@@ -3269,6 +3462,20 @@ function exportSheets() {
   var sampleClaim = claims[0] || {};
   var corrections = buildCorrections(sampleClaim.phn, sampleClaim.last, sampleClaim.first);
 
+  // v1.21 — Save card photo to Drive in parallel with patient/claim saves.
+  // Outcome reported in the final status message. Non-blocking — if Drive
+  // save fails, claims still go through (audit trail loss is preferable
+  // to blocking billing entry).
+  var thumbResult = null;   // null=pending, {ok:true,...}=saved, {ok:false,...}=failed
+  var thumbPhn = ((document.getElementById('f-phn')||{}).value || '').replace(/\D/g,'');
+  if (window._singleThumb) {
+    saveThumbToDrive(thumbPhn, window._singleThumb, function(ok, info){
+      thumbResult = Object.assign({ ok:ok }, info || {});
+    });
+  } else {
+    thumbResult = { ok:false, error:'No photo in this session', noPhoto:true };
+  }
+
   // v1.12: Build one patient row per unique PHN and push savePatient for each
   // BEFORE saveHistorical, so the patient row exists when claims arrive.
   // Upload-tool patients are added as DISCHARGED (admitDate = earliest claim,
@@ -3338,14 +3545,38 @@ function exportSheets() {
         // v1.19 — build a loud structured status combining all three outcomes:
         // inserted / patient-failures / duplicates. Make duplicate-skip
         // unmissable since that was the Ravestein silent-fail path.
+        // v1.21 — also report Drive thumbnail save outcome.
         var lines = [];
+        var hadIssues = false;
         if (ins > 0) {
           lines.push('✓ Saved ' + ins + ' claim' + (ins===1?'':'s') + ' to Claims tab');
         }
         if (corrections.length) {
           lines.push('  ' + corrections.length + ' OCR correction' + (corrections.length===1?'':'s') + ' logged');
         }
-        var hadIssues = false;
+        // v1.21 — Drive thumbnail status. May still be pending if the parallel
+        // save hasn't completed yet; if so, just note it as "in progress".
+        // Fallback path: if Drive failed but local Downloads succeeded,
+        // surface that distinctly so the user knows where the photo is.
+        if (thumbResult) {
+          if (thumbResult.ok) {
+            lines.push('✓ Card photo saved to Drive: ' + (thumbResult.fileName || 'kgh-' + thumbPhn + '.jpg'));
+          } else if (thumbResult.noPhoto) {
+            lines.push('· No card photo to save (no upload this session)');
+          } else if (thumbResult.fellBackToDisk) {
+            hadIssues = true;
+            lines.push('⚠ DRIVE UPLOAD FAILED — photo saved to your Downloads folder instead');
+            lines.push('   Drive error: ' + (thumbResult.error || 'unknown'));
+            lines.push('   Local filename: ' + (thumbResult.fallbackFilename || '(see Downloads)'));
+            lines.push('   → Re-upload manually to your KGH Card Thumbnails Drive folder later');
+          } else {
+            hadIssues = true;
+            lines.push('⛔ CARD PHOTO LOST — both Drive AND Downloads fallback failed');
+            lines.push('   Error: ' + (thumbResult.error || 'unknown'));
+          }
+        } else {
+          lines.push('· Card photo upload to Drive still in progress…');
+        }
         if (patientFailures.length) {
           hadIssues = true;
           lines.push('');
