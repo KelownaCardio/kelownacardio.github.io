@@ -1,9 +1,63 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology Billing — main app
-  Version:    v3.33
-  Built:      2026-05-13 UTC
+  Version:    v3.61
+  Built:      2026-05-17 UTC
   Repo:       github.com/KelownaCardio/kelownacardio.github.io
+
+  Changes in this build (v3.61) — Add Patient claim card cleanup:
+    - Removed redundant "Lmtd Consult" tab from Add Patient claim card.
+      Full / Limited consult selection is handled by the 33010/33012
+      buttons already present inside the consult area.
+    - Added live modifier banner (night / evening / weekend / daytime)
+      below the MOST pill in the Add Patient consult area, mirroring
+      the behaviour of the standalone consult screen. Updates on date
+      and start time changes. Shows increment tier if consult > 45 min.
+    - End time hint text changed to "Defaults to 50min, adjust as needed".
+    - Start time change now auto-updates end time to start + 50 min
+      (same as standalone consult screen).
+    - Removed all _apClaimType === 'lmtd' branches; lmtd is now
+      handled entirely by the 33012 toggle inside the consult area.
+    - REVERTS v3.59. CCU_DAILY is now the canonical placeholder fee for
+      every CCU day. The Apps Script ccuConsolidateForExport() rolls
+      groups of CCU_DAILY taps into properly-banded 1411/1421/1431 rows
+      with units at export time. This eliminates the band-at-rest
+      correctness problem and matches the BC MSP standard form
+      (one row per band with units, not one row per day).
+    - All CCU write paths reverted: batchRound (ward sweep),
+      quickCCUBtn, claim-screen CCU button, calendar gap-fill picker,
+      discharge modal CCU Daily buttons (both branches). They all
+      write 'CCU_DAILY' and addClaim no longer intercepts it.
+    - CCU_DAILY restored in the claim edit fee dropdown as
+      "CCU day (placeholder, export bands)".
+    - The ccuFeeForDate(p, dateStr) and ccuFeeForToday(p) helpers
+      remain in the file but are no longer called from billing paths.
+      Kept in case future work needs them (e.g. showing the projected
+      band on a confirmation screen before submit). Effectively dead
+      code for now.
+    - User-facing label simplified: quickCCUBtn shows "CCU day" toast
+      instead of the per-band label ("CCU day 1 (1411)" etc), since
+      the per-day band is meaningless until export.
+
+  Changes in this build (v3.59) — CCU_DAILY elimination [REVERTED in v3.60]:
+    - Briefly switched to band-on-write (compute 1411/1421/1431 at tap
+      time). Created band-at-rest correctness issues after manual
+      edits and mid-episode backfills. Reverted by user request in
+      favour of the placeholder + export-consolidation approach.
+
+  Changes in this build (v3.58) — Patient card style improvements:
+    - DOB removed from patient card meta line (age+sex already shown).
+    - Dx (ICD description + code) added after MRP on all card views
+      (ward list, alphabetical, off-service). Format: "Dx: Description (code)".
+    - Quick-tap action buttons (Directive / Combined daily / + Claim) now
+      share a single full-width row using flex:1 on each button (nowrap).
+    - CCU/CSICU/ICU consulting patients now correctly show Directive +
+      Combined daily quick-tap buttons (not CCU daily — we only claim CCU
+      daily when Cardiology is MRP). showsCCUDaily() now checks role===mrp
+      exclusively (dropped legacy care===ccu fallback).
+    - Ward room-number circle centered vertically in card (align-items:center
+      on .wp). Room number font reduced 10px→8px for clearer name hierarchy.
+      Removed margin-top offsets on .wp-pos and .wp-pos-wrap.
 
   Changes in this build (v3.33) — Meditech import auto-discharge:
     - Cardiologist matchers (inferMRP, inferCare) replaced with the
@@ -188,10 +242,10 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 
 /* WARD LIST */
 .ward-list { display:flex; flex-direction:column; gap:5px; }
-.wp { display:flex; align-items:flex-start; gap:8px; padding:8px 10px; border:.5px solid var(--border); border-radius:var(--r); background:var(--surface); cursor:pointer; }
+.wp { display:flex; align-items:center; gap:8px; padding:8px 10px; border:.5px solid var(--border); border-radius:var(--r); background:var(--surface); cursor:pointer; }
 .wp.done      { border-color:#7ec49a; background:var(--green-bg); }
 .wp.directive { border-color:#d4a84a; }
-.wp-pos { min-width:24px; height:22px; padding:0 6px; border-radius:11px; background:var(--surface2); display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:var(--text2); flex-shrink:0; margin-top:2px; letter-spacing:-.2px; }
+.wp-pos { min-width:24px; height:22px; padding:0 6px; border-radius:11px; background:var(--surface2); display:flex; align-items:center; justify-content:center; font-size:8px; font-weight:700; color:var(--text2); flex-shrink:0; margin-top:0; letter-spacing:-.2px; }
 .wp-pos.done { background:#7ec49a; color:#fff; }
 /* Card tints — persist across screens for visual continuity */
 .card-patient  { background:#f4f2f9; border-color:rgba(46,26,110,.10); }
@@ -209,14 +263,15 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 #ls-on.on  { color:var(--blue-t);  background:var(--blue-bg);  box-shadow:0 1px 3px rgba(46,26,110,.18); }
 #ls-off.on { color:var(--amber-t); background:var(--amber-bg); box-shadow:0 1px 3px rgba(160,96,16,.18); }
 
-.wp-pos-wrap { position:relative; flex-shrink:0; margin-top:2px; }
+.wp-pos-wrap { position:relative; flex-shrink:0; margin-top:0; }
 .wp-pos-badge { position:absolute; top:-4px; right:-4px; width:11px; height:11px; border-radius:50%; background:var(--green); display:flex; align-items:center; justify-content:center; border:1.5px solid var(--surface); }
 .wp-pos-badge svg { width:6px; height:6px; stroke:#fff; fill:none; stroke-width:3; }
 .wp-info { flex:1; min-width:0; }
 .wp-name { font-size:13px; font-weight:700; letter-spacing:-.1px; line-height:1.25; }
 .wp-meta { font-size:10px; color:var(--text2); margin-top:1px; }
 .wp-chips{ display:flex; gap:4px; margin-top:3px; flex-wrap:wrap; }
-.wp-acts { display:flex; gap:4px; margin-top:5px; flex-wrap:wrap; }
+.wp-acts { display:flex; gap:3px; margin-top:5px; flex-wrap:nowrap; }
+.wp-acts .bb { flex:1; min-width:0; text-align:center; padding:4px 2px; font-size:clamp(8px,1.15vw,10px); overflow:hidden; text-overflow:ellipsis; }
 .ro-col { display:flex; flex-direction:column; gap:3px; flex-shrink:0; padding-top:4px; }
 .ro { width:20px; height:20px; border:.5px solid var(--border2); border-radius:4px; background:none; cursor:pointer; font-size:10px; color:var(--text2); display:flex; align-items:center; justify-content:center; font-family:inherit; }
 .ro:hover { background:var(--surface2); }
@@ -802,7 +857,6 @@ input[type=file] { display:none; }
     <div class="card-title">Claim</div>
     <div class="fl" style="margin-bottom:10px">
       <button class="ct-btn ct-on-consult" id="ap-ct-consult" style="flex:1" onclick="apSelectClaimType('consult')">Consult</button>
-      <button class="ct-btn" id="ap-ct-lmtd" style="flex:1" onclick="apSelectClaimType('lmtd')">Lmtd Consult</button>
       <button class="ct-btn" id="ap-ct-other" style="flex:1" onclick="apSelectClaimType('other')">Other Claim</button>
     </div>
     <div id="ap-claim-area"></div>
@@ -1986,11 +2040,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.60-2026-05-18-no-dx-on-cards';
+var BUILD_ID    = 'v3.62-2026-05-18-remove-dx-from-cards';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.60';
+var APP_VERSION = 'v3.62';
 var APP_BUILT   = '2026-05-18';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -2058,6 +2112,7 @@ async function loadLocal() {
         if (!c.icd       && pat.icd)       c.icd       = pat.icd;
       }
       if (!c.icd)       c.icd       = '3062';
+      if (!c.startTime) c.startTime = '08:00';
       if (c.endTime) c.endTime = fmtStartTime(c.endTime);
     });
   }
@@ -2355,6 +2410,7 @@ async function syncFromSheets() {
           if (!c.icd       && pat.icd)       { c.icd       = pat.icd;       changed = true; }
         }
         if (!c.icd)       { c.icd = '3062'; changed = true; }
+        if (!c.startTime) { c.startTime = '08:00'; changed = true; }
         if (c.endTime) c.endTime = fmtStartTime(c.endTime);
         if (c.dob) {
           var cleanDob = fmtClaimDate(c.dob);
@@ -2901,7 +2957,7 @@ function ccuConsolidate() {
       // Day 1 of this episode → 1411 (always 1 unit)
       out.push(Object.assign({}, base, {
         fee:'1411', feeCode:'1411', units:1,
-        date:ep[0].date, id:'ccu1_' + epId, notes:''
+        date:ep[0].date, id:'ccu1_' + epId
       }));
 
       // Days 2–7 of this episode → 1421 (up to 6 units)
@@ -2909,7 +2965,7 @@ function ccuConsolidate() {
         var band2 = Math.min(n - 1, 6);
         out.push(Object.assign({}, base, {
           fee:'1421', feeCode:'1421', units:band2,
-          date:ep[1].date, id:'ccu2_' + epId, notes:''
+          date:ep[1].date, id:'ccu2_' + epId
         }));
       }
 
@@ -2918,7 +2974,7 @@ function ccuConsolidate() {
         var band3 = n - 7;
         out.push(Object.assign({}, base, {
           fee:'1431', feeCode:'1431', units:band3,
-          date:ep[7].date, id:'ccu3_' + epId, notes:''
+          date:ep[7].date, id:'ccu3_' + epId
         }));
       }
     });
@@ -2927,24 +2983,30 @@ function ccuConsolidate() {
   return out;
 }
 
-// Returns the correct CCU fee code for today based on consecutive episode length.
+// Returns the correct CCU fee code for a given date based on consecutive
+// episode length ending at that date.
 //   Day 1 of episode → 1411 | Days 2–7 → 1421 | Days 8+ → 1431
 // Episode resets on any gap > 1 calendar day in CCU claims.
-function ccuFeeForToday(p) {
+// dateStr is DD/MM/YYYY (Sheet storage format). Defaults to TODAY.
+// v3.59: generalized from ccuFeeForToday; CCU_DAILY is now a deprecated tag
+// (still recognized in history scan so existing rows don't break banding logic).
+function ccuFeeForDate(p, dateStr) {
   var CCU_FEES = ['CCU_DAILY','1411','1421','1431'];
   var DAY_MS   = 86400000;
+  var targetMs = parseDMYsafe(dateStr || TODAY);
+  if (!targetMs) return '1411';
   var taps = st.claims
-    .filter(function(c) { return samePhn(c.phn, p.phn) && CCU_FEES.indexOf(c.fee) !== -1; })
-    .sort(function(a, b) { return parseDMYsafe(a.date) - parseDMYsafe(b.date); });
+    .filter(function(c) { return samePhn(c.phn, p.phn) && CCU_FEES.indexOf(c.fee) !== -1; });
   if (!taps.length) return '1411';
-  var todayMs = parseDMYsafe(TODAY);
   var dateMsSet = {};
   taps.forEach(function(c) {
     var ms = parseDMYsafe(c.date);
-    if (ms && ms < todayMs) dateMsSet[ms] = true;
+    // Only count days STRICTLY before the target — we're computing the
+    // band FOR the target date, so it doesn't count itself.
+    if (ms && ms < targetMs) dateMsSet[ms] = true;
   });
   var consec = 0;
-  var checkMs = todayMs - DAY_MS;
+  var checkMs = targetMs - DAY_MS;
   while (dateMsSet[checkMs]) { consec++; checkMs -= DAY_MS; }
   var dayNum = consec + 1;
   if (dayNum === 1) return '1411';
@@ -2952,45 +3014,17 @@ function ccuFeeForToday(p) {
   return '1431';
 }
 
-// Returns the correct CCU fee code for an arbitrary past/future date by tracing
-// the consecutive episode that date would belong to. Used by calendar gap-fill
-// so claims are stored with the real MSC code directly, never CCU_DAILY.
-//
-// Algorithm: walk back from (dateStr - 1 day) following consecutive CCU days
-// to find the episode start; dayNum = distance from episode start + 1.
-// Any gap > 1 day resets the episode → day 1 (1411).
-function ccuFeeForDate(p, dateStr) {
-  var CCU_FEES = ['CCU_DAILY', '1411', '1421', '1431'];
-  var DAY_MS   = 86400000;
-  var targetMs = parseDMYsafe(dateStr);
-  if (!targetMs) return '1411';
-
-  // Build a set of existing CCU dates for this patient, excluding targetMs itself
-  var dateSet = {};
-  st.claims.forEach(function(c) {
-    if (!samePhn(c.phn, p.phn)) return;
-    if (CCU_FEES.indexOf(c.fee) === -1) return;
-    var ms = parseDMYsafe(c.date);
-    if (ms && ms !== targetMs) dateSet[ms] = true;
-  });
-
-  if (!Object.keys(dateSet).length) return '1411';
-
-  var prevDay = targetMs - DAY_MS;
-  if (!dateSet[prevDay]) return '1411'; // No CCU the day before → new episode
-
-  // Walk back to episode start
-  var episodeStart = prevDay;
-  while (dateSet[episodeStart - DAY_MS]) episodeStart -= DAY_MS;
-
-  var dayNum = Math.round((targetMs - episodeStart) / DAY_MS) + 1;
-  if (dayNum === 1) return '1411';
-  if (dayNum <= 7)  return '1421';
-  return '1431';
-}
+// Backward-compat wrapper — TODAY band for patient p.
+function ccuFeeForToday(p) { return ccuFeeForDate(p, TODAY); }
 
 // ── Add Claim Helper ───────────────────────────────────
 function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, performingAlias) {
+  // v3.60: CCU_DAILY is the canonical placeholder for CCU days. The
+  // Apps Script ccuConsolidateForExport() groups them by patient+alias,
+  // segments into consecutive episodes, and emits properly-banded
+  // 1411/1421/1431 rows with units at export time. So we DELIBERATELY
+  // do not re-band CCU_DAILY at write time anymore — the per-day band
+  // is meaningless until consolidation runs. Reverts the v3.59 guard.
   // Guard: never write an MRP service string into refby/refbyName
   if (looksLikeMRPService(p.refbyName)) {
     p.refbyName = '';
@@ -3004,9 +3038,9 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, 
     if (!p.refbyName && inherited.refbyName) { p.refbyName = inherited.refbyName; _patUpdated = true; }
     if (!p.icd       && inherited.icd)       { p.icd       = inherited.icd;       _patUpdated = true; }
   }
-  // Use provided start time; daily/CCU codes have no start time (left blank)
+  // Always stamp a start time — use provided value or current clock
   var _now = new Date();
-  var _start = startTime || '';
+  var _start = startTime || (pad(_now.getHours()) + ':' + pad(_now.getMinutes()));
   var c = {
     id:        'c' + Date.now() + Math.floor(Math.random() * 9999),
     alias:     performingAlias || st.doc.alias,
@@ -3512,10 +3546,9 @@ function offRow(p) {
   // Row 2: room number (prominent) + last-seen chip
   var roomStr  = p.bed ? esc(String(p.bed)) : (esc(wardLabel(p.ward) || '—'));
   var lastSeen = lastSeenByGroup(p);
-  // Row 3: DOB · Age (Sex) · MRP
-  var dobStr   = p.dob ? esc(dispDate(p.dob)) : '';
+  // Row 3: Age (Sex) · MRP · Dx
   var ageSex   = ageGenderShort(p);
-  var row3     = (dobStr ? dobStr + ' &bull; ' : '') + esc(ageSex) + ' &bull; ' + mrpLabel(p) + lastBilledChip(p);
+  var row3     = esc(ageSex) + ' &bull; ' + mrpLabel(p) + lastBilledChip(p);
   return '<div class="alpha-row' + (dn ? ' done' : '') + '">' +
     '<div class="alpha-av av-off" style="font-size:9px;font-weight:800;letter-spacing:-.3px" data-pid="' + p.id + '" onclick="openLocationEditEl(this)" title="Tap to move patient">' + esc(wardAbbr) + '</div>' +
     '<div class="wp-main">' +
@@ -3526,12 +3559,12 @@ function offRow(p) {
         '</button>' +
       '</div>' +
       '<div style="display:flex;align-items:baseline;gap:7px;margin-top:1px;margin-bottom:2px">' +
-        '<span style="font-size:14px;font-weight:700;color:var(--text)">' + roomStr + '</span>' +
+        '<span style="font-size:11px;font-weight:700;color:var(--text2)">' + roomStr + '</span>' +
         lastSeen +
       '</div>' +
       '<div class="wp-meta">' + row3 + '</div>' +
       '<div class="wp-acts">' + quickActBtns(p) +
-        '<div style="width:100%"><button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button></div>' +
+        '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
       '</div>' +
     '</div>' +
     '<div class="wp-side-btns">' +
@@ -3563,12 +3596,9 @@ function calcAgeGender(p) {
       if (!isNaN(yr) && yr >= 0 && yr < 130) age = String(yr);
     }
   }
-  // Format: DOB · AgeGender  e.g. "15/03/1948 · 77M"
+  // Format: AgeGender  e.g. "77M"  (DOB removed — age+gender already shown)
   var ageGender = (age + (p.sex || '')) || '';
-  if (p.dob && ageGender) return esc(dispDate(dobClean)) + ' &bull; ' + ageGender;
-  if (p.dob)              return esc(dispDate(dobClean));
-  if (ageGender)          return ageGender;
-  return '—';
+  return ageGender || '—';
 }
 
 function alphaRow(p) {
@@ -3642,10 +3672,10 @@ function wardActBtns(p) {
 }
 
 function showsCCUDaily(p) {
-  // CCU daily shows when cardiology is MRP (role=mrp) on CCU/ICU wards
+  // CCU daily only when Cardiology is MRP — consulting cardiologists get Directive/Combined daily
   var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
   if (icuWards.indexOf(p.ward) === -1) return false;
-  return p.role === 'mrp' || p.care === 'ccu'; // support both old and new field
+  return p.role === 'mrp';
 }
 
 // Instantly style a quick-tap button as done (dark green ✓) before render().
@@ -3668,7 +3698,9 @@ function batchRound(ward) {
   });
   if (!pts.length) { showToast('All ' + wardLabel(ward) + ' patients already rounded'); return; }
   pts.forEach(function(p) {
-    var fee = ward === 'CCU' ? ccuFeeForToday(p) : '33008';
+    // v3.60: CCU_DAILY placeholder for CCU ward. Export-time consolidation
+    // assigns the correct 1411/1421/1431 band based on episode position.
+    var fee = ward === 'CCU' ? 'CCU_DAILY' : '33008';
     addClaim(p, fee, fee, 1, TODAY, 'I');
   });
   sv('patients', st.patients);
@@ -3923,14 +3955,16 @@ function quickCCUBtn(btn) {
     return;
   }
   var p   = getP(pid);
-  var fee = ccuFeeForToday(p);
-  var feeLabels = { '1411':'CCU day 1 (1411)', '1421':'CCU days 2–7 (1421)', '1431':'CCU days 8+ (1431)' };
-  bbDone(btn, feeLabels[fee] || fee);
+  // v3.60: write CCU_DAILY placeholder; export consolidates to 1411/1421/1431
+  // based on consecutive episode position. The user-facing label stays
+  // friendly ("CCU day") since the per-day band isn't meaningful until export.
+  var fee = 'CCU_DAILY';
+  bbDone(btn, 'CCU day');
   addClaim(p, fee, fee, 1, TODAY, 'I');
-  p.lastBilled   = feeLabels[fee] || fee;
+  p.lastBilled   = 'CCU day';
   sv('patients', st.patients);
   sv('claims', st.claims);
-  showToast('✓ ' + (feeLabels[fee] || fee) + ' — ' + p.last);
+  showToast('✓ CCU day — ' + p.last);
   requestAnimationFrame(render);
 }
 
@@ -4599,8 +4633,6 @@ function openPatientSummary(pid) {
   if (p.refbyName || p.refby) {
     html += '<div style="font-size:11px;color:var(--blue-t);opacity:.8;margin-top:7px">Referred by ' + esc(p.refbyName || p.refby) + (p.refby ? ' #' + p.refby : '') + '</div>';
   }
-  if (p.icd) {
-  }
   html += '</div>'; // end demographics card
 
   // ── Claims section — toggle (Calendar default) + List/Calendar views (v3.27) ─
@@ -5153,8 +5185,8 @@ function _cvFillClaim(pid, dateStr, type, note, icdOverride) {
 
   var alias = st.doc.alias;
   if (type === 'ccu') {
-    var ccuFee = ccuFeeForDate(p, dateStr);
-    addClaim(p, ccuFee, ccuFee, 1, dateStr, 'I', null, note || null, null, alias);
+    // v3.60: write CCU_DAILY placeholder; export consolidates to 1411/1421/1431.
+    addClaim(p, 'CCU_DAILY', 'CCU_DAILY', 1, dateStr, 'I', null, note || null, null, alias);
   } else if (type === 'daily') {
     addClaim(p, '33008', '33008', 1, dateStr, 'I', null, note || null, null, alias);
   } else if (type === 'directive') {
@@ -5276,14 +5308,10 @@ function icdShortLabel(code) {
   return 'ICD-9 ' + c;    // fallback for custom/unknown codes
 }
 
-// Description only — strips the trailing "(code)" for patient card display.
-// Returns empty string for unknown/default codes so nothing renders.
+// Returns only the text description, no code suffix — e.g. "Heart Failure"
 function icdDescOnly(code) {
-  if (!code) return '';
-  var c = String(code).trim();
-  var dx = DIAGNOSES.find(function(d) { return String(d.code).trim() === c; });
-  if (!dx) return '';
-  return dx.label.replace(/\s*\(\d+\)\s*$/, '').trim();
+  var full = icdShortLabel(code);
+  return full.replace(/\s*\([^)]+\)\s*$/, '').trim() || full;
 }
 
 // Get short human label for a fee code
@@ -5366,7 +5394,8 @@ function openClaimEdit(btn) {
     { code:'33012', label:'Limited consultation (33012)' },
     { code:'33008', label:'Daily rounds / MRP (33008)' },
     { code:'33006', label:'Directive visit (33006)' },
-    { code:'CCU_DAILY', label:'CCU daily tap' },
+    // v3.60: CCU daily placeholder restored — export consolidates to 1411/1421/1431.
+    { code:'CCU_DAILY', label:'CCU day (placeholder, export bands)' },
     { code:'1411',  label:'CCU day 1 (1411)' },
     { code:'1421',  label:'CCU days 2–7 (1421)' },
     { code:'1431',  label:'CCU days 8–30 (1431)' },
@@ -6445,8 +6474,8 @@ function submitCCU(isDuplicate) {
   updatePatientFromClaimForm(p);
   if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
   var alias = getPerformingAlias();
-  var fee = ccuFeeForToday(p);
-  addClaim(p, fee, fee, 1, TODAY, 'I', null, null, null, alias);
+  // v3.60: write CCU_DAILY placeholder; export consolidates.
+  addClaim(p, 'CCU_DAILY', 'CCU_DAILY', 1, TODAY, 'I', null, null, null, alias);
   sv('patients', st.patients); sv('claims', st.claims);
   showToast('CCU daily recorded' + (isDuplicate ? ' (duplicate)' : '') + ' — ' + p.last);
   closeClaimScreen();
@@ -7006,21 +7035,15 @@ var _apClaimType = 'consult';
 
 function apSelectClaimType(type) {
   _apClaimType = type;
-  ['consult','lmtd','other'].forEach(function(t) {
+  ['consult','other'].forEach(function(t) {
     var btn = document.getElementById('ap-ct-' + t);
     if (btn) btn.className = 'ct-btn' + (t === type ? ' ct-on-consult' : '');
   });
   var area = document.getElementById('ap-claim-area');
   if (!area) return;
-  if (type === 'consult' || type === 'lmtd') {
+  if (type === 'consult') {
     area.innerHTML = buildApConsultArea();
     initAddPatientConsult();
-    if (type === 'lmtd') {
-      var el10 = document.getElementById('f-c-33010');
-      var el12 = document.getElementById('f-c-33012');
-      if (el10) el10.className = 'ct-btn';
-      if (el12) el12.className = 'ct-btn ct-on-consult';
-    }
   } else {
     area.innerHTML = buildApOtherClaimArea();
     var dateEl = document.getElementById('ap-oc-date');
@@ -7054,11 +7077,12 @@ function buildApConsultArea() {
   h += '<button class="most-btn on" id="f-c-most" onclick="toggleApMost()">' +
        '<svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>' +
        '+ MOST (78720)</button>';
-  h += '<div class="fl" style="margin-top:8px">';
-  h += '<div class="f1"><label>Date</label><input type="date" id="f-c-date"></div>';
-  h += '<div class="f1"><label>Start time</label><input type="time" id="f-c-start"></div>';
+  h += '<div id="f-c-mod" style="margin-top:6px"></div>';
+  h += '<div class="fl" style="margin-top:4px">';
+  h += '<div class="f1"><label>Date</label><input type="date" id="f-c-date" oninput="updateApConsultUI()"></div>';
+  h += '<div class="f1"><label>Start time</label><input type="time" id="f-c-start" oninput="updateApConsultUI()"></div>';
   h += '</div>';
-  h += '<div class="fl"><div class="f1"><label>End time <span style="font-size:10px;color:var(--text3)">— adjust if &lt; 45 min</span></label><input type="time" id="f-c-end"></div></div>';
+  h += '<div class="fl"><div class="f1"><label>End time <span style="font-size:10px;color:var(--text3)">— Defaults to 50min, adjust as needed</span></label><input type="time" id="f-c-end" oninput="updateApConsultUI()"></div></div>';
   h += '<label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(optional)</span></label>';
   h += '<textarea id="f-c-notes" rows="2" placeholder="Optional" autocorrect="off" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:6px"></textarea>';
   h += '<div style="border-top:.5px solid var(--border);margin:4px 0 10px"></div>';
@@ -7181,7 +7205,7 @@ async function apSubmit(addToList, _skipDupCheck) {
   else if (String(phn).replace(/\D/g,'').length !== 10) addMissing.push('phn-len');
   if (!gv('f-refby-num') && !gv('f-refby'))   addMissing.push('refby');
   if (!icd)                                    addMissing.push('icd');
-  if (_apClaimType === 'consult' || _apClaimType === 'lmtd') {
+  if (_apClaimType === 'consult') {
     if (!(document.getElementById('f-c-date')  || {}).value) addMissing.push('date');
     if (!(document.getElementById('f-c-start') || {}).value) addMissing.push('start time');
     if (!(document.getElementById('f-c-end')   || {}).value) addMissing.push('end time');
@@ -7303,7 +7327,7 @@ async function apSubmit(addToList, _skipDupCheck) {
     var cPerf = document.getElementById('f-c-performing-doc');
     if (cPerf && cPerf.value) cAlias = cPerf.value;
 
-    if (_apClaimType === 'consult' || _apClaimType === 'lmtd') {
+    if (_apClaimType === 'consult') {
       var cCode    = (document.getElementById('f-c-33010') || {}).classList && document.getElementById('f-c-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
       var cDateISO = (document.getElementById('f-c-date')  || {}).value || '';
       var cStart   = (document.getElementById('f-c-start') || {}).value || '';
@@ -7375,6 +7399,7 @@ function initAddPatientConsult() {
   if (el10) el10.className = 'ct-btn ct-on-consult';
   if (el12) el12.className = 'ct-btn';
   injectApPerformingDoc();
+  updateApConsultUI();
 }
 
 function toggleApConsultCode(code) {
@@ -7387,6 +7412,50 @@ function toggleApMost() {
   document.getElementById('f-c-most').className = 'most-btn' + (_apMostOn ? ' on' : '');
 }
 
+function updateApConsultUI() {
+  var start   = gv('f-c-start');
+  var end     = gv('f-c-end');
+  var dateISO = gv('f-c-date');
+
+  // If start time changed, auto-update end to start + 50 min
+  var changed = (typeof event !== 'undefined' && event && event.target) ? event.target.id : '';
+  if (start && changed === 'f-c-start') {
+    var endEl = document.getElementById('f-c-end');
+    if (endEl) endEl.value = minsToTime(t2m(start) + 50);
+    end = gv('f-c-end');
+  }
+
+  var modBase  = getModifier(start, dateISO);
+  var hasInc   = consultHasIncrement(start, end);
+  var modInc   = hasInc ? getModifierForIncrement(start, dateISO) : null;
+  var incUnits = consultIncUnits(start, end);
+  var modEl    = document.getElementById('f-c-mod');
+  if (!modEl) return;
+
+  if (modBase) {
+    var banner = '<div class="mod-box ' + modBase.cls + '" style="margin-bottom:0;border-radius:var(--rsm) var(--rsm) 0 0">' +
+      '<span style="font-weight:700">' + modBase.label + '</span>' +
+      '<span style="font-size:10px;opacity:.75;margin-left:6px">' + modBase.base + ' ×1</span>' +
+      '</div>';
+    if (incUnits > 0) {
+      var incMod = modInc || modBase;
+      banner += '<div class="mod-box ' + incMod.cls + '" style="margin-top:1px;border-radius:0 0 var(--rsm) var(--rsm);opacity:.85">' +
+        '<span>Consult time &gt; 45 min</span>' +
+        '<span style="font-size:10px;font-weight:700;margin-left:6px">' + incMod.inc + ' ×' + incUnits + '</span>' +
+        '</div>';
+    } else {
+      banner += '<div style="font-size:11px;padding:5px 10px;color:var(--text3);' +
+        'border:.5px solid var(--border);border-top:none;border-radius:0 0 var(--rsm) var(--rsm);' +
+        'background:var(--surface2)">Consult ≤ 45 min — no increment</div>';
+    }
+    modEl.innerHTML = banner;
+  } else if (start && dateISO) {
+    modEl.innerHTML = '<div class="mod-box mod-day">✓ Daytime weekday — no call-out modifier</div>';
+  } else {
+    modEl.innerHTML = '';
+  }
+}
+
 function clearAddForm() {
   ['f-last','f-first','f-phn','f-dob'].forEach(function(id) {
     var el = document.getElementById(id); if (el) el.value = '';
@@ -7397,7 +7466,7 @@ function clearAddForm() {
   var ocr = document.getElementById('ocr-bar'); if (ocr) ocr.style.display = 'none';
   // Reset claim type to consult and rebuild claim area
   _apClaimType = 'consult';
-  ['consult','lmtd','other'].forEach(function(t) {
+  ['consult','other'].forEach(function(t) {
     var b = document.getElementById('ap-ct-' + t);
     if (b) b.className = 'ct-btn' + (t === 'consult' ? ' ct-on-consult' : '');
   });
@@ -8200,12 +8269,14 @@ function _dischStep1(pid) {
   var btns = '';
   if (isCCUWard && isMRP) {
     // CCU/ICU ward, MRP role → CCU Daily default
+    // v3.60: write CCU_DAILY placeholder; export consolidates.
     btns += vbtn('CCU Daily',      'CCU_DAILY', 'CCU_DAILY', true);
     btns += vbtn('Daily\n33008',   '33008',     '33008',     false);
     btns += vbtn('Directive',      '33006',     '33006',     false);
   } else if (isMRP) {
     // Ward MRP → Daily 33008 default always
     btns += vbtn('Daily\n33008',   '33008',     '33008',     true);
+    // v3.60: write CCU_DAILY placeholder; export consolidates.
     btns += vbtn('CCU Daily',      'CCU_DAILY', 'CCU_DAILY', false);
     btns += vbtn('Directive',      '33006',     '33006',     false);
   } else {
@@ -8384,12 +8455,8 @@ function purgeOldPatients() {
 function reexportSubmitted() {
   var sub = (st.claims||[]).filter(function(c){ return parseBool(c.submitted); });
   if (!sub.length) { showToast('No submitted claims to re-export'); return; }
-  // CCU_DAILY is a legacy synthetic tap — exclude and let real 1411/1421/1431
-  // rows (stored directly since v3.58) handle CCU in re-exports.
-  var raw = sub.filter(function(c){ return c.fee !== 'CCU_DAILY'; });
-  if (!raw.length) { showToast('No submitted claims to re-export'); return; }
-  _buildAndDownloadCSV(raw, 'iClinic_KGH_reexport_' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '.csv');
-  showToast('Re-exported ' + raw.length + ' submitted claims');
+  _buildAndDownloadCSV(sub, 'iClinic_KGH_reexport_' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '.csv');
+  showToast('Re-exported ' + sub.length + ' submitted claims');
 }
 
 function purgeSubmittedClaims() {
@@ -8436,10 +8503,7 @@ function _buildAndDownloadCSV(claims, filename) {
     // this. Stripping happens here at the boundary, not at storage.
     var icdRaw = String(c.icd || '3062');
     var icdOut = icdRaw.replace(/\./g, '');
-    // CCU banded codes and MOST add-on carry no claim notes in the CSV
-    var _NOTE_FREE = { '1411':1, '1421':1, '1431':1, 'CCU_DAILY':1, '78720':1 };
-    var _notes = _NOTE_FREE[c.fee] ? '' : (c.notes || '');
-    return [doc.num||'',c.alias||'',first,last,pn,c.phn||'','',sex,dob,'','',c.fee,icdOut,'',c.units||1,'100','MSP',c.date,c.startTime||'',_cet(c),_notes,c.refby||'','',rn,loc,'OA040','','','','','','MSP','','','','','',''].join(',');
+    return [doc.num||'',c.alias||'',first,last,pn,c.phn||'','',sex,dob,'','',c.fee,icdOut,'',c.units||1,'100','MSP',c.date,c.startTime||'',_cet(c),c.notes||'',c.refby||'','',rn,loc,'OA040','','','','','','MSP','','','','','',''].join(',');
   });
   var blob=new Blob([hdr+'\n'+rows.join('\n')],{type:'text/csv;charset=utf-8;'});
   var url=URL.createObjectURL(blob);
