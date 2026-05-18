@@ -1,11 +1,23 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology Billing — main app
-  Version:    v3.60
-  Built:      2026-05-16 UTC
+  Version:    v3.61
+  Built:      2026-05-17 UTC
   Repo:       github.com/KelownaCardio/kelownacardio.github.io
 
-  Changes in this build (v3.60) — CCU placeholder approach restored:
+  Changes in this build (v3.61) — Add Patient claim card cleanup:
+    - Removed redundant "Lmtd Consult" tab from Add Patient claim card.
+      Full / Limited consult selection is handled by the 33010/33012
+      buttons already present inside the consult area.
+    - Added live modifier banner (night / evening / weekend / daytime)
+      below the MOST pill in the Add Patient consult area, mirroring
+      the behaviour of the standalone consult screen. Updates on date
+      and start time changes. Shows increment tier if consult > 45 min.
+    - End time hint text changed to "Defaults to 50min, adjust as needed".
+    - Start time change now auto-updates end time to start + 50 min
+      (same as standalone consult screen).
+    - Removed all _apClaimType === 'lmtd' branches; lmtd is now
+      handled entirely by the 33012 toggle inside the consult area.
     - REVERTS v3.59. CCU_DAILY is now the canonical placeholder fee for
       every CCU day. The Apps Script ccuConsolidateForExport() rolls
       groups of CCU_DAILY taps into properly-banded 1411/1421/1431 rows
@@ -845,7 +857,6 @@ input[type=file] { display:none; }
     <div class="card-title">Claim</div>
     <div class="fl" style="margin-bottom:10px">
       <button class="ct-btn ct-on-consult" id="ap-ct-consult" style="flex:1" onclick="apSelectClaimType('consult')">Consult</button>
-      <button class="ct-btn" id="ap-ct-lmtd" style="flex:1" onclick="apSelectClaimType('lmtd')">Lmtd Consult</button>
       <button class="ct-btn" id="ap-ct-other" style="flex:1" onclick="apSelectClaimType('other')">Other Claim</button>
     </div>
     <div id="ap-claim-area"></div>
@@ -2029,11 +2040,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.60-2026-05-16-ccu-placeholder-restored';
+var BUILD_ID    = 'v3.61-2026-05-17-ap-claim-card-cleanup';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.60';
+var APP_VERSION = 'v3.61';
 var APP_BUILT   = '2026-05-16';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -7028,21 +7039,15 @@ var _apClaimType = 'consult';
 
 function apSelectClaimType(type) {
   _apClaimType = type;
-  ['consult','lmtd','other'].forEach(function(t) {
+  ['consult','other'].forEach(function(t) {
     var btn = document.getElementById('ap-ct-' + t);
     if (btn) btn.className = 'ct-btn' + (t === type ? ' ct-on-consult' : '');
   });
   var area = document.getElementById('ap-claim-area');
   if (!area) return;
-  if (type === 'consult' || type === 'lmtd') {
+  if (type === 'consult') {
     area.innerHTML = buildApConsultArea();
     initAddPatientConsult();
-    if (type === 'lmtd') {
-      var el10 = document.getElementById('f-c-33010');
-      var el12 = document.getElementById('f-c-33012');
-      if (el10) el10.className = 'ct-btn';
-      if (el12) el12.className = 'ct-btn ct-on-consult';
-    }
   } else {
     area.innerHTML = buildApOtherClaimArea();
     var dateEl = document.getElementById('ap-oc-date');
@@ -7076,11 +7081,12 @@ function buildApConsultArea() {
   h += '<button class="most-btn on" id="f-c-most" onclick="toggleApMost()">' +
        '<svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>' +
        '+ MOST (78720)</button>';
-  h += '<div class="fl" style="margin-top:8px">';
-  h += '<div class="f1"><label>Date</label><input type="date" id="f-c-date"></div>';
-  h += '<div class="f1"><label>Start time</label><input type="time" id="f-c-start"></div>';
+  h += '<div id="f-c-mod" style="margin-top:6px"></div>';
+  h += '<div class="fl" style="margin-top:4px">';
+  h += '<div class="f1"><label>Date</label><input type="date" id="f-c-date" oninput="updateApConsultUI()"></div>';
+  h += '<div class="f1"><label>Start time</label><input type="time" id="f-c-start" oninput="updateApConsultUI()"></div>';
   h += '</div>';
-  h += '<div class="fl"><div class="f1"><label>End time <span style="font-size:10px;color:var(--text3)">— adjust if &lt; 45 min</span></label><input type="time" id="f-c-end"></div></div>';
+  h += '<div class="fl"><div class="f1"><label>End time <span style="font-size:10px;color:var(--text3)">— Defaults to 50min, adjust as needed</span></label><input type="time" id="f-c-end" oninput="updateApConsultUI()"></div></div>';
   h += '<label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(optional)</span></label>';
   h += '<textarea id="f-c-notes" rows="2" placeholder="Optional" autocorrect="off" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:6px"></textarea>';
   h += '<div style="border-top:.5px solid var(--border);margin:4px 0 10px"></div>';
@@ -7203,7 +7209,7 @@ async function apSubmit(addToList, _skipDupCheck) {
   else if (String(phn).replace(/\D/g,'').length !== 10) addMissing.push('phn-len');
   if (!gv('f-refby-num') && !gv('f-refby'))   addMissing.push('refby');
   if (!icd)                                    addMissing.push('icd');
-  if (_apClaimType === 'consult' || _apClaimType === 'lmtd') {
+  if (_apClaimType === 'consult') {
     if (!(document.getElementById('f-c-date')  || {}).value) addMissing.push('date');
     if (!(document.getElementById('f-c-start') || {}).value) addMissing.push('start time');
     if (!(document.getElementById('f-c-end')   || {}).value) addMissing.push('end time');
@@ -7325,7 +7331,7 @@ async function apSubmit(addToList, _skipDupCheck) {
     var cPerf = document.getElementById('f-c-performing-doc');
     if (cPerf && cPerf.value) cAlias = cPerf.value;
 
-    if (_apClaimType === 'consult' || _apClaimType === 'lmtd') {
+    if (_apClaimType === 'consult') {
       var cCode    = (document.getElementById('f-c-33010') || {}).classList && document.getElementById('f-c-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
       var cDateISO = (document.getElementById('f-c-date')  || {}).value || '';
       var cStart   = (document.getElementById('f-c-start') || {}).value || '';
@@ -7397,6 +7403,7 @@ function initAddPatientConsult() {
   if (el10) el10.className = 'ct-btn ct-on-consult';
   if (el12) el12.className = 'ct-btn';
   injectApPerformingDoc();
+  updateApConsultUI();
 }
 
 function toggleApConsultCode(code) {
@@ -7409,6 +7416,50 @@ function toggleApMost() {
   document.getElementById('f-c-most').className = 'most-btn' + (_apMostOn ? ' on' : '');
 }
 
+function updateApConsultUI() {
+  var start   = gv('f-c-start');
+  var end     = gv('f-c-end');
+  var dateISO = gv('f-c-date');
+
+  // If start time changed, auto-update end to start + 50 min
+  var changed = (typeof event !== 'undefined' && event && event.target) ? event.target.id : '';
+  if (start && changed === 'f-c-start') {
+    var endEl = document.getElementById('f-c-end');
+    if (endEl) endEl.value = minsToTime(t2m(start) + 50);
+    end = gv('f-c-end');
+  }
+
+  var modBase  = getModifier(start, dateISO);
+  var hasInc   = consultHasIncrement(start, end);
+  var modInc   = hasInc ? getModifierForIncrement(start, dateISO) : null;
+  var incUnits = consultIncUnits(start, end);
+  var modEl    = document.getElementById('f-c-mod');
+  if (!modEl) return;
+
+  if (modBase) {
+    var banner = '<div class="mod-box ' + modBase.cls + '" style="margin-bottom:0;border-radius:var(--rsm) var(--rsm) 0 0">' +
+      '<span style="font-weight:700">' + modBase.label + '</span>' +
+      '<span style="font-size:10px;opacity:.75;margin-left:6px">' + modBase.base + ' ×1</span>' +
+      '</div>';
+    if (incUnits > 0) {
+      var incMod = modInc || modBase;
+      banner += '<div class="mod-box ' + incMod.cls + '" style="margin-top:1px;border-radius:0 0 var(--rsm) var(--rsm);opacity:.85">' +
+        '<span>Consult time &gt; 45 min</span>' +
+        '<span style="font-size:10px;font-weight:700;margin-left:6px">' + incMod.inc + ' ×' + incUnits + '</span>' +
+        '</div>';
+    } else {
+      banner += '<div style="font-size:11px;padding:5px 10px;color:var(--text3);' +
+        'border:.5px solid var(--border);border-top:none;border-radius:0 0 var(--rsm) var(--rsm);' +
+        'background:var(--surface2)">Consult ≤ 45 min — no increment</div>';
+    }
+    modEl.innerHTML = banner;
+  } else if (start && dateISO) {
+    modEl.innerHTML = '<div class="mod-box mod-day">✓ Daytime weekday — no call-out modifier</div>';
+  } else {
+    modEl.innerHTML = '';
+  }
+}
+
 function clearAddForm() {
   ['f-last','f-first','f-phn','f-dob'].forEach(function(id) {
     var el = document.getElementById(id); if (el) el.value = '';
@@ -7419,7 +7470,7 @@ function clearAddForm() {
   var ocr = document.getElementById('ocr-bar'); if (ocr) ocr.style.display = 'none';
   // Reset claim type to consult and rebuild claim area
   _apClaimType = 'consult';
-  ['consult','lmtd','other'].forEach(function(t) {
+  ['consult','other'].forEach(function(t) {
     var b = document.getElementById('ap-ct-' + t);
     if (b) b.className = 'ct-btn' + (t === 'consult' ? ' ct-on-consult' : '');
   });
