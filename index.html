@@ -2040,7 +2040,7 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.62-2026-05-18-remove-dx-from-cards';
+var BUILD_ID    = 'v3.62-2026-05-18-claims-single-view';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
@@ -3368,7 +3368,7 @@ function wardHtml(ward) {
                    '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
                  '</button>' +
                '</div>' +
-               '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + '</div>' +
+               '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + (p.icd ? ' &bull; Dx: ' + esc(icdDescOnly(p.icd)) : '') + '</div>' +
                '<div class="wp-acts">' +
                  wardActBtns(p) +
                  '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
@@ -3548,7 +3548,7 @@ function offRow(p) {
   var lastSeen = lastSeenByGroup(p);
   // Row 3: Age (Sex) · MRP · Dx
   var ageSex   = ageGenderShort(p);
-  var row3     = esc(ageSex) + ' &bull; ' + mrpLabel(p) + lastBilledChip(p);
+  var row3     = esc(ageSex) + ' &bull; ' + mrpLabel(p) + (p.icd ? ' &bull; Dx: ' + esc(icdDescOnly(p.icd)) : '') + lastBilledChip(p);
   return '<div class="alpha-row' + (dn ? ' done' : '') + '">' +
     '<div class="alpha-av av-off" style="font-size:9px;font-weight:800;letter-spacing:-.3px" data-pid="' + p.id + '" onclick="openLocationEditEl(this)" title="Tap to move patient">' + esc(wardAbbr) + '</div>' +
     '<div class="wp-main">' +
@@ -3617,7 +3617,7 @@ function alphaRow(p) {
           '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
         '</button>' +
       '</div>' +
-      '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + lastBilledChip(p) + '</div>' +
+      '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + (p.icd ? ' &bull; Dx: ' + esc(icdDescOnly(p.icd)) : '') + lastBilledChip(p) + '</div>' +
       '<div class="wp-acts">' + quickActBtns(p) +
         '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
       '</div>' +
@@ -4003,6 +4003,7 @@ function _openClaimScreen(pid) {
           wardLabel(p.ward) + (p.bed ? ' Rm ' + p.bed : '') +
           ' &bull; ' + mrpLabel(p) +
           (!p.phn ? ' &bull; <span style="color:var(--amber-t);font-weight:700">⚠ no PHN</span>' : '') +
+         ' &bull; ' + icdShortLabel(p.icd) +
         '</div>' +
       '</div>' +
       '<button class="ctx-edit-btn" data-pid="' + p.id + '" onclick="ctxEditBtn(this)" title="Edit patient">' +
@@ -4633,6 +4634,9 @@ function openPatientSummary(pid) {
   if (p.refbyName || p.refby) {
     html += '<div style="font-size:11px;color:var(--blue-t);opacity:.8;margin-top:7px">Referred by ' + esc(p.refbyName || p.refby) + (p.refby ? ' #' + p.refby : '') + '</div>';
   }
+  if (p.icd) {
+    html += '<div style="font-size:11px;color:var(--blue-t);opacity:.8;margin-top:2px">Dx: ' + esc(icdShortLabel(p.icd)) + '</div>';
+  }
   html += '</div>'; // end demographics card
 
   // ── Claims section — toggle (Calendar default) + List/Calendar views (v3.27) ─
@@ -4645,17 +4649,10 @@ function openPatientSummary(pid) {
             '</div>';
   html += '</div>';
 
-  // View toggle — defaults to Calendar
-  html += '<div class="cv-tog">' +
-            '<button id="cv-tog-list" onclick="togglePtSummaryView(\'list\')">List</button>' +
-            '<button id="cv-tog-cal" class="on" onclick="togglePtSummaryView(\'cal\')">Calendar</button>' +
-          '</div>';
+  // Calendar (90% width, centred) + list below — no toggle
+  html += '<div id="cv-view-cal" style="width:90%;margin:0 auto 0">' + _ptSummaryCalendarHTML(p, claims) + '</div>';
 
-  // List view (hidden by default)
-  html += '<div id="cv-view-list" style="display:none">' + _ptSummaryListHTML(p, claims) + '</div>';
-
-  // Calendar view (shown by default)
-  html += '<div id="cv-view-cal">' + _ptSummaryCalendarHTML(p, claims) + '</div>';
+  html += '<div id="cv-view-list" style="margin-top:14px">' + _ptSummaryListHTML(p, claims) + '</div>';
 
   // Close button
   html += '<button class="btn btn-s" style="margin-top:12px;margin-bottom:0" onclick="hideModal(\'pt-summary-modal\')">Close</button>';
