@@ -2040,12 +2040,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.62-2026-05-18-claims-single-view';
+var BUILD_ID    = 'v3.63-2026-05-20-no-default-starttime-no-ccu-notes';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.62';
-var APP_BUILT   = '2026-05-18';
+var APP_VERSION = 'v3.63';
+var APP_BUILT   = '2026-05-20';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -2112,7 +2112,6 @@ async function loadLocal() {
         if (!c.icd       && pat.icd)       c.icd       = pat.icd;
       }
       if (!c.icd)       c.icd       = '3062';
-      if (!c.startTime) c.startTime = '08:00';
       if (c.endTime) c.endTime = fmtStartTime(c.endTime);
     });
   }
@@ -2410,7 +2409,6 @@ async function syncFromSheets() {
           if (!c.icd       && pat.icd)       { c.icd       = pat.icd;       changed = true; }
         }
         if (!c.icd)       { c.icd = '3062'; changed = true; }
-        if (!c.startTime) { c.startTime = '08:00'; changed = true; }
         if (c.endTime) c.endTime = fmtStartTime(c.endTime);
         if (c.dob) {
           var cleanDob = fmtClaimDate(c.dob);
@@ -3038,9 +3036,8 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, 
     if (!p.refbyName && inherited.refbyName) { p.refbyName = inherited.refbyName; _patUpdated = true; }
     if (!p.icd       && inherited.icd)       { p.icd       = inherited.icd;       _patUpdated = true; }
   }
-  // Always stamp a start time — use provided value or current clock
-  var _now = new Date();
-  var _start = startTime || (pad(_now.getHours()) + ':' + pad(_now.getMinutes()));
+  // Start time only for consults (33010/33012) and emergency care (33035)
+  var _start = startTime || '';
   var c = {
     id:        'c' + Date.now() + Math.floor(Math.random() * 9999),
     alias:     performingAlias || st.doc.alias,
@@ -8500,7 +8497,10 @@ function _buildAndDownloadCSV(claims, filename) {
     // this. Stripping happens here at the boundary, not at storage.
     var icdRaw = String(c.icd || '3062');
     var icdOut = icdRaw.replace(/\./g, '');
-    return [doc.num||'',c.alias||'',first,last,pn,c.phn||'','',sex,dob,'','',c.fee,icdOut,'',c.units||1,'100','MSP',c.date,c.startTime||'',_cet(c),c.notes||'',c.refby||'','',rn,loc,'OA040','','','','','','MSP','','','','','',''].join(',');
+    // MOST add-on (78720) and CCU codes carry no notes in the iClinic CSV
+    var _NOTE_FREE = { '1411':1, '1421':1, '1431':1, 'CCU_DAILY':1, '78720':1 };
+    var _csvNotes = _NOTE_FREE[c.fee] ? '' : (c.notes || '');
+    return [doc.num||'',c.alias||'',first,last,pn,c.phn||'','',sex,dob,'','',c.fee,icdOut,'',c.units||1,'100','MSP',c.date,c.startTime||'',_cet(c),_csvNotes,c.refby||'','',rn,loc,'OA040','','','','','','MSP','','','','','',''].join(',');
   });
   var blob=new Blob([hdr+'\n'+rows.join('\n')],{type:'text/csv;charset=utf-8;'});
   var url=URL.createObjectURL(blob);
