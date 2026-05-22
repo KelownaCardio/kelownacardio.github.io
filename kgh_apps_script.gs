@@ -46,6 +46,7 @@ function handleRequest(e) {
     else if (action === 'saveRef')          result = saveRow('Referrers', body, 'id');
     else if (action === 'saveDoctor')       result = saveRow('Doctors',   body, 'alias');
     else if (action === 'logChange')        result = appendRow('ChangeLog', body);
+    else if (action === 'getAnthropicKey')  result = getAnthropicKey();
     else if (action === 'searchPhysicians') result = searchPhysicians(p.q || '');
     else result = { error: 'unknown action: ' + action };
   } catch(err) {
@@ -440,6 +441,12 @@ function searchPhysicians(q) {
     }
   }
   return out;
+}
+
+function getAnthropicKey() {
+  var key = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_KEY');
+  if (!key) return { ok: false, error: 'ANTHROPIC_KEY not set in Script Properties' };
+  return { ok: true, key: key };
 }
 
 // ── Date helpers ───────────────────────────────────────
