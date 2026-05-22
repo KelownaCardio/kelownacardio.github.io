@@ -2068,11 +2068,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.67-2026-05-22-sticker-ocr-apps-script-path';
+var BUILD_ID    = 'v3.68-2026-05-22-add-patient-hard-dup-block';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.67';
+var APP_VERSION = 'v3.68';
 var APP_BUILT   = '2026-05-20';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -6596,52 +6596,44 @@ function mergePatient(action) {
 // Soft duplicate check — fires when last name + DOB match an existing
 // patient but PHN differs (suggests a PHN typo). Does NOT block: gives
 // the doctor the choice to fix the PHN or proceed as a new patient.
-function openPossibleDuplicateModal(existing, withClaim) {
-  var newPhn  = gv('f-phn');
-  var typedLs = String((existing.last||'') + ', ' + (existing.first||'')).trim();
-  var dobStr  = existing.dob ? dispDate(existing.dob) : '—';
-  var status  = existing.discharged
+// ── Hard duplicate block modal ────────────────────────────────────
+// Shown when 2-of-3 (PHN / last name / DOB) match an existing patient.
+// No bypass — user must dismiss and correct the form.
+function openDuplicateBlockModal(existing, matchedFields) {
+  var nameStr    = esc((existing.last || '') + ', ' + (existing.first || ''));
+  var dobStr     = existing.dob ? dispDate(existing.dob) : '—';
+  var phnStr     = existing.phn || '—';
+  var wardStr    = existing.ward ? (existing.ward + (existing.bed ? ' Rm ' + existing.bed : '')) : '';
+  var claimCount = st.claims.filter(function(c) { return samePhn(c.phn, existing.phn); }).length;
+  var status     = existing.discharged
     ? '<span style="background:var(--amber-bg);color:var(--amber-t);padding:2px 8px;border-radius:var(--rpill);font-size:10px;font-weight:700">Previously discharged</span>'
     : '<span style="background:var(--red-bg);color:var(--red-t);padding:2px 8px;border-radius:var(--rpill);font-size:10px;font-weight:700">Currently on list</span>';
-  var claimCount = st.claims.filter(function(c) { return samePhn(c.phn, existing.phn); }).length;
 
   var h = status +
-    '<div style="margin:10px 0 4px;font-size:13px;font-weight:700">' + esc(typedLs) + '</div>' +
-    '<div style="font-size:11px;color:var(--text2)">DOB: ' + esc(dobStr) + ' &bull; ' + claimCount + ' claim(s)</div>' +
-    '<div style="margin-top:8px;font-size:12px;line-height:1.45">' +
-      'A patient with the <b>same last name and DOB</b> already exists with PHN ' +
-      '<b>' + esc(existing.phn || '—') + '</b>.<br>' +
-      'You entered PHN <b>' + esc(newPhn) + '</b>.' +
+    '<div style="margin:10px 0 4px;font-size:15px;font-weight:700">' + nameStr + '</div>' +
+    '<div style="font-size:12px;color:var(--text2);line-height:1.6">' +
+      'PHN: <b>' + esc(phnStr) + '</b><br>' +
+      'DOB: <b>' + esc(dobStr) + '</b>' +
+      (wardStr ? '<br>Location: <b>' + esc(wardStr) + '</b>' : '') +
+      '<br>Claims: <b>' + claimCount + '</b>' +
     '</div>' +
-    '<div style="color:var(--amber-t);font-weight:700;font-size:12px;margin-top:8px">' +
-      '⚠ Likely PHN typo — re-check before adding as a new patient' +
+    '<div style="margin-top:10px;padding:10px;background:var(--red-bg);border-radius:8px;font-size:12px;line-height:1.5">' +
+      '<b>Duplicate detected</b> — ' + esc(matchedFields.join(' + ')) + ' match' +
+      (matchedFields.length > 1 ? 'es' : '') + ' an existing patient.<br>' +
+      'This patient cannot be added again.' +
     '</div>' +
-    '<div style="margin-top:14px;display:flex;flex-direction:column;gap:8px">' +
-      '<button class="btn btn-p" style="margin:0" data-wc="' + (withClaim?'1':'0') + '" onclick="_pdRecheckPhn(this)">Re-check PHN — likely typo</button>' +
-      '<button class="btn btn-s" style="margin:0" data-wc="' + (withClaim?'1':'0') + '" onclick="_pdContinueAnyway(this)">Continue — different patient</button>' +
+    '<div style="margin-top:14px">' +
+      '<button class="btn btn-p" style="margin:0" onclick="hideModal(\'merge-modal\')">Go back and correct</button>' +
     '</div>';
 
-  document.getElementById('merge-title').textContent = 'Possible duplicate patient';
+  document.getElementById('merge-title').textContent = 'Patient already exists';
   document.getElementById('merge-body').innerHTML = h;
   showModal('merge-modal');
 }
 
-function _pdRecheckPhn(btn) {
-  hideModal('merge-modal');
-  var phnEl = document.getElementById('f-phn');
-  if (phnEl) {
-    phnEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)';
-    phnEl.select();
-    phnEl.focus();
-  }
-  showToast('Check PHN — may be a transcription error');
-}
-
-function _pdContinueAnyway(btn) {
-  hideModal('merge-modal');
-  // Resume the new add-patient flow with the originally selected path
-  var addToList = window._apPendingAddToList === true;
-  apSubmit(addToList, true);  // skip the name+DOB check this time
+function openPossibleDuplicateModal(existing, withClaim) {
+  // Legacy — route through hard block instead
+  openDuplicateBlockModal(existing, ['Last name', 'DOB']);
 }
 
 // ── Add patient — entry points ────────────────────────────
@@ -7260,34 +7252,37 @@ async function apSubmit(addToList, _skipDupCheck) {
     return;
   }
 
-  // Duplicate checks (PHN exact match — always run, even on retry)
-  var existing = st.patients.find(function(x) { return x.phn === phn && !x.discharged; });
-  if (existing) { openMergeModal(existing); return; }
-  var dischExisting = st.patients.find(function(x) { return x.phn === phn && x.discharged; });
-  if (dischExisting && !_skipDupCheck) { openMergeModal(dischExisting, true); return; }
+  // ── Duplicate check — 2-of-3 hard block ─────────────────────────
+  // Fields: PHN (exact), last name (case-insensitive), DOB (formatted).
+  // If any 2 of the 3 match an existing patient → hard stop, no bypass.
+  var chkPhn  = String(phn || '').replace(/\D/g,'');
+  var chkLast = String(last || '').trim().toLowerCase();
+  var chkDob  = fmtClaimDate(gv('f-dob') || '');
 
-  var lastLc  = String(last).trim().toLowerCase();
-  var dobFmt  = fmtClaimDate(gv('f-dob') || '');
-  var firstLc = String(gv('f-first') || '').trim().toLowerCase();
-  if (!_skipDupCheck && lastLc && dobFmt) {
-    var nameDobMatch = st.patients.find(function(x) {
-      if (!x || x.phn === phn) return false;
-      return String(x.last||'').trim().toLowerCase() === lastLc &&
-             (x.dob ? fmtClaimDate(x.dob) : '') === dobFmt;
-    });
-    if (nameDobMatch) { openPossibleDuplicateModal(nameDobMatch, true); return; }
-  }
-  if (!_skipDupCheck && lastLc && firstLc && phn && phn.length === 10) {
-    var phnTypoMatch = st.patients.find(function(x) {
-      if (!x || !x.phn || x.phn === phn) return false;
-      if (x.phn.length !== phn.length) return false;
-      if (String(x.last||'').trim().toLowerCase() !== lastLc) return false;
-      if (String(x.first||'').trim().toLowerCase() !== firstLc) return false;
-      var diffs = 0;
-      for (var i = 0; i < phn.length; i++) if (phn[i] !== x.phn[i]) diffs++;
-      return diffs >= 1 && diffs <= 2;
-    });
-    if (phnTypoMatch) { openPossibleDuplicateModal(phnTypoMatch, true); return; }
+  var dupMatch = null;
+  var dupScore = 0;
+  var dupFields = [];
+
+  st.patients.forEach(function(x) {
+    if (!x) return;
+    var xPhn  = String(x.phn  || '').replace(/\D/g,'');
+    var xLast = String(x.last || '').trim().toLowerCase();
+    var xDob  = x.dob ? fmtClaimDate(x.dob) : '';
+    var score = 0;
+    var fields = [];
+    if (chkPhn  && xPhn  && chkPhn  === xPhn)  { score++; fields.push('PHN');      }
+    if (chkLast && xLast && chkLast === xLast)  { score++; fields.push('Last name'); }
+    if (chkDob  && xDob  && chkDob  === xDob)  { score++; fields.push('DOB');      }
+    if (score >= 2 && score > dupScore) {
+      dupMatch  = x;
+      dupScore  = score;
+      dupFields = fields;
+    }
+  });
+
+  if (dupMatch) {
+    openDuplicateBlockModal(dupMatch, dupFields);
+    return;
   }
 
   var p = {
