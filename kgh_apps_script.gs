@@ -1,5 +1,6 @@
 // ═══════════════════════════════════════════════════════
 // KGH Cardiology Billing — Google Apps Script backend
+// Version: v2.21 — auto-sort Patients (last) + Claims (last, date)
 // Deploy as Web App: Execute as Me, Anyone can access
 //
 // SETUP INSTRUCTIONS:
@@ -382,6 +383,8 @@ function saveRow(sheetName, obj, keyField) {
   var row     = objToRow(headers, obj);
   if (rowIdx > 0) sheet.getRange(rowIdx, 1, 1, row.length).setValues([row]);
   else sheet.appendRow(row);
+  if (sheetName === 'Patients') sortSheet(sheet, 'last');
+  if (sheetName === 'Claims')   sortSheet(sheet, 'last', 'date');
   return { ok: true };
 }
 
@@ -451,4 +454,23 @@ function getWeekStart() {
   var d = new Date();
   d.setDate(d.getDate() - 6); // 7 days ago
   return Utilities.formatDate(d, 'America/Vancouver', 'MMM d');
+}
+
+// ── Sheet sorting ──────────────────────────────────────
+// Sorts a sheet by one or two columns (ascending).
+// col1, col2 = header names. Header row (row 1) is preserved.
+// If fewer than 2 data rows, skips silently.
+function sortSheet(sheet, col1, col2) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 3) return; // header + at least 2 data rows needed
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var col1Idx = headers.indexOf(col1) + 1;
+  if (col1Idx < 1) return; // column not found — skip
+  var sortSpec = [{ column: col1Idx, ascending: true }];
+  if (col2) {
+    var col2Idx = headers.indexOf(col2) + 1;
+    if (col2Idx > 0) sortSpec.push({ column: col2Idx, ascending: true });
+  }
+  var dataRange = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn());
+  dataRange.sort(sortSpec);
 }
