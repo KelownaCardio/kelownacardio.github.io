@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology · Meditech Import (standalone)
-  Version:    v1.5
-  Built:      2026-05-08 15:39 UTC
+  Version:    v1.6
+  Built:      2026-05-22 UTC
   Repo:       github.com/KelownaCardio/kelownacardio.github.io
   Path:       Apps Script → Anthropic (no Cloudflare needed — works on hospital WiFi)
   Features:
@@ -10,6 +10,14 @@
     - AI extracts patient list, categorises by MRP
     - All rows have checkboxes; ignored rows can be added manually
     - Commit selected directly to Google Sheet
+  Changes in v1.6:
+    - Discharge detection: after parsing the PDF, active on-service patients
+      not found in the imported list (by PHN or name) are flagged as
+      "No longer on Meditech Import List". Pre-checked, shown at the top
+      of the preview in a dedicated red section. User can uncheck any false
+      positive (e.g. patient on a different doctor's list).
+    - dischargeNote field written to Sheets on commit (non-billing note).
+    - dischargeCandidates included in the commit summary count.
   Changes in v1.5:
     - max_tokens raised to 16000 (was 8000) — fits longer rounds lists
     - Auto-check location updates and new Cardiology MRP rows
@@ -199,8 +207,8 @@
 
 <script>
 // ── Version ───────────────────────────────────────────────────────
-const APP_VERSION = 'v1.5';
-const APP_BUILT   = '2026-05-08 15:39 UTC';
+const APP_VERSION = 'v1.6';
+const APP_BUILT   = '2026-05-22 UTC';
 console.log('%c[KGH Meditech Import] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
 
@@ -258,8 +266,9 @@ function esc(s) {
 
 // ── State ─────────────────────────────────────────────────────────
 let selectedFile   = null;
-let parsedPatients = [];   // enriched with _action, _existingId, _highConf etc
-let existingPats   = [];
+let parsedPatients     = [];   // enriched with _action, _existingId, _highConf etc
+let existingPats       = [];
+let dischargeCandidates = [];  // active on-service patients absent from the imported PDF
 
 // ── File input ────────────────────────────────────────────────────
 const dropZone  = document.getElementById('dropZone');
@@ -568,6 +577,32 @@ async function buildPreview(patients) {
     });
   });
 
+  // ── Discharge candidates ──────────────────────────────────────────
+  // Any active on-service patient not found in this PDF (by PHN or name)
+  // is flagged for discharge as "No longer on Meditech Import List".
+  // Pre-checked; user can uncheck false positives before committing.
+  const importedPHNs  = new Set(parsedPatients.map(p => p._phn).filter(Boolean));
+  const importedNames = new Set(parsedPatients.map(p => nameKey(p.last, p.first)));
+
+  dischargeCandidates = existingPats
+    .filter(ep => !ep.discharged && ep.list === 'on')
+    .filter(ep => {
+      const epPHN = String(ep.phn || '').replace(/\D/g, '');
+      if (epPHN && importedPHNs.has(epPHN)) return false;
+      if (importedNames.has(nameKey(ep.last, ep.first))) return false;
+      return true;
+    })
+    .map((ep, i) => ({
+      _didx:  i,
+      id:     ep.id,
+      phn:    ep.phn,
+      last:   ep.last,
+      first:  ep.first,
+      ward:   ep.ward,
+      bed:    ep.bed || '',
+      _selected: true
+    }));
+
   renderPreview();
 }
 
@@ -590,6 +625,7 @@ function renderPreview() {
 
   // Pills
   document.getElementById('pills').innerHTML = [
+    dischargeCandidates.length ? `<div class="pill" style="background:var(--red-bg);color:var(--red)">⚠ ${dischargeCandidates.length} to discharge</div>` : '',
     `<div class="pill pill-blue">${updates.length} matched</div>`,
     locChanged.length ? `<div class="pill pill-green">${locChanged.length} location change${locChanged.length!==1?'s':''}</div>` : '',
     mrpLeft.length    ? `<div class="pill" style="background:var(--red-bg);color:var(--red)">⚠ ${mrpLeft.length} MRP change${mrpLeft.length!==1?'s':''} — review</div>` : '',
@@ -599,6 +635,27 @@ function renderPreview() {
   ].filter(Boolean).join('');
 
   let html = '';
+
+  // ── Discharge candidates — shown FIRST, most urgent ───────────────
+  if (dischargeCandidates.length) {
+    html += `<div class="sec-label" style="color:var(--red)">⚠ No longer on Meditech list — discharge (pre-checked, uncheck to keep)</div>`;
+    html += `<div style="font-size:12px;color:var(--ink2);margin-bottom:8px;line-height:1.4">
+      These patients are active on your list but absent from this PDF.
+      Uncheck anyone who appears on a different doctor's rounds list.
+    </div>`;
+    html += dischargeCandidates.map(d => `
+      <div class="pat-row" style="background:var(--red-bg);border-color:#e8a09a">
+        <input type="checkbox" class="disch-check" data-didx="${d._didx}" ${d._selected ? 'checked' : ''}>
+        <div class="pat-body">
+          <div class="pat-name">${esc(d.last)}, ${esc(d.first)}</div>
+          <div class="pat-meta">${d.ward ? d.ward + (d.bed ? ' Rm ' + d.bed : '') : 'Ward unknown'}</div>
+          <div class="pat-tags">
+            <span class="tag tag-red">No longer on Meditech Import List</span>
+          </div>
+        </div>
+      </div>`).join('');
+    html += '<div style="height:12px"></div>';
+  }
 
   // ⚠ MRP changes — most important section, shown FIRST so the doctor sees them
   // before scrolling. These are auto-UNCHECKED — explicit action required to
@@ -640,11 +697,19 @@ function renderPreview() {
 
   document.getElementById('patientList').innerHTML = html;
 
-  // Checkbox listeners
+  // Checkbox listeners — patient rows
   document.querySelectorAll('.pat-check').forEach(cb => {
     cb.addEventListener('change', e => {
       const idx = parseInt(e.target.dataset.idx);
       parsedPatients[idx]._selected = e.target.checked;
+    });
+  });
+
+  // Checkbox listeners — discharge candidates
+  document.querySelectorAll('.disch-check').forEach(cb => {
+    cb.addEventListener('change', e => {
+      const didx = parseInt(e.target.dataset.didx);
+      dischargeCandidates[didx]._selected = e.target.checked;
     });
   });
 
@@ -654,11 +719,12 @@ function renderPreview() {
   const summary = [
     `${parsedPatients.length} patients`,
     `${updates.length} matched`,
-    newConsult.length ? `${newConsult.length} new Cardiology MRP` : '',
-    mrpLeft.length    ? `${mrpLeft.length} MRP review` : '',
+    newConsult.length  ? `${newConsult.length} new Cardiology MRP` : '',
+    mrpLeft.length     ? `${mrpLeft.length} MRP review` : '',
+    dischargeCandidates.length ? `${dischargeCandidates.length} to discharge` : '',
     `${ignored.length} ignored`
   ].filter(Boolean).join(' — ');
-  showStatus('parseStatus', mrpLeft.length ? 'warn' : 'ok', summary);
+  showStatus('parseStatus', (mrpLeft.length || dischargeCandidates.length) ? 'warn' : 'ok', summary);
 }
 
 function patRow(p) {
@@ -717,44 +783,68 @@ function patRow(p) {
 
 // ── Commit ────────────────────────────────────────────────────────
 document.getElementById('commitBtn').addEventListener('click', async () => {
-  const selected = parsedPatients.filter(p => p._selected);
-  if (!selected.length) {
+  const selected  = parsedPatients.filter(p => p._selected);
+  const toDischarge = dischargeCandidates.filter(d => d._selected);
+
+  if (!selected.length && !toDischarge.length) {
     showStatus('commitStatus', 'warn', 'Nothing selected to commit.');
     return;
   }
 
   document.getElementById('commitBtn').disabled = true;
   document.getElementById('cancelBtn').disabled = true;
-  showStatus('commitStatus', 'info', `<span class="spinner"></span>Writing ${selected.length} patients to Google Sheet…`);
+
+  const totalCount = selected.length + toDischarge.length;
+  showStatus('commitStatus', 'info', `<span class="spinner"></span>Writing ${totalCount} changes to Google Sheet…`);
 
   const log = document.getElementById('log');
   log.style.display = 'block';
   log.innerHTML = '';
 
+  // Build today's date in DD/MM/YYYY format for dischargeDate
+  const now = new Date();
+  const todayStr = String(now.getDate()).padStart(2,'0') + '/' +
+                   String(now.getMonth()+1).padStart(2,'0') + '/' +
+                   now.getFullYear();
+
+  // Regular patient upserts
   const toSend = selected.map(p => buildPayload(p));
 
-  addLog(`Sending ${toSend.length} patients…`, 'inf');
+  // Discharge payloads — mark as discharged with note
+  const dischPayloads = toDischarge.map(d => ({
+    id:            d.id,
+    phn:           d.phn,
+    last:          d.last,
+    first:         d.first,
+    discharged:    true,
+    dischargeDate: todayStr,
+    dischargeNote: 'No longer on Meditech Import List',
+    addedVia:      'meditech-discharge'
+  }));
+
+  addLog(`Sending ${toSend.length} updates, ${dischPayloads.length} discharges…`, 'inf');
 
   try {
     const resp = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({
-        key: SHARED_KEY,
-        action: 'bulkUpsertPatients',
-        patients: toSend
+        key:      SHARED_KEY,
+        action:   'bulkUpsertPatients',
+        patients: [...toSend, ...dischPayloads]
       })
     });
     const result = await resp.json();
     if (!result.ok) throw new Error(result.error || 'Unknown error');
 
-    addLog(`✓ Inserted: ${result.inserted}`, 'ok');
-    addLog(`✓ Updated:  ${result.updated}`, 'ok');
+    addLog(`✓ Inserted:   ${result.inserted}`, 'ok');
+    addLog(`✓ Updated:    ${result.updated}`, 'ok');
+    addLog(`✓ Discharged: ${dischPayloads.length}`, 'ok');
     if (result.skipped) addLog(`· Skipped:  ${result.skipped}`, 'inf');
     (result.errors || []).forEach(e => addLog('✗ ' + e, 'err'));
 
     showStatus('commitStatus', 'ok',
-      `Done — ${result.inserted} new, ${result.updated} updated. App will pick up on next sync.`);
+      `Done — ${result.inserted} new, ${result.updated} updated, ${dischPayloads.length} discharged.`);
   } catch(err) {
     addLog('✗ ' + err.message, 'err');
     showStatus('commitStatus', 'err', 'Commit failed: ' + err.message);
@@ -766,7 +856,8 @@ document.getElementById('commitBtn').addEventListener('click', async () => {
 
 document.getElementById('cancelBtn').addEventListener('click', () => {
   document.getElementById('preview-section').style.display = 'none';
-  parsedPatients = [];
+  parsedPatients      = [];
+  dischargeCandidates = [];
   document.getElementById('log').style.display = 'none';
   hideStatus('commitStatus');
 });
