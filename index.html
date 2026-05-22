@@ -2040,11 +2040,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.63-2026-05-20-no-default-starttime-no-ccu-notes';
+var BUILD_ID    = 'v3.64-2026-05-20-remove-dx-from-all-cards';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.63';
+var APP_VERSION = 'v3.64';
 var APP_BUILT   = '2026-05-20';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -3365,7 +3365,7 @@ function wardHtml(ward) {
                    '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
                  '</button>' +
                '</div>' +
-               '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + (p.icd ? ' &bull; Dx: ' + esc(icdDescOnly(p.icd)) : '') + '</div>' +
+               '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + '</div>' +
                '<div class="wp-acts">' +
                  wardActBtns(p) +
                  '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
@@ -3545,7 +3545,7 @@ function offRow(p) {
   var lastSeen = lastSeenByGroup(p);
   // Row 3: Age (Sex) · MRP · Dx
   var ageSex   = ageGenderShort(p);
-  var row3     = esc(ageSex) + ' &bull; ' + mrpLabel(p) + (p.icd ? ' &bull; Dx: ' + esc(icdDescOnly(p.icd)) : '') + lastBilledChip(p);
+  var row3     = esc(ageSex) + ' &bull; ' + mrpLabel(p) + lastBilledChip(p);
   return '<div class="alpha-row' + (dn ? ' done' : '') + '">' +
     '<div class="alpha-av av-off" style="font-size:9px;font-weight:800;letter-spacing:-.3px" data-pid="' + p.id + '" onclick="openLocationEditEl(this)" title="Tap to move patient">' + esc(wardAbbr) + '</div>' +
     '<div class="wp-main">' +
@@ -3614,7 +3614,7 @@ function alphaRow(p) {
           '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
         '</button>' +
       '</div>' +
-      '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + (p.icd ? ' &bull; Dx: ' + esc(icdDescOnly(p.icd)) : '') + lastBilledChip(p) + '</div>' +
+      '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + lastBilledChip(p) + '</div>' +
       '<div class="wp-acts">' + quickActBtns(p) +
         '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
       '</div>' +
@@ -4000,7 +4000,6 @@ function _openClaimScreen(pid) {
           wardLabel(p.ward) + (p.bed ? ' Rm ' + p.bed : '') +
           ' &bull; ' + mrpLabel(p) +
           (!p.phn ? ' &bull; <span style="color:var(--amber-t);font-weight:700">⚠ no PHN</span>' : '') +
-         ' &bull; ' + icdShortLabel(p.icd) +
         '</div>' +
       '</div>' +
       '<button class="ctx-edit-btn" data-pid="' + p.id + '" onclick="ctxEditBtn(this)" title="Edit patient">' +
@@ -4632,7 +4631,6 @@ function openPatientSummary(pid) {
     html += '<div style="font-size:11px;color:var(--blue-t);opacity:.8;margin-top:7px">Referred by ' + esc(p.refbyName || p.refby) + (p.refby ? ' #' + p.refby : '') + '</div>';
   }
   if (p.icd) {
-    html += '<div style="font-size:11px;color:var(--blue-t);opacity:.8;margin-top:2px">Dx: ' + esc(icdShortLabel(p.icd)) + '</div>';
   }
   html += '</div>'; // end demographics card
 
