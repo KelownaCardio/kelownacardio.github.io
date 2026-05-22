@@ -1,9 +1,30 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology Billing — main app
-  Version:    v3.65
+  Version:    v3.66
   Built:      2026-05-22 UTC
   Repo:       github.com/KelownaCardio/kelownacardio.github.io
+
+  Changes in this build (v3.66) — Meditech import MRP transition detection:
+    - Detect when a matched existing patient's MRP has changed between the
+      stored record and the imported Meditech list:
+        · left-cardiology  → patient was Cardiology MRP, attending is no
+                              longer a cardiologist (e.g. moved to CSICU
+                              for surgery, became Hospitalist primary).
+                              Row is auto-UNCHECKED — doctor must
+                              explicitly confirm before billing changes.
+        · joined-cardiology → patient was not on our service, attending
+                              now a cardiologist. Row is auto-checked.
+    - Transition rows render at the top of the import modal with a red /
+      amber tinted background and a chip showing "oldMRP → newMRP".
+    - On confirm, transition rows mutate the existing patient: writes new
+      mrp + flips list/role/care to match the new service designation
+      (off/consultant/directive for left-cardiology; on/mrp/daily-or-ccu
+      for joined-cardiology). Ward/bed also updated. Logged via
+      logChange("MRP transition via Meditech import", oldVals → newVals).
+    - Only fires when there is exactly 1 local name match — multi-match
+      duplicates continue to flow through the existing demographic-conflict
+      banner so a single row never triggers both warnings at once.
 
   Changes in this build (v3.65) — Meditech import discharge note:
     - Discharge reason for missing patients changed from
@@ -2047,11 +2068,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.65-2026-05-22-meditech-room-conflict-discharge-note';
+var BUILD_ID    = 'v3.66-2026-05-22-meditech-mrp-transition';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.65';
+var APP_VERSION = 'v3.66';
 var APP_BUILT   = '2026-05-20';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -9086,8 +9107,38 @@ function renderMediteachPreview(patients) {
       _idx: i, _ward: loc.ward, _room: loc.room,
       _list: care.list, _care: care.care, _role: care.role,
       _icd: icd, _mrp: _mrp, _include: !existing, _existing: existing,
-      _matches: matches  // v3.38: full match list for conflict detection
+      _matches: matches,  // v3.38: full match list for conflict detection
+      _mrpTransition: null,
+      _existingPid: null,
+      _existingMrp: ''
     });
+  });
+
+  // v3.66: MRP transition detection — compares the existing local patient's
+  // stored MRP/role against the role inferred from the Meditech attending.
+  // Only fires when there is exactly one local match so we don't conflict
+  // with the duplicate-detection banner. Two outcomes flagged:
+  //   - left-cardiology   : was on Cardiology service, attending now non-Cardiology
+  //                          (e.g. moved to CSICU, became Hospitalist primary).
+  //                          Auto-UNCHECKED — doctor must explicitly confirm.
+  //   - joined-cardiology : was off-service / different MRP, attending now
+  //                          a cardiologist. Auto-checked (pulling onto our
+  //                          service is the normal expected action).
+  _mitPats.forEach(function(p) {
+    if (!p._matches || p._matches.length !== 1) return;
+    var ep = p._matches[0];
+    p._existingPid = ep.id;
+    p._existingMrp = String(ep.mrp || '').trim();
+    if (!p._existingMrp) return;            // no prior MRP recorded → nothing to compare
+    var wasCardiology = (ep.role === 'mrp') && /cardiology/i.test(p._existingMrp);
+    var isCardiology  = (p._role === 'mrp');
+    if (wasCardiology && !isCardiology)      p._mrpTransition = 'left-cardiology';
+    else if (!wasCardiology && isCardiology) p._mrpTransition = 'joined-cardiology';
+    // Override default _include for transitions. Existing matches normally
+    // default to _include=false (skipped); we want left-cardiology to stay
+    // unchecked (explicit confirm) and joined-cardiology to be auto-checked.
+    if (p._mrpTransition === 'joined-cardiology') p._include = true;
+    if (p._mrpTransition === 'left-cardiology')   p._include = false;
   });
 
   // v3.38: Detect demographic conflicts surfaced by the Meditech list.
@@ -9133,9 +9184,11 @@ function renderMediteachPreview(patients) {
   });
   window._mitConflicts = _mitConflicts;  // for console inspection
 
-  var onCnt  = _mitPats.filter(function(p) { return p._list === 'on'  && p._include; }).length;
-  var offCnt = _mitPats.filter(function(p) { return p._list === 'off' && p._include; }).length;
-  var exCnt  = _mitPats.filter(function(p) { return p._existing; }).length;
+  var onCnt    = _mitPats.filter(function(p) { return p._list === 'on'  && p._include; }).length;
+  var offCnt   = _mitPats.filter(function(p) { return p._list === 'off' && p._include; }).length;
+  var exCnt    = _mitPats.filter(function(p) { return p._existing; }).length;
+  var leftCnt  = _mitPats.filter(function(p) { return p._mrpTransition === 'left-cardiology'; }).length;
+  var joinCnt  = _mitPats.filter(function(p) { return p._mrpTransition === 'joined-cardiology'; }).length;
 
   // ── Discharge candidates ───────────────────────────────
   // For each currently active on-service patient, check whether they:
@@ -9174,6 +9227,8 @@ function renderMediteachPreview(patients) {
   sumEl.innerHTML = '<div class="imp-sum">' +
     _mitPats.length + ' patients &bull; ' + onCnt + ' on service &bull; ' + offCnt + ' off service' +
     (exCnt ? ' &bull; ' + exCnt + ' already on list (skipped)' : '') +
+    (leftCnt ? ' &bull; <span style="color:var(--red-t)">⚠ ' + leftCnt + ' MRP review</span>' : '') +
+    (joinCnt ? ' &bull; ' + joinCnt + ' joining Cardiology' : '') +
     (_mitDisch.length ? ' &bull; ' + _mitDisch.length + ' to remove' : '') +
     '</div>';
 
@@ -9255,15 +9310,32 @@ function renderMediteachPreview(patients) {
       '<div style="height:10px"></div>';
   }
 
-  document.getElementById('mit-rows').innerHTML = conflictHtml + dischHtml + _mitPats.map(function(p) {
-    return '<div class="imp-row' + (p._existing ? ' existing' : '') + '" id="imp-row-' + p._idx + '">' +
+  // v3.66: row renderer extracted so transition rows can be rendered in
+  // their own sections (above the rest of the import list) while preserving
+  // the original _idx → _mitPats[idx] invariant that toggleImpRow relies on.
+  function renderImpRow(p) {
+    var rowCls   = 'imp-row';
+    var rowStyle = '';
+    var nameTag  = '';
+    var transChip = '';
+    if (p._mrpTransition === 'left-cardiology') {
+      rowStyle  = ' style="border-color:#eab8b3;background:var(--red-bg)"';
+      nameTag   = ' <span style="color:var(--red-t);font-size:10px;font-weight:700">⚠ MRP changed</span>';
+      transChip = '<span class="chip chip-red">⚠ MRP: ' + esc(p._existingMrp || '?') + ' → ' + esc(p._mrp || 'Other') + '</span>';
+    } else if (p._mrpTransition === 'joined-cardiology') {
+      rowStyle  = ' style="border-color:#d4a84a;background:var(--amber-bg)"';
+      nameTag   = ' <span style="color:var(--amber-t);font-size:10px;font-weight:700">joining Cardiology</span>';
+      transChip = '<span class="chip chip-amber">→ Cardiology (was ' + esc(p._existingMrp || '?') + ')</span>';
+    } else if (p._existing) {
+      rowCls += ' existing';
+      nameTag = ' <span style="color:var(--green-t);font-size:10px;font-weight:700">already on list</span>';
+    }
+    return '<div class="' + rowCls + '" id="imp-row-' + p._idx + '"' + rowStyle + '>' +
       '<div class="imp-chk' + (p._include ? ' on' : '') + '" id="imp-chk-' + p._idx + '" onclick="toggleImpRow(' + p._idx + ')">' +
         (p._include ? '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>' : '') +
       '</div>' +
       '<div class="imp-info">' +
-        '<div class="imp-name">' + esc(p.last) + ', ' + esc(p.first) +
-          (p._existing ? ' <span style="color:var(--green-t);font-size:10px;font-weight:700">already on list</span>' : '') +
-        '</div>' +
+        '<div class="imp-name">' + esc(p.last) + ', ' + esc(p.first) + nameTag + '</div>' +
         '<div class="imp-meta">' + esc(p.attending || '') + (p._room ? ' Rm ' + p._room : '') +
           ' &bull; Age ' + (p.age || '?') + ' ' + (p.sex || '') + ' &bull; ' + esc(p.los || '') + '</div>' +
         '<div class="imp-meta" style="color:var(--text)">Dx: ' + esc(p.reason || '') + '</div>' +
@@ -9271,10 +9343,41 @@ function renderMediteachPreview(patients) {
           '<span class="chip ' + (p._list === 'on' ? 'chip-blue' : 'chip-amber') + '">' +
             (p._list === 'on' ? 'On: ' + wardLabel(p._ward) : 'Off: ' + wardLabel(p._ward)) +
           '</span>' +
+          transChip +
         '</div>' +
       '</div>' +
       '</div>';
-  }).join('');
+  }
+
+  // MRP transitions appear in their own sections above the rest so the
+  // doctor sees them before scrolling. left-cardiology rows are flagged
+  // most prominently because they affect which service bills the patient.
+  var transLeft   = _mitPats.filter(function(p) { return p._mrpTransition === 'left-cardiology'; });
+  var transJoined = _mitPats.filter(function(p) { return p._mrpTransition === 'joined-cardiology'; });
+  var restRows    = _mitPats.filter(function(p) { return !p._mrpTransition; });
+
+  var mrpHtml = '';
+  if (transLeft.length) {
+    mrpHtml +=
+      '<div class="sec-lbl" style="color:var(--red-t);margin-top:4px">' +
+        '⚠ MRP changed — review before committing (' + transLeft.length + ')' +
+      '</div>' +
+      '<div style="font-size:10px;color:var(--text2);margin-bottom:6px;line-height:1.4">' +
+        'Auto-unchecked. Check the row to confirm the patient has moved off ' +
+        'Cardiology service — list/role/care will switch to off-service consultant.' +
+      '</div>' +
+      transLeft.map(renderImpRow).join('');
+  }
+  if (transJoined.length) {
+    mrpHtml +=
+      '<div class="sec-lbl" style="color:var(--amber-t);margin-top:4px">' +
+        'MRP changed TO Cardiology (' + transJoined.length + ')' +
+      '</div>' +
+      transJoined.map(renderImpRow).join('');
+  }
+
+  document.getElementById('mit-rows').innerHTML =
+    conflictHtml + dischHtml + mrpHtml + restRows.map(renderImpRow).join('');
 
   document.getElementById('mit-actions').style.display = 'block';
 }
@@ -9325,6 +9428,39 @@ function confirmMediteachImport() {
     logChange(p, 'Discharged via Meditech import', d.reason);
   });
 
+  // ── MRP transitions ───────────────────────────────────
+  // v3.66: existing matches that have an MRP transition flagged AND have
+  // been confirmed (left-cardiology auto-unchecked, joined-cardiology
+  // auto-checked, both user-overridable). Mutates the existing patient
+  // in place — does NOT create a new record.
+  var toTransition = _mitPats.filter(function(p) {
+    return p._include && p._existing && p._mrpTransition && p._existingPid;
+  });
+  toTransition.forEach(function(p) {
+    var ep = st.patients.find(function(pp) { return pp.id === p._existingPid; });
+    if (!ep) return;
+    var prev = ep.mrp + '/' + ep.list + '/' + ep.role + '/' + ep.care;
+    // Always refresh ward/bed from the Meditech list — that's the freshest
+    // location signal regardless of transition direction.
+    ep.ward = p._ward;
+    ep.bed  = p._room;
+    if (p._mrpTransition === 'left-cardiology') {
+      ep.mrp  = p._mrp || 'Other';
+      ep.list = 'off';
+      ep.role = 'consultant';
+      ep.care = 'directive';
+    } else if (p._mrpTransition === 'joined-cardiology') {
+      ep.mrp  = 'Cardiology';
+      ep.list = 'on';
+      ep.role = 'mrp';
+      ep.care = (ep.ward === 'CCU' || ep.ward === 'CSICU' || ep.ward === 'ICUA' || ep.ward === 'ICUB')
+                ? 'ccu' : 'daily';
+    }
+    if (SHEETS_URL) push('savePatient', ep);
+    logChange(ep, 'MRP transition via Meditech import',
+              prev + ' → ' + ep.mrp + '/' + ep.list + '/' + ep.role + '/' + ep.care);
+  });
+
   // ── Imports ───────────────────────────────────────────
   var toImport = _mitPats.filter(function(p) { return p._include && !p._existing; });
   toImport.forEach(function(p) {
@@ -9356,8 +9492,9 @@ function confirmMediteachImport() {
   render();
 
   var msg = [];
-  if (toImport.length) msg.push(toImport.length + ' imported');
-  if (toDisch.length)  msg.push(toDisch.length  + ' discharged');
+  if (toImport.length)     msg.push(toImport.length     + ' imported');
+  if (toTransition.length) msg.push(toTransition.length + ' MRP changed');
+  if (toDisch.length)      msg.push(toDisch.length      + ' discharged');
   showToast(msg.length ? msg.join(', ') : 'Nothing to change');
 
   _mitPats  = [];
