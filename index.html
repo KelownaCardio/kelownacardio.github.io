@@ -2068,11 +2068,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.66-2026-05-22-meditech-mrp-transition';
+var BUILD_ID    = 'v3.67-2026-05-22-sticker-ocr-apps-script-path';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.66';
+var APP_VERSION = 'v3.67';
 var APP_BUILT   = '2026-05-20';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -7640,22 +7640,110 @@ function processStickerOCR(croppedDataUrl, bar) {
   img.src = croppedDataUrl;
 }
 
+// ── OCR routing ────────────────────────────────────────────────────
+// Priority:
+//   1. Apps Script → Anthropic  (works on hospital WiFi — no Cloudflare needed)
+//   2. Cloudflare Worker        (works off hospital WiFi)
+//   3. Tesseract / ML Kit       (last resort, offline)
+//
+// Session cache: _appsScriptOCRReachable, _cloudOCRReachable
+// Both reset to null on page load; set false on first failure so
+// subsequent scans skip straight to the next tier without probing.
+
 function sendToOCR(b64, mediaType, bar) {
   if (bar) bar.textContent = 'Extracting (' + Math.round(b64.length / 1024) + ' KB)…';
 
-  // Cloud-reachability cache for this session.
-  // Reset to null on every page load — re-probed on first scan.
-  if (typeof window._cloudOCRReachable === 'undefined') {
-    window._cloudOCRReachable = null;
+  if (typeof window._appsScriptOCRReachable === 'undefined') window._appsScriptOCRReachable = null;
+  if (typeof window._cloudOCRReachable      === 'undefined') window._cloudOCRReachable      = null;
+
+  // Tier 1 — Apps Script → Anthropic
+  if (window._appsScriptOCRReachable !== false) {
+    sendToAppsScriptOCR(b64, mediaType, bar);
+    return;
   }
 
-  // If we already know cloud is unreachable this session, skip straight to offline.
-  if (window._cloudOCRReachable === false) {
-    if (bar) bar.textContent = 'Extracting (offline)…';
-    return runOfflineOCR(b64, mediaType, bar);
+  // Tier 2 — Cloudflare Worker
+  if (window._cloudOCRReachable !== false) {
+    sendToCloudflareOCR(b64, mediaType, bar);
+    return;
   }
 
-  // Try cloud with a 10s timeout. On hospital WiFi this fails fast and we fall through.
+  // Tier 3 — Offline (Tesseract / ML Kit)
+  if (bar) bar.textContent = 'Extracting (offline)…';
+  runOfflineOCR(b64, mediaType, bar);
+}
+
+// Tier 1: fetch API key from Apps Script, then call Anthropic directly.
+// Same network path as import.html — works on hospital WiFi.
+function sendToAppsScriptOCR(b64, mediaType, bar) {
+  if (bar) bar.textContent = 'Extracting (via Apps Script)…';
+
+  var STICKER_PROMPT =
+    'Hospital patient sticker from Kelowna General Hospital (KGH). ' +
+    'Extract the printed fields from the sticker ONLY — ignore any handwriting.\n\n' +
+    'Return a single JSON object with exactly these fields:\n' +
+    '  last, first, phn, dob, sex, mrp, admitDate\n\n' +
+    'Rules:\n' +
+    '  last / first  — from "Last,First" name line\n' +
+    '  phn           — the HCN number (10 digits after "HCN")\n' +
+    '  dob           — date after "DOB", format DD Mon YYYY e.g. "26 Oct 1958"\n' +
+    '  sex           — M or F (from "L:M" or "L:F" field, or "Sex: M/F")\n' +
+    '  mrp           — text after "MRP" e.g. "CardiologyMRP,KGH Kelowna"\n' +
+    '  admitDate     — date after "ADM", same format as dob\n\n' +
+    'Return ONLY valid JSON, no markdown, no explanation.';
+
+  // Step 1: get API key from Apps Script
+  fetch(SHEETS_URL + '?action=getAnthropicKey&key=' + SHARED_KEY)
+    .then(function(r) {
+      if (!r.ok) throw new Error('Apps Script key fetch: HTTP ' + r.status);
+      return r.json();
+    })
+    .then(function(j) {
+      var apiKey = j.key || j.anthropicKey || '';
+      if (!apiKey) throw new Error('No API key returned');
+
+      // Step 2: call Anthropic directly
+      return fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 500,
+          messages: [{ role: 'user', content: [
+            { type: 'image', source: { type: 'base64', media_type: mediaType, data: b64 } },
+            { type: 'text', text: STICKER_PROMPT }
+          ]}]
+        })
+      });
+    })
+    .then(function(r) {
+      if (!r.ok) throw new Error('Anthropic HTTP ' + r.status);
+      return r.json();
+    })
+    .then(function(j) {
+      var raw = (j.content || []).map(function(c) { return c.text || ''; }).join('');
+      var clean = raw.replace(/```json|```/g, '').trim();
+      var p = JSON.parse(clean);
+      p._engine = 'apps-script';
+      window._appsScriptOCRReachable = true;
+      handleOCRResult(p, bar);
+    })
+    .catch(function(err) {
+      console.warn('[OCR] Apps Script path failed:', err.message, '— trying Cloudflare');
+      window._appsScriptOCRReachable = false;
+      sendToCloudflareOCR(b64, mediaType, bar);
+    });
+}
+
+// Tier 2: Cloudflare Worker (original path — works off hospital WiFi).
+function sendToCloudflareOCR(b64, mediaType, bar) {
+  if (bar) bar.textContent = 'Extracting (cloud)…';
+
   var xhr = new XMLHttpRequest();
   xhr.open('POST', OCR_WORKER_URL, true);
   xhr.setRequestHeader('Content-Type', 'application/json');
@@ -7967,6 +8055,7 @@ function handleOCRResult(data, bar) {
     bar.className = 'ocr-bar ocr-ok';
     var engineTag = '';
     if (p._engine === 'cloud')          engineTag = '☁️ ';
+    else if (p._engine === 'apps-script') engineTag = '🏥 ';
     else if (p._engine === 'tesseract') engineTag = '📱 ';
     else if (p._engine === 'mlkit')     engineTag = '📱 ';
     bar.textContent = engineTag + '✓ Extracted: ' + (p.last||'?') + ', ' + (p.first||'?') + (p.phn ? ' · ' + p.phn : '');
