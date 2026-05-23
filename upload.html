@@ -216,6 +216,11 @@ v1.14 2026-05-14  ICD9_LOCAL rebuilt from the iClinic xlsx (385 codes,
                   is the single source of truth for the full 7,000+
                   iClinic codes.
 
+v1.22 2026-05-23  Start-time field fix (v1.21 fix was described but not applied):
+                  oninput no longer calls onStartTimeChange — avoids partial-parse
+                  snapping end time to "01:50" after typing just "1". onblur now
+                  calls onStartTimeChange after normalization, and the !endEl.value
+                  guard is removed so end always recalculates on blur.
 v1.21 2026-05-23  Fix: consult end-time auto-calc. onStartTimeChange now
                   normalises the raw input via parseTime24() before calling t2m(),
                   and always writes the end field (removed the !endEl.value guard
@@ -653,7 +658,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
       </div>
     </div>
     <div class="row">
-      <div><label>Start time</label><input id="c-start" type="text" placeholder="14:30 or 2:30pm" oninput="onStartTimeChange()" onblur="var v=parseTime24(this.value);if(v){this.value=v;onStartTimeChange();}"></div>
+      <div><label>Start time</label><input id="c-start" type="text" placeholder="14:30 or 2:30pm" oninput="updateModifierBanner();detectCCFPP();" onblur="var v=parseTime24(this.value);if(v){this.value=v;}onStartTimeChange();"></div>
       <div><label>End time</label><input id="c-end" type="text" placeholder="14:30 or 2:30pm" oninput="updateModifierBanner()" onblur="var v=parseTime24(this.value);if(v){this.value=v;updateModifierBanner();}"></div>
     </div>
     <div id="mod-banner"></div>
@@ -1778,9 +1783,10 @@ function onStartTimeChange() {
   var startEl = document.getElementById('c-start');
   var endEl   = document.getElementById('c-end');
   if (startEl && endEl) {
+    // Called from onblur only — value is already normalized.
+    // Always write end so a changed start time always recalculates.
     var norm = parseTime24(startEl.value);
     if (norm) {
-      startEl.value = norm;
       endEl.value = minsToTime(t2m(norm) + 50); // default 50-min consult
     }
   }
