@@ -1182,6 +1182,15 @@ var DOCTORS_SEED = [
   { alias:'SB',      name:'Dr. Sandy Baker'     },
 ];
 
+// Sort a doctors array alphabetically by last name (last word of .name)
+function sortedDoctors(docs) {
+  return (docs || []).slice().sort(function(a, b) {
+    var la = String(a.name || a.alias).trim().split(' ').pop().toLowerCase();
+    var lb = String(b.name || b.alias).trim().split(' ').pop().toLowerCase();
+    return la < lb ? -1 : la > lb ? 1 : 0;
+  });
+}
+
 // Ward definitions: label, default list, default care type, preset rooms
 var WARDS = {
   CCU:  { label:'CICU',     list:'on',  care:'ccu',      role:'mrp',       rooms:['1','2','3','4','5','6','7','8'] },
@@ -5300,7 +5309,7 @@ function _ecInjectDoc() {
   if (!wrap) return;
   if (!st.doctors || !st.doctors.length) { wrap.innerHTML = ''; return; }
   var curAlias = st.doc ? st.doc.alias : '';
-  var opts = st.doctors.map(function(d) {
+  var opts = sortedDoctors(st.doctors).map(function(d) {
     return '<option value="' + esc(d.alias) + '"' + (d.alias === curAlias ? ' selected' : '') + '>' +
            esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
   }).join('');
@@ -5716,7 +5725,7 @@ function openClaimEdit(btn) {
   var curDx = DIAGNOSES.find(function(d) { return d.code === c.icd; });
 
   // Build doctor options for performing physician selector
-  var docOptions = st.doctors.map(function(d) {
+  var docOptions = sortedDoctors(st.doctors).map(function(d) {
     return '<option value="' + esc(d.alias) + '"' + (c.alias === d.alias ? ' selected' : '') + '>' +
            esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
   }).join('');
@@ -6604,7 +6613,7 @@ function buildIcdRefCard(p) {
 function buildPerformingPhysSelector() {
   if (!st.doctors || !st.doctors.length) return '';
   var curAlias = st.doc ? st.doc.alias : '';
-  var opts = st.doctors.map(function(d) {
+  var opts = sortedDoctors(st.doctors).map(function(d) {
     return '<option value="' + esc(d.alias) + '"' + (d.alias === curAlias ? ' selected' : '') + '>' +
            esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
   }).join('');
@@ -7364,7 +7373,7 @@ function injectApPerformingDoc() {
   if (!perfWrap) return;
   if (!st.doctors || !st.doctors.length) { perfWrap.innerHTML = ''; return; }
   var curAlias = st.doc ? st.doc.alias : '';
-  var opts = st.doctors.map(function(d) {
+  var opts = sortedDoctors(st.doctors).map(function(d) {
     return '<option value="' + esc(d.alias) + '"' + (d.alias === curAlias ? ' selected' : '') + '>' +
            esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
   }).join('');
@@ -10100,7 +10109,7 @@ function hideModal(id) {
 
 function renderDocOpts() {
   document.getElementById('doc-opts').innerHTML = st.doctors.length
-    ? st.doctors.map(function(d) {
+    ? sortedDoctors(st.doctors).map(function(d) {
         var ini = d.name.replace('Dr. ','').split(' ').map(function(w){return w[0]||''}).join('').slice(0,2).toUpperCase();
         var numLine = d.alias;
         return '<div class="doc-opt" data-alias="' + d.alias + '" data-num="' + d.num + '" data-name="' + esc(d.name) + '" onclick="selectDocEl(this)">' +
