@@ -2876,6 +2876,12 @@ function saveHistEdit(id) {
 function deleteHist(id) {
   var c = findHistClaim(id);
   if (!c) return;
+  // Claims with no id (App claims with blank id cell) can't be deleted via this tool —
+  // they must be deleted directly in the Google Sheet.
+  if (!c.id) {
+    showToast('Can\u2019t delete: this claim has no row ID. Delete it directly in the Google Sheet (Claims tab).', 'err', 6000);
+    return;
+  }
   if (!window.confirm('Delete this claim?\n\n'+c.date+' · '+c.fee+(c.claimType?' ('+c.claimType+')':'')+'\nThis cannot be undone.')) return;
   var url = document.getElementById('script-url').value.trim();
   fetch(url, { method:'POST',
