@@ -216,6 +216,10 @@ v1.14 2026-05-14  ICD9_LOCAL rebuilt from the iClinic xlsx (385 codes,
                   is the single source of truth for the full 7,000+
                   iClinic codes.
 
+v1.19 2026-05-22  Claim edit save: old claims with missing PHN/demos now
+                  pull from the patient card form fields as fallback.
+                  Fixes "Blocked save of empty claim record" error on
+                  legacy claims.
 v1.18 2026-05-22  DOB display fully converted to DD/MMM/YYYY everywhere.
                   fmtDOB() used on all fill paths (lookup, OCR, batch).
                   parseDobDisplay() converts display format back to
@@ -2787,12 +2791,23 @@ function saveHistEdit(id) {
   var url = document.getElementById('script-url').value.trim();
   // Build payload by extending the existing claim (preserves any fields the lookup
   // doesn't expose, like createdAt, ward, room) and overwriting only what changed.
+  // For old claims missing patient demographics, pull from the patient card
+  var cardPhn   = ((document.getElementById('f-phn')  ||{}).value||'').replace(/\D/g,'');
+  var cardLast  = ((document.getElementById('f-last') ||{}).value||'').trim();
+  var cardFirst = ((document.getElementById('f-first')||{}).value||'').trim();
+  var cardDob   = parseDobDisplay(((document.getElementById('f-dob')||{}).value||'').trim());
+  var cardSex   = ((document.getElementById('f-sex')  ||{}).value||'').trim();
+
   var payload = Object.assign({}, c, {
     action: 'saveClaim',
     key: getScriptKey(),
     id: c.id,
     alias: newAlias,
-    phn: c.phn || '',
+    phn:   c.phn   || cardPhn,
+    last:  c.last  || cardLast,
+    first: c.first || cardFirst,
+    dob:   c.dob   || cardDob,
+    sex:   c.sex   || cardSex,
     date: newDateBc,
     fee: newFee,
     feeCode: newFee,
