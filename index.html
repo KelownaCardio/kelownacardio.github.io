@@ -1,8 +1,15 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology Billing — main app
-  Version:    v3.67
+  Version:    v3.75
   Built:      2026-05-23 UTC
+
+  Changes in this build (v3.75) — Remove direct CSV export from app:
+    - Removed exportCSV(), reexportSubmitted(), _buildAndDownloadCSV(),
+      and ccuConsolidate() — all CSV generation is handled exclusively
+      by the Google Sheets Apps Script (ccuConsolidateForExport()).
+    - No UI changes; these functions were already unreachable from any
+      button in the app.
   Repo:       github.com/KelownaCardio/kelownacardio.github.io
 
   Changes in this build (v3.67) — CCU export: one row per day:
@@ -2075,11 +2082,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.74-2026-05-23-ccu-one-row-per-day';
+var BUILD_ID    = 'v3.75-2026-05-23-remove-csv-export';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.74';
+var APP_VERSION = 'v3.75';
 var APP_BUILT   = '2026-05-20';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -2935,84 +2942,7 @@ function dirCountThisWeek(phn, isoDate) {
   }).length;
 }
 
-// ── CCU Consolidation (runs at export time) ────────────
-// Groups raw CCU_DAILY taps by patient PHN, splits into consecutive
-// episodes (any gap resets to a new episode = new 1411 day 1), then
-// bands each episode independently into 1411 / 1421 / 1431.
-//
-// Example: CCU May 1, ward May 2-5, CCU May 6-10
-//   Episode 1: May 1         → 1411 ×1
-//   Episode 2: May 6-10 (5d) → 1411 ×1 (May 6), 1421 ×4 (May 7-10)
-//
-function ccuConsolidate() {
-  var DAY_MS = 86400000;
-  var taps = st.claims.filter(function(c) { return c.fee === 'CCU_DAILY'; });
 
-  // Group by patient PHN
-  var byPhn = {};
-  taps.forEach(function(c) {
-    if (!byPhn[c.phn]) byPhn[c.phn] = [];
-    byPhn[c.phn].push(c);
-  });
-
-  var out = [];
-
-  Object.keys(byPhn).forEach(function(phn) {
-    // Sort chronologically
-    var sorted = byPhn[phn].slice().sort(function(a, b) {
-      return parseDMY(a.date) - parseDMY(b.date);
-    });
-
-    // Split into consecutive episodes — gap of > 1 day starts a new episode
-    var episodes = [];
-    var episode  = [sorted[0]];
-    for (var i = 1; i < sorted.length; i++) {
-      var prev = parseDMY(sorted[i-1].date).getTime();
-      var curr = parseDMY(sorted[i].date).getTime();
-      var gap  = Math.round((curr - prev) / DAY_MS);
-      if (gap <= 1) {
-        // Consecutive or same day (duplicate tap guard) — same episode
-        if (gap === 1) episode.push(sorted[i]);
-      } else {
-        // Gap found — close current episode, start new one
-        episodes.push(episode);
-        episode = [sorted[i]];
-      }
-    }
-    episodes.push(episode);
-
-    // Generate billing rows for each episode independently
-    episodes.forEach(function(ep, epIdx) {
-      var n    = ep.length;
-      var base = ep[0]; // use first tap of episode for demographics
-      var epId = phn + '_ep' + epIdx;
-
-      // Day 1 of this episode → 1411 (always 1 unit)
-      out.push(Object.assign({}, base, {
-        fee:'1411', feeCode:'1411', units:1,
-        date:ep[0].date, id:'ccu1_' + epId
-      }));
-
-      // Days 2–7 → 1421, one row per calendar day (units:1 each)
-      for (var d = 1; d < Math.min(n, 7); d++) {
-        out.push(Object.assign({}, ep[d], {
-          fee:'1421', feeCode:'1421', units:1,
-          date:ep[d].date, id:'ccu2_' + epId + '_d' + d
-        }));
-      }
-
-      // Days 8+ → 1431, one row per calendar day (units:1 each)
-      for (var d = 7; d < n; d++) {
-        out.push(Object.assign({}, ep[d], {
-          fee:'1431', feeCode:'1431', units:1,
-          date:ep[d].date, id:'ccu3_' + epId + '_d' + d
-        }));
-      }
-    });
-  });
-
-  return out;
-}
 
 // Returns the correct CCU fee code for a given date based on consecutive
 // episode length ending at that date.
@@ -8582,15 +8512,9 @@ function purgeOldPatients() {
 
 // ── 11_export.js ──
 // ═══════════════════════════════════════════════════════
-// 11_export.js — iClinic CSV export, export queue render
+// 11_export.js — export queue helpers (CSV export removed v3.75;
+//   all CSV generation handled by Google Sheets Apps Script)
 // ═══════════════════════════════════════════════════════
-
-function reexportSubmitted() {
-  var sub = (st.claims||[]).filter(function(c){ return parseBool(c.submitted); });
-  if (!sub.length) { showToast('No submitted claims to re-export'); return; }
-  _buildAndDownloadCSV(sub, 'iClinic_KGH_reexport_' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '.csv');
-  showToast('Re-exported ' + sub.length + ' submitted claims');
-}
 
 function purgeSubmittedClaims() {
   var cutoff = new Date(); cutoff.setDate(cutoff.getDate()-90);
@@ -8604,49 +8528,6 @@ function purgeSubmittedClaims() {
   if (st.claims.length < before) sv('claims', st.claims);
 }
 
-function _buildAndDownloadCSV(claims, filename) {
-  // v3.39: SERVICE_END_TIME is taken from the claim if specified, otherwise
-  // left blank — never computed from start+fee-duration. iClinic only wants
-  // end time when it's medically meaningful (e.g. consult length recorded by
-  // the doctor); a computed fallback creates spurious data.
-  function _cet(c) { return c.endTime || ''; }
-  // Lookups for derived fields
-  var docByAlias = {};
-  (st.doctors||[]).forEach(function(d) { docByAlias[d.alias] = d; });
-  var patByPhn = {};
-  (st.patients||[]).forEach(function(p) { if (p.phn) patByPhn[p.phn] = p; });
-
-  var hdr='DOCTOR_NUMBER,PAYEE_ALIAS,PATIENT_FIRST_NAME,PATIENT_LAST_NAME,PATIENT_NAME,PHN,OTHER_INSURER_CODE,GENDER,DOB,MRN,CORRECTIONAL_ID,FEE_ITEM_CODE,ICD9_CODE,AMOUNT_BILLED,SERVICE_UNITS,PERCENT_BILLED,FEE_SCHEDULE,SERVICE_DATE,SERVICE_START_TIME,SERVICE_END_TIME,ADDITIONAL_CLAIM_NOTES,REFERRED_BY_DOCTOR_NUMBER,REFERRED_TO_DOCTOR_NUMBER,REFERRED_BY_DOCTOR_NAME,SERVICE_LOCATION_CODE,FACILITY_NUMBER,SUB_FACILITY_NUMBER,SUBMISSION_CODE,CORRESPONDENCE_CODE,AFTER_HOURS_INDICATOR_CODE,SCC_CODE,CLAIM_TYPE,ICBC_CLAIM_NUMBER,WORK_SAFE_CLAIM_NUMBER,WORK_SAFE_INJURY_DATE,WORK_SAFE_INJURY_AREA_CODE,WORK_SAFE_INJURY_NATURE_CODE,WORK_SAFE_ANATOMICAL_POSITION';
-  var rows=claims.map(function(c){
-    var doc = docByAlias[c.alias] || {};
-    var pat = patByPhn[c.phn] || {};
-    var first = pat.first || '';
-    var last  = pat.last  || '';
-    var dob   = pat.dob   || '';
-    var sex   = pat.sex   || '';
-    var loc   = pat.ward === 'ED' ? 'E' : 'I';
-    var pn='"\"'+last+','+first+'\""';
-    var rn=c.refbyName?'"\"'+c.refbyName+'\""':'';
-    // v3.39: SUBMISSION_CODE blank (was 'P' — that was wrong, MSP rejects it
-    // for routine claims). Position 27 in the row, between SUB_FACILITY_NUMBER
-    // and CORRESPONDENCE_CODE.
-    // v3.40: ICD9 — strip the decimal point on export. iClinic / BC MSP
-    // wants codes with no period (427.3 → 4273, 414.0 → 4140). Only one
-    // decimal place is permitted; the in-app DIAGNOSES list now enforces
-    // this. Stripping happens here at the boundary, not at storage.
-    var icdRaw = String(c.icd || '3062');
-    var icdOut = icdRaw.replace(/\./g, '');
-    // MOST add-on (78720) and CCU codes carry no notes in the iClinic CSV
-    var _NOTE_FREE = { '1411':1, '1421':1, '1431':1, 'CCU_DAILY':1, '78720':1 };
-    var _csvNotes = _NOTE_FREE[c.fee] ? '' : (c.notes || '');
-    return [doc.num||'',c.alias||'',first,last,pn,c.phn||'','',sex,dob,'','',c.fee,icdOut,'',c.units||1,'100','MSP',c.date,c.startTime||'',_cet(c),_csvNotes,c.refby||'','',rn,loc,'OA040','','','','','','MSP','','','','','',''].join(',');
-  });
-  var blob=new Blob([hdr+'\n'+rows.join('\n')],{type:'text/csv;charset=utf-8;'});
-  var url=URL.createObjectURL(blob);
-  var a=document.createElement('a');
-  a.href=url; a.download=filename; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-}
-
 function removeClaim(id) {
   st.claims = st.claims.filter(function(c) { return c.id !== id; });
   sv('claims', st.claims);
@@ -8656,50 +8537,6 @@ function clearQueue() {
   st.claims = [];
   sv('claims', st.claims);
   showToast('Queue cleared');
-}
-
-function exportCSV() {
-  if (!st.claims.length) { showToast('No claims to export'); return; }
-
-  // v3.39: Pre-flight check — every claim must have a matching patient row in
-  // st.patients (by PHN). An orphan claim writes empty first/last/DOB/sex into
-  // the CSV and iClinic rejects the row. Block the export and point the doctor
-  // at the Data Check tab so they can fix the underlying issue rather than
-  // submitting bad data.
-  var patPhns = {};
-  (st.patients || []).forEach(function(p) { if (p.phn) patPhns[String(p.phn)] = true; });
-  var orphans = (st.claims || []).filter(function(c) {
-    return c.phn && !patPhns[String(c.phn)] && !parseBool(c.submitted);
-  });
-  if (orphans.length) {
-    var sample = orphans.slice(0, 3).map(function(c) {
-      return c.last + ' / ' + c.phn + ' / ' + c.fee + ' on ' + c.date;
-    }).join('; ');
-    var msg = orphans.length + ' claim' + (orphans.length===1?'':'s') +
-              ' have no matching patient row — iClinic will reject these. ' +
-              'Fix in Data Check first. Sample: ' + sample;
-    showToast(msg);
-    console.warn('exportCSV blocked — orphan claims:', orphans);
-    return;
-  }
-
-  // Non-CCU claims + consolidated CCU bands
-  var raw = st.claims.filter(function(c) { return c.fee !== 'CCU_DAILY'; });
-  var ccu = ccuConsolidate();
-  var all = raw.concat(ccu);
-
-  _buildAndDownloadCSV(all, 'iClinic_KGH_' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '.csv');
-  var now = new Date().toISOString();
-  all.forEach(function(c) {
-    var sc = st.claims.find(function(x){ return x.id===c.id; });
-    if (sc && !parseBool(sc.submitted)) {
-      sc.submitted   = true;
-      sc.submittedAt = now;
-      if (SHEETS_URL) push('saveClaim', sc);
-    }
-  });
-  sv('claims', st.claims);
-  showToast('Exported ' + all.length + ' claims — marked as submitted');
 }
 
 // ── 12_referrers.js ──
