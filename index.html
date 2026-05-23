@@ -725,13 +725,6 @@ input[type=file] { display:none; }
 .cv-day.cv-ccu       { background:#f08585; color:#5e1414; }
 .cv-day .cv-num { font-size:12px; line-height:1; }
 .cv-day .cv-tag { font-size:8px; font-weight:700; line-height:1; margin-top:2px; opacity:.85; letter-spacing:.3px; }
-/* Tappable legend pills for batch-entry mode */
-.cv-lg-tap { cursor:pointer; padding:2px 6px; border-radius:4px; border:1.5px solid transparent; transition:.12s; -webkit-tap-highlight-color:transparent; }
-.cv-lg-tap:active { opacity:.65; }
-.cv-lg-tap.cv-mode-on { border-color:currentColor; font-weight:700; background:rgba(0,0,0,.07); }
-.cv-cal-mode-bar { font-size:11px; color:var(--blue-t); background:var(--blue-bg);
-  border-radius:6px; padding:6px 10px; margin-bottom:8px;
-  display:flex; align-items:center; justify-content:space-between; }
 .cv-warn { background:var(--amber-bg); border:1px solid #f5d28a; color:var(--amber-t);
            border-radius:var(--rsm); padding:10px 12px; font-size:12px; margin:10px 0 6px;
            display:flex; gap:10px; align-items:flex-start; }
@@ -892,7 +885,6 @@ input[type=file] { display:none; }
     <div class="card-title">Claim</div>
     <div class="fl" style="margin-bottom:10px">
       <button class="ct-btn ct-on-consult" id="ap-ct-consult" style="flex:1" onclick="apSelectClaimType('consult')">Consult</button>
-      <button class="ct-btn" id="ap-ct-ccu-admit" style="flex:1" onclick="apSelectClaimType('ccu-admit')">CCU Admit</button>
       <button class="ct-btn" id="ap-ct-other" style="flex:1" onclick="apSelectClaimType('other')">Other Claim</button>
     </div>
     <div id="ap-claim-area"></div>
@@ -1114,14 +1106,6 @@ input[type=file] { display:none; }
   </div>
 </div>
 
-<!-- ═══ EXTRA CLAIM MODAL ═══ -->
-<div class="overlay" id="ec-modal">
-  <div class="modal" style="border-radius:18px 18px 0 0;padding-bottom:env(safe-area-inset-bottom);max-width:480px;margin:auto">
-    <div class="modal-handle"></div>
-    <div id="ec-content"></div>
-  </div>
-</div>
-
 <!-- ═══ PATIENT EDIT MODAL ═══ -->
 <div class="overlay" id="pt-edit-modal">
   <div class="modal">
@@ -1181,15 +1165,6 @@ var DOCTORS_SEED = [
   { alias:'EMMassie',name:'Dr. Emma Massie'     },
   { alias:'SB',      name:'Dr. Sandy Baker'     },
 ];
-
-// Sort a doctors array alphabetically by last name (last word of .name)
-function sortedDoctors(docs) {
-  return (docs || []).slice().sort(function(a, b) {
-    var la = String(a.name || a.alias).trim().split(' ').pop().toLowerCase();
-    var lb = String(b.name || b.alias).trim().split(' ').pop().toLowerCase();
-    return la < lb ? -1 : la > lb ? 1 : 0;
-  });
-}
 
 // Ward definitions: label, default list, default care type, preset rooms
 var WARDS = {
@@ -2093,12 +2068,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.75-2026-05-23-cal-legend-mode';
+var BUILD_ID    = 'v3.73-2026-05-23-calendar-performing-doc';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.75';
-var APP_BUILT   = '2026-05-23';
+var APP_VERSION = 'v3.73';
+var APP_BUILT   = '2026-05-20';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -4694,8 +4669,6 @@ function openPatientSummary(pid) {
             claims.length + ' claim' + (claims.length !== 1 ? 's' : '') + ' on record</div>';
   html +=   '<div style="display:flex;gap:6px">' +
               '<button class="pt-addclaim-btn" data-pid2="' + p.id + '" data-fn2="' + addClaimFn2 + '" onclick="ptSummaryAddClaim(this)">+ Add claim</button>' +
-              '<button class="pt-addclaim-btn" style="background:var(--amber-bg);color:var(--amber-t);border-color:var(--amber-t)" ' +
-                'onclick="openExtraClaimModal(\''+p.id+'\',null)">+ Extra claim</button>' +
             '</div>';
   html += '</div>';
 
@@ -4833,36 +4806,6 @@ function _cvAdmitSpan(p) {
 
 // Map a DD/MM/YYYY date to the dominant cell-colour key.
 // Priority: consult > ccu > daily > directive > combined
-// Map claim type key → background colour (matches .cv-day CSS classes)
-var _CV_TYPE_BG = {
-  consult:'#ffcf73', ccu:'#f08585', daily:'#3fa658',
-  directive:'#8eb5fa', combined:'#b8e6c4'
-};
-
-// Classify a single claim into its display type key
-function _cvClaimType(c) {
-  if (c.fee === '33010' || c.fee === '33012' || c.fee === '33005' ||
-      c.fee === '33014' || c.fee === '33035' ||
-      c.fee === 'Y33025' || c.fee === '00751') return 'consult';
-  if (c.fee === 'CCU_DAILY' || c.fee === '1411' || c.fee === '1421' ||
-      c.fee === '1431'    || c.fee === '1441') return 'ccu';
-  if (c.fee === '33006') return 'directive';
-  if (c.fee === '33008') return (c.notes && String(c.notes).trim()) ? 'combined' : 'daily';
-  return null;
-}
-
-// Return a secondary type if a day has two distinct billable types
-function _cvSecondaryType(dayClaims, primary) {
-  var priority = ['ccu','consult','daily','combined','directive'];
-  var found = {};
-  dayClaims.forEach(function(c) { var t = _cvClaimType(c); if (t) found[t] = true; });
-  for (var i = 0; i < priority.length; i++) {
-    var t = priority[i];
-    if (found[t] && t !== primary) return t;
-  }
-  return null;
-}
-
 function _cvDominantType(dayClaims) {
   if (!dayClaims || !dayClaims.length) return null;
   var has = { consult:false, ccu:false, daily:false, directive:false, combined:false };
@@ -4973,30 +4916,15 @@ function _ptSummaryCalendarHTML(p, claims) {
 
   var html = '';
 
-  // Legend — tappable pills for batch-entry mode
-  var _calMode = window._cvCalMode || null;
-  function _lgPill(type, color, label) {
-    var on = _calMode === type;
-    return '<div class="cv-lg cv-lg-tap' + (on ? ' cv-mode-on' : '') + '" onclick="cvSetCalMode(\'' + type + '\')">' +
-           '<div class="cv-sw" style="background:' + color + '"></div>' + label + '</div>';
-  }
+  // Legend
   html += '<div class="cv-legend">' +
-    _lgPill('consult',  '#ffcf73', 'Consult') +
-    _lgPill('ccu',      '#f08585', 'CCU') +
-    _lgPill('daily',    '#3fa658', 'Daily') +
-    _lgPill('directive','#8eb5fa', 'Directive') +
-    _lgPill('combined', '#b8e6c4', 'Combined') +
-    (rule ? '<div class="cv-lg"><div class="cv-sw" style="background:#d4d4d8;border:1px dashed #8a8a92"></div>Gap</div>' : '') +
-  '</div>';
-
-  // Mode banner
-  if (_calMode) {
-    var _modeLabel = {consult:'Consult',ccu:'CCU',daily:'Daily',directive:'Directive',combined:'Combined'}[_calMode] || _calMode;
-    html += '<div class="cv-cal-mode-bar">' +
-      '<span>+ Tap days to add <strong>' + _modeLabel + '</strong></span>' +
-      '<button onclick="cvSetCalMode(null)" style="background:none;border:none;cursor:pointer;font-size:13px;color:var(--blue-t);padding:0;font-family:inherit;font-weight:700">✕ Done</button>' +
-    '</div>';
-  }
+            '<div class="cv-lg"><div class="cv-sw" style="background:#ffcf73"></div>Consult</div>' +
+            '<div class="cv-lg"><div class="cv-sw" style="background:#f08585"></div>CCU</div>' +
+            '<div class="cv-lg"><div class="cv-sw" style="background:#3fa658"></div>Daily</div>' +
+            '<div class="cv-lg"><div class="cv-sw" style="background:#8eb5fa"></div>Directive</div>' +
+            '<div class="cv-lg"><div class="cv-sw" style="background:#b8e6c4"></div>Combined</div>' +
+            (rule ? '<div class="cv-lg"><div class="cv-sw" style="background:#d4d4d8;border:1px dashed #8a8a92"></div>Gap</div>' : '') +
+          '</div>';
 
   // Month nav
   html += '<div class="cv-nav">' +
@@ -5030,14 +4958,6 @@ function _ptSummaryCalendarHTML(p, claims) {
     if (dateStr === todayKey) cls += ' cv-today';
     if (p.discharged && p.dischargeDate === dateStr) cls += ' cv-discharged';
 
-    // Diagonal split when the day has two different claim types
-    var secondary = dominant ? _cvSecondaryType(dayClaims, dominant) : null;
-    var splitStyle = '';
-    if (secondary && _CV_TYPE_BG[secondary]) {
-      cls += ' cv-split';
-      splitStyle = ' style="--cv2:' + _CV_TYPE_BG[secondary] + '"';
-    }
-
     var tag = '';
     if (dominant === 'ccu') {
       // Show the band (1411 / 1421 / 1431)
@@ -5047,9 +4967,9 @@ function _ptSummaryCalendarHTML(p, claims) {
       if (ccuClaim) tag = ccuClaim.fee;
     }
 
-    var tappable = (dayClaims.length > 0) || inSpan || !!window._cvCalMode;
+    var tappable = (dayClaims.length > 0) || inSpan;
     var onclick = tappable ? ' onclick="tapCalDay(\'' + dateStr + '\')"' : '';
-    html += '<div class="' + cls + '"' + onclick + splitStyle + '>' +
+    html += '<div class="' + cls + '"' + onclick + '>' +
               '<div class="cv-num">' + d + '</div>' +
               (tag ? '<div class="cv-tag">' + tag + '</div>' : '') +
             '</div>';
@@ -5096,19 +5016,12 @@ function _cvChangeMonth(delta) {
   if (calEl) calEl.innerHTML = _ptSummaryCalendarHTML(p, claims);
 }
 
-// Tap a day — batch-entry mode, details, or gap-fill picker
+// Tap a day — open details or the gap-fill picker
 function tapCalDay(dateStr) {
   var pid = window._cvPid;
   if (!pid) return;
   var p = getP(pid);
   if (!p) return;
-
-  // Batch-entry mode active — add claim of selected type directly
-  if (window._cvCalMode) {
-    _cvTapWithMode(pid, dateStr, window._cvCalMode);
-    return;
-  }
-
   var dayClaims = st.claims.filter(function(c) {
     return samePhn(c.phn, p.phn) && c.date === dateStr;
   });
@@ -5119,44 +5032,6 @@ function tapCalDay(dateStr) {
   }
 }
 
-// ── Batch-entry legend mode ──────────────────────────────────────────────────
-
-// Toggle calendar entry mode (type = 'daily' | 'directive' | 'ccu' | 'combined' | 'consult' | null)
-function cvSetCalMode(type) {
-  window._cvCalMode = (!type || window._cvCalMode === type) ? null : type;
-  _cvRefreshCal();
-}
-
-// Re-render just the calendar div in-place (preserves modal open state)
-function _cvRefreshCal() {
-  var pid = window._cvPid;
-  if (!pid) return;
-  var p = getP(pid);
-  if (!p) return;
-  var claims = st.claims.filter(function(c) {
-    return c.phn && p.phn && samePhn(c.phn, p.phn);
-  }).sort(function(a, b) { return parseDMY(a.date) - parseDMY(b.date); });
-  var calEl = document.getElementById('cv-view-cal');
-  if (calEl) calEl.innerHTML = _ptSummaryCalendarHTML(p, claims);
-}
-
-// Handle a day tap when a legend mode is active
-function _cvTapWithMode(pid, dateStr, mode) {
-  if (mode === 'combined') {
-    // Combined needs ICD+reason form — reuse existing picker flow
-    _cvShowCombinedForm(pid, dateStr);
-    return;
-  }
-  if (mode === 'consult') {
-    // Consult needs time entry — open standard picker pre-selecting consult
-    _cvShowPicker(pid, dateStr);
-    return;
-  }
-  // Daily, Directive, CCU — instant add, then refresh in-place
-  _cvFillClaim(pid, dateStr, mode, '');
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Sheet showing all claims on a single day with edit/delete
 function _cvShowDayDetails(pid, dateStr, dayClaims) {
   var rows = dayClaims.map(function(c) {
@@ -5195,180 +5070,11 @@ function _cvShowDayDetails(pid, dateStr, dayClaims) {
     '<div style="font-size:14px;font-weight:700;margin-bottom:2px">' + dispDate(dateStr) + '</div>' +
     '<div style="font-size:11px;color:var(--text2);margin-bottom:12px">' + dayClaims.length + ' claim' + (dayClaims.length>1?'s':'') + ' on this day</div>' +
     rows +
-    '<div style="display:flex;gap:6px;margin-top:6px">' +
-      '<button class="btn btn-p" style="flex:1;margin:0" onclick="_cvAddExtraClaim(\''+pid+'\',\''+dateStr+'\')">' +
-        '+ Add another claim</button>' +
-      '<button class="btn btn-s" style="flex:1;margin:0" onclick="hideModal(\'cv-picker-modal\')">Close</button>' +
-    '</div>';
+    '<button class="btn btn-s" style="margin-top:6px;margin-bottom:0" onclick="hideModal(\'cv-picker-modal\')">Close</button>';
   document.getElementById('cv-picker-content').innerHTML = html;
   showModal('cv-picker-modal');
 }
 
-// ── Extra Claim ─────────────────────────────────────────────────────────────
-// Opened from: calendar day-detail "+ Add another claim", patient summary "+ Extra claim"
-
-var _ecPid  = null;
-var _ecDate = null;  // DD/MM/YYYY
-
-function _cvAddExtraClaim(pid, dateStr) {
-  hideModal('cv-picker-modal');
-  openExtraClaimModal(pid, dateStr);
-}
-
-function openExtraClaimModal(pid, dateStr) {
-  _ecPid  = pid;
-  _ecDate = dateStr || TODAY;
-  var p = getP(pid);
-  if (!p) return;
-
-  var TA_STYLE = 'width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);' +
-                 'font-size:14px;font-family:inherit;resize:vertical;margin-bottom:4px';
-
-  var html =
-    '<div style="font-weight:700;font-size:15px;margin-bottom:2px">Extra claim</div>' +
-    '<div style="font-size:12px;color:var(--text2);margin-bottom:12px">' + esc(p.last) + ', ' + esc(p.first) + '</div>' +
-    // 3 preset pills
-    '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:14px">' +
-      '<button class="ct-btn" id="ec-p-transfer"  onclick="ecSelPreset(\'transfer\')">CCU Transfer</button>' +
-      '<button class="ct-btn" id="ec-p-emergency" onclick="ecSelPreset(\'emergency\')">Emergency</button>' +
-      '<button class="ct-btn" id="ec-p-daily"     onclick="ecSelPreset(\'daily\')">Additional Daily</button>' +
-    '</div>' +
-    '<div id="ec-form-area"></div>' +
-    '<div id="ec-actions" style="display:none;margin-top:10px">' +
-      '<button class="btn btn-p" onclick="ecSubmit()" style="margin-bottom:6px">Add claim</button>' +
-      '<button class="btn btn-s" onclick="hideModal(\'ec-modal\')" style="margin-bottom:0">Cancel</button>' +
-    '</div>';
-
-  document.getElementById('ec-content').innerHTML = html;
-  showModal('ec-modal');
-}
-
-function ecSelPreset(type) {
-  // Pill highlight
-  ['transfer','emergency','daily'].forEach(function(t) {
-    var b = document.getElementById('ec-p-' + t);
-    if (b) b.className = 'ct-btn' + (t === type ? ' ct-on-consult' : '');
-  });
-
-  var TA_STYLE = 'width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);' +
-                 'font-size:14px;font-family:inherit;resize:vertical;margin-bottom:4px';
-
-  // ISO value for the date input
-  var dParts = (_ecDate || TODAY).split('/');
-  var isoDate = dParts.length === 3
-    ? dParts[2] + '-' + dParts[1] + '-' + dParts[0]
-    : localISODate();
-
-  var dateRow = '<label>Date</label><input type="date" id="ec-date" value="' + isoDate + '" style="margin-bottom:6px">';
-  var docRow  = '<div id="ec-doc-wrap"></div>';
-  var h = '';
-
-  if (type === 'transfer') {
-    h += '<div style="font-size:12px;color:var(--text3);margin-bottom:8px">Fee 1411 — CCU critical care day 1</div>' +
-         dateRow +
-         '<label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(optional)</span></label>' +
-         '<textarea id="ec-notes" rows="2" placeholder="e.g. Transferred to CCU, haemodynamic instability" autocorrect="off" style="' + TA_STYLE + '"></textarea>';
-  } else if (type === 'emergency') {
-    h += '<div style="font-size:12px;color:var(--amber-t);background:var(--amber-bg);border-radius:6px;padding:7px 10px;margin-bottom:8px">' +
-         '⚠ Fee 33035 — start time, end time and a note describing emergent care provided are <strong>mandatory</strong> for this code</div>' +
-         dateRow +
-         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">' +
-           '<div><label>Start time *</label>' +
-                '<input type="text" id="ec-start" placeholder="14:30 or 2:30pm" ' +
-                'oninput="ecAutoEnd()" onblur="var v=parseTime24(this.value);if(v){this.value=v;ecAutoEnd();}"></div>' +
-           '<div><label>End time *</label>' +
-                '<input type="text" id="ec-end" placeholder="15:20" ' +
-                'onblur="var v=parseTime24(this.value);if(v)this.value=v;"></div>' +
-         '</div>' +
-         '<label>Notes * <span style="font-size:10px;color:var(--red-t)">document emergent care provided</span></label>' +
-         '<textarea id="ec-notes" rows="3" placeholder="e.g. Called to assess acute respiratory decompensation; assessed and stabilised, arranged ICU transfer" autocorrect="off" style="' + TA_STYLE + '"></textarea>';
-  } else {
-    h += '<div style="font-size:12px;color:var(--text3);margin-bottom:8px">Fee 33008 — additional daily visit (different physician or on-call)</div>' +
-         dateRow +
-         '<label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(optional)</span></label>' +
-         '<textarea id="ec-notes" rows="2" placeholder="e.g. On-call cover, cross-coverage visit" autocorrect="off" style="' + TA_STYLE + '"></textarea>';
-  }
-
-  h += docRow;
-  document.getElementById('ec-form-area').innerHTML = h;
-  document.getElementById('ec-actions').style.display = 'block';
-  document.getElementById('ec-form-area')._ecType = type;
-  _ecInjectDoc();
-}
-
-function ecAutoEnd() {
-  var s = document.getElementById('ec-start');
-  var e = document.getElementById('ec-end');
-  if (!s || !e) return;
-  var norm = parseTime24(s.value);
-  if (norm && !e.value) e.value = minsToTime(t2m(norm) + 50);
-}
-
-function _ecInjectDoc() {
-  var wrap = document.getElementById('ec-doc-wrap');
-  if (!wrap) return;
-  if (!st.doctors || !st.doctors.length) { wrap.innerHTML = ''; return; }
-  var curAlias = st.doc ? st.doc.alias : '';
-  var opts = sortedDoctors(st.doctors).map(function(d) {
-    return '<option value="' + esc(d.alias) + '"' + (d.alias === curAlias ? ' selected' : '') + '>' +
-           esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
-  }).join('');
-  wrap.innerHTML = '<label style="margin-top:6px">Performing physician</label>' +
-                   '<select id="ec-doc">' + opts + '</select>';
-  var sel = document.getElementById('ec-doc');
-  if (sel && curAlias) sel.value = curAlias;
-}
-
-function ecSubmit() {
-  var area  = document.getElementById('ec-form-area');
-  var type  = area ? area._ecType : null;
-  if (!type || !_ecPid) return;
-
-  var p = getP(_ecPid);
-  if (!p) return;
-
-  var dateISO = (document.getElementById('ec-date') || {}).value || '';
-  var notes   = ((document.getElementById('ec-notes') || {}).value || '').trim();
-  var alias   = (document.getElementById('ec-doc')   || {}).value || (st.doc && st.doc.alias) || '';
-
-  if (!dateISO) { showToast('Date required'); return; }
-  var dateFmt = fmtD(parseISODate(dateISO));
-  var loc = p.ward === 'ED' ? 'E' : 'I';
-
-  if (type === 'transfer') {
-    addClaim(p, '1411', '1411', 1, dateFmt, loc, null, notes, null, alias);
-
-  } else if (type === 'emergency') {
-    var start = ((document.getElementById('ec-start') || {}).value || '').trim();
-    var end   = ((document.getElementById('ec-end')   || {}).value || '').trim();
-    if (!start) { showToast('Start time required for 33035'); return; }
-    if (!end)   { showToast('End time required for 33035');   return; }
-    if (!notes) { showToast('Notes required for 33035 — document emergent care provided'); return; }
-    var startN = parseTime24(start);
-    var endN   = parseTime24(end);
-    if (!startN) { showToast('Invalid start time'); return; }
-    if (!endN)   { showToast('Invalid end time');   return; }
-    addClaim(p, '33035', '33035', 1, dateFmt, loc, startN, notes, endN, alias);
-
-  } else {
-    // additional daily
-    addClaim(p, '33008', '33008', 1, dateFmt, loc, null, notes, null, alias);
-  }
-
-  sv('claims', st.claims);
-  hideModal('ec-modal');
-  showToast('Extra claim added');
-
-  // Refresh patient summary calendar if open
-  setTimeout(function() {
-    if (window._cvPid) {
-      var pp = getP(window._cvPid);
-      if (pp) openPatientSummary(pp.id);
-    }
-  }, 80);
-}
-
-// ────────────────────────────────────────────────────────────────────────────
 function _cvEditFromSheet(btn) {
   var cid = btn.getAttribute('data-cid');
   var pid = btn.getAttribute('data-pid');
@@ -5395,7 +5101,7 @@ function _cvDeleteFromSheet(btn) {
 }
 
 // Gap-fill picker — 4 options, rule-recommended type highlighted
-function _cvShowPicker(pid, dateStr) {
+function _cvShowPicker(pid, dateStr, preselectedAlias) {
   var p = getP(pid);
   if (!p) return;
   var rec = _cvGapRuleForPatient(p);   // 'ccu' | 'daily' | null
@@ -5423,9 +5129,23 @@ function _cvShowPicker(pid, dateStr) {
     ? p.last + ' was ' + (rec === 'ccu' ? 'in CCU' : 'MRP') + ' this day — pick a type to backfill.'
     : 'No claim on file. Pick a visit type to add for this date.';
 
+  // Build performing doctor dropdown (unique id cv-performing-doc to avoid conflict with claim builder)
+  var curAlias = preselectedAlias || (st.doc ? st.doc.alias : '');
+  var docOpts = (st.doctors || []).map(function(d) {
+    return '<option value="' + esc(d.alias) + '"' + (d.alias === curAlias ? ' selected' : '') + '>' +
+           esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
+  }).join('');
+  var docRow = docOpts
+    ? '<div style="margin-bottom:10px">' +
+        '<label style="display:block;font-size:11px;font-weight:600;color:var(--text2);margin-bottom:4px">Performing doctor</label>' +
+        '<select id="cv-performing-doc" style="width:100%;padding:8px 10px;border:.5px solid var(--border2);border-radius:8px;font-size:13px;font-family:inherit;background:var(--surface2)">' +
+        docOpts + '</select></div>'
+    : '';
+
   var html =
     '<div style="font-size:14px;font-weight:700;color:' + headerColor + ';margin-bottom:2px">' + headerIcon + dispDate(dateStr) + '</div>' +
-    '<div style="font-size:11px;color:var(--text2);margin-bottom:6px">' + hint + '</div>' +
+    '<div style="font-size:11px;color:var(--text2);margin-bottom:10px">' + hint + '</div>' +
+    docRow +
     '<div class="cv-pick-grid">' + btns + '</div>' +
     '<div style="display:flex;gap:8px;margin-top:6px">' +
       '<button class="btn btn-s" style="flex:1;margin-bottom:0" onclick="hideModal(\'cv-picker-modal\')">Cancel</button>' +
@@ -5438,15 +5158,18 @@ function _cvPickType(btn) {
   var pid     = btn.getAttribute('data-pid');
   var dateStr = btn.getAttribute('data-date');
   var type    = btn.getAttribute('data-type');
-  if (type === 'combined') return _cvShowCombinedForm(pid, dateStr);
-  _cvFillClaim(pid, dateStr, type, '');
+  var sel = document.getElementById('cv-performing-doc');
+  var alias = (sel && sel.value) ? sel.value : (st.doc ? st.doc.alias : '');
+  if (type === 'combined') return _cvShowCombinedForm(pid, dateStr, alias);
+  _cvFillClaim(pid, dateStr, type, '', null, alias);
 }
 
 // Combined daily sub-form — ICD + reason
-function _cvShowCombinedForm(pid, dateStr) {
+function _cvShowCombinedForm(pid, dateStr, alias) {
   var p = getP(pid);
   if (!p) return;
   var defaultIcd = String(p.icd || '').trim();
+  var safeAlias = alias || (st.doc ? st.doc.alias : '');
   var html =
     '<div style="font-size:14px;font-weight:700;color:var(--teal-t);margin-bottom:2px">Combined daily — ' + dispDate(dateStr) + '</div>' +
     '<div style="font-size:11px;color:var(--text2);margin-bottom:12px">Combined daily requires documentation. Both fields attach to the claim note.</div>' +
@@ -5460,8 +5183,8 @@ function _cvShowCombinedForm(pid, dateStr) {
     'style="width:100%;padding:11px;border:.5px solid var(--border2);border-radius:8px;font-size:14px;font-family:inherit;background:var(--surface2);resize:vertical"></textarea>' +
 
     '<div style="display:flex;gap:8px;margin-top:14px">' +
-      '<button class="btn btn-s" style="flex:1;margin-bottom:0" data-pid="' + pid + '" data-date="' + dateStr + '" onclick="_cvBackFromCombined(this)">‹ Back</button>' +
-      '<button class="btn btn-p" style="flex:1;margin-bottom:0" data-pid="' + pid + '" data-date="' + dateStr + '" onclick="_cvConfirmCombined(this)">Add combined daily</button>' +
+      '<button class="btn btn-s" style="flex:1;margin-bottom:0" data-pid="' + pid + '" data-date="' + dateStr + '" data-alias="' + esc(safeAlias) + '" onclick="_cvBackFromCombined(this)">‹ Back</button>' +
+      '<button class="btn btn-p" style="flex:1;margin-bottom:0" data-pid="' + pid + '" data-date="' + dateStr + '" data-alias="' + esc(safeAlias) + '" onclick="_cvConfirmCombined(this)">Add combined daily</button>' +
     '</div>';
   document.getElementById('cv-picker-content').innerHTML = html;
   showModal('cv-picker-modal');
@@ -5472,12 +5195,14 @@ function _cvShowCombinedForm(pid, dateStr) {
 }
 
 function _cvBackFromCombined(btn) {
-  _cvShowPicker(btn.getAttribute('data-pid'), btn.getAttribute('data-date'));
+  var alias = btn.getAttribute('data-alias') || (st.doc ? st.doc.alias : '');
+  _cvShowPicker(btn.getAttribute('data-pid'), btn.getAttribute('data-date'), alias);
 }
 
 function _cvConfirmCombined(btn) {
   var pid     = btn.getAttribute('data-pid');
   var dateStr = btn.getAttribute('data-date');
+  var alias   = btn.getAttribute('data-alias') || (st.doc ? st.doc.alias : '');
   var icdEl    = document.getElementById('cv-cb-icd');
   var reasonEl = document.getElementById('cv-cb-reason');
   var icd    = (icdEl    ? icdEl.value    : '').trim();
@@ -5485,11 +5210,11 @@ function _cvConfirmCombined(btn) {
   if (!icd)    { if (icdEl)    icdEl.style.borderColor    = 'var(--red)'; return; }
   if (!reason) { if (reasonEl) reasonEl.style.borderColor = 'var(--red)'; return; }
   var note = icd + ' — ' + reason;
-  _cvFillClaim(pid, dateStr, 'combined', note, icd);
+  _cvFillClaim(pid, dateStr, 'combined', note, icd, alias);
 }
 
 // Create the gap-fill claim and refresh the calendar
-function _cvFillClaim(pid, dateStr, type, note, icdOverride) {
+function _cvFillClaim(pid, dateStr, type, note, icdOverride, alias) {
   var p = getP(pid);
   if (!p) return;
   if (!checkDoc()) return;
@@ -5497,16 +5222,16 @@ function _cvFillClaim(pid, dateStr, type, note, icdOverride) {
   var origIcd = p.icd;
   if (icdOverride) p.icd = icdOverride;
 
-  var alias = st.doc.alias;
+  var performingAlias = alias || st.doc.alias;
   if (type === 'ccu') {
     // v3.60: write CCU_DAILY placeholder; export consolidates to 1411/1421/1431.
-    addClaim(p, 'CCU_DAILY', 'CCU_DAILY', 1, dateStr, 'I', null, note || null, null, alias);
+    addClaim(p, 'CCU_DAILY', 'CCU_DAILY', 1, dateStr, 'I', null, note || null, null, performingAlias);
   } else if (type === 'daily') {
-    addClaim(p, '33008', '33008', 1, dateStr, 'I', null, note || null, null, alias);
+    addClaim(p, '33008', '33008', 1, dateStr, 'I', null, note || null, null, performingAlias);
   } else if (type === 'directive') {
-    addClaim(p, '33006', '33006', 1, dateStr, 'I', null, note || null, null, alias);
+    addClaim(p, '33006', '33006', 1, dateStr, 'I', null, note || null, null, performingAlias);
   } else if (type === 'combined') {
-    addClaim(p, '33008', '33008', 1, dateStr, 'I', null, note, null, alias);
+    addClaim(p, '33008', '33008', 1, dateStr, 'I', null, note, null, performingAlias);
   }
   // Restore original ICD (the claim copy already captured it)
   if (icdOverride) p.icd = origIcd;
@@ -5725,7 +5450,7 @@ function openClaimEdit(btn) {
   var curDx = DIAGNOSES.find(function(d) { return d.code === c.icd; });
 
   // Build doctor options for performing physician selector
-  var docOptions = sortedDoctors(st.doctors).map(function(d) {
+  var docOptions = st.doctors.map(function(d) {
     return '<option value="' + esc(d.alias) + '"' + (c.alias === d.alias ? ' selected' : '') + '>' +
            esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
   }).join('');
@@ -6613,7 +6338,7 @@ function buildIcdRefCard(p) {
 function buildPerformingPhysSelector() {
   if (!st.doctors || !st.doctors.length) return '';
   var curAlias = st.doc ? st.doc.alias : '';
-  var opts = sortedDoctors(st.doctors).map(function(d) {
+  var opts = st.doctors.map(function(d) {
     return '<option value="' + esc(d.alias) + '"' + (d.alias === curAlias ? ' selected' : '') + '>' +
            esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
   }).join('');
@@ -7343,7 +7068,7 @@ var _apClaimType = 'consult';
 
 function apSelectClaimType(type) {
   _apClaimType = type;
-  ['consult','ccu-admit','other'].forEach(function(t) {
+  ['consult','other'].forEach(function(t) {
     var btn = document.getElementById('ap-ct-' + t);
     if (btn) btn.className = 'ct-btn' + (t === type ? ' ct-on-consult' : '');
   });
@@ -7352,14 +7077,6 @@ function apSelectClaimType(type) {
   if (type === 'consult') {
     area.innerHTML = buildApConsultArea();
     initAddPatientConsult();
-  } else if (type === 'ccu-admit') {
-    area.innerHTML = buildApCCUAdmitArea();
-    var ccuDateEl = document.getElementById('ap-ccu-date');
-    if (ccuDateEl) ccuDateEl.value = localISODate();
-    injectApPerformingDoc();
-    // Snap location card to CCU defaults (on-service, MRP, Cardiology, ccu care)
-    var wardSel = document.getElementById('f-ward');
-    if (wardSel) { wardSel.value = 'CCU'; wardChange(); }
   } else {
     area.innerHTML = buildApOtherClaimArea();
     var dateEl = document.getElementById('ap-oc-date');
@@ -7373,7 +7090,7 @@ function injectApPerformingDoc() {
   if (!perfWrap) return;
   if (!st.doctors || !st.doctors.length) { perfWrap.innerHTML = ''; return; }
   var curAlias = st.doc ? st.doc.alias : '';
-  var opts = sortedDoctors(st.doctors).map(function(d) {
+  var opts = st.doctors.map(function(d) {
     return '<option value="' + esc(d.alias) + '"' + (d.alias === curAlias ? ' selected' : '') + '>' +
            esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
   }).join('');
@@ -7416,18 +7133,6 @@ function buildApOtherClaimArea() {
   h += '<label>Date</label><input type="date" id="ap-oc-date">';
   h += '<label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(optional)</span></label>';
   h += '<textarea id="ap-oc-notes" rows="2" placeholder="Optional" autocorrect="off" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:6px"></textarea>';
-  h += '<div style="border-top:.5px solid var(--border);margin:4px 0 10px"></div>';
-  h += _buildApRefIcdHtml();
-  h += '<div id="f-c-performing-wrap"></div>';
-  return h;
-}
-
-function buildApCCUAdmitArea() {
-  var h = '';
-  h += '<div style="font-size:12px;color:var(--text3);margin-bottom:8px">Fee code 1411 — CCU critical care day 1</div>';
-  h += '<label>Date</label><input type="date" id="ap-ccu-date">';
-  h += '<label style="margin-top:6px">Notes <span style="font-size:10px;color:var(--text3)">(optional)</span></label>';
-  h += '<textarea id="ap-ccu-notes" rows="2" placeholder="Optional" autocorrect="off" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:6px"></textarea>';
   h += '<div style="border-top:.5px solid var(--border);margin:4px 0 10px"></div>';
   h += _buildApRefIcdHtml();
   h += '<div id="f-c-performing-wrap"></div>';
@@ -7537,8 +7242,6 @@ async function apSubmit(addToList, _skipDupCheck) {
     if (!(document.getElementById('f-c-date')  || {}).value) addMissing.push('date');
     if (!(document.getElementById('f-c-start') || {}).value) addMissing.push('start time');
     if (!(document.getElementById('f-c-end')   || {}).value) addMissing.push('end time');
-  } else if (_apClaimType === 'ccu-admit') {
-    if (!(document.getElementById('ap-ccu-date') || {}).value) addMissing.push('date');
   } else if (_apClaimType === 'other') {
     if (!gv('ap-oc-fee')) addMissing.push('fee');
     if (!(document.getElementById('ap-oc-date') || {}).value) addMissing.push('date');
@@ -7687,15 +7390,6 @@ async function apSubmit(addToList, _skipDupCheck) {
         }
         sv('claims', st.claims);
       }
-    } else if (_apClaimType === 'ccu-admit') {
-      var ccuDateISO = (document.getElementById('ap-ccu-date')  || {}).value || '';
-      var ccuNotes   = (document.getElementById('ap-ccu-notes') || {}).value || '';
-      if (ccuDateISO) {
-        var ccuDateFmt = fmtD(parseISODate(ccuDateISO));
-        var ccuLoc = p.ward === 'ED' ? 'E' : 'I';
-        addClaim(p, '1411', '1411', 1, ccuDateFmt, ccuLoc, null, ccuNotes, null, cAlias);
-        sv('claims', st.claims);
-      }
     } else if (_apClaimType === 'other') {
       var ocFee     = gv('ap-oc-fee') || '';
       var ocUnits   = parseInt(gv('ap-oc-units')) || 1;
@@ -7809,7 +7503,7 @@ function clearAddForm() {
   var ocr = document.getElementById('ocr-bar'); if (ocr) ocr.style.display = 'none';
   // Reset claim type to consult and rebuild claim area
   _apClaimType = 'consult';
-  ['consult','ccu-admit','other'].forEach(function(t) {
+  ['consult','other'].forEach(function(t) {
     var b = document.getElementById('ap-ct-' + t);
     if (b) b.className = 'ct-btn' + (t === 'consult' ? ' ct-on-consult' : '');
   });
@@ -10109,7 +9803,7 @@ function hideModal(id) {
 
 function renderDocOpts() {
   document.getElementById('doc-opts').innerHTML = st.doctors.length
-    ? sortedDoctors(st.doctors).map(function(d) {
+    ? st.doctors.map(function(d) {
         var ini = d.name.replace('Dr. ','').split(' ').map(function(w){return w[0]||''}).join('').slice(0,2).toUpperCase();
         var numLine = d.alias;
         return '<div class="doc-opt" data-alias="' + d.alias + '" data-num="' + d.num + '" data-name="' + esc(d.name) + '" onclick="selectDocEl(this)">' +
