@@ -1,0 +1,1266 @@
+<!DOCTYPE html>
+<!--
+  KGH Cardiology Billing — main app
+  Version:    v3.77
+  Built:      2026-05-23 UTC
+
+  Changes in this build (v3.77) — Calendar legend clickable + desktop size fix:
+    - Legend pills (CCU / Daily / Directive / Combined) are now clickable
+      type selectors. Tap a pill to enter sticky-add mode; tap any calendar
+      day to add that claim type directly (no picker modal). Tap the pill
+      again to cancel. Active pill highlights in its claim colour.
+    - A hint line below the legend confirms the active mode:
+      "Tap any day to add CCU — tap pill again to cancel".
+    - Consult and Gap legend items remain view-only (not addable via calendar).
+    - Combined daily still opens its ICD + reason sub-form.
+    - Active pill is restored after calendar re-render (month change, claim add).
+    - _cvActiveType resets to null whenever a new patient summary is opened.
+    - All in-month calendar days are now tappable (previously only days with
+      claims or in-span days responded to tap).
+    - Picker modal buttons enlarged: padding 18px, label font 16px.
+    - Calendar grid capped at max-width:420px to prevent oversizing on desktop.
+
+  Changes in this build (v3.76) — CCU Admission/Transfer pill:
+    - Added "CCU Admit" pill to the Add Patient claim card, between
+      Consult and Other Claim.
+    - Selecting CCU Admit shows a minimal claim area: date + optional
+      notes + diagnosis + referring MD + performing physician.
+      No time fields, no MOST toggle, no call-out modifier banner.
+    - On submit, writes a single 1411 (CCU Day 1) claim with the
+      selected date. Location follows ward (E if ED, else I).
+    - CCU Admit pill highlights in red (ct-on-ccu) when active.
+    - Validation requires: PHN, referring MD, diagnosis, date.
+    - clearAddForm and pill-reset loop updated to include 'ccu-admit'
+      so state clears correctly on form reset.
+
+  Changes in this build (v3.75) — Remove direct CSV export from app:
+    - Removed exportCSV(), reexportSubmitted(), _buildAndDownloadCSV(),
+      and ccuConsolidate() — all CSV generation is handled exclusively
+      by the Google Sheets Apps Script (ccuConsolidateForExport()).
+    - No UI changes; these functions were already unreachable from any
+      button in the app.
+  Repo:       github.com/KelownaCardio/kelownacardio.github.io
+
+  Changes in this build (v3.67) — CCU export: one row per day:
+    - ccuConsolidate() now emits one row per calendar day for 1421 and
+      1431 (units:1 each) instead of a single batched row with N units.
+    - Each row uses that day's actual tap (ep[d]) so date and performing
+      alias are correct per day, not copied from episode day 1.
+    - 1411 (day 1) behaviour unchanged.
+
+  Changes in this build (v3.66) — Meditech import MRP transition detection:
+    - Detect when a matched existing patient's MRP has changed between the
+      stored record and the imported Meditech list:
+        · left-cardiology  → patient was Cardiology MRP, attending is no
+                              longer a cardiologist (e.g. moved to CSICU
+                              for surgery, became Hospitalist primary).
+                              Row is auto-UNCHECKED — doctor must
+                              explicitly confirm before billing changes.
+        · joined-cardiology → patient was not on our service, attending
+                              now a cardiologist. Row is auto-checked.
+    - Transition rows render at the top of the import modal with a red /
+      amber tinted background and a chip showing "oldMRP → newMRP".
+    - On confirm, transition rows mutate the existing patient: writes new
+      mrp + flips list/role/care to match the new service designation
+      (off/consultant/directive for left-cardiology; on/mrp/daily-or-ccu
+      for joined-cardiology). Ward/bed also updated. Logged via
+      logChange("MRP transition via Meditech import", oldVals → newVals).
+    - Only fires when there is exactly 1 local name match — multi-match
+      duplicates continue to flow through the existing demographic-conflict
+      banner so a single row never triggers both warnings at once.
+
+  Changes in this build (v3.65) — Meditech import discharge note:
+    - Discharge reason for missing patients changed from
+      "Not on Meditech list" to "No longer on Meditech Import List".
+    - `dischargeNote` field added to patient record before savePatient
+      push so the reason persists to the Patients tab in Sheets
+      (non-billing note only).
+
+  Changes in this build (v3.61) — Add Patient claim card cleanup:
+    - Removed redundant "Lmtd Consult" tab from Add Patient claim card.
+      Full / Limited consult selection is handled by the 33010/33012
+      buttons already present inside the consult area.
+    - Added live modifier banner (night / evening / weekend / daytime)
+      below the MOST pill in the Add Patient consult area, mirroring
+      the behaviour of the standalone consult screen. Updates on date
+      and start time changes. Shows increment tier if consult > 45 min.
+    - End time hint text changed to "Defaults to 50min, adjust as needed".
+    - Start time change now auto-updates end time to start + 50 min
+      (same as standalone consult screen).
+    - Removed all _apClaimType === 'lmtd' branches; lmtd is now
+      handled entirely by the 33012 toggle inside the consult area.
+    - REVERTS v3.59. CCU_DAILY is now the canonical placeholder fee for
+      every CCU day. The Apps Script ccuConsolidateForExport() rolls
+      groups of CCU_DAILY taps into properly-banded 1411/1421/1431 rows
+      with units at export time. This eliminates the band-at-rest
+      correctness problem and matches the BC MSP standard form
+      (one row per band with units, not one row per day).
+    - All CCU write paths reverted: batchRound (ward sweep),
+      quickCCUBtn, claim-screen CCU button, calendar gap-fill picker,
+      discharge modal CCU Daily buttons (both branches). They all
+      write 'CCU_DAILY' and addClaim no longer intercepts it.
+    - CCU_DAILY restored in the claim edit fee dropdown as
+      "CCU day (placeholder, export bands)".
+    - The ccuFeeForDate(p, dateStr) and ccuFeeForToday(p) helpers
+      remain in the file but are no longer called from billing paths.
+      Kept in case future work needs them (e.g. showing the projected
+      band on a confirmation screen before submit). Effectively dead
+      code for now.
+    - User-facing label simplified: quickCCUBtn shows "CCU day" toast
+      instead of the per-band label ("CCU day 1 (1411)" etc), since
+      the per-day band is meaningless until export.
+
+  Changes in this build (v3.59) — CCU_DAILY elimination [REVERTED in v3.60]:
+    - Briefly switched to band-on-write (compute 1411/1421/1431 at tap
+      time). Created band-at-rest correctness issues after manual
+      edits and mid-episode backfills. Reverted by user request in
+      favour of the placeholder + export-consolidation approach.
+
+  Changes in this build (v3.58) — Patient card style improvements:
+    - DOB removed from patient card meta line (age+sex already shown).
+    - Dx (ICD description + code) added after MRP on all card views
+      (ward list, alphabetical, off-service). Format: "Dx: Description (code)".
+    - Quick-tap action buttons (Directive / Combined daily / + Claim) now
+      share a single full-width row using flex:1 on each button (nowrap).
+    - CCU/CSICU/ICU consulting patients now correctly show Directive +
+      Combined daily quick-tap buttons (not CCU daily — we only claim CCU
+      daily when Cardiology is MRP). showsCCUDaily() now checks role===mrp
+      exclusively (dropped legacy care===ccu fallback).
+    - Ward room-number circle centered vertically in card (align-items:center
+      on .wp). Room number font reduced 10px→8px for clearer name hierarchy.
+      Removed margin-top offsets on .wp-pos and .wp-pos-wrap.
+
+  Changes in this build (v3.33) — Meditech import auto-discharge:
+    - Cardiologist matchers (inferMRP, inferCare) replaced with the
+      actual app users + 'CardiologyMRP' group label. Surnames wan/
+      soon removed — those are cardiac SURGEONS, not cardiologists.
+    - New helpers isCardiologistAttending() and isCardiacSurgeonAttending()
+      with explicit CARDIOLOGIST_SURNAMES and CARDIAC_SURGEON_SURNAMES
+      constants at the top of 13_meditech.js.
+    - Meditech import now also flags discharge candidates: active
+      on-service patients who are (a) not on the imported list, or
+      (b) on the list with a cardiac surgeon as attending. Shown in
+      a pre-checked red section at the top of the import modal; MD
+      can uncheck any that should stay. Confirm processes discharges
+      first (logChange "Discharged via Meditech import"), then imports.
+
+  Changes in this build (v3.32) — toast + ward defaults:
+    - showToast no longer stacks. Each call removes any previous toast
+      div immediately (the v3.31 code cleared the removal timer but left
+      the orphan div in the DOM until its own timer fired, so rapid
+      rounding taps left several banners visible). Duration shortened
+      from 2400ms to 1600ms. Any visible toast is also dismissed when
+      the user navigates to a different pane via showPane.
+    - wardChange / peWardChange now snap role + MRP + care to the ward's
+      defaults (in addition to list, which v3.31 added). CCU/2S/2W set
+      role=MRP, mrp=Cardiology; everything else sets role=Consulting,
+      mrp=Other. Care is set to ccu for CCU/CSICU/ICUA/B/D, daily for
+      2S/2W, directive elsewhere. This fixes the case where adding a
+      patient to a non-cardiac ward via the form left them with
+      role=MRP+mrp=Cardiology (defaults from clearAddForm), causing the
+      wrong quick-tap buttons (+ Daily instead of + Directive / + Combined
+      daily). User can still manually override after.
+    - Edit modal: preserveList renamed to preserveAll and now also
+      preserves the saved role / mrp / care, so opening edit on an
+      existing patient never clobbers their saved values.
+    - clearAddForm now defers to wardChange() to pick role/mrp/list/care
+      based on the current ward, instead of hard-coding mrp+on+daily.
+
+  v3.31: Location & service rule tightening — list (on/off) ward-driven;
+         role ↔ MRP bidirectional binding kept but list-snapping removed;
+         edit-modal preserves saved list; Meditech import writes role and
+         defaults unrecognised MRPs to 'Other'.
+
+  v3.29: FEES trimmed from 56 to 20 codes (group's actual usage).
+  v3.28: FEES audited against MSC 2026; 13 mis-labels fixed; 3 invalid
+         codes removed (14101/14105/14113); $ amounts added; getFeeLabel
+         refactored.
+  v3.27: Calendar view default in patient summary; gap detection for CCU
+         + MRP daily wards; tap-to-add picker; discharge gap check.
+  v3.25: ocr_offline.js v1.2 (Meditech parser fixes).
+  v3.24: Multi-pass Tesseract (paper + screen preprocessing).
+  v3.23: Meditech-aware empty-OCR ward/room corrections with rawText.
+  v3.22: Debug panel minimizable.
+  v3.21: Debug panel + version-aware Service Worker.
+  v3.20: OCR corrections capture.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>KGH Cardiology Billing</title>
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="KGH Cards">
+<meta name="theme-color" content="#1a5fa8">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<style>
+:root {
+  --bg:#f5f4f7; --surface:#fff; --surface2:#f0eff5;
+  --border:rgba(0,0,0,.09); --border2:rgba(0,0,0,.16);
+  --text:#1a1128; --text2:#6b6478; --text3:#a099b0;
+  --blue:#2e1a6e; --blue-bg:#ece9f8; --blue-t:#1c0f48;
+  --red:#c42828; --red-bg:#fbeaea; --red-t:#8a1a1a;
+  --green:#1a7a4a; --green-bg:#e6f5ec; --green-t:#0f4f2e;
+  --amber:#a06010; --amber-bg:#fdf0db; --amber-t:#6b3e08;
+  --teal:#0e6e6e; --teal-bg:#e0f4f4; --teal-t:#094848;
+  --kca-red:#c42828; --kca-navy:#2e1a6e;
+  --r:10px; --rsm:6px; --rpill:20px;
+}
+* { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:var(--bg); color:var(--text); font-size:14px; line-height:1.4; max-width:430px; margin:0 auto; min-height:100vh; }
+
+/* HEADER */
+.hdr { background:var(--surface); border-bottom:.5px solid var(--border); padding:9px 13px; display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; z-index:50; }
+.hdr-l { display:flex; align-items:center; gap:0; }
+.logo { display:flex; align-items:center; flex-shrink:0; }
+.logo svg { width:36px; height:36px; }
+.hdr-divider { width:1px; height:30px; background:var(--kca-navy); margin:0 9px; opacity:.6; flex-shrink:0; }
+.hdr-title { font-size:13px; font-weight:700; letter-spacing:-.1px; color:var(--kca-navy); line-height:1.25; }
+.hdr-sub { font-size:10px; color:var(--text2); margin-top:1px; }
+.doc-chip { display:flex; align-items:center; gap:5px; padding:5px 10px; border:.5px solid var(--border2); border-radius:var(--rpill); cursor:pointer; font-size:11px; font-weight:600; background:var(--surface); }
+.logout-btn { display:flex; align-items:center; justify-content:center; width:30px; height:30px; border:.5px solid var(--border2); border-radius:50%; cursor:pointer; background:var(--surface); color:var(--text3); transition:color .15s,border-color .15s; }
+.logout-btn:active { color:var(--red-t); border-color:var(--red-t); background:var(--red-bg); }
+.doc-dot { width:7px; height:7px; border-radius:50%; background:var(--text3); flex-shrink:0; transition:background .3s; }
+.doc-dot.on { background:var(--green); }
+.sync-dot { width:6px; height:6px; border-radius:50%; background:var(--text3); display:inline-block; margin-left:4px; vertical-align:middle; transition:background .3s; }
+.sync-dot.syncing { background:var(--amber); animation:pulse 1s infinite; }
+.sync-dot.synced { background:var(--green); }
+.sync-dot.error { background:var(--red); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+/* NAV (directly below header) */
+.nav { display:flex; background:var(--surface2); border-bottom:1px solid var(--border2); position:sticky; top:54px; z-index:49; padding:4px 6px; gap:4px; }
+.nb { flex:1; padding:7px 3px; font-size:11px; text-align:center; color:var(--text2); cursor:pointer; border:none; border-radius:var(--rsm); font-family:inherit; background:none; transition:background .15s,color .15s; }
+.nb.on { color:var(--kca-navy); font-weight:700; background:var(--surface); box-shadow:0 1px 3px rgba(0,0,0,.1); }
+
+/* LIST SELECTOR + ROUNDS SEARCH (below nav, only on Rounds tab) */
+.list-sel { display:flex; flex-direction:column; background:var(--surface); border-bottom:1px solid var(--border2); position:sticky; top:88px; z-index:48; padding:6px 8px; gap:5px; }
+.list-sel.hidden { display:none; }
+.list-sel-btns { display:flex; gap:4px; }
+.ls-btn { flex:1; padding:7px 8px; font-size:12px; font-weight:600; text-align:center; cursor:pointer; border:none; border-radius:var(--rsm); color:var(--text2); background:none; font-family:inherit; transition:background .15s,color .15s; }
+.ls-btn.on { color:var(--kca-navy); background:var(--surface2); box-shadow:0 1px 3px rgba(0,0,0,.1); }
+.rounds-search-wrap { position:relative; }
+.rounds-search-wrap input { width:100%; padding:7px 32px 7px 28px; border:.5px solid var(--border2); border-radius:var(--rsm); font-size:13px; background:var(--surface2); font-family:inherit; outline:none; }
+.rounds-search-wrap input:focus { border-color:#a8a0c8; background:var(--surface); }
+.rounds-search-ico { position:absolute; left:8px; top:50%; transform:translateY(-50%); width:13px; height:13px; stroke:var(--text3); fill:none; stroke-width:2; pointer-events:none; }
+.rounds-search-clear { position:absolute; right:4px; top:50%; transform:translateY(-50%); background:none; border:none; font-size:18px; line-height:1; color:var(--text3); cursor:pointer; padding:4px 8px; font-family:inherit; display:none; }
+.rounds-search-clear.on { display:block; }
+.rounds-search-clear:active { color:var(--text); }
+
+/* PANES */
+.pane { display:none; padding:10px 11px 30px; }
+.pane.on { display:block; }
+
+/* PROGRESS */
+.prog-bar { height:3px; background:var(--border); border-radius:2px; overflow:hidden; margin-bottom:4px; }
+.prog-fill { height:100%; background:var(--green); border-radius:2px; transition:width .4s; }
+.prog-lbl { font-size:10px; color:var(--text3); text-align:right; margin-bottom:9px; }
+
+/* STATS */
+.stats { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-bottom:10px; }
+.stat { background:var(--surface); border-radius:var(--rsm); padding:8px 5px; text-align:center; border:.5px solid var(--border); }
+.stat-n { font-size:20px; font-weight:700; letter-spacing:-.5px; }
+.stat-l { font-size:9px; color:var(--text2); margin-top:1px; text-transform:uppercase; letter-spacing:.3px; }
+
+/* VIEW TOGGLE */
+.view-tog { display:flex; background:var(--surface2); border-radius:var(--rsm); padding:3px; }
+.vt { flex:1; padding:6px; font-size:11px; font-weight:500; text-align:center; cursor:pointer; border-radius:5px; border:none; background:none; color:var(--text2); font-family:inherit; display:flex; align-items:center; justify-content:center; gap:4px; }
+.vt svg { width:12px; height:12px; stroke:currentColor; fill:none; stroke-width:2; }
+.vt.on { background:var(--surface); color:var(--blue); font-weight:700; box-shadow:0 1px 3px rgba(0,0,0,.1); }
+
+/* MEDITECH IMPORT BUTTON */
+.mit-btn { display:flex; align-items:center; gap:7px; width:100%; padding:9px 12px; border:1.5px dashed var(--border2); border-radius:var(--r); background:var(--surface2); cursor:pointer; font-family:inherit; color:var(--text2); font-size:12px; font-weight:600; margin-bottom:10px; }
+.mit-btn svg { width:15px; height:15px; stroke:var(--blue); fill:none; stroke-width:2; flex-shrink:0; }
+.mit-btn:hover { background:var(--blue-bg); border-color:#a8c4e8; color:var(--blue-t); }
+
+/* WARD */
+.ward-block { margin-bottom:13px; }
+.ward-hdr { display:flex; align-items:center; justify-content:space-between; margin-bottom:7px; }
+.ward-lbl { font-size:11px; font-weight:700; color:var(--text2); text-transform:uppercase; letter-spacing:.5px; display:flex; align-items:center; gap:5px; }
+.chip { font-size:10px; padding:2px 7px; border-radius:var(--rpill); font-weight:600; }
+.chip-red    { background:var(--red-bg);   color:var(--red-t); }
+.chip-blue   { background:var(--blue-bg);  color:var(--blue-t); }
+.chip-amber  { background:var(--amber-bg); color:var(--amber-t); }
+.chip-green  { background:var(--green-bg); color:var(--green-t); }
+.chip-teal   { background:var(--teal-bg);  color:var(--teal-t); }
+.chip-grey   { background:var(--surface2); color:var(--text2); }
+.chip-yellow { background:#fff0c4;         color:#5a2700; }
+.chip-skyblue{ background:#dbe7fc;         color:#002461; }
+.ward-add { padding:4px 10px; font-size:11px; border:.5px solid var(--border2); border-radius:var(--rpill); background:none; cursor:pointer; font-family:inherit; color:var(--text2); }
+.ward-add:hover { background:var(--surface2); }
+
+/* BATCH BUTTON */
+.batch-btn { display:flex; align-items:center; justify-content:space-between; width:100%; padding:9px 12px; border:.5px solid var(--border2); border-radius:var(--r); background:var(--surface); cursor:pointer; font-family:inherit; font-size:12px; font-weight:600; color:var(--blue-t); margin-bottom:7px; }
+.batch-btn:hover { background:var(--blue-bg); }
+.batch-btn svg { width:14px; height:14px; stroke:currentColor; fill:none; stroke-width:2; }
+
+/* CCU GRID */
+.ccu-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.bed { border:.5px solid var(--border); border-radius:var(--r); padding:9px 10px; background:var(--surface); cursor:pointer; min-height:88px; transition:all .15s; }
+.bed.empty    { background:var(--surface2); border-style:dashed; }
+.bed.occupied { border-color:#a8c4e8; }
+.bed.done     { border-color:#7ec49a; background:var(--green-bg); }
+.bed-num  { font-size:10px; color:var(--text3); margin-bottom:4px; display:flex; align-items:center; justify-content:space-between; }
+.bed-name { font-size:12px; font-weight:700; line-height:1.3; }
+.bed-first{ font-size:10px; font-weight:400; color:var(--text2); }
+.bed-phn  { font-size:10px; color:var(--text3); margin-top:2px; }
+.bed-btns { display:flex; gap:4px; margin-top:6px; flex-wrap:wrap; }
+
+/* WARD LIST */
+.ward-list { display:flex; flex-direction:column; gap:5px; }
+.wp { display:flex; align-items:center; gap:8px; padding:8px 10px; border:.5px solid var(--border); border-radius:var(--r); background:var(--surface); cursor:pointer; }
+.wp.done      { border-color:#7ec49a; background:var(--green-bg); }
+.wp.directive { border-color:#d4a84a; }
+.wp-pos { min-width:24px; height:22px; padding:0 6px; border-radius:11px; background:var(--surface2); display:flex; align-items:center; justify-content:center; font-size:8px; font-weight:700; color:var(--text2); flex-shrink:0; margin-top:0; letter-spacing:-.2px; }
+.wp-pos.done { background:#7ec49a; color:#fff; }
+/* Card tints — persist across screens for visual continuity */
+.card-patient  { background:#f4f2f9; border-color:rgba(46,26,110,.10); }
+.card-patient  .card-title { color:var(--blue-t); }
+.card-claim    { background:#fff8e8; border-color:rgba(160,96,16,.22); }
+.card-claim    .card-title { color:var(--amber-t); }
+.card-location { background:var(--teal-bg); border-color:rgba(14,110,110,.20); }
+.card-location .card-title { color:var(--teal-t); }
+/* On/Off service pills on add-patient location card */
+.ap-list-pill { flex:1; padding:7px 8px; border-radius:var(--rpill); border:1.5px solid var(--border2); background:var(--surface2); font-size:11px; font-weight:700; font-family:inherit; cursor:pointer; transition:all .15s; color:var(--text2); }
+.ap-list-pill.on { background:var(--blue-bg); border-color:var(--blue); color:var(--blue-t); }
+/* Off-service pills go amber when active (on=blue, off=amber convention) */
+.ap-list-pill.tone-amber.on { background:var(--amber-bg); border-color:var(--amber); color:var(--amber-t); }
+/* Top list-selector tabs: blue when On, amber when Off */
+#ls-on.on  { color:var(--blue-t);  background:var(--blue-bg);  box-shadow:0 1px 3px rgba(46,26,110,.18); }
+#ls-off.on { color:var(--amber-t); background:var(--amber-bg); box-shadow:0 1px 3px rgba(160,96,16,.18); }
+
+.wp-pos-wrap { position:relative; flex-shrink:0; margin-top:0; }
+.wp-pos-badge { position:absolute; top:-4px; right:-4px; width:11px; height:11px; border-radius:50%; background:var(--green); display:flex; align-items:center; justify-content:center; border:1.5px solid var(--surface); }
+.wp-pos-badge svg { width:6px; height:6px; stroke:#fff; fill:none; stroke-width:3; }
+.wp-info { flex:1; min-width:0; }
+.wp-name { font-size:13px; font-weight:700; letter-spacing:-.1px; line-height:1.25; }
+.wp-meta { font-size:10px; color:var(--text2); margin-top:1px; }
+.wp-chips{ display:flex; gap:4px; margin-top:3px; flex-wrap:wrap; }
+.wp-acts { display:flex; gap:3px; margin-top:5px; flex-wrap:nowrap; }
+.wp-acts .bb { flex:1; min-width:0; text-align:center; padding:4px 2px; font-size:clamp(8px,1.15vw,10px); overflow:hidden; text-overflow:ellipsis; }
+.ro-col { display:flex; flex-direction:column; gap:3px; flex-shrink:0; padding-top:4px; }
+.ro { width:20px; height:20px; border:.5px solid var(--border2); border-radius:4px; background:none; cursor:pointer; font-size:10px; color:var(--text2); display:flex; align-items:center; justify-content:center; font-family:inherit; }
+.ro:hover { background:var(--surface2); }
+
+/* ALPHA LIST */
+.alpha-sec { font-size:10px; font-weight:700; color:var(--text3); text-transform:uppercase; letter-spacing:.5px; margin:11px 0 5px; }
+.alpha-row { display:flex; align-items:flex-start; gap:9px; padding:9px 10px; border:.5px solid var(--border); border-radius:var(--r); background:var(--surface); cursor:pointer; margin-bottom:5px; }
+.alpha-row.done { border-color:#7ec49a; background:var(--green-bg); }
+.alpha-av { width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0; }
+.av-on  { background:var(--blue-bg);  color:var(--blue-t); }
+.av-2s  { background:var(--blue-bg);  color:var(--blue-t); }
+.av-2w  { background:var(--green-bg); color:var(--green-t); }
+.av-off { background:var(--amber-bg); color:var(--amber-t); }
+.av-ccu { background:var(--red-bg);   color:var(--red-t); }
+
+/* QUICK CLAIM BUTTONS */
+.bb { padding:4px 9px; font-size:10px; border-radius:var(--rpill); border:.5px solid var(--border2); background:var(--surface); cursor:pointer; font-family:inherit; color:var(--text); white-space:nowrap; font-weight:500; }
+.bb:hover { background:var(--surface2); }
+.bb-rnd  { background:var(--blue-bg);  border-color:#a8c4e8; color:var(--blue-t); }
+.bb-dir  { background:var(--amber-bg); border-color:#d4a84a; color:var(--amber-t); }
+.bb-ccu  { background:var(--red-bg);   border-color:#e0a090; color:var(--red-t); }
+.bb-done { background:var(--green); border-color:var(--green); color:#fff; font-weight:700; cursor:pointer; }
+.bb-comb { background:var(--teal-bg);  border-color:#7ec4c4; color:var(--teal-t); }
+
+/* FORMS */
+.card { background:var(--surface); border:.5px solid var(--border); border-radius:var(--r); padding:12px 13px; margin-bottom:9px; }
+.card-title { font-size:11px; font-weight:700; color:var(--text2); text-transform:uppercase; letter-spacing:.5px; margin-bottom:9px; }
+.fl { display:flex; gap:7px; }
+.f1 { flex:1; min-width:0; }
+label { display:block; font-size:11px; font-weight:600; color:var(--text2); margin-bottom:3px; }
+input, select, textarea { width:100%; font-size:13px; padding:8px 9px; border:.5px solid var(--border2); border-radius:var(--rsm); background:var(--surface); color:var(--text); font-family:inherit; margin-bottom:7px; -webkit-appearance:none; }
+input:focus, select:focus, textarea:focus { outline:none; border-color:var(--blue); box-shadow:0 0 0 2px rgba(26,95,168,.12); }
+textarea { resize:vertical; min-height:48px; }
+input[type=file] { display:none; }
+
+/* BUTTONS */
+.btn { width:100%; padding:11px; border:none; border-radius:var(--r); font-size:13px; font-weight:700; cursor:pointer; font-family:inherit; margin-bottom:7px; letter-spacing:-.1px; }
+.btn-p { background:var(--blue);   color:#fff; } .btn-p:hover { background:var(--blue-t); }
+.btn-s { background:var(--surface); border:.5px solid var(--border2); color:var(--text); } .btn-s:hover { background:var(--surface2); }
+.btn-g { background:var(--green);  color:#fff; } .btn-g:hover { background:var(--green-t); }
+.btn-a { background:var(--amber);  color:#fff; }
+.btn-r { background:var(--red);    color:#fff; }
+.btn-t { background:var(--teal);   color:#fff; }
+
+/* PHOTO */
+.photo-zone { border:1.5px dashed var(--border2); border-radius:var(--r); min-height:85px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; cursor:pointer; overflow:hidden; background:var(--surface2); margin-bottom:8px; }
+.photo-zone img { width:100%; object-fit:cover; border-radius:9px; }
+.ocr-bar { font-size:11px; padding:6px 10px; border-radius:var(--rsm); margin-bottom:8px; min-height:28px; }
+.ocr-ok   { background:var(--green-bg); color:var(--green-t); }
+.ocr-warn { background:var(--amber-bg); color:var(--amber-t); }
+
+/* CLAIM SCREEN */
+.claim-ctx { background:var(--blue-bg); border-radius:var(--r); padding:11px 13px; margin-bottom:10px; border:.5px solid #a8c4e8; }
+.claim-ctx-name { font-size:15px; font-weight:700; color:var(--blue-t); }
+.claim-ctx-meta { font-size:11px; color:var(--blue-t); opacity:.8; margin-top:3px; }
+.claim-type-sel { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:11px; }
+.ct-btn { padding:10px 6px; font-size:12px; font-weight:600; border-radius:var(--rsm); border:.5px solid var(--border2); background:var(--surface); cursor:pointer; font-family:inherit; color:var(--text2); text-align:center; }
+.ct-on-consult  { background:var(--blue-bg);  border-color:#a8c4e8; color:var(--blue-t); }
+.ct-on-daily    { background:var(--green-bg); border-color:#7ec49a; color:var(--green-t); }
+.ct-on-combined { background:var(--teal-bg);  border-color:#7ec4c4; color:var(--teal-t); }
+.ct-on-directive{ background:var(--amber-bg); border-color:#d4a84a; color:var(--amber-t); }
+.ct-on-ccu      { background:var(--red-bg);   border-color:#e0a090; color:var(--red-t); }
+
+/* MOST BUTTON */
+.most-btn { width:100%; padding:12px; border-radius:var(--r); border:2px solid var(--border2); background:var(--surface); cursor:pointer; font-family:inherit; font-size:14px; font-weight:700; color:var(--text2); margin-bottom:9px; display:flex; align-items:center; justify-content:center; gap:8px; transition:all .15s; }
+.most-btn.on { background:var(--green-bg); border-color:#7ec49a; color:var(--green-t); }
+.most-btn svg { width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2.5; }
+
+/* MODIFIER */
+.mod-box { padding:9px 12px; border-radius:var(--rsm); margin-bottom:9px; font-size:12px; font-weight:600; display:flex; align-items:center; justify-content:space-between; }
+.mod-night   { background:var(--red-bg);   color:var(--red-t); }
+.mod-evening { background:var(--amber-bg); color:var(--amber-t); }
+.mod-weekend { background:var(--teal-bg);  color:var(--teal-t); }
+.mod-day     { background:var(--green-bg); color:var(--green-t); }
+.mod-units { display:flex; align-items:center; gap:8px; }
+.mu-btn { width:28px; height:28px; border-radius:50%; border:none; font-size:18px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; font-family:inherit; background:rgba(0,0,0,.12); color:inherit; }
+.mod-count { font-size:15px; font-weight:700; min-width:18px; text-align:center; }
+
+/* CLAIM PREVIEW */
+.cp { background:var(--surface2); border-radius:var(--rsm); padding:9px 12px; margin-bottom:10px; }
+.cp-title { font-size:10px; font-weight:700; color:var(--text3); text-transform:uppercase; letter-spacing:.5px; margin-bottom:7px; }
+.cp-row { display:flex; align-items:center; padding:3px 0; border-bottom:.5px solid var(--border); font-size:12px; }
+.cp-row:last-child { border-bottom:none; }
+.cp-code { font-weight:700; color:var(--blue); font-family:monospace; min-width:52px; }
+.cp-desc { color:var(--text2); flex:1; margin:0 8px; font-size:11px; }
+.cp-units{ color:var(--text3); font-size:11px; }
+
+/* REFERRER DROPDOWN */
+.ref-dd { border:.5px solid var(--border2); border-radius:var(--rsm); background:var(--surface); margin-top:-5px; margin-bottom:7px; max-height:160px; overflow-y:auto; display:none; position:relative; z-index:10; }
+.bed-dd { position:absolute; top:100%; left:0; right:0; background:var(--surface); border:.5px solid var(--border2); border-radius:var(--rsm); z-index:200; max-height:180px; overflow-y:auto; box-shadow:0 4px 12px rgba(0,0,0,.12); display:none; }
+.bed-dd-row { padding:9px 12px; font-size:14px; cursor:pointer; }
+.bed-dd-row:active { background:var(--blue-bg); color:var(--blue-t); }
+.ref-dd-row { padding:8px 10px; font-size:12px; cursor:pointer; border-bottom:.5px solid var(--border); }
+.ref-dd-row:hover { background:var(--surface2); }
+.ref-dd-row:last-child { border-bottom:none; }
+
+/* LOCATION SCREEN */
+.loc-grid { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-bottom:11px; }
+.loc-opt { padding:12px 8px; border:.5px solid var(--border2); border-radius:var(--r); cursor:pointer; text-align:center; background:var(--surface); font-family:inherit; }
+.loc-opt:hover { background:var(--surface2); }
+.loc-opt.selected { border-color:var(--blue); background:var(--blue-bg); }
+.loc-opt-name { font-size:13px; font-weight:700; color:var(--text); }
+.loc-opt-sub  { font-size:10px; color:var(--text2); margin-top:2px; }
+
+/* MODALS */
+.overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:100; display:none; align-items:flex-end; justify-content:center; padding-bottom:env(safe-area-inset-bottom); }
+.overlay.top { align-items:center; padding:16px; }
+.overlay.on  { display:flex; }
+.modal { background:var(--surface); border-radius:18px 18px 0 0; padding:16px; width:100%; max-height:90vh; overflow-y:auto; }
+.overlay.top .modal { border-radius:var(--r); max-width:390px; }
+.modal-handle { width:36px; height:4px; background:var(--border2); border-radius:2px; margin:0 auto 13px; }
+.modal-title  { font-size:15px; font-weight:700; margin-bottom:12px; letter-spacing:-.3px; }
+.divider { height:.5px; background:var(--border); margin:9px 0; }
+.move-opt { display:flex; align-items:center; gap:10px; padding:10px 11px; border:.5px solid var(--border2); border-radius:var(--rsm); margin-bottom:6px; cursor:pointer; }
+.move-opt:hover { background:var(--surface2); }
+.move-ico { width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.move-ico svg { width:13px; height:13px; stroke:currentColor; fill:none; stroke-width:2; }
+.move-lbl { font-size:13px; font-weight:600; }
+.move-sub { font-size:11px; color:var(--text2); margin-top:1px; }
+.doc-opt { display:flex; align-items:center; gap:9px; padding:9px 11px; border:.5px solid var(--border); border-radius:var(--rsm); margin-bottom:6px; cursor:pointer; }
+.doc-opt:hover { background:var(--surface2); }
+.doc-av { width:32px; height:32px; border-radius:50%; background:var(--blue-bg); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; color:var(--blue-t); flex-shrink:0; }
+
+/* MEDITECH IMPORT */
+.imp-row { display:flex; align-items:flex-start; gap:8px; padding:9px 10px; border:.5px solid var(--border); border-radius:var(--rsm); margin-bottom:6px; background:var(--surface); }
+.imp-row.excluded { opacity:.4; background:var(--surface2); }
+.imp-row.existing { border-color:#7ec49a; background:var(--green-bg); }
+.imp-chk { width:18px; height:18px; border-radius:4px; border:1.5px solid var(--border2); background:var(--surface); cursor:pointer; flex-shrink:0; display:flex; align-items:center; justify-content:center; margin-top:2px; }
+.imp-chk.on { background:var(--blue); border-color:var(--blue); }
+.imp-chk svg { width:10px; height:10px; stroke:#fff; fill:none; stroke-width:3; }
+.imp-info { flex:1; min-width:0; }
+.imp-name { font-size:13px; font-weight:700; }
+.imp-meta { font-size:10px; color:var(--text2); margin-top:2px; line-height:1.5; }
+.imp-badges{ display:flex; gap:4px; flex-wrap:wrap; margin-top:4px; }
+.imp-sum { font-size:12px; padding:9px 11px; background:var(--blue-bg); border-radius:var(--rsm); color:var(--blue-t); margin-bottom:10px; font-weight:600; }
+
+/* EXPORT */
+.q-row { display:flex; align-items:flex-start; gap:8px; padding:8px 10px; border:.5px solid var(--border); border-radius:var(--rsm); margin-bottom:5px; }
+.q-info { flex:1; min-width:0; }
+.q-name { font-size:12px; font-weight:600; }
+.q-sub  { font-size:10px; color:var(--text2); margin-top:2px; }
+.del-btn { width:24px; height:24px; border:none; background:transparent; color:var(--text3); cursor:pointer; font-size:14px; border-radius:4px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.del-btn:hover { background:var(--red-bg); color:var(--red-t); }
+.log-row { padding:8px 10px; border:.5px solid var(--border); border-radius:var(--rsm); margin-bottom:5px; }
+.log-action { font-size:12px; font-weight:600; }
+.log-meta   { font-size:10px; color:var(--text2); margin-top:2px; }
+
+/* FEE CODES */
+.fee-row  { display:flex; align-items:flex-start; gap:8px; padding:8px 10px; border:.5px solid var(--border); border-radius:var(--rsm); margin-bottom:5px; cursor:pointer; }
+.fee-row:hover { background:var(--surface2); }
+.fee-code { font-size:12px; font-weight:700; color:var(--blue); font-family:monospace; min-width:52px; flex-shrink:0; }
+.fee-desc { font-size:12px; flex:1; line-height:1.4; }
+.fee-chip { font-size:10px; padding:1px 6px; border-radius:var(--rpill); white-space:nowrap; flex-shrink:0; }
+
+/* REFERRERS */
+.ref-row { display:flex; align-items:center; gap:8px; padding:8px 10px; border:.5px solid var(--border); border-radius:var(--rsm); margin-bottom:5px; }
+.ref-av   { width:28px; height:28px; border-radius:50%; background:var(--green-bg); display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:var(--green-t); flex-shrink:0; }
+.ref-info { flex:1; min-width:0; }
+.ref-name { font-size:12px; font-weight:600; }
+.ref-meta { font-size:10px; color:var(--text2); }
+.ref-use  { padding:4px 10px; font-size:11px; font-weight:600; border-radius:var(--rpill); border:.5px solid #a8c4e8; background:var(--blue-bg); color:var(--blue-t); cursor:pointer; font-family:inherit; }
+
+/* MISC */
+.empty    { text-align:center; padding:22px; color:var(--text3); font-size:12px; }
+.sec-lbl  { font-size:10px; font-weight:700; color:var(--text3); text-transform:uppercase; letter-spacing:.5px; margin:10px 0 6px; }
+.search-wrap { position:relative; margin-bottom:8px; }
+.search-ico  { position:absolute; left:9px; top:50%; transform:translateY(-50%); width:13px; height:13px; stroke:var(--text3); fill:none; stroke-width:2; pointer-events:none; }
+.search-wrap input { padding-left:28px; margin-bottom:0; }
+.warn-tag { font-size:10px; color:var(--amber); font-weight:700; }
+.dir-warn { background:var(--amber-bg); color:var(--amber-t); font-size:11px; padding:7px 10px; border-radius:var(--rsm); margin-bottom:8px; font-weight:600; }
+.chk-ico  { display:inline-flex; width:14px; height:14px; border-radius:50%; background:var(--green); align-items:center; justify-content:center; margin-left:4px; vertical-align:middle; }
+.chk-ico svg { width:8px; height:8px; stroke:#fff; fill:none; stroke-width:3; }
+
+/* ICD-9 / Referrer search recent badge */
+.recent-badge { font-size:9px; color:var(--green-t); font-weight:700; margin-right:5px; background:var(--green-bg); padding:1px 5px; border-radius:var(--rpill); }
+
+/* Patient chart/summary button */
+.pt-chart-btn {
+  width:26px; height:26px;
+  border:.5px solid var(--border2); border-radius:5px;
+  background:var(--surface); cursor:pointer;
+  display:inline-flex; align-items:center; justify-content:center;
+  flex-shrink:0; padding:0;
+}
+.pt-chart-btn:hover { background:var(--blue-bg); border-color:#a8c4e8; }
+.pt-chart-btn svg {
+  width:13px; height:13px;
+  stroke:var(--text2); fill:none; stroke-width:1.8;
+}
+.pt-chart-btn:hover svg { stroke:var(--blue-t); }
+
+/* Tab count badges */
+.ls-btn span { font-size:11px; opacity:.7; margin-left:3px; }
+
+/* Patient summary Add claim button */
+.pt-addclaim-btn {
+  padding:6px 14px; background:var(--blue); color:#fff;
+  border:none; border-radius:var(--rpill);
+  font-size:12px; font-weight:700; cursor:pointer; font-family:inherit;
+}
+.pt-addclaim-btn:hover { background:var(--blue-t); }
+
+/* Edit pencil button on claim screen patient banner */
+.ctx-edit-btn {
+  width:32px; height:32px; flex-shrink:0;
+  border:.5px solid var(--border2); border-radius:var(--rsm);
+  background:var(--surface); cursor:pointer;
+  display:flex; align-items:center; justify-content:center; padding:0;
+}
+.ctx-edit-btn svg {
+  width:14px; height:14px;
+  stroke:var(--text2); fill:none; stroke-width:1.8;
+}
+.ctx-edit-btn:active { background:var(--blue-bg); }
+.ctx-edit-btn:active svg { stroke:var(--blue-t); }
+
+/* Small edit button in patient summary header */
+.pt-edit-sm-btn {
+  padding:6px 10px; background:var(--surface); color:var(--text2);
+  border:.5px solid var(--border2); border-radius:var(--rpill);
+  font-size:12px; font-weight:600; cursor:pointer; font-family:inherit;
+}
+.pt-edit-sm-btn:active { background:var(--blue-bg); color:var(--blue-t); }
+
+/* Row right-side icon column */
+.wp-right { display:flex; flex-direction:column; align-items:flex-end; gap:5px; flex-shrink:0; padding-left:4px; }
+.row-icons { display:flex; gap:4px; align-items:center; }
+.row-icon-btn {
+  width:28px; height:28px; border:.5px solid var(--border2); border-radius:6px;
+  background:var(--surface); cursor:pointer;
+  display:flex; align-items:center; justify-content:center; flex-shrink:0; padding:0;
+}
+.row-icon-btn svg { width:13px; height:13px; stroke:var(--text2); fill:none; stroke-width:1.8; }
+.row-icon-btn:active { background:var(--blue-bg); }
+.row-icon-btn:active svg { stroke:var(--blue-t); }
+.row-icon-disch svg { stroke:var(--red-t); }
+.row-icon-disch:active { background:var(--red-bg); }
+.btn-ghost { background:none; border:none; font-size:14px; cursor:pointer; font-family:inherit; padding:10px; }
+
+/* Patient row name + pencil inline */
+.wp-name-row { display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
+.wp-rm   { font-size:10px; color:var(--text2); font-weight:700; margin-left:2px; }
+
+/* Pencil inline with name */
+.row-pencil-btn {
+  width:20px; height:20px; flex-shrink:0;
+  border:none; background:none; cursor:pointer; padding:0;
+  display:inline-flex; align-items:center; justify-content:center;
+  border-radius:4px; opacity:.55;
+}
+.row-pencil-btn svg { width:12px; height:12px; stroke:var(--text2); fill:none; stroke-width:2; }
+.row-pencil-btn:active { opacity:1; background:var(--blue-bg); }
+
+/* D/C button */
+.row-icon-disch {
+  font-size:10px; font-weight:800; color:var(--red-t);
+  border-color:var(--red-t); width:auto; padding:0 7px; letter-spacing:.3px;
+}
+.row-icon-disch:active { background:var(--red-bg); }
+
+/* Right column layout */
+.wp-right { display:flex; flex-direction:column; align-items:flex-end; gap:5px; flex-shrink:0; }
+.row-icons { display:flex; gap:4px; align-items:center; justify-content:flex-end; }
+
+/* Stacked Claim Hx / D/C right-side buttons */
+.wp-side-btns {
+  display:flex; flex-direction:column; gap:4px;
+  flex-shrink:0; align-items:stretch; min-width:58px;
+}
+.side-btn {
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:2px; padding:5px 4px; border-radius:var(--rsm);
+  border:.5px solid var(--border2); background:var(--surface);
+  cursor:pointer; font-family:inherit; font-size:9px; font-weight:700;
+  letter-spacing:.2px; line-height:1;
+}
+.side-btn svg { width:13px; height:13px; fill:none; stroke-width:1.8; }
+.side-btn-hx { color:var(--blue-t); border-color:#a8c4e8; background:var(--blue-bg); }
+.side-btn-hx svg { stroke:var(--blue-t); }
+.side-btn-hx:active { opacity:.7; }
+.side-btn-dc { color:var(--red-t); border-color:var(--red-t); }
+.side-btn-dc svg { stroke:var(--red-t); }
+.side-btn-dc:active { background:var(--red-bg); }
+
+/* wp-main replaces wp-info for new layout */
+.wp-main { flex:1; min-width:0; }
+
+/* Pencil icon inline with patient name in summary modal */
+.summary-pencil-btn {
+  width:22px; height:22px; flex-shrink:0;
+  border:none; background:rgba(255,255,255,.4); border-radius:5px;
+  cursor:pointer; padding:0;
+  display:inline-flex; align-items:center; justify-content:center;
+}
+.summary-pencil-btn svg { width:12px; height:12px; stroke:var(--blue-t); fill:none; stroke-width:2; }
+.summary-pencil-btn:active { background:rgba(255,255,255,.7); }
+
+/* Ward colour accents — left border stripe */
+.ward-block-ccu .ward-hdr { border-left:3px solid var(--red-t); padding-left:8px; }
+.ward-block-2s  .ward-hdr { border-left:3px solid var(--blue-t); padding-left:8px; }
+.ward-block-2w  .ward-hdr { border-left:3px solid var(--green-t); padding-left:8px; }
+
+/* wp-pos circle colour by ward — override in wardHtml via inline style */
+.ward-block-ccu .wp-pos:not(.done) { background:var(--red-bg);   color:var(--red-t);   border-color:var(--red-t); }
+.ward-block-2s  .wp-pos:not(.done) { background:var(--blue-bg);  color:var(--blue-t);  border-color:var(--blue-t); }
+.ward-block-2w  .wp-pos:not(.done) { background:var(--green-bg); color:var(--green-t); border-color:var(--green-t); }
+
+/* Claim row edit/delete buttons */
+  /* CROP MODAL */
+.crop-overlay {
+  position:fixed; inset:0; background:rgba(0,0,0,.92); z-index:200;
+  display:none; flex-direction:column; padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+}
+.crop-overlay.on { display:flex; }
+.crop-hdr {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:12px 16px; color:#fff;
+}
+.crop-hdr-title { font-size:14px; font-weight:700; }
+.crop-hdr-btn {
+  background:none; border:none; color:#fff; font-size:14px;
+  font-weight:600; cursor:pointer; font-family:inherit; padding:8px 12px;
+  border-radius:var(--rsm);
+}
+.crop-hdr-btn:active { background:rgba(255,255,255,.15); }
+.crop-stage {
+  flex:1; position:relative; overflow:hidden;
+  display:flex; align-items:center; justify-content:center;
+  touch-action:none;
+}
+.crop-img-wrap {
+  position:relative; max-width:100%; max-height:100%;
+}
+.crop-img {
+  display:block; max-width:100vw; max-height:calc(100vh - 180px);
+  object-fit:contain; user-select:none; -webkit-user-select:none;
+  -webkit-user-drag:none; pointer-events:none;
+}
+.crop-overlay-mask {
+  position:absolute; pointer-events:none;
+  background:rgba(0,0,0,.55);
+}
+.crop-frame {
+  position:absolute; border:2px solid #fff;
+  box-shadow:0 0 0 1px rgba(0,0,0,.4);
+  pointer-events:none;
+}
+.crop-grid {
+  position:absolute; pointer-events:none; inset:0;
+}
+.crop-grid::before, .crop-grid::after {
+  content:''; position:absolute; background:rgba(255,255,255,.4);
+}
+.crop-grid::before { left:33.33%; top:0; width:1px; height:100%; box-shadow:33.33vw 0 0 rgba(255,255,255,.4); }
+.crop-grid::after  { top:33.33%; left:0; height:1px; width:100%; box-shadow:0 33.33vh 0 rgba(255,255,255,.4); }
+.crop-handle {
+  position:absolute; width:44px; height:44px;
+  margin:-22px 0 0 -22px;
+  cursor:grab; touch-action:none;
+  display:flex; align-items:center; justify-content:center;
+}
+.crop-handle::before {
+  content:''; width:22px; height:22px; border-radius:50%;
+  background:#fff; box-shadow:0 0 0 3px rgba(26,95,168,.6), 0 2px 8px rgba(0,0,0,.4);
+}
+.crop-handle:active::before { background:var(--blue-bg); }
+.crop-actions {
+  display:flex; gap:10px; padding:10px 16px 14px; background:rgba(0,0,0,.5);
+}
+.crop-actions button {
+  flex:1; padding:13px; font-size:14px; font-weight:700;
+  border-radius:var(--r); border:none; cursor:pointer; font-family:inherit;
+}
+.crop-btn-reset { background:rgba(255,255,255,.18); color:#fff; }
+.crop-btn-cancel { background:rgba(255,255,255,.18); color:#fff; }
+.crop-btn-use { background:var(--blue); color:#fff; }
+.crop-hint {
+  text-align:center; color:rgba(255,255,255,.7); font-size:11px;
+  padding:6px 16px 4px;
+}
+.claim-action-btn {
+  width:22px; height:22px; border-radius:4px;
+  border:.5px solid var(--border2); background:var(--surface);
+  font-size:11px; cursor:pointer; display:inline-flex;
+  align-items:center; justify-content:center; padding:0;
+}
+.claim-edit-btn { color:var(--blue-t); border-color:#a8c4e8; }
+.claim-edit-btn:active { background:var(--blue-bg); }
+.claim-del-btn  { color:var(--red-t);  border-color:var(--red-t); }
+.claim-del-btn:active  { background:var(--red-bg); }
+
+/* ═══ v3.27 — calendar view in patient summary ═══ */
+.cv-tog { display:flex; background:var(--surface2); border-radius:var(--rsm); padding:3px; margin-bottom:10px; }
+.cv-tog button { flex:1; padding:8px; border:none; border-radius:6px; font-size:13px; font-weight:600;
+                 cursor:pointer; font-family:inherit; background:transparent; color:var(--text2); }
+.cv-tog button.on { background:var(--surface); color:var(--text); box-shadow:0 1px 2px rgba(0,0,0,.06); }
+.cv-legend { display:flex; flex-wrap:wrap; gap:6px 8px; padding:4px 0 6px; font-size:10px; color:var(--text2); align-items:center; }
+.cv-lg { display:flex; align-items:center; gap:4px; }
+.cv-sw { width:10px; height:10px; border-radius:2px; flex-shrink:0; }
+/* Clickable legend pills for addable claim types */
+.cv-lg-pill { display:flex; align-items:center; gap:5px; padding:5px 11px; border-radius:20px;
+              font-size:11px; font-weight:700; border:2px solid var(--border2); cursor:pointer;
+              font-family:inherit; background:var(--surface2); color:var(--text2); transition:border-color .12s, background .12s; }
+.cv-lg-pill:active { transform:scale(.96); }
+.cv-lg-pill.active { background:var(--surface); color:var(--text); }
+.cv-lg-pill.active.cv-lgp-ccu       { border-color:#b53636; color:#5e1414; background:#fde8e8; }
+.cv-lg-pill.active.cv-lgp-daily     { border-color:#1a7a35; color:#062814; background:#d4f0dc; }
+.cv-lg-pill.active.cv-lgp-directive { border-color:#003478; color:#002461; background:#dce8fe; }
+.cv-lg-pill.active.cv-lgp-combined  { border-color:#34804a; color:#0a4520; background:#e0f5e5; }
+/* Tap hint shown when a legend pill is active */
+.cv-tap-hint { font-size:11px; font-weight:600; padding:3px 0 5px; display:none; }
+.cv-nav { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+.cv-nav button { background:var(--surface2); border:none; width:30px; height:30px; border-radius:6px;
+                 font-size:16px; cursor:pointer; color:var(--text); font-family:inherit; }
+.cv-month { font-size:14px; font-weight:700; }
+.cv-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:3px; }
+.cv-dow { text-align:center; font-size:10px; color:var(--text3); font-weight:600; padding:4px 0; }
+.cv-day { aspect-ratio:1; border-radius:6px; display:flex; flex-direction:column; align-items:center;
+          justify-content:center; font-size:12px; font-weight:600; cursor:pointer; position:relative;
+          user-select:none; border:1px solid transparent; }
+.cv-day.cv-outside { color:var(--text3); opacity:.35; cursor:default; }
+.cv-day.cv-gap     { background:#d4d4d8; color:#4a4a52; border:1px dashed #8a8a92; }
+.cv-day.cv-today   { box-shadow:inset 0 0 0 2.5px var(--blue); }
+.cv-day.cv-discharged { box-shadow:inset 0 0 0 2.5px var(--red); }
+/* v3.29 — deepened cell fills. The chip-bg pastels (--amber-bg, --purple-bg
+   etc.) rendered near-white on some phone screens, making CCU/Daily/etc.
+   indistinguishable from blank squares. These hex values are saturated
+   enough to read clearly. Text colour tuned for contrast against each fill.
+   CCU is red-family (high-acuity); Daily is dark green; Combined is lighter
+   green so the two greens read as a hierarchy at a glance. */
+.cv-day.cv-consult   { background:#ffcf73; color:#5a2700; }
+.cv-day.cv-daily     { background:#3fa658; color:#062814; }
+.cv-day.cv-combined  { background:#b8e6c4; color:#0a4520; }
+.cv-day.cv-directive { background:#8eb5fa; color:#002461; }
+.cv-day.cv-ccu       { background:#f08585; color:#5e1414; }
+.cv-day .cv-num { font-size:12px; line-height:1; }
+.cv-day .cv-tag { font-size:8px; font-weight:700; line-height:1; margin-top:2px; opacity:.85; letter-spacing:.3px; }
+.cv-warn { background:var(--amber-bg); border:1px solid #f5d28a; color:var(--amber-t);
+           border-radius:var(--rsm); padding:10px 12px; font-size:12px; margin:10px 0 6px;
+           display:flex; gap:10px; align-items:flex-start; }
+.cv-warn-ok { background:var(--green-bg); border-color:#a8e2b8; color:var(--green-t); }
+.cv-warn-icon { font-size:16px; line-height:1; }
+.cv-warn-body { flex:1; line-height:1.4; }
+.cv-warn-body b { display:block; margin-bottom:2px; }
+
+/* Type picker (CCU / Daily / Directive / Combined daily) */
+.cv-pick-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:6px 0 12px; }
+.cv-pick-btn { position:relative; padding:18px 12px; border-radius:var(--rsm); border:2px solid transparent;
+               cursor:pointer; font-family:inherit; text-align:center; }
+.cv-pick-btn:active { transform:scale(.97); transition:transform .08s; }
+.cv-pick-btn .cv-pk-l { font-size:16px; font-weight:700; line-height:1.1; }
+.cv-pick-btn .cv-pk-s { font-size:11px; margin-top:4px; opacity:.75; }
+.cv-pick-btn .cv-pk-flag { position:absolute; top:-7px; left:50%; transform:translateX(-50%);
+                           background:var(--amber); color:#fff; font-size:8px; font-weight:800;
+                           padding:2px 6px; border-radius:6px; letter-spacing:.3px; text-transform:uppercase; }
+/* v3.29 — picker button fills match the calendar day cell palette so a
+   doctor reading the calendar sees the same colour mean the same thing
+   in the picker (CCU red-coral, Daily dark green, Combined light mint,
+   Directive periwinkle). Recommended border = a deeper shade of the fill. */
+.cv-pick-btn.cv-pk-ccu       { background:#f08585; color:#5e1414; }
+.cv-pick-btn.cv-pk-daily     { background:#3fa658; color:#062814; }
+.cv-pick-btn.cv-pk-directive { background:#8eb5fa; color:#002461; }
+.cv-pick-btn.cv-pk-combined  { background:#b8e6c4; color:#0a4520; }
+.cv-pick-btn.cv-pk-rec.cv-pk-ccu       { border-color:#b53636; }
+.cv-pick-btn.cv-pk-rec.cv-pk-daily     { border-color:#1a7a35; }
+.cv-pick-btn.cv-pk-rec.cv-pk-directive { border-color:#003478; }
+.cv-pick-btn.cv-pk-rec.cv-pk-combined  { border-color:#34804a; }
+
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="hdr-l">
+    <div class="logo">
+      <svg viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M22 37C22 37 6.5 27 6.5 16.5C6.5 12.1 9.9 8.5 14 8.5C16.9 8.5 19.5 10.2 20.8 12.8C21.2 13.6 21.6 14 22 14C22.4 14 22.8 13.6 23.2 12.8C24.5 10.2 27.1 8.5 30 8.5C34.1 8.5 37.5 12.1 37.5 16.5C37.5 27 22 37 22 37Z" stroke="#c42828" stroke-width="2.2" stroke-linejoin="round"/>
+        <path d="M6.5 20H13.5L16 15L19 25.5L21 18L22.5 22L24.5 16.5L27 22.5L29 20H37.5" stroke="#c42828" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div class="hdr-divider"></div>
+    <div>
+      <div class="hdr-title">Kelowna Cardiology <span id="hdr-version" style="font-size:9px;opacity:.4;font-weight:500;letter-spacing:0">v3.33</span> <span class="sync-dot" id="sync-dot"></span></div>
+      <div class="hdr-sub" id="hdr-date"></div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:7px">
+    <div class="doc-chip" onclick="showModal('doc-modal')">
+    <div class="doc-dot" id="doc-dot"></div>
+    <span id="doc-label">Sign in</span>
+    </div>
+    <div class="logout-btn" id="logout-btn" onclick="logoutAndRefresh()" title="Sync &amp; refresh">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+        <polyline points="16 17 21 12 16 7"/>
+        <line x1="21" y1="12" x2="9" y2="12"/>
+      </svg>
+    </div>
+  </div>
+</div>
+
+<div id="wifi-banner" style="display:none;align-items:center;justify-content:center;gap:8px;
+  background:#c42828;color:#fff;font-size:12px;font-weight:600;padding:8px 14px;
+  position:sticky;top:88px;z-index:47;">
+  <svg style="width:14px;height:14px;stroke:#fff;fill:none;stroke-width:2;flex-shrink:0" viewBox="0 0 24 24">
+    <line x1="1" y1="1" x2="23" y2="23"/>
+    <path d="M16.72 11.06A10.94 10.94 0 0119 12.55M5 12.55a10.94 10.94 0 015.17-2.39M10.71 5.05A16 16 0 0122.56 9M1.42 9a15.91 15.91 0 014.7-2.88M8.53 16.11a6 6 0 016.95 0M12 20h.01"/>
+  </svg>
+  Can't connect — switch to cellular data
+  <button onclick="setSyncState('syncing');syncFromSheets()" style="margin-left:8px;background:rgba(255,255,255,.25);
+    border:none;color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:4px;cursor:pointer;font-family:inherit">
+    Retry
+  </button>
+</div>
+
+<div class="nav">
+  <button class="nb on" onclick="nav(0,this)">Rounds</button>
+  <button class="nb" onclick="nav(1,this)">Add patient</button>
+  <button class="nb" onclick="nav(2,this)">Recently discharged</button>
+</div>
+
+<div class="list-sel" id="list-sel-bar">
+  <div class="list-sel-btns">
+    <button class="ls-btn on" id="ls-on" onclick="setList('on')">On Service <span id="ls-on-count"></span></button>
+    <button class="ls-btn" id="ls-off" onclick="setList('off')">Off Service <span id="ls-off-count"></span></button>
+  </div>
+  <div class="rounds-search-wrap">
+    <svg class="rounds-search-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input id="rounds-search" placeholder="Search active patients" oninput="roundsSearch(this.value)" autocorrect="off" autocomplete="off">
+    <button type="button" id="rounds-search-clear" class="rounds-search-clear" tabindex="-1"
+      onclick="clearRoundsSearch()" onpointerdown="event.preventDefault();clearRoundsSearch()" aria-label="Clear search">&times;</button>
+  </div>
+  <div class="view-tog" id="view-tog-bar">
+    <button class="vt on" id="vt-geo" onclick="setView('geo')">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Geographic
+    </button>
+    <button class="vt" id="vt-alpha" onclick="setView('alpha')">
+      <svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/></svg>Alphabetical
+    </button>
+  </div>
+</div>
+
+<!-- ═══ ROUNDS PANE ═══ -->
+<div class="pane on" id="p0">
+  <div id="search-view" style="display:none"></div>
+  <div id="on-view">
+    <div id="geo-view"></div>
+    <div id="alpha-view" style="display:none"></div>
+  </div>
+  <div id="off-view" style="display:none"><div id="off-list"></div></div>
+  <!-- Meditech list import — opens standalone import.html (Apps Script path, works on hospital WiFi) -->
+  <a href="import.html" target="_blank" rel="noopener" class="mit-btn" style="margin-top:16px;text-decoration:none">
+    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Import from Meditech list
+  </a>
+</div>
+
+<!-- ═══ ADD PATIENT PANE ═══ -->
+<div class="pane" id="p1">
+
+  <!-- Scan sticker -->
+  <div class="card">
+    <div class="card-title">Scan sticker or Meditech chart</div>
+    <div class="photo-zone" id="photo-zone" onclick="document.getElementById('f-photo').click()">
+      <svg style="width:26px;height:26px;stroke:var(--text3);fill:none;stroke-width:1.5" viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+      <span style="font-size:12px;color:var(--text2)">Tap to photograph sticker or chart header</span>
+      <span style="font-size:10px;color:var(--text3)">Auto-fills name, PHN, DOB, ward, room</span>
+    </div>
+    <input type="file" id="f-photo" accept="image/*" onchange="handleStickerPhoto(this)">
+    <div class="ocr-bar" id="ocr-bar"></div>
+  </div>
+
+  <!-- Patient demographics — PHN first -->
+  <div class="card card-patient">
+    <div class="card-title">Patient</div>
+    <label>PHN (HCN)</label>
+    <input id="f-phn" inputmode="numeric" maxlength="10" autocorrect="off" placeholder="10 digits" style="font-size:16px;letter-spacing:.3px">
+    <div class="fl">
+      <div class="f1"><label>Last name</label><input id="f-last" autocorrect="off" autocapitalize="words"></div>
+      <div class="f1"><label>First name</label><input id="f-first" autocorrect="off" autocapitalize="words"></div>
+    </div>
+    <div class="fl">
+      <div class="f1"><label>DOB (DD/MMM/YYYY)</label><input id="f-dob" autocorrect="off" placeholder="DD/MMM/YYYY"></div>
+      <div class="f1"><label>Sex</label>
+        <div class="fl" style="gap:6px">
+          <button class="ap-list-pill" id="f-sex-m" onclick="apSexPill('M')">M</button>
+          <button class="ap-list-pill" id="f-sex-f" onclick="apSexPill('F')">F</button>
+        </div>
+        <input id="f-sex" type="hidden" value="">
+      </div>
+    </div>
+  </div>
+
+  <!-- Claim card with type toggle -->
+  <div class="card card-claim">
+    <div class="card-title">Claim</div>
+    <div class="fl" style="margin-bottom:10px">
+      <button class="ct-btn ct-on-consult" id="ap-ct-consult" style="flex:1" onclick="apSelectClaimType('consult')">Consult</button>
+      <button class="ct-btn" id="ap-ct-ccu-admit" style="flex:1" onclick="apSelectClaimType('ccu-admit')">CCU Admit</button>
+      <button class="ct-btn" id="ap-ct-other" style="flex:1" onclick="apSelectClaimType('other')">Other Claim</button>
+    </div>
+    <div id="ap-claim-area"></div>
+  </div>
+
+  <!-- Location card (always visible — default path is add to list) -->
+  <div id="ap-loc-section">
+    <div class="card card-location">
+      <div class="card-title">Location &amp; list</div>
+      <div class="fl">
+        <div class="f1"><label>Ward</label>
+          <select id="f-ward" onchange="wardChange()">
+            <option value="CCU">CICU</option>
+            <option value="2S">2S</option>
+            <option value="2W">2W</option>
+            <option value="CSICU">CSICU</option>
+            <option value="ICUA">ICU A</option>
+            <option value="ICUB">ICU B</option>
+            <option value="ICUD">ICU D</option>
+            <option value="ED">ED</option>
+            <option value="3E">3E</option>
+            <option value="3W">3W</option>
+            <option value="3MU">3MU</option>
+            <option value="4A">4A</option>
+            <option value="4B">4B</option>
+            <option value="4E">4E</option>
+            <option value="4W">4W</option>
+            <option value="5A">5A</option>
+            <option value="5B">5B</option>
+            <option value="REHAB">Rehab</option>
+            <option value="6W">6W</option>
+            <option value="PAR">Centennial PAR</option>
+            <option value="OTHER">Other</option>
+          </select>
+          <div id="f-ward-other-wrap" style="display:none;margin-top:-3px">
+            <input id="f-ward-other" placeholder="Enter ward name…" autocorrect="off" autocapitalize="words" style="margin-bottom:4px">
+            <button type="button" onclick="saveCustomWard()" style="padding:5px 12px;font-size:11px;font-weight:700;border:.5px solid var(--border2);border-radius:var(--rpill);background:var(--blue-bg);color:var(--blue-t);cursor:pointer;font-family:inherit">Save to list</button>
+          </div>
+        </div>
+        <div class="f1">
+          <label id="bed-lbl">Bed / room</label>
+          <div style="position:relative">
+            <input id="f-bed" autocorrect="off" autocomplete="off" placeholder="Select or type…" style="margin-bottom:0"
+              oninput="bedSearchEl(this,'f-bed-dd')"
+              onfocus="bedSearchEl(this,'f-bed-dd')"
+              onblur="setTimeout(function(){hideBedDd('f-bed-dd')},200)">
+            <div class="bed-dd" id="f-bed-dd"></div>
+          </div>
+        </div>
+      </div>
+      <label style="margin-top:8px">Cardiology role</label>
+      <div class="fl" style="gap:8px;margin-top:4px">
+        <button class="ap-list-pill" id="ap-role-mrp"  onclick="apRolePill('mrp')">MRP</button>
+        <button class="ap-list-pill on" id="ap-role-con" onclick="apRolePill('consultant')">Consulting</button>
+      </div>
+      <input id="f-role" type="hidden" value="consultant">
+      <label style="margin-top:8px">MRP service</label>
+      <select id="f-mrp" onchange="mrpChange()">
+        <option value="Cardiology">Cardiology</option>
+        <option value="Other">Other</option>
+        <option value="Hospitalist">Hospitalist</option>
+        <option value="CTU">CTU</option>
+        <option value="ICU">ICU</option>
+        <option value="CSICU">CSICU</option>
+        <option value="Cardiac Surgery">Cardiac Surgery</option>
+        <option value="General Surgery">General Surgery</option>
+        <option value="Orthopedics">Orthopedics</option>
+        <option value="Neurology">Neurology</option>
+        <option value="Nephrology">Nephrology</option>
+      </select>
+      <label style="margin-top:8px">On / Off service</label>
+      <div class="fl" style="gap:8px;margin-top:4px">
+        <button class="ap-list-pill on" id="ap-pill-on" onclick="apListPill('on')">On service</button>
+        <button class="ap-list-pill tone-amber" id="ap-pill-off" onclick="apListPill('off')">Off service</button>
+      </div>
+      <input id="f-list" type="hidden" value="on">
+      <input id="f-care" type="hidden" value="daily">
+    </div>
+  </div>
+
+  <!-- Submit buttons — primary path first (add to list), exception below -->
+  <button class="btn btn-p" onclick="apSubmit(true)" style="margin-top:8px">Submit claim and add patient to list</button>
+  <button class="btn btn-s" onclick="apSubmit(false)" style="margin-top:6px">Submit claim only &mdash; not following</button>
+  <button class="btn btn-s" onclick="clearAddForm()" style="margin-top:14px">Clear</button>
+</div>
+
+<!-- ═══ RECENTLY DISCHARGED PANE ═══ -->
+<div class="pane" id="p-discharged">
+  <div class="search-wrap">
+    <svg class="search-ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input id="discharged-search" placeholder="Search discharged patients…"
+      oninput="dischargedSearch(this.value)" autocorrect="off" autocomplete="off">
+  </div>
+  <div id="discharged-results"></div>
+</div>
+
+<!-- ═══ CLAIM SCREEN (full pane) ═══ -->
+<div class="pane" id="p-claim">
+  <div class="claim-ctx" id="claim-ctx"></div>
+  <div class="claim-type-sel" id="claim-type-sel"></div>
+  <div id="claim-body"></div>
+  <div id="claim-pt-actions" style="display:flex;gap:7px;margin-top:4px"></div>
+  <button class="btn btn-s" onclick="closeClaimScreen()" style="margin-top:7px">← Back to rounds</button>
+</div>
+
+<!-- ═══ LOCATION CHANGE SCREEN ═══ -->
+<div class="pane" id="p-loc">
+  <div style="font-size:13px;font-weight:700;margin-bottom:12px" id="loc-pt-name"></div>
+  <div class="sec-lbl">Select new location</div>
+  <div class="loc-grid" id="loc-grid"></div>
+  <div id="loc-room-wrap">
+    <label>Room / bed</label>
+    <select id="loc-room" style="margin-bottom:9px"></select>
+  </div>
+  <div class="fl" style="margin-bottom:9px">
+    <div class="f1"><label>On / Off service</label>
+      <select id="loc-list"><option value="on">On Service</option><option value="off">Off Service</option></select>
+    </div>
+    <div class="f1"><label>Care type</label>
+      <select id="loc-care">
+        <option value="daily">Daily rounds</option>
+        <option value="directive">Directive</option>
+        <option value="combined">Combined daily</option>
+        <option value="ccu">CCU daily</option>
+      </select>
+    </div>
+  </div>
+  <button class="btn btn-p" onclick="confirmLocChange()">Confirm location change</button>
+  <button class="btn btn-s" onclick="closeLocScreen()">Cancel</button>
+</div>
+
+<!-- ═══ MODALS ═══ -->
+<div class="overlay top" id="doc-modal">
+  <div class="modal">
+    <div class="modal-title">Who are you?</div>
+    <div style="font-size:12px;color:var(--text2);margin-top:-8px;margin-bottom:10px">Tap your name to sign in</div>
+    <div id="doc-opts"></div>
+    <div class="divider"></div>
+    <div class="divider"></div>
+    <div class="card-title" style="margin-bottom:4px">Add or update MSP number</div>
+    <div style="font-size:11px;color:var(--text2);margin-bottom:8px">Enter your alias and MSP billing # to update your profile</div>
+    <div class="fl" style="gap:6px;margin-bottom:6px">
+      <input id="new-alias" placeholder="Alias (SB)" style="margin:0" maxlength="8" autocorrect="off" autocapitalize="characters">
+      <input id="new-num" placeholder="Doctor #" style="margin:0" inputmode="numeric" autocorrect="off">
+    </div>
+    <input id="new-name" placeholder="Dr. Full Name" style="margin-bottom:8px" autocorrect="off" autocapitalize="words">
+    <button class="btn btn-p" onclick="addDoctor()">Add and sign in</button>
+    <button class="btn btn-s" onclick="hideModal('doc-modal')">Cancel</button>
+    <div class="divider" style="margin-top:14px"></div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Clear all local data and re-sync from Sheets. Use if your device is showing stale or test patients.</div>
+    <button class="btn" style="background:var(--red-bg);color:var(--red-t);border:.5px solid var(--red-t);width:100%;margin:0" onclick="resetLocalData()">⚠ Reset local data &amp; re-sync</button>
+  </div>
+</div>
+
+<div class="overlay" id="disch-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="disch-title">Discharge</div>
+    <div id="disch-body"></div>
+  </div>
+</div>
+
+<div class="overlay" id="comb-reason-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Combined daily care — first claim</div>
+    <div id="comb-reason-body"></div>
+  </div>
+</div>
+
+<div class="overlay" id="merge-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="merge-title">Duplicate PHN</div>
+    <div id="merge-body"></div>
+    <div class="divider"></div>
+    <button class="btn btn-s" onclick="hideModal('merge-modal')" style="margin-bottom:0">Cancel</button>
+  </div>
+</div>
+
+<!-- Daily claims list — opened by tapping $X (N claims) in header -->
+<div class="overlay" id="daily-claims-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="daily-claims-title">Today's claims</div>
+    <div id="daily-claims-body" style="max-height:60vh;overflow-y:auto"></div>
+    <div class="divider"></div>
+    <button class="btn btn-s" onclick="hideModal('daily-claims-modal')" style="margin-bottom:0">Close</button>
+  </div>
+</div>
+
+<div class="overlay" id="mit-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Import from Meditech</div>
+    <div class="ocr-bar ocr-ok" id="mit-status" style="display:none"></div>
+    <div id="mit-sum" style="display:none"></div>
+    <div id="mit-rows"></div>
+    <div id="mit-actions" style="display:none">
+      <button class="btn btn-p" onclick="confirmMediteachImport()">Import selected</button>
+    </div>
+    <button class="btn btn-s" onclick="hideModal('mit-modal')" style="margin-bottom:0">Cancel</button>
+  </div>
+</div>
+
+<!-- ═══ PATIENT SUMMARY MODAL ═══ -->
+<div class="overlay" id="pt-summary-modal">
+  <div class="modal" style="border-radius:18px 18px 0 0;padding-bottom:env(safe-area-inset-bottom)">
+    <div class="modal-handle"></div>
+    <div id="pt-summary-content"></div>
+  </div>
+</div>
+
+<!-- ═══ CALENDAR GAP PICKER MODAL (v3.27) ═══ -->
+<div class="overlay" id="cv-picker-modal">
+  <div class="modal" style="border-radius:18px 18px 0 0;padding-bottom:env(safe-area-inset-bottom);max-width:480px;margin:auto">
+    <div class="modal-handle"></div>
+    <div id="cv-picker-content"></div>
+  </div>
+</div>
+
+<!-- ═══ PATIENT EDIT MODAL ═══ -->
+<div class="overlay" id="pt-edit-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div id="pt-edit-content"></div>
+  </div>
+</div>
+
+<!-- ═══ LOCATION EDIT MODAL — opened by tapping the ward/bed circle ═══ -->
+<div class="overlay" id="loc-edit-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div id="loc-edit-content"></div>
+  </div>
+</div>
+
+<!-- ═══ CLAIM EDIT MODAL ═══ -->
+<div class="overlay" id="claim-edit-modal">
+  <div class="modal" style="max-width:380px;margin:auto">
+    <div class="modal-handle"></div>
+    <div id="claim-edit-content"></div>
+  </div>
+</div>
+
+<!-- Offline OCR module (Tesseract.js + KGH parser) — used as silent fallback when Cloudflare worker is unreachable -->
+<script src="ocr_offline.js"></script>
+
+<!--KGHBUILD:app-main.js-->
+
+<!-- Build stamp — visible footer for support/debugging -->
+<div id="kgh-build-stamp" style="
+    text-align:center; padding:12px 8px 18px;
+    font-size:10px; color:#8e8e93; font-family:ui-monospace,'SF Mono',monospace;
+    user-select:text; -webkit-user-select:text; opacity:.7;">
+  KGH Cardiology Billing · <span id="kgh-build-stamp-text"></span>
+</div>
+<!--KGHBUILD:app-buildstamp.js-->
+
+<!-- ═══════════════════════════════════════════════════════
+     DEBUG PANEL — visible only when URL has ?debug=1
+     ───────────────────────────────────────────────────
+     Starts MINIMIZED as a small pill in the corner so it
+     doesn't block interaction with the app. Tap pill to
+     expand into the full panel; tap the chevron to collapse.
+     State persists across reloads via localStorage.
+     ═══════════════════════════════════════════════════════ -->
+
+<!-- Minimized pill (default visible state) -->
+<div id="kgh-debug-pill"
+     onclick="dbgToggle(true)"
+     style="display:none; position:fixed; bottom:8px; right:8px; z-index:9999;
+            background:#1a1a1a; color:#7fd1ff; border:1px solid #2d4a6a;
+            border-radius:18px; padding:6px 12px; font-size:12px;
+            font-family:ui-monospace,'SF Mono',Menlo,monospace;
+            box-shadow:0 2px 8px rgba(0,0,0,.3); cursor:pointer; user-select:none;
+            display:none; align-items:center; gap:6px;">
+  <span>🔧</span>
+  <span id="dbg-pill-text">debug</span>
+</div>
+
+<!-- Full panel (hidden until pill is tapped) -->
+<div id="kgh-debug-panel" style="display:none; position:fixed; bottom:8px; right:8px; left:8px;
+     max-width:340px; margin-left:auto; z-index:9999;
+     background:#1a1a1a; color:#e5e5ea; border-radius:12px; padding:12px;
+     font-family:ui-monospace,'SF Mono',Menlo,monospace; font-size:13px;
+     box-shadow:0 4px 18px rgba(0,0,0,.4);">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+    <strong style="color:#7fd1ff;">🔧 OCR Debug</strong>
+    <div style="display:flex; align-items:center; gap:8px;">
+      <span id="dbg-engine-pill" style="font-size:11px; padding:3px 8px; border-radius:10px; background:#333;">probing…</span>
+      <button onclick="dbgToggle(false)" aria-label="Minimize"
+              style="background:transparent; border:none; color:#888;
+                     font-size:18px; cursor:pointer; padding:0 4px; line-height:1;">×</button>
+    </div>
+  </div>
+
+  <label style="display:flex; align-items:center; gap:10px; padding:8px 0; cursor:pointer;">
+    <input type="checkbox" id="dbg-force-offline" style="width:20px; height:20px; accent-color:#7fd1ff;">
+    <span>Force offline OCR (skip Cloudflare)</span>
+  </label>
+
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+    <button onclick="dbgShowLast()" style="padding:10px; border:none; border-radius:8px;
+            background:#2d4a6a; color:#fff; font-family:inherit; font-size:13px; cursor:pointer;">
+      Show last OCR
+    </button>
+    <button onclick="dbgCopyLast()" style="padding:10px; border:none; border-radius:8px;
+            background:#2d6a4a; color:#fff; font-family:inherit; font-size:13px; cursor:pointer;">
+      📋 Copy
+    </button>
+  </div>
+
+  <div id="dbg-status" style="margin-top:10px; padding:8px; background:#252525; border-radius:6px;
+       font-size:11px; color:#888; min-height:32px; word-break:break-word; cursor:pointer;">
+    No scan yet. Tap photograph in Add Patient.
+  </div>
+</div>
+
+<!--KGHBUILD:app-debugpanel.js-->
+
+</body>
+</html>
