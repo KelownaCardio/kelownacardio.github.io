@@ -1,8 +1,28 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology Billing — main app
-  Version:    v3.66
-  Built:      2026-05-22 UTC
+  Version:    v3.74
+  Built:      2026-05-23 UTC
+
+  Changes in this build (v3.67) — Full audit trail on all claims and patients:
+    - addClaim(): now writes dob, sex, feeCode, loc, fac, ward, room, and
+      source:'App' into every claim object at creation time. Previously these
+      were left blank and only filled at export time, making it impossible to
+      distinguish missing data from un-entered data in the Claims tab.
+    - addClaim(): createdBy was already computed but is now reliably written
+      (it was already in the object; this build ensures it flows through with
+      the other new fields).
+    - All three patient-creation paths (_addPatientCore, the upload-flow
+      addPatientWithClaim, and the orphan-claim healer stub) now stamp
+      addedVia:'app' (or 'app-orphan-healer' for the healer path) so every
+      patient row has a traceable origin.
+    - Config.gs v2.26: Claims HEADERS gains 'createdBy'; Patients HEADERS
+      gains 'createdBy' and 'createdAt'. getOrCreateSheet() auto-appends
+      these columns to existing sheets on first call.
+    - Crud.gs v2.27: bulkUpsertPatients stamps createdBy/createdAt on new
+      Meditech rows.
+    - Lookup.gs v2.26: saveHistoricalBatch stamps createdBy:'Upload' and
+      createdAt on every inserted Upload claim.
   Repo:       github.com/KelownaCardio/kelownacardio.github.io
 
   Changes in this build (v3.66) — Meditech import MRP transition detection:
@@ -2068,12 +2088,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.73-2026-05-23-calendar-performing-doc';
+var BUILD_ID    = 'v3.74-2026-05-23-audit-trail';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.73';
-var APP_BUILT   = '2026-05-20';
+var APP_VERSION = 'v3.74';
+var APP_BUILT   = '2026-05-23';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -2488,7 +2508,10 @@ async function syncFromSheets() {
           care:         'directive',
           icd:          src.icd || '3062',
           admitDate:    src.date || '',
-          roundedToday: null
+          roundedToday: null,
+          addedVia:     'app-orphan-healer',
+          createdBy:    '',
+          createdAt:    Date.now()
         };
         st.patients.push(stub);
         if (SHEETS_URL) push('savePatient', stub);
@@ -3072,15 +3095,23 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, 
     last:      p.last  || '',
     first:     p.first || '',
     phn:       p.phn,
+    dob:       p.dob   || '',
+    sex:       p.sex   || '',
     fee:       fee,
+    feeCode:   feeCode || fee,
     icd:       p.icd || '3062',
     units:     units || 1,
     date:      date,
+    loc:       loc     || (p.ward === 'ED' ? 'E' : 'I'),
+    fac:       p.fac   || 'OA040',
     refby:     p.refby     || '',
     refbyName: p.refbyName || '',
     notes:     notes       || '',
     startTime: _start,
     endTime:   endTime || '',
+    ward:      p.ward  || '',
+    room:      p.bed   || '',
+    source:    'App',
     createdBy: (st.doc && st.doc.alias) || '',
     createdAt: Date.now()
   };
@@ -6782,6 +6813,7 @@ async function _addPatientCore(withClaim, skipNameDobDup) {
     care:         gv('f-care')   || (gv('f-role') === 'mrp' ? 'daily' : 'directive'),
     icd:          icd,
     roundedToday: null,
+    addedVia:     'app',
     createdBy:    (st.doc && st.doc.alias) || '',
     createdAt:    Date.now()
   };
@@ -7313,6 +7345,7 @@ async function apSubmit(addToList, _skipDupCheck) {
     refby:     gv('f-refby-num') || gv('f-refby'),
     refbyName: gv('f-refby-name'),
     icd: icd,
+    addedVia:  'app',
     createdBy: (st.doc && st.doc.alias) || '',
     createdAt: Date.now()
   };
