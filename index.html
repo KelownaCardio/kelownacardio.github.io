@@ -1,8 +1,21 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology Billing — main app
-  Version:    v3.75
+  Version:    v3.76
   Built:      2026-05-23 UTC
+
+  Changes in this build (v3.76) — CCU Admission/Transfer pill:
+    - Added "CCU Admit" pill to the Add Patient claim card, between
+      Consult and Other Claim.
+    - Selecting CCU Admit shows a minimal claim area: date + optional
+      notes + diagnosis + referring MD + performing physician.
+      No time fields, no MOST toggle, no call-out modifier banner.
+    - On submit, writes a single 1411 (CCU Day 1) claim with the
+      selected date. Location follows ward (E if ED, else I).
+    - CCU Admit pill highlights in red (ct-on-ccu) when active.
+    - Validation requires: PHN, referring MD, diagnosis, date.
+    - clearAddForm and pill-reset loop updated to include 'ccu-admit'
+      so state clears correctly on form reset.
 
   Changes in this build (v3.75) — Remove direct CSV export from app:
     - Removed exportCSV(), reexportSubmitted(), _buildAndDownloadCSV(),
@@ -899,6 +912,7 @@ input[type=file] { display:none; }
     <div class="card-title">Claim</div>
     <div class="fl" style="margin-bottom:10px">
       <button class="ct-btn ct-on-consult" id="ap-ct-consult" style="flex:1" onclick="apSelectClaimType('consult')">Consult</button>
+      <button class="ct-btn" id="ap-ct-ccu-admit" style="flex:1" onclick="apSelectClaimType('ccu-admit')">CCU Admit</button>
       <button class="ct-btn" id="ap-ct-other" style="flex:1" onclick="apSelectClaimType('other')">Other Claim</button>
     </div>
     <div id="ap-claim-area"></div>
@@ -2082,11 +2096,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.75-2026-05-23-remove-csv-export';
+var BUILD_ID    = 'v3.76-2026-05-23-ccu-admit-pill';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.75';
+var APP_VERSION = 'v3.76';
 var APP_BUILT   = '2026-05-20';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -7003,15 +7017,21 @@ var _apClaimType = 'consult';
 
 function apSelectClaimType(type) {
   _apClaimType = type;
-  ['consult','other'].forEach(function(t) {
+  var clsFor = { consult:'ct-on-consult', 'ccu-admit':'ct-on-ccu', other:'ct-on-consult' };
+  ['consult','ccu-admit','other'].forEach(function(t) {
     var btn = document.getElementById('ap-ct-' + t);
-    if (btn) btn.className = 'ct-btn' + (t === type ? ' ct-on-consult' : '');
+    if (btn) btn.className = 'ct-btn' + (t === type ? ' ' + (clsFor[t] || 'ct-on-consult') : '');
   });
   var area = document.getElementById('ap-claim-area');
   if (!area) return;
   if (type === 'consult') {
     area.innerHTML = buildApConsultArea();
     initAddPatientConsult();
+  } else if (type === 'ccu-admit') {
+    area.innerHTML = buildApCCUAdmitArea();
+    var caDateEl = document.getElementById('ap-ca-date');
+    if (caDateEl) caDateEl.value = localISODate();
+    injectApPerformingDoc();
   } else {
     area.innerHTML = buildApOtherClaimArea();
     var dateEl = document.getElementById('ap-oc-date');
@@ -7068,6 +7088,17 @@ function buildApOtherClaimArea() {
   h += '<label>Date</label><input type="date" id="ap-oc-date">';
   h += '<label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(optional)</span></label>';
   h += '<textarea id="ap-oc-notes" rows="2" placeholder="Optional" autocorrect="off" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:6px"></textarea>';
+  h += '<div style="border-top:.5px solid var(--border);margin:4px 0 10px"></div>';
+  h += _buildApRefIcdHtml();
+  h += '<div id="f-c-performing-wrap"></div>';
+  return h;
+}
+
+function buildApCCUAdmitArea() {
+  var h = '';
+  h += '<label>Date</label><input type="date" id="ap-ca-date">';
+  h += '<label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(optional)</span></label>';
+  h += '<textarea id="ap-ca-notes" rows="2" placeholder="Optional" autocorrect="off" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:6px"></textarea>';
   h += '<div style="border-top:.5px solid var(--border);margin:4px 0 10px"></div>';
   h += _buildApRefIcdHtml();
   h += '<div id="f-c-performing-wrap"></div>';
@@ -7177,6 +7208,8 @@ async function apSubmit(addToList, _skipDupCheck) {
     if (!(document.getElementById('f-c-date')  || {}).value) addMissing.push('date');
     if (!(document.getElementById('f-c-start') || {}).value) addMissing.push('start time');
     if (!(document.getElementById('f-c-end')   || {}).value) addMissing.push('end time');
+  } else if (_apClaimType === 'ccu-admit') {
+    if (!(document.getElementById('ap-ca-date') || {}).value) addMissing.push('date');
   } else if (_apClaimType === 'other') {
     if (!gv('ap-oc-fee')) addMissing.push('fee');
     if (!(document.getElementById('ap-oc-date') || {}).value) addMissing.push('date');
@@ -7325,6 +7358,15 @@ async function apSubmit(addToList, _skipDupCheck) {
         }
         sv('claims', st.claims);
       }
+    } else if (_apClaimType === 'ccu-admit') {
+      var caDateISO = (document.getElementById('ap-ca-date')  || {}).value || '';
+      var caNotes   = (document.getElementById('ap-ca-notes') || {}).value || '';
+      if (caDateISO) {
+        var caDateFmt = fmtD(parseISODate(caDateISO));
+        var caLoc = p.ward === 'ED' ? 'E' : 'I';
+        addClaim(p, '1411', '1411', 1, caDateFmt, caLoc, null, caNotes, null, cAlias);
+        sv('claims', st.claims);
+      }
     } else if (_apClaimType === 'other') {
       var ocFee     = gv('ap-oc-fee') || '';
       var ocUnits   = parseInt(gv('ap-oc-units')) || 1;
@@ -7438,7 +7480,7 @@ function clearAddForm() {
   var ocr = document.getElementById('ocr-bar'); if (ocr) ocr.style.display = 'none';
   // Reset claim type to consult and rebuild claim area
   _apClaimType = 'consult';
-  ['consult','other'].forEach(function(t) {
+  ['consult','ccu-admit','other'].forEach(function(t) {
     var b = document.getElementById('ap-ct-' + t);
     if (b) b.className = 'ct-btn' + (t === 'consult' ? ' ct-on-consult' : '');
   });
