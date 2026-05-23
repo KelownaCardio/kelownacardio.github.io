@@ -1,8 +1,24 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology Billing — main app
-  Version:    v3.76
+  Version:    v3.77
   Built:      2026-05-23 UTC
+
+  Changes in this build (v3.77) — Calendar legend clickable + desktop size fix:
+    - Legend pills (CCU / Daily / Directive / Combined) are now clickable
+      type selectors. Tap a pill to enter sticky-add mode; tap any calendar
+      day to add that claim type directly (no picker modal). Tap the pill
+      again to cancel. Active pill highlights in its claim colour.
+    - A hint line below the legend confirms the active mode:
+      "Tap any day to add CCU — tap pill again to cancel".
+    - Consult and Gap legend items remain view-only (not addable via calendar).
+    - Combined daily still opens its ICD + reason sub-form.
+    - Active pill is restored after calendar re-render (month change, claim add).
+    - _cvActiveType resets to null whenever a new patient summary is opened.
+    - All in-month calendar days are now tappable (previously only days with
+      claims or in-span days responded to tap).
+    - Picker modal buttons enlarged: padding 18px, label font 16px.
+    - Calendar grid capped at max-width:420px to prevent oversizing on desktop.
 
   Changes in this build (v3.76) — CCU Admission/Transfer pill:
     - Added "CCU Admit" pill to the Add Patient claim card, between
@@ -723,9 +739,21 @@ input[type=file] { display:none; }
 .cv-tog button { flex:1; padding:8px; border:none; border-radius:6px; font-size:13px; font-weight:600;
                  cursor:pointer; font-family:inherit; background:transparent; color:var(--text2); }
 .cv-tog button.on { background:var(--surface); color:var(--text); box-shadow:0 1px 2px rgba(0,0,0,.06); }
-.cv-legend { display:flex; flex-wrap:wrap; gap:6px 12px; padding:4px 0 10px; font-size:10px; color:var(--text2); }
+.cv-legend { display:flex; flex-wrap:wrap; gap:6px 8px; padding:4px 0 6px; font-size:10px; color:var(--text2); align-items:center; }
 .cv-lg { display:flex; align-items:center; gap:4px; }
-.cv-sw { width:10px; height:10px; border-radius:2px; }
+.cv-sw { width:10px; height:10px; border-radius:2px; flex-shrink:0; }
+/* Clickable legend pills for addable claim types */
+.cv-lg-pill { display:flex; align-items:center; gap:5px; padding:5px 11px; border-radius:20px;
+              font-size:11px; font-weight:700; border:2px solid var(--border2); cursor:pointer;
+              font-family:inherit; background:var(--surface2); color:var(--text2); transition:border-color .12s, background .12s; }
+.cv-lg-pill:active { transform:scale(.96); }
+.cv-lg-pill.active { background:var(--surface); color:var(--text); }
+.cv-lg-pill.active.cv-lgp-ccu       { border-color:#b53636; color:#5e1414; background:#fde8e8; }
+.cv-lg-pill.active.cv-lgp-daily     { border-color:#1a7a35; color:#062814; background:#d4f0dc; }
+.cv-lg-pill.active.cv-lgp-directive { border-color:#003478; color:#002461; background:#dce8fe; }
+.cv-lg-pill.active.cv-lgp-combined  { border-color:#34804a; color:#0a4520; background:#e0f5e5; }
+/* Tap hint shown when a legend pill is active */
+.cv-tap-hint { font-size:11px; font-weight:600; padding:3px 0 5px; display:none; }
 .cv-nav { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
 .cv-nav button { background:var(--surface2); border:none; width:30px; height:30px; border-radius:6px;
                  font-size:16px; cursor:pointer; color:var(--text); font-family:inherit; }
@@ -762,11 +790,11 @@ input[type=file] { display:none; }
 
 /* Type picker (CCU / Daily / Directive / Combined daily) */
 .cv-pick-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:6px 0 12px; }
-.cv-pick-btn { position:relative; padding:14px 10px; border-radius:var(--rsm); border:2px solid transparent;
+.cv-pick-btn { position:relative; padding:18px 12px; border-radius:var(--rsm); border:2px solid transparent;
                cursor:pointer; font-family:inherit; text-align:center; }
 .cv-pick-btn:active { transform:scale(.97); transition:transform .08s; }
-.cv-pick-btn .cv-pk-l { font-size:14px; font-weight:700; line-height:1.1; }
-.cv-pick-btn .cv-pk-s { font-size:10px; margin-top:3px; opacity:.75; }
+.cv-pick-btn .cv-pk-l { font-size:16px; font-weight:700; line-height:1.1; }
+.cv-pick-btn .cv-pk-s { font-size:11px; margin-top:4px; opacity:.75; }
 .cv-pick-btn .cv-pk-flag { position:absolute; top:-7px; left:50%; transform:translateX(-50%);
                            background:var(--amber); color:#fff; font-size:8px; font-weight:800;
                            padding:2px 6px; border-radius:6px; letter-spacing:.3px; text-transform:uppercase; }
@@ -2096,11 +2124,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.76-2026-05-23-ccu-admit-pill';
+var BUILD_ID    = 'v3.77-2026-05-23-calendar-legend-pills';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.76';
+var APP_VERSION = 'v3.77';
 var APP_BUILT   = '2026-05-20';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -4556,6 +4584,7 @@ function _doRestore(pid, list) {
 function openPatientSummary(pid) {
   var p = getP(pid);
   if (!p || !p.id) return;
+  _cvActiveType = null;  // reset legend pill selection for fresh open
 
   // All claims for this patient, sorted oldest → newest
   var claims = st.claims
@@ -4865,17 +4894,24 @@ function _ptSummaryCalendarHTML(p, claims) {
 
   var html = '';
 
-  // Legend
+  // Legend — Consult and Gap are view-only; CCU/Daily/Directive/Combined are clickable type-selector pills
   html += '<div class="cv-legend">' +
             '<div class="cv-lg"><div class="cv-sw" style="background:#ffcf73"></div>Consult</div>' +
-            '<div class="cv-lg"><div class="cv-sw" style="background:#f08585"></div>CCU</div>' +
-            '<div class="cv-lg"><div class="cv-sw" style="background:#3fa658"></div>Daily</div>' +
-            '<div class="cv-lg"><div class="cv-sw" style="background:#8eb5fa"></div>Directive</div>' +
-            '<div class="cv-lg"><div class="cv-sw" style="background:#b8e6c4"></div>Combined</div>' +
+            '<button class="cv-lg-pill cv-lgp-ccu"       id="cv-lgp-ccu"       onclick="_cvSelectLegend(\'ccu\',this)"><div class="cv-sw" style="background:#f08585"></div>CCU</button>' +
+            '<button class="cv-lg-pill cv-lgp-daily"     id="cv-lgp-daily"     onclick="_cvSelectLegend(\'daily\',this)"><div class="cv-sw" style="background:#3fa658"></div>Daily</button>' +
+            '<button class="cv-lg-pill cv-lgp-directive" id="cv-lgp-directive" onclick="_cvSelectLegend(\'directive\',this)"><div class="cv-sw" style="background:#8eb5fa"></div>Directive</button>' +
+            '<button class="cv-lg-pill cv-lgp-combined"  id="cv-lgp-combined"  onclick="_cvSelectLegend(\'combined\',this)"><div class="cv-sw" style="background:#b8e6c4"></div>Combined</button>' +
             (rule ? '<div class="cv-lg"><div class="cv-sw" style="background:#d4d4d8;border:1px dashed #8a8a92"></div>Gap</div>' : '') +
-          '</div>';
+          '</div>' +
+          '<div class="cv-tap-hint" id="cv-tap-hint"></div>';
+
+  // Restore active pill highlight if a type was already selected
+  if (window._cvActiveType) {
+    var _restoreHint = html; // keep ref; actual DOM restore happens after render via _cvRestoreActivePill()
+  }
 
   // Month nav
+  html += '<div style="max-width:420px;margin:0 auto">';  // desktop width cap
   html += '<div class="cv-nav">' +
             '<button onclick="_cvChangeMonth(-1)">‹</button>' +
             '<div class="cv-month">' + monthName + ' ' + year + '</div>' +
@@ -4916,15 +4952,15 @@ function _ptSummaryCalendarHTML(p, claims) {
       if (ccuClaim) tag = ccuClaim.fee;
     }
 
-    var tappable = (dayClaims.length > 0) || inSpan;
-    var onclick = tappable ? ' onclick="tapCalDay(\'' + dateStr + '\')"' : '';
+    var tappable = true;  // all in-month days tappable — active pill mode needs this
+    var onclick = ' onclick="tapCalDay(\'' + dateStr + '\')"';
     html += '<div class="' + cls + '"' + onclick + '>' +
               '<div class="cv-num">' + d + '</div>' +
               (tag ? '<div class="cv-tag">' + tag + '</div>' : '') +
             '</div>';
   }
 
-  html += '</div>';
+  html += '</div>'; // close cv-grid
 
   // Gap warning banner
   if (rule) {
@@ -4947,6 +4983,8 @@ function _ptSummaryCalendarHTML(p, claims) {
     }
   }
 
+  html += '</div>'; // close max-width wrapper
+
   return html;
 }
 
@@ -4962,7 +5000,37 @@ function _cvChangeMonth(delta) {
     return c.phn && p.phn && samePhn(c.phn, p.phn);
   }).sort(function(a, b) { return parseDMY(a.date) - parseDMY(b.date); });
   var calEl = document.getElementById('cv-view-cal');
-  if (calEl) calEl.innerHTML = _ptSummaryCalendarHTML(p, claims);
+  if (calEl) { calEl.innerHTML = _ptSummaryCalendarHTML(p, claims); _cvRestoreActivePill(); }
+}
+
+// Legend pill selection — sticky type mode
+var _cvActiveType = null;
+
+function _cvSelectLegend(type, btn) {
+  var wasActive = _cvActiveType === type;
+  _cvActiveType = wasActive ? null : type;
+  document.querySelectorAll('.cv-lg-pill').forEach(function(b) { b.classList.remove('active'); });
+  if (!wasActive && btn) btn.classList.add('active');
+  var hint = document.getElementById('cv-tap-hint');
+  if (hint) {
+    var labelMap = { ccu:'CCU', daily:'Daily', directive:'Directive', combined:'Combined daily' };
+    hint.style.display = _cvActiveType ? '' : 'none';
+    hint.style.color = _cvActiveType ? 'var(--blue-t)' : '';
+    hint.textContent = _cvActiveType ? '↑ Tap any day to add ' + (labelMap[_cvActiveType] || _cvActiveType) + ' — tap pill again to cancel' : '';
+  }
+}
+
+function _cvRestoreActivePill() {
+  if (!_cvActiveType) return;
+  var pill = document.getElementById('cv-lgp-' + _cvActiveType);
+  if (pill) pill.classList.add('active');
+  var hint = document.getElementById('cv-tap-hint');
+  if (hint) {
+    var labelMap = { ccu:'CCU', daily:'Daily', directive:'Directive', combined:'Combined daily' };
+    hint.style.display = '';
+    hint.style.color = 'var(--blue-t)';
+    hint.textContent = '↑ Tap any day to add ' + (labelMap[_cvActiveType] || _cvActiveType) + ' — tap pill again to cancel';
+  }
 }
 
 // Tap a day — open details or the gap-fill picker
@@ -4971,6 +5039,18 @@ function tapCalDay(dateStr) {
   if (!pid) return;
   var p = getP(pid);
   if (!p) return;
+
+  // Active legend pill mode — add that type directly without opening picker
+  if (_cvActiveType) {
+    var alias = st.doc ? st.doc.alias : '';
+    if (_cvActiveType === 'combined') {
+      _cvShowCombinedForm(pid, dateStr, alias);
+    } else {
+      _cvFillClaim(pid, dateStr, _cvActiveType, '', null, alias);
+    }
+    return;
+  }
+
   var dayClaims = st.claims.filter(function(c) {
     return samePhn(c.phn, p.phn) && c.date === dateStr;
   });
@@ -5195,7 +5275,7 @@ function _cvFillClaim(pid, dateStr, type, note, icdOverride, alias) {
     return c.phn && p.phn && samePhn(c.phn, p.phn);
   }).sort(function(a, b) { return parseDMY(a.date) - parseDMY(b.date); });
   var calEl = document.getElementById('cv-view-cal');
-  if (calEl) calEl.innerHTML = _ptSummaryCalendarHTML(p, claims);
+  if (calEl) { calEl.innerHTML = _ptSummaryCalendarHTML(p, claims); _cvRestoreActivePill(); }
   var listEl = document.getElementById('cv-view-list');
   if (listEl) listEl.innerHTML = _ptSummaryListHTML(p, claims);
   render();
