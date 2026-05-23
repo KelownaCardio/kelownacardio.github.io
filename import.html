@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology · Meditech Import (standalone)
-  Version:    v1.6
-  Built:      2026-05-22 UTC
+  Version:    v1.7
+  Built:      2026-05-23 UTC
   Repo:       github.com/KelownaCardio/kelownacardio.github.io
   Path:       Apps Script → Anthropic (no Cloudflare needed — works on hospital WiFi)
   Features:
@@ -10,6 +10,16 @@
     - AI extracts patient list, categorises by MRP
     - All rows have checkboxes; ignored rows can be added manually
     - Commit selected directly to Google Sheet
+  Changes in v1.7:
+    - parseLocCode: CCU validated 1-8 beds; 2W/2S rooms strip floor prefix (1-16,
+      17-34); hallway beds KGHSH2W-A/B and KGHSH2S-A parsed as Hall-A / Hall-B
+    - Same-bed conflict detection: two patients sharing ward+bed flagged, later
+      entry auto-deselected; red tag shown on both rows
+    - PHN deduplication: duplicate PHN in same import auto-deselected with amber tag
+    - Cardiac Surgery MRP: unchecked left-cardiology rows auto-discharged on commit;
+      checked rows retain patient and update MRP field only (list/role/care preserved)
+    - Labels: "MRP Changed to Cardiac Surgery" throughout; pill, section header, tag
+    - Commit log shows split discharge count (off-list vs cardiac surgery)
   Changes in v1.6:
     - Discharge detection: after parsing the PDF, active on-service patients
       not found in the imported list (by PHN or name) are flagged as
@@ -207,8 +217,8 @@
 
 <script>
 // ── Version ───────────────────────────────────────────────────────
-const APP_VERSION = 'v1.6';
-const APP_BUILT   = '2026-05-22 UTC';
+const APP_VERSION = 'v1.7';
+const APP_BUILT   = '2026-05-23 UTC';
 console.log('%c[KGH Meditech Import] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
 
@@ -230,24 +240,52 @@ const LOC_MAP = {
   S4E: '4E', S4W: '4W',
 };
 
+const CCU_MAX_BED = 8;  // KGH CCU has 8 beds
+
 function parseLocCode(locCode, roomBed) {
   var ward = 'OTHER';
   var room = '';
+  var suspect = false;
   var loc = (locCode || '').toUpperCase();
   for (var key in LOC_MAP) {
     if (loc.indexOf(key) !== -1) { ward = LOC_MAP[key]; break; }
   }
   var rb = (roomBed || '').replace(/-/g,'').toUpperCase()
     .replace(/^KGHS/,'').replace(/^KGHR/,'').replace(/^KGHC/,'').replace(/^KGHAC/,'');
+
   if (ward === 'CCU') {
+    // CCU beds 1-8. Strip any hundreds prefix then validate.
     var n = parseInt(rb, 10);
-    if (!isNaN(n)) room = String(n % 100 || n);
+    if (!isNaN(n)) {
+      var bedNum = n % 100 || n;
+      room = String(bedNum);
+      if (bedNum < 1 || bedNum > CCU_MAX_BED) suspect = true;
+    }
+
+  } else if (ward === '2W' || ward === '2S') {
+    // Hallway beds: KGHSH2W-A/B -> rb="H2WA"/"H2WB"; KGHSH2S-A -> "H2SA"
+    var hallMatch = rb.match(/^H\d[WS]([AB])$/);
+    if (hallMatch) {
+      room = 'Hall-' + hallMatch[1];
+    } else {
+      // Standard rooms: KGHS02XX-A/B -> rb="02XXA"
+      // Strip 2-digit floor prefix -> room = e.g. "1A", "16A", "25B"
+      var floorMatch = rb.match(/^\d{2}(\d{1,2})([A-Z]?)$/);
+      if (floorMatch) {
+        room = String(parseInt(floorMatch[1], 10)) + (floorMatch[2] || '');
+      } else {
+        var m = rb.match(/^0*(\d+)([A-Z]?)$/);
+        if (m) room = m[1] + m[2];
+      }
+    }
+
   } else {
     var m = rb.match(/^0*(\d+)([A-Z]?)$/);
     if (m) room = m[1] + m[2];
     else if (rb.match(/^(3MU|C1C|EDOF|HAH|REH)/i)) room = rb;
   }
-  return { ward, room };
+
+  return { ward, room, suspect };
 }
 
 function fmtDate(d) {
@@ -561,6 +599,7 @@ async function buildPreview(patients) {
       _idx: i,
       _ward: loc.ward,
       _room: loc.room,
+      _suspectBed: loc.suspect || false,
       _dob: mitDOB,
       _phn: mitPHN,
       _mrpRaw: mrpRaw,
@@ -573,8 +612,40 @@ async function buildPreview(patients) {
       _selected: autoCheck,
       _locationChanged: existing ? (existing.ward !== loc.ward || existing.bed !== loc.room) : true,
       _mrpTransition: mrpTransition,
-      _existingMrp: existingMrpStr
+      _existingMrp: existingMrpStr,
+      _bedConflict: false,
+      _phnDuplicate: false
     });
+  });
+
+  // ── PHN deduplication ─────────────────────────────────────────────
+  // If the AI extracted the same patient twice (same PHN), keep the first,
+  // flag and auto-deselect the second.
+  const phnSeenIdx = new Map();
+  parsedPatients.forEach(p => {
+    if (!p._phn) return;
+    if (phnSeenIdx.has(p._phn)) {
+      p._phnDuplicate = true;
+      p._selected = false;
+    } else {
+      phnSeenIdx.set(p._phn, p._idx);
+    }
+  });
+
+  // ── Same-bed conflict detection ───────────────────────────────────
+  // Two patients cannot occupy the same ward+bed. Flag both; auto-deselect
+  // the later entry so the doctor must explicitly resolve the conflict.
+  const bedSeenIdx = new Map();
+  parsedPatients.forEach(p => {
+    if (!p._ward || !p._room) return;
+    const bedKey = p._ward + '|' + p._room;
+    if (bedSeenIdx.has(bedKey)) {
+      parsedPatients[bedSeenIdx.get(bedKey)]._bedConflict = true;
+      p._bedConflict = true;
+      p._selected = false;
+    } else {
+      bedSeenIdx.set(bedKey, p._idx);
+    }
   });
 
   // ── Discharge candidates ──────────────────────────────────────────
@@ -624,13 +695,20 @@ function renderPreview() {
   const unchanged  = remaining.filter(p => !p._locationChanged);
 
   // Pills
+  const bedConflicts  = parsedPatients.filter(p => p._bedConflict);
+  const phnDupes      = parsedPatients.filter(p => p._phnDuplicate);
+  const suspectBeds   = parsedPatients.filter(p => p._suspectBed);
+
   document.getElementById('pills').innerHTML = [
     dischargeCandidates.length ? `<div class="pill" style="background:var(--red-bg);color:var(--red)">⚠ ${dischargeCandidates.length} to discharge</div>` : '',
     `<div class="pill pill-blue">${updates.length} matched</div>`,
     locChanged.length ? `<div class="pill pill-green">${locChanged.length} location change${locChanged.length!==1?'s':''}</div>` : '',
-    mrpLeft.length    ? `<div class="pill" style="background:var(--red-bg);color:var(--red)">⚠ ${mrpLeft.length} MRP change${mrpLeft.length!==1?'s':''} — review</div>` : '',
+    mrpLeft.length    ? `<div class="pill" style="background:var(--red-bg);color:var(--red)">⚠ ${mrpLeft.length} cardiac surgery MRP change${mrpLeft.length!==1?'s':''}</div>` : '',
     mrpJoined.length  ? `<div class="pill pill-amber">${mrpJoined.length} new to Cardiology</div>` : '',
     newConsult.length ? `<div class="pill" style="background:var(--red-bg);color:var(--red)">${newConsult.length} new Cardiology MRP</div>` : '',
+    bedConflicts.length ? `<div class="pill" style="background:var(--red-bg);color:var(--red)">⚠ ${bedConflicts.length} bed conflict${bedConflicts.length!==1?'s':''}</div>` : '',
+    phnDupes.length   ? `<div class="pill" style="background:var(--amber-bg);color:var(--amber)">⚠ ${phnDupes.length} duplicate PHN${phnDupes.length!==1?'s':''}</div>` : '',
+    suspectBeds.length ? `<div class="pill" style="background:var(--amber-bg);color:var(--amber)">⚠ ${suspectBeds.length} suspect bed${suspectBeds.length!==1?'s':''}</div>` : '',
     `<div class="pill pill-grey">${ignored.length} ignored</div>`
   ].filter(Boolean).join('');
 
@@ -661,7 +739,7 @@ function renderPreview() {
   // before scrolling. These are auto-UNCHECKED — explicit action required to
   // pull a patient who has moved off the Cardiology service.
   if (mrpLeft.length) {
-    html += `<div class="sec-label" style="color:var(--red)">⚠ MRP changed — review before committing (auto-unchecked)</div>`;
+    html += `<div class="sec-label" style="color:var(--red)">⚠ MRP Changed to Cardiac Surgery — uncheck to discharge, check to retain</div>`;
     html += mrpLeft.map(p => patRow(p)).join('');
   }
 
@@ -752,13 +830,18 @@ function patRow(p) {
     // service is responsible for billing. Most important case: patient moved
     // from a Cardiology floor to CSICU for surgery and is no longer ours.
     if (p._mrpTransition === 'left-cardiology') {
-      tags += `<span class="tag tag-red">⚠ Review change in MRP: ${esc(p._existingMrp)} → ${esc(p._mrpRaw)}</span>`;
+      tags += `<span class="tag tag-red">⚠ MRP Changed to Cardiac Surgery: ${esc(p._mrpRaw)} — uncheck to discharge</span>`;
     } else if (p._mrpTransition === 'joined-cardiology') {
       tags += `<span class="tag tag-amber">MRP changed to Cardiology (was ${esc(p._existingMrp)})</span>`;
     }
     if (p._highConf) tags += `<span class="tag tag-green conf-high">✓ 2/3 match — demographics will update</span>`;
     else tags += `<span class="tag tag-amber conf-low">⚠ Low confidence — location only</span>`;
   }
+
+  // Bed conflict / PHN dupe / suspect bed — appended to any row type
+  if (p._bedConflict)   tags += `<span class="tag tag-red">⚠ Bed conflict — same ward+bed as another patient</span>`;
+  if (p._phnDuplicate)  tags += `<span class="tag tag-amber">⚠ Duplicate PHN — already parsed above</span>`;
+  if (p._suspectBed)    tags += `<span class="tag tag-amber">⚠ Suspect bed number — verify (CCU beds 1–${CCU_MAX_BED})</span>`;
 
   const metaParts = [];
   if (p._phn) metaParts.push('PHN ' + p._phn);
@@ -786,7 +869,23 @@ document.getElementById('commitBtn').addEventListener('click', async () => {
   const selected  = parsedPatients.filter(p => p._selected);
   const toDischarge = dischargeCandidates.filter(d => d._selected);
 
-  if (!selected.length && !toDischarge.length) {
+  // Unchecked left-cardiology rows → auto-discharge (MRP moved to cardiac surgery).
+  // These are separate from the manual discharge candidates section — they are
+  // silently harvested here so unchecking = confirm the patient has left service.
+  const leftCardioDischarges = parsedPatients
+    .filter(p => !p._selected && p._mrpTransition === 'left-cardiology' && p._existing)
+    .map(p => ({
+      id:            p._existing.id,
+      phn:           p._phn || p._existing.phn,
+      last:          p.last,
+      first:         p.first,
+      discharged:    true,
+      dischargeDate: '',   // filled below once todayStr is built
+      dischargeNote: 'MRP changed to cardiac surgery',
+      addedVia:      'meditech-discharge'
+    }));
+
+  if (!selected.length && !toDischarge.length && !leftCardioDischarges.length) {
     showStatus('commitStatus', 'warn', 'Nothing selected to commit.');
     return;
   }
@@ -794,7 +893,7 @@ document.getElementById('commitBtn').addEventListener('click', async () => {
   document.getElementById('commitBtn').disabled = true;
   document.getElementById('cancelBtn').disabled = true;
 
-  const totalCount = selected.length + toDischarge.length;
+  const totalCount = selected.length + toDischarge.length + leftCardioDischarges.length;
   showStatus('commitStatus', 'info', `<span class="spinner"></span>Writing ${totalCount} changes to Google Sheet…`);
 
   const log = document.getElementById('log');
@@ -806,6 +905,9 @@ document.getElementById('commitBtn').addEventListener('click', async () => {
   const todayStr = String(now.getDate()).padStart(2,'0') + '/' +
                    String(now.getMonth()+1).padStart(2,'0') + '/' +
                    now.getFullYear();
+
+  // Stamp discharge dates now that todayStr is available
+  leftCardioDischarges.forEach(d => { d.dischargeDate = todayStr; });
 
   // Regular patient upserts
   const toSend = selected.map(p => buildPayload(p));
@@ -822,7 +924,7 @@ document.getElementById('commitBtn').addEventListener('click', async () => {
     addedVia:      'meditech-discharge'
   }));
 
-  addLog(`Sending ${toSend.length} updates, ${dischPayloads.length} discharges…`, 'inf');
+  addLog(`Sending ${toSend.length} updates, ${dischPayloads.length + leftCardioDischarges.length} discharges…`, 'inf');
 
   try {
     const resp = await fetch(APPS_SCRIPT_URL, {
@@ -831,7 +933,7 @@ document.getElementById('commitBtn').addEventListener('click', async () => {
       body: JSON.stringify({
         key:      SHARED_KEY,
         action:   'bulkUpsertPatients',
-        patients: [...toSend, ...dischPayloads]
+        patients: [...toSend, ...dischPayloads, ...leftCardioDischarges]
       })
     });
     const result = await resp.json();
@@ -839,12 +941,13 @@ document.getElementById('commitBtn').addEventListener('click', async () => {
 
     addLog(`✓ Inserted:   ${result.inserted}`, 'ok');
     addLog(`✓ Updated:    ${result.updated}`, 'ok');
-    addLog(`✓ Discharged: ${dischPayloads.length}`, 'ok');
+    const totalDisch = dischPayloads.length + leftCardioDischarges.length;
+    addLog(`✓ Discharged: ${totalDisch} (${dischPayloads.length} off-list, ${leftCardioDischarges.length} cardiac surgery)`, 'ok');
     if (result.skipped) addLog(`· Skipped:  ${result.skipped}`, 'inf');
     (result.errors || []).forEach(e => addLog('✗ ' + e, 'err'));
 
     showStatus('commitStatus', 'ok',
-      `Done — ${result.inserted} new, ${result.updated} updated, ${dischPayloads.length} discharged.`);
+      `Done — ${result.inserted} new, ${result.updated} updated, ${totalDisch} discharged.`);
   } catch(err) {
     addLog('✗ ' + err.message, 'err');
     showStatus('commitStatus', 'err', 'Commit failed: ' + err.message);
@@ -909,15 +1012,12 @@ function buildPayload(p) {
     payload.newConsult = ep.newConsult;
     payload.needsSticker = !payload.phn;
 
-    // If the doctor has explicitly checked an MRP-change row (auto-unchecked
-    // by default for "left-cardiology"), they're confirming the patient has
-    // moved off our service. Write the new MRP through and switch them to
-    // off-service / consultant role so daily rounding stops auto-billing.
+    // If the doctor has explicitly CHECKED a cardiac-surgery MRP-change row,
+    // they are retaining the patient on the list — update the MRP field only.
+    // Unchecked rows are handled separately as auto-discharges in the commit step.
     if (p._mrpTransition === 'left-cardiology') {
-      payload.mrp  = p._mrpRaw || ep.mrp;
-      payload.list = 'off';
-      payload.role = 'consultant';
-      payload.care = 'directive';
+      payload.mrp = p._mrpRaw || ep.mrp;
+      // list / role / care deliberately preserved — doctor chose to keep patient
     }
     // If MRP changed TO Cardiology, pull them onto our service.
     if (p._mrpTransition === 'joined-cardiology') {
