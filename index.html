@@ -885,6 +885,7 @@ input[type=file] { display:none; }
     <div class="card-title">Claim</div>
     <div class="fl" style="margin-bottom:10px">
       <button class="ct-btn ct-on-consult" id="ap-ct-consult" style="flex:1" onclick="apSelectClaimType('consult')">Consult</button>
+      <button class="ct-btn" id="ap-ct-ccu-admit" style="flex:1" onclick="apSelectClaimType('ccu-admit')">CCU Admit</button>
       <button class="ct-btn" id="ap-ct-other" style="flex:1" onclick="apSelectClaimType('other')">Other Claim</button>
     </div>
     <div id="ap-claim-area"></div>
@@ -2068,12 +2069,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.72-2026-05-22-time-input-24hr-text';
+var BUILD_ID    = 'v3.73-2026-05-23-ccu-admit-pill';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.72';
-var APP_BUILT   = '2026-05-20';
+var APP_VERSION = 'v3.73';
+var APP_BUILT   = '2026-05-23';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -7049,7 +7050,7 @@ var _apClaimType = 'consult';
 
 function apSelectClaimType(type) {
   _apClaimType = type;
-  ['consult','other'].forEach(function(t) {
+  ['consult','ccu-admit','other'].forEach(function(t) {
     var btn = document.getElementById('ap-ct-' + t);
     if (btn) btn.className = 'ct-btn' + (t === type ? ' ct-on-consult' : '');
   });
@@ -7058,6 +7059,14 @@ function apSelectClaimType(type) {
   if (type === 'consult') {
     area.innerHTML = buildApConsultArea();
     initAddPatientConsult();
+  } else if (type === 'ccu-admit') {
+    area.innerHTML = buildApCCUAdmitArea();
+    var ccuDateEl = document.getElementById('ap-ccu-date');
+    if (ccuDateEl) ccuDateEl.value = localISODate();
+    injectApPerformingDoc();
+    // Snap location card to CCU defaults (on-service, MRP, Cardiology, ccu care)
+    var wardSel = document.getElementById('f-ward');
+    if (wardSel) { wardSel.value = 'CCU'; wardChange(); }
   } else {
     area.innerHTML = buildApOtherClaimArea();
     var dateEl = document.getElementById('ap-oc-date');
@@ -7114,6 +7123,18 @@ function buildApOtherClaimArea() {
   h += '<label>Date</label><input type="date" id="ap-oc-date">';
   h += '<label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(optional)</span></label>';
   h += '<textarea id="ap-oc-notes" rows="2" placeholder="Optional" autocorrect="off" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:6px"></textarea>';
+  h += '<div style="border-top:.5px solid var(--border);margin:4px 0 10px"></div>';
+  h += _buildApRefIcdHtml();
+  h += '<div id="f-c-performing-wrap"></div>';
+  return h;
+}
+
+function buildApCCUAdmitArea() {
+  var h = '';
+  h += '<div style="font-size:12px;color:var(--text3);margin-bottom:8px">Fee code 1411 — CCU critical care day 1</div>';
+  h += '<label>Date</label><input type="date" id="ap-ccu-date">';
+  h += '<label style="margin-top:6px">Notes <span style="font-size:10px;color:var(--text3)">(optional)</span></label>';
+  h += '<textarea id="ap-ccu-notes" rows="2" placeholder="Optional" autocorrect="off" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:6px"></textarea>';
   h += '<div style="border-top:.5px solid var(--border);margin:4px 0 10px"></div>';
   h += _buildApRefIcdHtml();
   h += '<div id="f-c-performing-wrap"></div>';
@@ -7223,6 +7244,8 @@ async function apSubmit(addToList, _skipDupCheck) {
     if (!(document.getElementById('f-c-date')  || {}).value) addMissing.push('date');
     if (!(document.getElementById('f-c-start') || {}).value) addMissing.push('start time');
     if (!(document.getElementById('f-c-end')   || {}).value) addMissing.push('end time');
+  } else if (_apClaimType === 'ccu-admit') {
+    if (!(document.getElementById('ap-ccu-date') || {}).value) addMissing.push('date');
   } else if (_apClaimType === 'other') {
     if (!gv('ap-oc-fee')) addMissing.push('fee');
     if (!(document.getElementById('ap-oc-date') || {}).value) addMissing.push('date');
@@ -7371,6 +7394,15 @@ async function apSubmit(addToList, _skipDupCheck) {
         }
         sv('claims', st.claims);
       }
+    } else if (_apClaimType === 'ccu-admit') {
+      var ccuDateISO = (document.getElementById('ap-ccu-date')  || {}).value || '';
+      var ccuNotes   = (document.getElementById('ap-ccu-notes') || {}).value || '';
+      if (ccuDateISO) {
+        var ccuDateFmt = fmtD(parseISODate(ccuDateISO));
+        var ccuLoc = p.ward === 'ED' ? 'E' : 'I';
+        addClaim(p, '1411', '1411', 1, ccuDateFmt, ccuLoc, null, ccuNotes, null, cAlias);
+        sv('claims', st.claims);
+      }
     } else if (_apClaimType === 'other') {
       var ocFee     = gv('ap-oc-fee') || '';
       var ocUnits   = parseInt(gv('ap-oc-units')) || 1;
@@ -7484,7 +7516,7 @@ function clearAddForm() {
   var ocr = document.getElementById('ocr-bar'); if (ocr) ocr.style.display = 'none';
   // Reset claim type to consult and rebuild claim area
   _apClaimType = 'consult';
-  ['consult','other'].forEach(function(t) {
+  ['consult','ccu-admit','other'].forEach(function(t) {
     var b = document.getElementById('ap-ct-' + t);
     if (b) b.className = 'ct-btn' + (t === 'consult' ? ' ct-on-consult' : '');
   });
