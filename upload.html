@@ -216,6 +216,10 @@ v1.14 2026-05-14  ICD9_LOCAL rebuilt from the iClinic xlsx (385 codes,
                   is the single source of truth for the full 7,000+
                   iClinic codes.
 
+v1.20 2026-05-22  Time inputs changed from browser native time pickers
+                  to plain text fields. parseTime24() normalizes on blur:
+                  accepts 14:30, 7:40, 740, 1430, 7:40am, 2:30PM, 7am.
+                  Always stores HH:MM 24-hour format.
 v1.19 2026-05-22  Claim edit save: old claims with missing PHN/demos now
                   pull from the patient card form fields as fallback.
                   Fixes "Blocked save of empty claim record" error on
@@ -644,8 +648,8 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
       </div>
     </div>
     <div class="row">
-      <div><label>Start time</label><input id="c-start" type="time" oninput="onStartTimeChange()"></div>
-      <div><label>End time</label><input id="c-end" type="time" oninput="updateModifierBanner()"></div>
+      <div><label>Start time</label><input id="c-start" type="text" placeholder="14:30 or 2:30pm" oninput="onStartTimeChange()" onblur="var v=parseTime24(this.value);if(v){this.value=v;onStartTimeChange();}"></div>
+      <div><label>End time</label><input id="c-end" type="text" placeholder="14:30 or 2:30pm" oninput="updateModifierBanner()" onblur="var v=parseTime24(this.value);if(v){this.value=v;updateModifierBanner();}"></div>
     </div>
     <div id="mod-banner"></div>
     <label>Referring MD</label>
@@ -1685,9 +1689,38 @@ function isWeekendOrStat(dateStr) {
   return dow === 0 || dow === 6 || isBCStat(dateStr);
 }
 
+// Accept any reasonable time format → HH:MM (24-hour).
+// Handles: 14:30, 7:40, 740, 1430, 7:40am, 2:30PM, 7am
+function parseTime24(s) {
+  if (!s) return '';
+  s = String(s).trim();
+  if (!s) return '';
+  var ampm = s.match(/\s*([ap])\.?m?\.?$/i);
+  s = s.replace(/\s*[ap]\.?m?\.?$/i, '').trim();
+  var h, m;
+  var c = s.match(/^(\d{1,2})[:\s](\d{2})$/);
+  if (c) { h = parseInt(c[1]); m = parseInt(c[2]); }
+  else if (/^\d{3,4}$/.test(s)) {
+    if (s.length === 3) { h = parseInt(s[0]);      m = parseInt(s.slice(1)); }
+    else                { h = parseInt(s.slice(0,2)); m = parseInt(s.slice(2)); }
+  }
+  else if (/^\d{1,2}$/.test(s)) { h = parseInt(s); m = 0; }
+  else return '';
+  if (isNaN(h) || isNaN(m) || m > 59) return '';
+  if (ampm) {
+    var ap = ampm[1].toLowerCase();
+    if (ap === 'p' && h < 12) h += 12;
+    if (ap === 'a' && h === 12) h = 0;
+  }
+  if (h > 23) return '';
+  return pad(h) + ':' + pad(m);
+}
+
 function t2m(s) {
   if (!s) return -1;
-  var p = String(s).split(':');
+  var n = parseTime24(String(s));
+  var x = n || String(s);
+  var p = x.split(':');
   return parseInt(p[0]) * 60 + parseInt(p[1] || 0);
 }
 
@@ -2703,8 +2736,8 @@ function histEditStripHtml(c) {
     '</div>' +
     '<div class="hist-edit-row">' +
       '<div><label>Fee code</label><input type="text" id="he-fee-'+id+'" value="'+esc(c.fee||'')+'"></div>' +
-      '<div><label>Start time</label><input type="time" id="he-start-'+id+'" value="'+esc(c.startTime||'')+'" style="margin-bottom:4px">' +
-           '<label>End time</label><input type="time" id="he-end-'+id+'" value="'+esc(c.endTime||'')+'"></div>' +
+      '<div><label>Start time</label><input type="text" id="he-start-'+id+'" value="'+esc(c.startTime||'')+'" placeholder="14:30 or 2:30pm" onblur="var v=parseTime24(this.value);if(v)this.value=v;" style="margin-bottom:4px">' +
+           '<label>End time</label><input type="text" id="he-end-'+id+'" value="'+esc(c.endTime||'')+'" placeholder="14:30 or 2:30pm" onblur="var v=parseTime24(this.value);if(v)this.value=v;"></div>' +
     '</div>' +
     '<div class="hist-edit-row">' +
       '<div style="position:relative"><label>ICD-9 diagnosis</label>' +

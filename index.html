@@ -869,7 +869,7 @@ input[type=file] { display:none; }
       <div class="f1"><label>First name</label><input id="f-first" autocorrect="off" autocapitalize="words"></div>
     </div>
     <div class="fl">
-      <div class="f1"><label>DOB (DD/MM/YYYY)</label><input id="f-dob" autocorrect="off" placeholder="DD/MM/YYYY"></div>
+      <div class="f1"><label>DOB (DD/MMM/YYYY)</label><input id="f-dob" autocorrect="off" placeholder="DD/MMM/YYYY"></div>
       <div class="f1"><label>Sex</label>
         <div class="fl" style="gap:6px">
           <button class="ap-list-pill" id="f-sex-m" onclick="apSexPill('M')">M</button>
@@ -2068,11 +2068,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.70-2026-05-22-fix-ocr-key-fetch';
+var BUILD_ID    = 'v3.72-2026-05-22-time-input-24hr-text';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.70';
+var APP_VERSION = 'v3.72';
 var APP_BUILT   = '2026-05-20';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -4199,11 +4199,11 @@ function buildOtherClaimForm(p) {
   h +=   '<div class="f1"><label>Date</label>' +
          '<input type="date" id="oc-date" value="' + todayISO + '" oninput="updateOtherPreview()"></div>';
   h +=   '<div class="f1"><label id="oc-start-lbl">Start time <span style="font-size:10px;color:var(--text3)">(if required)</span></label>' +
-         '<input type="time" id="oc-start" value="' + nowTime + '"></div>';
+         '<input type="text" id="oc-start" value="' + nowTime + '" placeholder="14:30 or 2:30pm" onblur="var v=parseTime24(this.value);if(v)this.value=v;"></div>';
   h += '</div>';
   h += '<div id="oc-end-wrap" style="display:none;margin-bottom:6px">' +
        '<label>End time <span style="color:var(--red-t)">*</span></label>' +
-       '<input type="time" id="oc-end" style="width:100%;padding:10px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px">' +
+       '<input type="text" id="oc-end" placeholder="14:30 or 2:30pm" onblur="var v=parseTime24(this.value);if(v)this.value=v;" style="width:100%;padding:10px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px">' +
        '</div>';
 
   // Location
@@ -5454,9 +5454,9 @@ function openClaimEdit(btn) {
         '<div class="f1"><label>Date</label>' +
           '<input id="ce-date" type="date" value="' + esc(dateISO) + '"></div>' +
         '<div class="f1"><label>Start time</label>' +
-          '<input id="ce-time" type="time" value="' + esc(startTimeClean) + '"></div>' +
+          '<input id="ce-time" type="text" value="' + esc(startTimeClean) + '" placeholder="14:30 or 2:30pm" onblur="var v=parseTime24(this.value);if(v)this.value=v;"></div>' +
         '<div class="f1"><label>End time</label>' +
-          '<input id="ce-end-time" type="time" value="' + esc(fmtStartTime(c.endTime || '')) + '"></div>' +
+          '<input id="ce-end-time" type="text" value="' + esc(fmtStartTime(c.endTime || '')) + '" placeholder="14:30 or 2:30pm" onblur="var v=parseTime24(this.value);if(v)this.value=v;"></div>' +
       '</div>' +
       '<label style="margin-top:7px">Performing physician</label>' +
       '<select id="ce-alias" style="margin-bottom:7px">' + docOptions + '</select>' +
@@ -5591,7 +5591,7 @@ function openPatientEdit(pid) {
   html += '</div>';
   html += '<div class="fl">';
   html += '<div class="f1"><label>PHN</label><input id="pe-phn" value="' + esc(p.phn||'') + '" inputmode="numeric" maxlength="10" autocorrect="off"></div>';
-  html += '<div class="f1"><label>DOB</label><input id="pe-dob" value="' + esc(p.dob||'') + '" autocorrect="off" placeholder="DD/MM/YYYY"></div>';
+  html += '<div class="f1"><label>DOB</label><input id="pe-dob" value="' + esc(p.dob||'') + '" autocorrect="off" placeholder="DD/MMM/YYYY"></div>';
   html += '</div>';
   html += '<div class="fl">';
   html += '<div class="f1"><label>Sex</label>' +
@@ -6083,14 +6083,14 @@ function buildConsultForm(p) {
        '<div class="f1"><label>Date</label>' +
        '<input type="date" id="cb-date" value="' + todayISO + '" oninput="updateConsultUI()"></div>' +
        '<div class="f1"><label>Start time</label>' +
-       '<input type="time" id="cb-start" value="' + nowTime + '" oninput="updateConsultUI()"></div>' +
+       '<input type="text" id="cb-start" value="' + nowTime + '" placeholder="14:30 or 2:30pm" oninput="updateConsultUI()" onblur="var v=parseTime24(this.value);if(v){this.value=v;updateConsultUI();}"></div>' +
        '</div>';
 
   // End time — defaults to start+45, doctor adjusts if shorter
   h += '<div class="fl" style="margin-bottom:9px">' +
        '<div class="f1"><label>End time' +
        '<span style="font-size:10px;color:var(--text3)"> — adjust if &lt; 45 min</span></label>' +
-       '<input type="time" id="cb-end" value="' + endTime + '" oninput="updateConsultUI()"></div>' +
+       '<input type="text" id="cb-end" value="' + endTime + '" placeholder="14:30 or 2:30pm" oninput="updateConsultUI()" onblur="var v=parseTime24(this.value);if(v){this.value=v;updateConsultUI();}"></div>' +
        '</div>';
 
   // Modifier display area
@@ -7092,9 +7092,9 @@ function buildApConsultArea() {
   h += '<div id="f-c-mod" style="margin-top:6px"></div>';
   h += '<div class="fl" style="margin-top:4px">';
   h += '<div class="f1"><label>Date</label><input type="date" id="f-c-date" oninput="updateApConsultUI()"></div>';
-  h += '<div class="f1"><label>Start time</label><input type="time" id="f-c-start" oninput="updateApConsultUI()"></div>';
+  h += '<div class="f1"><label>Start time</label><input type="text" id="f-c-start" placeholder="14:30 or 2:30pm" oninput="updateApConsultUI()" onblur="var v=parseTime24(this.value);if(v){this.value=v;updateApConsultUI();}"></div>';
   h += '</div>';
-  h += '<div class="fl"><div class="f1"><label>End time <span style="font-size:10px;color:var(--text3)">— Defaults to 50min, adjust as needed</span></label><input type="time" id="f-c-end" oninput="updateApConsultUI()"></div></div>';
+  h += '<div class="fl"><div class="f1"><label>End time <span style="font-size:10px;color:var(--text3)">— Defaults to 50min, adjust as needed</span></label><input type="text" id="f-c-end" placeholder="14:30 or 2:30pm" oninput="updateApConsultUI()" onblur="var v=parseTime24(this.value);if(v){this.value=v;updateApConsultUI();}"></div></div>';
   h += '<label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(optional)</span></label>';
   h += '<textarea id="f-c-notes" rows="2" placeholder="Optional" autocorrect="off" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:6px"></textarea>';
   h += '<div style="border-top:.5px solid var(--border);margin:4px 0 10px"></div>';
@@ -8019,7 +8019,7 @@ function handleOCRResult(data, bar) {
   if (p.last)  document.getElementById('f-last').value  = p.last;
   if (p.first) document.getElementById('f-first').value = p.first;
   if (p.phn)   document.getElementById('f-phn').value   = (p.phn + '').replace(/\D/g,'').slice(0,10);
-  if (p.dob)   document.getElementById('f-dob').value   = p.dob;
+  if (p.dob)   document.getElementById('f-dob').value   = dispDate(fmtClaimDate(p.dob));
   if (p.sex)   { apSexPill(p.sex); }
   if (p.ward && WARDS[p.ward]) { document.getElementById('f-ward').value = p.ward; wardChange(); }
   if (p.mrp) {
@@ -9927,9 +9927,38 @@ function pad(n) { return String(n).padStart(2, '0'); }
 function wardLabel(w) { return String((WARDS[w] && WARDS[w].label) || w || ''); }
 
 // time string "HH:MM" → total minutes
+// Accept any reasonable time format → HH:MM (24-hour).
+// Handles: 14:30, 7:40, 740, 1430, 7:40am, 2:30PM, 7am, 7 am
+function parseTime24(s) {
+  if (!s) return '';
+  s = String(s).trim();
+  if (!s) return '';
+  var ampm = s.match(/\s*([ap])\.?m?\.?$/i);
+  s = s.replace(/\s*[ap]\.?m?\.?$/i, '').trim();
+  var h, m;
+  var c = s.match(/^(\d{1,2})[:\s](\d{2})$/);
+  if (c) { h = parseInt(c[1]); m = parseInt(c[2]); }
+  else if (/^\d{3,4}$/.test(s)) {
+    if (s.length === 3) { h = parseInt(s[0]);      m = parseInt(s.slice(1)); }
+    else                { h = parseInt(s.slice(0,2)); m = parseInt(s.slice(2)); }
+  }
+  else if (/^\d{1,2}$/.test(s)) { h = parseInt(s); m = 0; }
+  else return '';
+  if (isNaN(h) || isNaN(m) || m > 59) return '';
+  if (ampm) {
+    var ap = ampm[1].toLowerCase();
+    if (ap === 'p' && h < 12) h += 12;
+    if (ap === 'a' && h === 12) h = 0;
+  }
+  if (h > 23) return '';
+  return pad(h) + ':' + pad(m);
+}
+
 function t2m(t) {
   if (!t) return 0;
-  var p = t.split(':');
+  var n = parseTime24(String(t));
+  var s = n || String(t);
+  var p = s.split(':');
   return parseInt(p[0]) * 60 + parseInt(p[1] || 0);
 }
 
