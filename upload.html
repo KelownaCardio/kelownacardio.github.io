@@ -2832,10 +2832,14 @@ function saveHistEdit(id) {
   var cardDob   = parseDobDisplay(((document.getElementById('f-dob')||{}).value||'').trim());
   var cardSex   = ((document.getElementById('f-sex')  ||{}).value||'').trim();
 
+  // If the claim has no id (can happen for App claims saved with a blank id cell),
+  // generate one so saveRow doesn't reject it. The Apps Script will append a new row.
+  var claimId = c.id || uid();
+  if (!c.id) c.id = claimId;  // keep local object consistent
   var payload = Object.assign({}, c, {
     action: 'saveClaim',
     key: getScriptKey(),
-    id: c.id,
+    id: claimId,
     alias: newAlias,
     phn:   c.phn   || cardPhn,
     last:  c.last  || cardLast,
