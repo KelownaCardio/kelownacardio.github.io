@@ -725,6 +725,13 @@ input[type=file] { display:none; }
 .cv-day.cv-ccu       { background:#f08585; color:#5e1414; }
 .cv-day .cv-num { font-size:12px; line-height:1; }
 .cv-day .cv-tag { font-size:8px; font-weight:700; line-height:1; margin-top:2px; opacity:.85; letter-spacing:.3px; }
+/* Tappable legend pills for batch-entry mode */
+.cv-lg-tap { cursor:pointer; padding:2px 6px; border-radius:4px; border:1.5px solid transparent; transition:.12s; -webkit-tap-highlight-color:transparent; }
+.cv-lg-tap:active { opacity:.65; }
+.cv-lg-tap.cv-mode-on { border-color:currentColor; font-weight:700; background:rgba(0,0,0,.07); }
+.cv-cal-mode-bar { font-size:11px; color:var(--blue-t); background:var(--blue-bg);
+  border-radius:6px; padding:6px 10px; margin-bottom:8px;
+  display:flex; align-items:center; justify-content:space-between; }
 .cv-warn { background:var(--amber-bg); border:1px solid #f5d28a; color:var(--amber-t);
            border-radius:var(--rsm); padding:10px 12px; font-size:12px; margin:10px 0 6px;
            display:flex; gap:10px; align-items:flex-start; }
@@ -2077,11 +2084,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.74-2026-05-23-multi-claim-per-day';
+var BUILD_ID    = 'v3.75-2026-05-23-cal-legend-mode';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.74';
+var APP_VERSION = 'v3.75';
 var APP_BUILT   = '2026-05-23';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -4957,15 +4964,30 @@ function _ptSummaryCalendarHTML(p, claims) {
 
   var html = '';
 
-  // Legend
+  // Legend — tappable pills for batch-entry mode
+  var _calMode = window._cvCalMode || null;
+  function _lgPill(type, color, label) {
+    var on = _calMode === type;
+    return '<div class="cv-lg cv-lg-tap' + (on ? ' cv-mode-on' : '') + '" onclick="cvSetCalMode(\'' + type + '\')">' +
+           '<div class="cv-sw" style="background:' + color + '"></div>' + label + '</div>';
+  }
   html += '<div class="cv-legend">' +
-            '<div class="cv-lg"><div class="cv-sw" style="background:#ffcf73"></div>Consult</div>' +
-            '<div class="cv-lg"><div class="cv-sw" style="background:#f08585"></div>CCU</div>' +
-            '<div class="cv-lg"><div class="cv-sw" style="background:#3fa658"></div>Daily</div>' +
-            '<div class="cv-lg"><div class="cv-sw" style="background:#8eb5fa"></div>Directive</div>' +
-            '<div class="cv-lg"><div class="cv-sw" style="background:#b8e6c4"></div>Combined</div>' +
-            (rule ? '<div class="cv-lg"><div class="cv-sw" style="background:#d4d4d8;border:1px dashed #8a8a92"></div>Gap</div>' : '') +
-          '</div>';
+    _lgPill('consult',  '#ffcf73', 'Consult') +
+    _lgPill('ccu',      '#f08585', 'CCU') +
+    _lgPill('daily',    '#3fa658', 'Daily') +
+    _lgPill('directive','#8eb5fa', 'Directive') +
+    _lgPill('combined', '#b8e6c4', 'Combined') +
+    (rule ? '<div class="cv-lg"><div class="cv-sw" style="background:#d4d4d8;border:1px dashed #8a8a92"></div>Gap</div>' : '') +
+  '</div>';
+
+  // Mode banner
+  if (_calMode) {
+    var _modeLabel = {consult:'Consult',ccu:'CCU',daily:'Daily',directive:'Directive',combined:'Combined'}[_calMode] || _calMode;
+    html += '<div class="cv-cal-mode-bar">' +
+      '<span>+ Tap days to add <strong>' + _modeLabel + '</strong></span>' +
+      '<button onclick="cvSetCalMode(null)" style="background:none;border:none;cursor:pointer;font-size:13px;color:var(--blue-t);padding:0;font-family:inherit;font-weight:700">✕ Done</button>' +
+    '</div>';
+  }
 
   // Month nav
   html += '<div class="cv-nav">' +
@@ -5065,12 +5087,19 @@ function _cvChangeMonth(delta) {
   if (calEl) calEl.innerHTML = _ptSummaryCalendarHTML(p, claims);
 }
 
-// Tap a day — open details or the gap-fill picker
+// Tap a day — batch-entry mode, details, or gap-fill picker
 function tapCalDay(dateStr) {
   var pid = window._cvPid;
   if (!pid) return;
   var p = getP(pid);
   if (!p) return;
+
+  // Batch-entry mode active — add claim of selected type directly
+  if (window._cvCalMode) {
+    _cvTapWithMode(pid, dateStr, window._cvCalMode);
+    return;
+  }
+
   var dayClaims = st.claims.filter(function(c) {
     return samePhn(c.phn, p.phn) && c.date === dateStr;
   });
@@ -5081,6 +5110,44 @@ function tapCalDay(dateStr) {
   }
 }
 
+// ── Batch-entry legend mode ──────────────────────────────────────────────────
+
+// Toggle calendar entry mode (type = 'daily' | 'directive' | 'ccu' | 'combined' | 'consult' | null)
+function cvSetCalMode(type) {
+  window._cvCalMode = (!type || window._cvCalMode === type) ? null : type;
+  _cvRefreshCal();
+}
+
+// Re-render just the calendar div in-place (preserves modal open state)
+function _cvRefreshCal() {
+  var pid = window._cvPid;
+  if (!pid) return;
+  var p = getP(pid);
+  if (!p) return;
+  var claims = st.claims.filter(function(c) {
+    return c.phn && p.phn && samePhn(c.phn, p.phn);
+  }).sort(function(a, b) { return parseDMY(a.date) - parseDMY(b.date); });
+  var calEl = document.getElementById('cv-view-cal');
+  if (calEl) calEl.innerHTML = _ptSummaryCalendarHTML(p, claims);
+}
+
+// Handle a day tap when a legend mode is active
+function _cvTapWithMode(pid, dateStr, mode) {
+  if (mode === 'combined') {
+    // Combined needs ICD+reason form — reuse existing picker flow
+    _cvShowCombinedForm(pid, dateStr);
+    return;
+  }
+  if (mode === 'consult') {
+    // Consult needs time entry — open standard picker pre-selecting consult
+    _cvShowPicker(pid, dateStr);
+    return;
+  }
+  // Daily, Directive, CCU — instant add, then refresh in-place
+  _cvFillClaim(pid, dateStr, mode, '');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Sheet showing all claims on a single day with edit/delete
 function _cvShowDayDetails(pid, dateStr, dayClaims) {
   var rows = dayClaims.map(function(c) {
