@@ -1,35 +1,93 @@
 <!DOCTYPE html>
 <!--
-  KGH Cardiology Billing — main app
-  Version:    v3.59
-  Built:      2026-05-15 UTC
+  KGH Cardiology Billing — SANDBOX / TRAINING MODE
+  Version:    sandbox-v3.75
+  Built:      2026-05-23 UTC
   Repo:       github.com/KelownaCardio/kelownacardio.github.io
 
-  Changes in this build (v3.59) — CCU_DAILY elimination:
-    - CCU_DAILY was a synthetic intermediate fee tag (banded at export-time
-      by ccuConsolidate). It is no longer written to the fee column anywhere.
-      All CCU billing paths now write the correct 1411/1421/1431 band
-      directly at tap time.
-    - Trigger: a phantom CCU_DAILY claim appeared in change history that
-      the user did not deliberately enter. Two write paths were hard-coding
-      CCU_DAILY: (1) calendar gap-fill picker, (2) discharge modal "CCU
-      Daily" button (pre-styled as blue default for CCU/ICU MRP — easy to
-      mistap on iPad). Both now compute the correct band at render time.
-    - New ccuFeeForDate(p, dateStr) — generalised from ccuFeeForToday.
-      Counts consecutive CCU days STRICTLY before the target date (excludes
-      the target itself) and returns day 1 → 1411, days 2–7 → 1421,
-      day 8+ → 1431. ccuFeeForToday kept as a thin wrapper.
-    - Hard guard added at the top of addClaim: if fee or feeCode equals
-      'CCU_DAILY', it is rebanded via ccuFeeForDate(p, date) and a
-      console.warn is logged. Defence in depth — catches any future
-      regression or call site we missed.
-    - Claim edit fee dropdown: 'CCU daily tap' option removed (can no
-      longer be selected as a fee).
-    - ccuConsolidate left intact as a no-op safety net for any legacy
-      CCU_DAILY rows already in the Sheet — will be removed once a
-      future migration re-bands those rows in place.
-    - Bonus: upload.html v1.16 corrects MOST fee code 03701 → 78720
-      (was wrong since v1.8). PWA was always correct on 78720.
+  Changes in this build (v3.75) — OCR PHN/HCN vs INS disambiguation + red validation:
+    - STICKER_PROMPT updated: now extracts hcn, ins, and insProvince as separate
+      fields. Explicit instructions prevent the model from confusing the INS
+      (out-of-province health card, e.g. 9-digit Alberta number + "AB") with the
+      HCN (BC PHN, 10 digits starting with 9).
+    - handleOCRResult: PHN disambiguation logic picks the best PHN —
+        · Prefers HCN when it is 10 digits and starts with 9.
+        · Falls back to INS only if INS itself is a valid BC PHN.
+        · If INS is out-of-province (has a non-BC province code), appends
+          "AB healthcare: 890637910" (or whichever province) to the notes
+          field so the information is preserved but not used as the PHN.
+    - PHN field real-time validation: #f-phn turns red (var(--red) border +
+      glow) whenever 1–9 digits are entered, clearing when 10 digits are
+      present or the field is empty. The phn-short CSS class drives this and
+      the oninput listener is wired in init().
+
+  Changes in this build (v3.66) — Meditech import MRP transition detection:
+    - Detect when a matched existing patient's MRP has changed between the
+      stored record and the imported Meditech list:
+        · left-cardiology  → patient was Cardiology MRP, attending is no
+                              longer a cardiologist (e.g. moved to CSICU
+                              for surgery, became Hospitalist primary).
+                              Row is auto-UNCHECKED — doctor must
+                              explicitly confirm before billing changes.
+        · joined-cardiology → patient was not on our service, attending
+                              now a cardiologist. Row is auto-checked.
+    - Transition rows render at the top of the import modal with a red /
+      amber tinted background and a chip showing "oldMRP → newMRP".
+    - On confirm, transition rows mutate the existing patient: writes new
+      mrp + flips list/role/care to match the new service designation
+      (off/consultant/directive for left-cardiology; on/mrp/daily-or-ccu
+      for joined-cardiology). Ward/bed also updated. Logged via
+      logChange("MRP transition via Meditech import", oldVals → newVals).
+    - Only fires when there is exactly 1 local name match — multi-match
+      duplicates continue to flow through the existing demographic-conflict
+      banner so a single row never triggers both warnings at once.
+
+  Changes in this build (v3.65) — Meditech import discharge note:
+    - Discharge reason for missing patients changed from
+      "Not on Meditech list" to "No longer on Meditech Import List".
+    - `dischargeNote` field added to patient record before savePatient
+      push so the reason persists to the Patients tab in Sheets
+      (non-billing note only).
+
+  Changes in this build (v3.61) — Add Patient claim card cleanup:
+    - Removed redundant "Lmtd Consult" tab from Add Patient claim card.
+      Full / Limited consult selection is handled by the 33010/33012
+      buttons already present inside the consult area.
+    - Added live modifier banner (night / evening / weekend / daytime)
+      below the MOST pill in the Add Patient consult area, mirroring
+      the behaviour of the standalone consult screen. Updates on date
+      and start time changes. Shows increment tier if consult > 45 min.
+    - End time hint text changed to "Defaults to 50min, adjust as needed".
+    - Start time change now auto-updates end time to start + 50 min
+      (same as standalone consult screen).
+    - Removed all _apClaimType === 'lmtd' branches; lmtd is now
+      handled entirely by the 33012 toggle inside the consult area.
+    - REVERTS v3.59. CCU_DAILY is now the canonical placeholder fee for
+      every CCU day. The Apps Script ccuConsolidateForExport() rolls
+      groups of CCU_DAILY taps into properly-banded 1411/1421/1431 rows
+      with units at export time. This eliminates the band-at-rest
+      correctness problem and matches the BC MSP standard form
+      (one row per band with units, not one row per day).
+    - All CCU write paths reverted: batchRound (ward sweep),
+      quickCCUBtn, claim-screen CCU button, calendar gap-fill picker,
+      discharge modal CCU Daily buttons (both branches). They all
+      write 'CCU_DAILY' and addClaim no longer intercepts it.
+    - CCU_DAILY restored in the claim edit fee dropdown as
+      "CCU day (placeholder, export bands)".
+    - The ccuFeeForDate(p, dateStr) and ccuFeeForToday(p) helpers
+      remain in the file but are no longer called from billing paths.
+      Kept in case future work needs them (e.g. showing the projected
+      band on a confirmation screen before submit). Effectively dead
+      code for now.
+    - User-facing label simplified: quickCCUBtn shows "CCU day" toast
+      instead of the per-band label ("CCU day 1 (1411)" etc), since
+      the per-day band is meaningless until export.
+
+  Changes in this build (v3.59) — CCU_DAILY elimination [REVERTED in v3.60]:
+    - Briefly switched to band-on-write (compute 1411/1421/1431 at tap
+      time). Created band-at-rest correctness issues after manual
+      edits and mid-episode backfills. Reverted by user request in
+      favour of the placeholder + export-consolidation approach.
 
   Changes in this build (v3.58) — Patient card style improvements:
     - DOB removed from patient card meta line (age+sex already shown).
@@ -103,7 +161,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>KGH Cardiology Billing — Sandbox</title>
+<title>KGH Cardiology Billing</title>
 
 <!-- PWA -->
 <link rel="manifest" href="manifest.json">
@@ -223,6 +281,8 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 .bed-num  { font-size:10px; color:var(--text3); margin-bottom:4px; display:flex; align-items:center; justify-content:space-between; }
 .bed-name { font-size:12px; font-weight:700; line-height:1.3; }
 .bed-first{ font-size:10px; font-weight:400; color:var(--text2); }
+/* v3.75 — PHN field flags red when fewer than 10 digits are entered */
+#f-phn.phn-short { border-color:var(--red) !important; box-shadow:0 0 0 2px rgba(196,40,40,.15) !important; }
 .bed-phn  { font-size:10px; color:var(--text3); margin-top:2px; }
 .bed-btns { display:flex; gap:4px; margin-top:6px; flex-wrap:wrap; }
 
@@ -798,16 +858,6 @@ input[type=file] { display:none; }
 <!-- Tips floating button -->
 <button id="tips-btn" onclick="openTips()">💡 Tips</button>
 
-<!-- Tips backdrop + drawer -->
-<div id="tips-drawer-backdrop" onclick="closeTips()"></div>
-<div id="tips-drawer">
-  <div class="tips-drawer-head">
-    <h3 id="tips-drawer-title">💡 Training Tips</h3>
-    <button class="tips-close-btn" onclick="closeTips()">✕</button>
-  </div>
-  <div id="tips-drawer-body"></div>
-</div>
-
 <div class="hdr">
   <div class="hdr-l">
     <div class="logo">
@@ -894,6 +944,7 @@ input[type=file] { display:none; }
 
 <!-- ═══ ADD PATIENT PANE ═══ -->
 <div class="pane" id="p1">
+
   <div id="sandbox-reset-notice">
     ℹ️ <span>Sandbox only — patients added here disappear on refresh. OCR camera works for real.</span>
   </div>
@@ -920,7 +971,7 @@ input[type=file] { display:none; }
       <div class="f1"><label>First name</label><input id="f-first" autocorrect="off" autocapitalize="words"></div>
     </div>
     <div class="fl">
-      <div class="f1"><label>DOB (DD/MM/YYYY)</label><input id="f-dob" autocorrect="off" placeholder="DD/MM/YYYY"></div>
+      <div class="f1"><label>DOB (DD/MMM/YYYY)</label><input id="f-dob" autocorrect="off" placeholder="DD/MMM/YYYY"></div>
       <div class="f1"><label>Sex</label>
         <div class="fl" style="gap:6px">
           <button class="ap-list-pill" id="f-sex-m" onclick="apSexPill('M')">M</button>
@@ -936,7 +987,6 @@ input[type=file] { display:none; }
     <div class="card-title">Claim</div>
     <div class="fl" style="margin-bottom:10px">
       <button class="ct-btn ct-on-consult" id="ap-ct-consult" style="flex:1" onclick="apSelectClaimType('consult')">Consult</button>
-      <button class="ct-btn" id="ap-ct-lmtd" style="flex:1" onclick="apSelectClaimType('lmtd')">Lmtd Consult</button>
       <button class="ct-btn" id="ap-ct-other" style="flex:1" onclick="apSelectClaimType('other')">Other Claim</button>
     </div>
     <div id="ap-claim-area"></div>
@@ -2121,12 +2171,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'sandbox-v3.59';
+var BUILD_ID    = 'sandbox-v3.75-2026-05-23';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
 var APP_VERSION = 'SANDBOX';
-var APP_BUILT   = '2026-05-15';
+var APP_BUILT   = '2026-05-23';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -2193,7 +2243,6 @@ async function loadLocal() {
         if (!c.icd       && pat.icd)       c.icd       = pat.icd;
       }
       if (!c.icd)       c.icd       = '3062';
-      if (!c.startTime) c.startTime = '08:00';
       if (c.endTime) c.endTime = fmtStartTime(c.endTime);
     });
   }
@@ -2491,7 +2540,6 @@ async function syncFromSheets() {
           if (!c.icd       && pat.icd)       { c.icd       = pat.icd;       changed = true; }
         }
         if (!c.icd)       { c.icd = '3062'; changed = true; }
-        if (!c.startTime) { c.startTime = '08:00'; changed = true; }
         if (c.endTime) c.endTime = fmtStartTime(c.endTime);
         if (c.dob) {
           var cleanDob = fmtClaimDate(c.dob);
@@ -3100,17 +3148,12 @@ function ccuFeeForToday(p) { return ccuFeeForDate(p, TODAY); }
 
 // ── Add Claim Helper ───────────────────────────────────
 function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, performingAlias) {
-  // v3.59: CCU_DAILY is not a real fee code. Recompute to the correct
-  // 1411/1421/1431 band based on consecutive episode days ending at `date`.
-  // Defence in depth — all call sites should already pass a banded fee,
-  // but this catches any legacy paths or future regressions.
-  if (fee === 'CCU_DAILY' || feeCode === 'CCU_DAILY') {
-    var banded = ccuFeeForDate(p, date);
-    console.warn('[addClaim] CCU_DAILY intercepted -> rebanded to ' + banded +
-                 ' for ' + (p.last || p.phn) + ' on ' + date);
-    fee     = banded;
-    feeCode = banded;
-  }
+  // v3.60: CCU_DAILY is the canonical placeholder for CCU days. The
+  // Apps Script ccuConsolidateForExport() groups them by patient+alias,
+  // segments into consecutive episodes, and emits properly-banded
+  // 1411/1421/1431 rows with units at export time. So we DELIBERATELY
+  // do not re-band CCU_DAILY at write time anymore — the per-day band
+  // is meaningless until consolidation runs. Reverts the v3.59 guard.
   // Guard: never write an MRP service string into refby/refbyName
   if (looksLikeMRPService(p.refbyName)) {
     p.refbyName = '';
@@ -3124,9 +3167,8 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, 
     if (!p.refbyName && inherited.refbyName) { p.refbyName = inherited.refbyName; _patUpdated = true; }
     if (!p.icd       && inherited.icd)       { p.icd       = inherited.icd;       _patUpdated = true; }
   }
-  // Always stamp a start time — use provided value or current clock
-  var _now = new Date();
-  var _start = startTime || (pad(_now.getHours()) + ':' + pad(_now.getMinutes()));
+  // Start time only for consults (33010/33012) and emergency care (33035)
+  var _start = startTime || '';
   var c = {
     id:        'c' + Date.now() + Math.floor(Math.random() * 9999),
     alias:     performingAlias || st.doc.alias,
@@ -3454,7 +3496,7 @@ function wardHtml(ward) {
                    '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
                  '</button>' +
                '</div>' +
-               '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + (p.icd ? ' &bull; Dx: ' + esc(icdDescOnly(p.icd)) : '') + '</div>' +
+               '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + '</div>' +
                '<div class="wp-acts">' +
                  wardActBtns(p) +
                  '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
@@ -3634,7 +3676,7 @@ function offRow(p) {
   var lastSeen = lastSeenByGroup(p);
   // Row 3: Age (Sex) · MRP · Dx
   var ageSex   = ageGenderShort(p);
-  var row3     = esc(ageSex) + ' &bull; ' + mrpLabel(p) + (p.icd ? ' &bull; Dx: ' + esc(icdDescOnly(p.icd)) : '') + lastBilledChip(p);
+  var row3     = esc(ageSex) + ' &bull; ' + mrpLabel(p) + lastBilledChip(p);
   return '<div class="alpha-row' + (dn ? ' done' : '') + '">' +
     '<div class="alpha-av av-off" style="font-size:9px;font-weight:800;letter-spacing:-.3px" data-pid="' + p.id + '" onclick="openLocationEditEl(this)" title="Tap to move patient">' + esc(wardAbbr) + '</div>' +
     '<div class="wp-main">' +
@@ -3703,7 +3745,7 @@ function alphaRow(p) {
           '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
         '</button>' +
       '</div>' +
-      '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + (p.icd ? ' &bull; Dx: ' + esc(icdDescOnly(p.icd)) : '') + lastBilledChip(p) + '</div>' +
+      '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + lastBilledChip(p) + '</div>' +
       '<div class="wp-acts">' + quickActBtns(p) +
         '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
       '</div>' +
@@ -3784,7 +3826,9 @@ function batchRound(ward) {
   });
   if (!pts.length) { showToast('All ' + wardLabel(ward) + ' patients already rounded'); return; }
   pts.forEach(function(p) {
-    var fee = ward === 'CCU' ? ccuFeeForToday(p) : '33008';
+    // v3.60: CCU_DAILY placeholder for CCU ward. Export-time consolidation
+    // assigns the correct 1411/1421/1431 band based on episode position.
+    var fee = ward === 'CCU' ? 'CCU_DAILY' : '33008';
     addClaim(p, fee, fee, 1, TODAY, 'I');
   });
   sv('patients', st.patients);
@@ -4039,14 +4083,16 @@ function quickCCUBtn(btn) {
     return;
   }
   var p   = getP(pid);
-  var fee = ccuFeeForToday(p);
-  var feeLabels = { '1411':'CCU day 1 (1411)', '1421':'CCU days 2–7 (1421)', '1431':'CCU days 8+ (1431)' };
-  bbDone(btn, feeLabels[fee] || fee);
+  // v3.60: write CCU_DAILY placeholder; export consolidates to 1411/1421/1431
+  // based on consecutive episode position. The user-facing label stays
+  // friendly ("CCU day") since the per-day band isn't meaningful until export.
+  var fee = 'CCU_DAILY';
+  bbDone(btn, 'CCU day');
   addClaim(p, fee, fee, 1, TODAY, 'I');
-  p.lastBilled   = feeLabels[fee] || fee;
+  p.lastBilled   = 'CCU day';
   sv('patients', st.patients);
   sv('claims', st.claims);
-  showToast('✓ ' + (feeLabels[fee] || fee) + ' — ' + p.last);
+  showToast('✓ CCU day — ' + p.last);
   requestAnimationFrame(render);
 }
 
@@ -4085,7 +4131,6 @@ function _openClaimScreen(pid) {
           wardLabel(p.ward) + (p.bed ? ' Rm ' + p.bed : '') +
           ' &bull; ' + mrpLabel(p) +
           (!p.phn ? ' &bull; <span style="color:var(--amber-t);font-weight:700">⚠ no PHN</span>' : '') +
-         ' &bull; ' + icdShortLabel(p.icd) +
         '</div>' +
       '</div>' +
       '<button class="ctx-edit-btn" data-pid="' + p.id + '" onclick="ctxEditBtn(this)" title="Edit patient">' +
@@ -4257,11 +4302,11 @@ function buildOtherClaimForm(p) {
   h +=   '<div class="f1"><label>Date</label>' +
          '<input type="date" id="oc-date" value="' + todayISO + '" oninput="updateOtherPreview()"></div>';
   h +=   '<div class="f1"><label id="oc-start-lbl">Start time <span style="font-size:10px;color:var(--text3)">(if required)</span></label>' +
-         '<input type="time" id="oc-start" value="' + nowTime + '"></div>';
+         '<input type="text" id="oc-start" value="' + nowTime + '" placeholder="14:30 or 2:30pm" onblur="var v=parseTime24(this.value);if(v)this.value=v;"></div>';
   h += '</div>';
   h += '<div id="oc-end-wrap" style="display:none;margin-bottom:6px">' +
        '<label>End time <span style="color:var(--red-t)">*</span></label>' +
-       '<input type="time" id="oc-end" style="width:100%;padding:10px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px">' +
+       '<input type="text" id="oc-end" placeholder="14:30 or 2:30pm" onblur="var v=parseTime24(this.value);if(v)this.value=v;" style="width:100%;padding:10px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px">' +
        '</div>';
 
   // Location
@@ -4717,7 +4762,6 @@ function openPatientSummary(pid) {
     html += '<div style="font-size:11px;color:var(--blue-t);opacity:.8;margin-top:7px">Referred by ' + esc(p.refbyName || p.refby) + (p.refby ? ' #' + p.refby : '') + '</div>';
   }
   if (p.icd) {
-    html += '<div style="font-size:11px;color:var(--blue-t);opacity:.8;margin-top:2px">Dx: ' + esc(icdShortLabel(p.icd)) + '</div>';
   }
   html += '</div>'; // end demographics card
 
@@ -4731,17 +4775,10 @@ function openPatientSummary(pid) {
             '</div>';
   html += '</div>';
 
-  // View toggle — defaults to Calendar
-  html += '<div class="cv-tog">' +
-            '<button id="cv-tog-list" onclick="togglePtSummaryView(\'list\')">List</button>' +
-            '<button id="cv-tog-cal" class="on" onclick="togglePtSummaryView(\'cal\')">Calendar</button>' +
-          '</div>';
+  // Calendar (90% width, centred) + list below — no toggle
+  html += '<div id="cv-view-cal" style="width:90%;margin:0 auto 0">' + _ptSummaryCalendarHTML(p, claims) + '</div>';
 
-  // List view (hidden by default)
-  html += '<div id="cv-view-list" style="display:none">' + _ptSummaryListHTML(p, claims) + '</div>';
-
-  // Calendar view (shown by default)
-  html += '<div id="cv-view-cal">' + _ptSummaryCalendarHTML(p, claims) + '</div>';
+  html += '<div id="cv-view-list" style="margin-top:14px">' + _ptSummaryListHTML(p, claims) + '</div>';
 
   // Close button
   html += '<button class="btn btn-s" style="margin-top:12px;margin-bottom:0" onclick="hideModal(\'pt-summary-modal\')">Close</button>';
@@ -5167,7 +5204,7 @@ function _cvDeleteFromSheet(btn) {
 }
 
 // Gap-fill picker — 4 options, rule-recommended type highlighted
-function _cvShowPicker(pid, dateStr) {
+function _cvShowPicker(pid, dateStr, preselectedAlias) {
   var p = getP(pid);
   if (!p) return;
   var rec = _cvGapRuleForPatient(p);   // 'ccu' | 'daily' | null
@@ -5195,9 +5232,23 @@ function _cvShowPicker(pid, dateStr) {
     ? p.last + ' was ' + (rec === 'ccu' ? 'in CCU' : 'MRP') + ' this day — pick a type to backfill.'
     : 'No claim on file. Pick a visit type to add for this date.';
 
+  // Build performing doctor dropdown (unique id cv-performing-doc to avoid conflict with claim builder)
+  var curAlias = preselectedAlias || (st.doc ? st.doc.alias : '');
+  var docOpts = (st.doctors || []).map(function(d) {
+    return '<option value="' + esc(d.alias) + '"' + (d.alias === curAlias ? ' selected' : '') + '>' +
+           esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
+  }).join('');
+  var docRow = docOpts
+    ? '<div style="margin-bottom:10px">' +
+        '<label style="display:block;font-size:11px;font-weight:600;color:var(--text2);margin-bottom:4px">Performing doctor</label>' +
+        '<select id="cv-performing-doc" style="width:100%;padding:8px 10px;border:.5px solid var(--border2);border-radius:8px;font-size:13px;font-family:inherit;background:var(--surface2)">' +
+        docOpts + '</select></div>'
+    : '';
+
   var html =
     '<div style="font-size:14px;font-weight:700;color:' + headerColor + ';margin-bottom:2px">' + headerIcon + dispDate(dateStr) + '</div>' +
-    '<div style="font-size:11px;color:var(--text2);margin-bottom:6px">' + hint + '</div>' +
+    '<div style="font-size:11px;color:var(--text2);margin-bottom:10px">' + hint + '</div>' +
+    docRow +
     '<div class="cv-pick-grid">' + btns + '</div>' +
     '<div style="display:flex;gap:8px;margin-top:6px">' +
       '<button class="btn btn-s" style="flex:1;margin-bottom:0" onclick="hideModal(\'cv-picker-modal\')">Cancel</button>' +
@@ -5210,15 +5261,18 @@ function _cvPickType(btn) {
   var pid     = btn.getAttribute('data-pid');
   var dateStr = btn.getAttribute('data-date');
   var type    = btn.getAttribute('data-type');
-  if (type === 'combined') return _cvShowCombinedForm(pid, dateStr);
-  _cvFillClaim(pid, dateStr, type, '');
+  var sel = document.getElementById('cv-performing-doc');
+  var alias = (sel && sel.value) ? sel.value : (st.doc ? st.doc.alias : '');
+  if (type === 'combined') return _cvShowCombinedForm(pid, dateStr, alias);
+  _cvFillClaim(pid, dateStr, type, '', null, alias);
 }
 
 // Combined daily sub-form — ICD + reason
-function _cvShowCombinedForm(pid, dateStr) {
+function _cvShowCombinedForm(pid, dateStr, alias) {
   var p = getP(pid);
   if (!p) return;
   var defaultIcd = String(p.icd || '').trim();
+  var safeAlias = alias || (st.doc ? st.doc.alias : '');
   var html =
     '<div style="font-size:14px;font-weight:700;color:var(--teal-t);margin-bottom:2px">Combined daily — ' + dispDate(dateStr) + '</div>' +
     '<div style="font-size:11px;color:var(--text2);margin-bottom:12px">Combined daily requires documentation. Both fields attach to the claim note.</div>' +
@@ -5232,8 +5286,8 @@ function _cvShowCombinedForm(pid, dateStr) {
     'style="width:100%;padding:11px;border:.5px solid var(--border2);border-radius:8px;font-size:14px;font-family:inherit;background:var(--surface2);resize:vertical"></textarea>' +
 
     '<div style="display:flex;gap:8px;margin-top:14px">' +
-      '<button class="btn btn-s" style="flex:1;margin-bottom:0" data-pid="' + pid + '" data-date="' + dateStr + '" onclick="_cvBackFromCombined(this)">‹ Back</button>' +
-      '<button class="btn btn-p" style="flex:1;margin-bottom:0" data-pid="' + pid + '" data-date="' + dateStr + '" onclick="_cvConfirmCombined(this)">Add combined daily</button>' +
+      '<button class="btn btn-s" style="flex:1;margin-bottom:0" data-pid="' + pid + '" data-date="' + dateStr + '" data-alias="' + esc(safeAlias) + '" onclick="_cvBackFromCombined(this)">‹ Back</button>' +
+      '<button class="btn btn-p" style="flex:1;margin-bottom:0" data-pid="' + pid + '" data-date="' + dateStr + '" data-alias="' + esc(safeAlias) + '" onclick="_cvConfirmCombined(this)">Add combined daily</button>' +
     '</div>';
   document.getElementById('cv-picker-content').innerHTML = html;
   showModal('cv-picker-modal');
@@ -5244,12 +5298,14 @@ function _cvShowCombinedForm(pid, dateStr) {
 }
 
 function _cvBackFromCombined(btn) {
-  _cvShowPicker(btn.getAttribute('data-pid'), btn.getAttribute('data-date'));
+  var alias = btn.getAttribute('data-alias') || (st.doc ? st.doc.alias : '');
+  _cvShowPicker(btn.getAttribute('data-pid'), btn.getAttribute('data-date'), alias);
 }
 
 function _cvConfirmCombined(btn) {
   var pid     = btn.getAttribute('data-pid');
   var dateStr = btn.getAttribute('data-date');
+  var alias   = btn.getAttribute('data-alias') || (st.doc ? st.doc.alias : '');
   var icdEl    = document.getElementById('cv-cb-icd');
   var reasonEl = document.getElementById('cv-cb-reason');
   var icd    = (icdEl    ? icdEl.value    : '').trim();
@@ -5257,11 +5313,11 @@ function _cvConfirmCombined(btn) {
   if (!icd)    { if (icdEl)    icdEl.style.borderColor    = 'var(--red)'; return; }
   if (!reason) { if (reasonEl) reasonEl.style.borderColor = 'var(--red)'; return; }
   var note = icd + ' — ' + reason;
-  _cvFillClaim(pid, dateStr, 'combined', note, icd);
+  _cvFillClaim(pid, dateStr, 'combined', note, icd, alias);
 }
 
 // Create the gap-fill claim and refresh the calendar
-function _cvFillClaim(pid, dateStr, type, note, icdOverride) {
+function _cvFillClaim(pid, dateStr, type, note, icdOverride, alias) {
   var p = getP(pid);
   if (!p) return;
   if (!checkDoc()) return;
@@ -5269,17 +5325,16 @@ function _cvFillClaim(pid, dateStr, type, note, icdOverride) {
   var origIcd = p.icd;
   if (icdOverride) p.icd = icdOverride;
 
-  var alias = st.doc.alias;
+  var performingAlias = alias || st.doc.alias;
   if (type === 'ccu') {
-    // v3.59: compute correct band for backfilled date instead of writing CCU_DAILY.
-    var ccuFee = ccuFeeForDate(p, dateStr);
-    addClaim(p, ccuFee, ccuFee, 1, dateStr, 'I', null, note || null, null, alias);
+    // v3.60: write CCU_DAILY placeholder; export consolidates to 1411/1421/1431.
+    addClaim(p, 'CCU_DAILY', 'CCU_DAILY', 1, dateStr, 'I', null, note || null, null, performingAlias);
   } else if (type === 'daily') {
-    addClaim(p, '33008', '33008', 1, dateStr, 'I', null, note || null, null, alias);
+    addClaim(p, '33008', '33008', 1, dateStr, 'I', null, note || null, null, performingAlias);
   } else if (type === 'directive') {
-    addClaim(p, '33006', '33006', 1, dateStr, 'I', null, note || null, null, alias);
+    addClaim(p, '33006', '33006', 1, dateStr, 'I', null, note || null, null, performingAlias);
   } else if (type === 'combined') {
-    addClaim(p, '33008', '33008', 1, dateStr, 'I', null, note, null, alias);
+    addClaim(p, '33008', '33008', 1, dateStr, 'I', null, note, null, performingAlias);
   }
   // Restore original ICD (the claim copy already captured it)
   if (icdOverride) p.icd = origIcd;
@@ -5481,7 +5536,8 @@ function openClaimEdit(btn) {
     { code:'33012', label:'Limited consultation (33012)' },
     { code:'33008', label:'Daily rounds / MRP (33008)' },
     { code:'33006', label:'Directive visit (33006)' },
-    // v3.59: CCU_DAILY removed — not a real fee code, was synthetic pre-rollup
+    // v3.60: CCU daily placeholder restored — export consolidates to 1411/1421/1431.
+    { code:'CCU_DAILY', label:'CCU day (placeholder, export bands)' },
     { code:'1411',  label:'CCU day 1 (1411)' },
     { code:'1421',  label:'CCU days 2–7 (1421)' },
     { code:'1431',  label:'CCU days 8–30 (1431)' },
@@ -5520,9 +5576,9 @@ function openClaimEdit(btn) {
         '<div class="f1"><label>Date</label>' +
           '<input id="ce-date" type="date" value="' + esc(dateISO) + '"></div>' +
         '<div class="f1"><label>Start time</label>' +
-          '<input id="ce-time" type="time" value="' + esc(startTimeClean) + '"></div>' +
+          '<input id="ce-time" type="text" value="' + esc(startTimeClean) + '" placeholder="14:30 or 2:30pm" onblur="var v=parseTime24(this.value);if(v)this.value=v;"></div>' +
         '<div class="f1"><label>End time</label>' +
-          '<input id="ce-end-time" type="time" value="' + esc(fmtStartTime(c.endTime || '')) + '"></div>' +
+          '<input id="ce-end-time" type="text" value="' + esc(fmtStartTime(c.endTime || '')) + '" placeholder="14:30 or 2:30pm" onblur="var v=parseTime24(this.value);if(v)this.value=v;"></div>' +
       '</div>' +
       '<label style="margin-top:7px">Performing physician</label>' +
       '<select id="ce-alias" style="margin-bottom:7px">' + docOptions + '</select>' +
@@ -5657,7 +5713,7 @@ function openPatientEdit(pid) {
   html += '</div>';
   html += '<div class="fl">';
   html += '<div class="f1"><label>PHN</label><input id="pe-phn" value="' + esc(p.phn||'') + '" inputmode="numeric" maxlength="10" autocorrect="off"></div>';
-  html += '<div class="f1"><label>DOB</label><input id="pe-dob" value="' + esc(p.dob||'') + '" autocorrect="off" placeholder="DD/MM/YYYY"></div>';
+  html += '<div class="f1"><label>DOB</label><input id="pe-dob" value="' + esc(p.dob||'') + '" autocorrect="off" placeholder="DD/MMM/YYYY"></div>';
   html += '</div>';
   html += '<div class="fl">';
   html += '<div class="f1"><label>Sex</label>' +
@@ -6149,14 +6205,14 @@ function buildConsultForm(p) {
        '<div class="f1"><label>Date</label>' +
        '<input type="date" id="cb-date" value="' + todayISO + '" oninput="updateConsultUI()"></div>' +
        '<div class="f1"><label>Start time</label>' +
-       '<input type="time" id="cb-start" value="' + nowTime + '" oninput="updateConsultUI()"></div>' +
+       '<input type="text" id="cb-start" value="' + nowTime + '" placeholder="14:30 or 2:30pm" oninput="updateConsultUI()" onblur="var v=parseTime24(this.value);if(v){this.value=v;updateConsultUI();}"></div>' +
        '</div>';
 
   // End time — defaults to start+45, doctor adjusts if shorter
   h += '<div class="fl" style="margin-bottom:9px">' +
        '<div class="f1"><label>End time' +
        '<span style="font-size:10px;color:var(--text3)"> — adjust if &lt; 45 min</span></label>' +
-       '<input type="time" id="cb-end" value="' + endTime + '" oninput="updateConsultUI()"></div>' +
+       '<input type="text" id="cb-end" value="' + endTime + '" placeholder="14:30 or 2:30pm" oninput="updateConsultUI()" onblur="var v=parseTime24(this.value);if(v){this.value=v;updateConsultUI();}"></div>' +
        '</div>';
 
   // Modifier display area
@@ -6319,13 +6375,14 @@ function submitConsult() {
   var modInc   = hasInc ? getModifierForIncrement(start, dateISO) : null;
 
   if (modBase) {
-    // Base modifier — CCFPP note here too
-    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start, fullNote, end, alias);
+    // Base modifier — first 30 min from consult start
+    var modBaseEnd = minsToTime((t2m(start) + 30) % (24 * 60));
+    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start, fullNote, modBaseEnd, alias);
 
     if (modInc) {
-      // Increment modifier — CCFPP note on all parts
+      // Increment modifier — start+30 to consult end
       var incStart = minsToTime((t2m(start) + 30) % (24 * 60));
-      addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, fullNote, null, alias);
+      addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, fullNote, end, alias);
     }
   }
   sv('patients', st.patients);
@@ -6560,8 +6617,8 @@ function submitCCU(isDuplicate) {
   updatePatientFromClaimForm(p);
   if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
   var alias = getPerformingAlias();
-  var fee = ccuFeeForToday(p);
-  addClaim(p, fee, fee, 1, TODAY, 'I', null, null, null, alias);
+  // v3.60: write CCU_DAILY placeholder; export consolidates.
+  addClaim(p, 'CCU_DAILY', 'CCU_DAILY', 1, TODAY, 'I', null, null, null, alias);
   sv('patients', st.patients); sv('claims', st.claims);
   showToast('CCU daily recorded' + (isDuplicate ? ' (duplicate)' : '') + ' — ' + p.last);
   closeClaimScreen();
@@ -6662,52 +6719,44 @@ function mergePatient(action) {
 // Soft duplicate check — fires when last name + DOB match an existing
 // patient but PHN differs (suggests a PHN typo). Does NOT block: gives
 // the doctor the choice to fix the PHN or proceed as a new patient.
-function openPossibleDuplicateModal(existing, withClaim) {
-  var newPhn  = gv('f-phn');
-  var typedLs = String((existing.last||'') + ', ' + (existing.first||'')).trim();
-  var dobStr  = existing.dob ? dispDate(existing.dob) : '—';
-  var status  = existing.discharged
+// ── Hard duplicate block modal ────────────────────────────────────
+// Shown when 2-of-3 (PHN / last name / DOB) match an existing patient.
+// No bypass — user must dismiss and correct the form.
+function openDuplicateBlockModal(existing, matchedFields) {
+  var nameStr    = esc((existing.last || '') + ', ' + (existing.first || ''));
+  var dobStr     = existing.dob ? dispDate(existing.dob) : '—';
+  var phnStr     = existing.phn || '—';
+  var wardStr    = existing.ward ? (existing.ward + (existing.bed ? ' Rm ' + existing.bed : '')) : '';
+  var claimCount = st.claims.filter(function(c) { return samePhn(c.phn, existing.phn); }).length;
+  var status     = existing.discharged
     ? '<span style="background:var(--amber-bg);color:var(--amber-t);padding:2px 8px;border-radius:var(--rpill);font-size:10px;font-weight:700">Previously discharged</span>'
     : '<span style="background:var(--red-bg);color:var(--red-t);padding:2px 8px;border-radius:var(--rpill);font-size:10px;font-weight:700">Currently on list</span>';
-  var claimCount = st.claims.filter(function(c) { return samePhn(c.phn, existing.phn); }).length;
 
   var h = status +
-    '<div style="margin:10px 0 4px;font-size:13px;font-weight:700">' + esc(typedLs) + '</div>' +
-    '<div style="font-size:11px;color:var(--text2)">DOB: ' + esc(dobStr) + ' &bull; ' + claimCount + ' claim(s)</div>' +
-    '<div style="margin-top:8px;font-size:12px;line-height:1.45">' +
-      'A patient with the <b>same last name and DOB</b> already exists with PHN ' +
-      '<b>' + esc(existing.phn || '—') + '</b>.<br>' +
-      'You entered PHN <b>' + esc(newPhn) + '</b>.' +
+    '<div style="margin:10px 0 4px;font-size:15px;font-weight:700">' + nameStr + '</div>' +
+    '<div style="font-size:12px;color:var(--text2);line-height:1.6">' +
+      'PHN: <b>' + esc(phnStr) + '</b><br>' +
+      'DOB: <b>' + esc(dobStr) + '</b>' +
+      (wardStr ? '<br>Location: <b>' + esc(wardStr) + '</b>' : '') +
+      '<br>Claims: <b>' + claimCount + '</b>' +
     '</div>' +
-    '<div style="color:var(--amber-t);font-weight:700;font-size:12px;margin-top:8px">' +
-      '⚠ Likely PHN typo — re-check before adding as a new patient' +
+    '<div style="margin-top:10px;padding:10px;background:var(--red-bg);border-radius:8px;font-size:12px;line-height:1.5">' +
+      '<b>Duplicate detected</b> — ' + esc(matchedFields.join(' + ')) + ' match' +
+      (matchedFields.length > 1 ? 'es' : '') + ' an existing patient.<br>' +
+      'This patient cannot be added again.' +
     '</div>' +
-    '<div style="margin-top:14px;display:flex;flex-direction:column;gap:8px">' +
-      '<button class="btn btn-p" style="margin:0" data-wc="' + (withClaim?'1':'0') + '" onclick="_pdRecheckPhn(this)">Re-check PHN — likely typo</button>' +
-      '<button class="btn btn-s" style="margin:0" data-wc="' + (withClaim?'1':'0') + '" onclick="_pdContinueAnyway(this)">Continue — different patient</button>' +
+    '<div style="margin-top:14px">' +
+      '<button class="btn btn-p" style="margin:0" onclick="hideModal(\'merge-modal\')">Go back and correct</button>' +
     '</div>';
 
-  document.getElementById('merge-title').textContent = 'Possible duplicate patient';
+  document.getElementById('merge-title').textContent = 'Patient already exists';
   document.getElementById('merge-body').innerHTML = h;
   showModal('merge-modal');
 }
 
-function _pdRecheckPhn(btn) {
-  hideModal('merge-modal');
-  var phnEl = document.getElementById('f-phn');
-  if (phnEl) {
-    phnEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)';
-    phnEl.select();
-    phnEl.focus();
-  }
-  showToast('Check PHN — may be a transcription error');
-}
-
-function _pdContinueAnyway(btn) {
-  hideModal('merge-modal');
-  // Resume the new add-patient flow with the originally selected path
-  var addToList = window._apPendingAddToList === true;
-  apSubmit(addToList, true);  // skip the name+DOB check this time
+function openPossibleDuplicateModal(existing, withClaim) {
+  // Legacy — route through hard block instead
+  openDuplicateBlockModal(existing, ['Last name', 'DOB']);
 }
 
 // ── Add patient — entry points ────────────────────────────
@@ -6887,10 +6936,11 @@ async function _addPatientCore(withClaim, skipNameDobDup) {
       var cIncUnits = consultIncUnits(cStart, cEnd);
       var cModInc   = cIncUnits > 0 ? getModifierForIncrement(cStart, cDateISO) : null;
       if (cModBase) {
-        addClaim(p, cModBase.base, cModBase.base, 1, cDateFmt, cLoc, cStart, cNotes, cEnd, cAlias);
+        var cModBaseEnd = minsToTime((t2m(cStart) + 30) % (24 * 60));
+        addClaim(p, cModBase.base, cModBase.base, 1, cDateFmt, cLoc, cStart, cNotes, cModBaseEnd, cAlias);
         if (cModInc) {
           var cIncStart = minsToTime((t2m(cStart) + 30) % (24 * 60));
-          addClaim(p, cModInc.inc, cModInc.inc, cIncUnits, cDateFmt, cLoc, cIncStart, cNotes, null, cAlias);
+          addClaim(p, cModInc.inc, cModInc.inc, cIncUnits, cDateFmt, cLoc, cIncStart, cNotes, cEnd, cAlias);
         }
       }
       sv('claims', st.claims);
@@ -7121,21 +7171,15 @@ var _apClaimType = 'consult';
 
 function apSelectClaimType(type) {
   _apClaimType = type;
-  ['consult','lmtd','other'].forEach(function(t) {
+  ['consult','other'].forEach(function(t) {
     var btn = document.getElementById('ap-ct-' + t);
     if (btn) btn.className = 'ct-btn' + (t === type ? ' ct-on-consult' : '');
   });
   var area = document.getElementById('ap-claim-area');
   if (!area) return;
-  if (type === 'consult' || type === 'lmtd') {
+  if (type === 'consult') {
     area.innerHTML = buildApConsultArea();
     initAddPatientConsult();
-    if (type === 'lmtd') {
-      var el10 = document.getElementById('f-c-33010');
-      var el12 = document.getElementById('f-c-33012');
-      if (el10) el10.className = 'ct-btn';
-      if (el12) el12.className = 'ct-btn ct-on-consult';
-    }
   } else {
     area.innerHTML = buildApOtherClaimArea();
     var dateEl = document.getElementById('ap-oc-date');
@@ -7169,11 +7213,12 @@ function buildApConsultArea() {
   h += '<button class="most-btn on" id="f-c-most" onclick="toggleApMost()">' +
        '<svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>' +
        '+ MOST (78720)</button>';
-  h += '<div class="fl" style="margin-top:8px">';
-  h += '<div class="f1"><label>Date</label><input type="date" id="f-c-date"></div>';
-  h += '<div class="f1"><label>Start time</label><input type="time" id="f-c-start"></div>';
+  h += '<div id="f-c-mod" style="margin-top:6px"></div>';
+  h += '<div class="fl" style="margin-top:4px">';
+  h += '<div class="f1"><label>Date</label><input type="date" id="f-c-date" oninput="updateApConsultUI()"></div>';
+  h += '<div class="f1"><label>Start time</label><input type="text" id="f-c-start" placeholder="14:30 or 2:30pm" oninput="updateApConsultUI()" onblur="var v=parseTime24(this.value);if(v){this.value=v;updateApConsultUI();}"></div>';
   h += '</div>';
-  h += '<div class="fl"><div class="f1"><label>End time <span style="font-size:10px;color:var(--text3)">— adjust if &lt; 45 min</span></label><input type="time" id="f-c-end"></div></div>';
+  h += '<div class="fl"><div class="f1"><label>End time <span style="font-size:10px;color:var(--text3)">— Defaults to 50min, adjust as needed</span></label><input type="text" id="f-c-end" placeholder="14:30 or 2:30pm" oninput="updateApConsultUI()" onblur="var v=parseTime24(this.value);if(v){this.value=v;updateApConsultUI();}"></div></div>';
   h += '<label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(optional)</span></label>';
   h += '<textarea id="f-c-notes" rows="2" placeholder="Optional" autocorrect="off" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:6px"></textarea>';
   h += '<div style="border-top:.5px solid var(--border);margin:4px 0 10px"></div>';
@@ -7296,7 +7341,7 @@ async function apSubmit(addToList, _skipDupCheck) {
   else if (String(phn).replace(/\D/g,'').length !== 10) addMissing.push('phn-len');
   if (!gv('f-refby-num') && !gv('f-refby'))   addMissing.push('refby');
   if (!icd)                                    addMissing.push('icd');
-  if (_apClaimType === 'consult' || _apClaimType === 'lmtd') {
+  if (_apClaimType === 'consult') {
     if (!(document.getElementById('f-c-date')  || {}).value) addMissing.push('date');
     if (!(document.getElementById('f-c-start') || {}).value) addMissing.push('start time');
     if (!(document.getElementById('f-c-end')   || {}).value) addMissing.push('end time');
@@ -7331,34 +7376,37 @@ async function apSubmit(addToList, _skipDupCheck) {
     return;
   }
 
-  // Duplicate checks (PHN exact match — always run, even on retry)
-  var existing = st.patients.find(function(x) { return x.phn === phn && !x.discharged; });
-  if (existing) { openMergeModal(existing); return; }
-  var dischExisting = st.patients.find(function(x) { return x.phn === phn && x.discharged; });
-  if (dischExisting && !_skipDupCheck) { openMergeModal(dischExisting, true); return; }
+  // ── Duplicate check — 2-of-3 hard block ─────────────────────────
+  // Fields: PHN (exact), last name (case-insensitive), DOB (formatted).
+  // If any 2 of the 3 match an existing patient → hard stop, no bypass.
+  var chkPhn  = String(phn || '').replace(/\D/g,'');
+  var chkLast = String(last || '').trim().toLowerCase();
+  var chkDob  = fmtClaimDate(gv('f-dob') || '');
 
-  var lastLc  = String(last).trim().toLowerCase();
-  var dobFmt  = fmtClaimDate(gv('f-dob') || '');
-  var firstLc = String(gv('f-first') || '').trim().toLowerCase();
-  if (!_skipDupCheck && lastLc && dobFmt) {
-    var nameDobMatch = st.patients.find(function(x) {
-      if (!x || x.phn === phn) return false;
-      return String(x.last||'').trim().toLowerCase() === lastLc &&
-             (x.dob ? fmtClaimDate(x.dob) : '') === dobFmt;
-    });
-    if (nameDobMatch) { openPossibleDuplicateModal(nameDobMatch, true); return; }
-  }
-  if (!_skipDupCheck && lastLc && firstLc && phn && phn.length === 10) {
-    var phnTypoMatch = st.patients.find(function(x) {
-      if (!x || !x.phn || x.phn === phn) return false;
-      if (x.phn.length !== phn.length) return false;
-      if (String(x.last||'').trim().toLowerCase() !== lastLc) return false;
-      if (String(x.first||'').trim().toLowerCase() !== firstLc) return false;
-      var diffs = 0;
-      for (var i = 0; i < phn.length; i++) if (phn[i] !== x.phn[i]) diffs++;
-      return diffs >= 1 && diffs <= 2;
-    });
-    if (phnTypoMatch) { openPossibleDuplicateModal(phnTypoMatch, true); return; }
+  var dupMatch = null;
+  var dupScore = 0;
+  var dupFields = [];
+
+  st.patients.forEach(function(x) {
+    if (!x) return;
+    var xPhn  = String(x.phn  || '').replace(/\D/g,'');
+    var xLast = String(x.last || '').trim().toLowerCase();
+    var xDob  = x.dob ? fmtClaimDate(x.dob) : '';
+    var score = 0;
+    var fields = [];
+    if (chkPhn  && xPhn  && chkPhn  === xPhn)  { score++; fields.push('PHN');      }
+    if (chkLast && xLast && chkLast === xLast)  { score++; fields.push('Last name'); }
+    if (chkDob  && xDob  && chkDob  === xDob)  { score++; fields.push('DOB');      }
+    if (score >= 2 && score > dupScore) {
+      dupMatch  = x;
+      dupScore  = score;
+      dupFields = fields;
+    }
+  });
+
+  if (dupMatch) {
+    openDuplicateBlockModal(dupMatch, dupFields);
+    return;
   }
 
   var p = {
@@ -7418,7 +7466,7 @@ async function apSubmit(addToList, _skipDupCheck) {
     var cPerf = document.getElementById('f-c-performing-doc');
     if (cPerf && cPerf.value) cAlias = cPerf.value;
 
-    if (_apClaimType === 'consult' || _apClaimType === 'lmtd') {
+    if (_apClaimType === 'consult') {
       var cCode    = (document.getElementById('f-c-33010') || {}).classList && document.getElementById('f-c-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
       var cDateISO = (document.getElementById('f-c-date')  || {}).value || '';
       var cStart   = (document.getElementById('f-c-start') || {}).value || '';
@@ -7436,10 +7484,11 @@ async function apSubmit(addToList, _skipDupCheck) {
         var cIncUnits = consultIncUnits(cStart, cEnd);
         var cModInc   = cIncUnits > 0 ? getModifierForIncrement(cStart, cDateISO) : null;
         if (cModBase) {
-          addClaim(p, cModBase.base, cModBase.base, 1, cDateFmt, cLoc, cStart, fullN, cEnd, cAlias);
+          var cModBaseEnd2 = minsToTime((t2m(cStart) + 30) % (24 * 60));
+          addClaim(p, cModBase.base, cModBase.base, 1, cDateFmt, cLoc, cStart, fullN, cModBaseEnd2, cAlias);
           if (cModInc) {
             var cIncStart = minsToTime((t2m(cStart) + 30) % (24 * 60));
-            addClaim(p, cModInc.inc, cModInc.inc, cIncUnits, cDateFmt, cLoc, cIncStart, fullN, null, cAlias);
+            addClaim(p, cModInc.inc, cModInc.inc, cIncUnits, cDateFmt, cLoc, cIncStart, fullN, cEnd, cAlias);
           }
         }
         sv('claims', st.claims);
@@ -7490,6 +7539,7 @@ function initAddPatientConsult() {
   if (el10) el10.className = 'ct-btn ct-on-consult';
   if (el12) el12.className = 'ct-btn';
   injectApPerformingDoc();
+  updateApConsultUI();
 }
 
 function toggleApConsultCode(code) {
@@ -7502,6 +7552,50 @@ function toggleApMost() {
   document.getElementById('f-c-most').className = 'most-btn' + (_apMostOn ? ' on' : '');
 }
 
+function updateApConsultUI() {
+  var start   = gv('f-c-start');
+  var end     = gv('f-c-end');
+  var dateISO = gv('f-c-date');
+
+  // If start time changed, auto-update end to start + 50 min
+  var changed = (typeof event !== 'undefined' && event && event.target) ? event.target.id : '';
+  if (start && changed === 'f-c-start') {
+    var endEl = document.getElementById('f-c-end');
+    if (endEl) endEl.value = minsToTime(t2m(start) + 50);
+    end = gv('f-c-end');
+  }
+
+  var modBase  = getModifier(start, dateISO);
+  var hasInc   = consultHasIncrement(start, end);
+  var modInc   = hasInc ? getModifierForIncrement(start, dateISO) : null;
+  var incUnits = consultIncUnits(start, end);
+  var modEl    = document.getElementById('f-c-mod');
+  if (!modEl) return;
+
+  if (modBase) {
+    var banner = '<div class="mod-box ' + modBase.cls + '" style="margin-bottom:0;border-radius:var(--rsm) var(--rsm) 0 0">' +
+      '<span style="font-weight:700">' + modBase.label + '</span>' +
+      '<span style="font-size:10px;opacity:.75;margin-left:6px">' + modBase.base + ' ×1</span>' +
+      '</div>';
+    if (incUnits > 0) {
+      var incMod = modInc || modBase;
+      banner += '<div class="mod-box ' + incMod.cls + '" style="margin-top:1px;border-radius:0 0 var(--rsm) var(--rsm);opacity:.85">' +
+        '<span>Consult time &gt; 45 min</span>' +
+        '<span style="font-size:10px;font-weight:700;margin-left:6px">' + incMod.inc + ' ×' + incUnits + '</span>' +
+        '</div>';
+    } else {
+      banner += '<div style="font-size:11px;padding:5px 10px;color:var(--text3);' +
+        'border:.5px solid var(--border);border-top:none;border-radius:0 0 var(--rsm) var(--rsm);' +
+        'background:var(--surface2)">Consult ≤ 45 min — no increment</div>';
+    }
+    modEl.innerHTML = banner;
+  } else if (start && dateISO) {
+    modEl.innerHTML = '<div class="mod-box mod-day">✓ Daytime weekday — no call-out modifier</div>';
+  } else {
+    modEl.innerHTML = '';
+  }
+}
+
 function clearAddForm() {
   ['f-last','f-first','f-phn','f-dob'].forEach(function(id) {
     var el = document.getElementById(id); if (el) el.value = '';
@@ -7512,7 +7606,7 @@ function clearAddForm() {
   var ocr = document.getElementById('ocr-bar'); if (ocr) ocr.style.display = 'none';
   // Reset claim type to consult and rebuild claim area
   _apClaimType = 'consult';
-  ['consult','lmtd','other'].forEach(function(t) {
+  ['consult','other'].forEach(function(t) {
     var b = document.getElementById('ap-ct-' + t);
     if (b) b.className = 'ct-btn' + (t === 'consult' ? ' ct-on-consult' : '');
   });
@@ -7666,22 +7760,117 @@ function processStickerOCR(croppedDataUrl, bar) {
   img.src = croppedDataUrl;
 }
 
+// ── OCR routing ────────────────────────────────────────────────────
+// Priority:
+//   1. Apps Script → Anthropic  (works on hospital WiFi — no Cloudflare needed)
+//   2. Cloudflare Worker        (works off hospital WiFi)
+//   3. Tesseract / ML Kit       (last resort, offline)
+//
+// Session cache: _appsScriptOCRReachable, _cloudOCRReachable
+// Both reset to null on page load; set false on first failure so
+// subsequent scans skip straight to the next tier without probing.
+
 function sendToOCR(b64, mediaType, bar) {
   if (bar) bar.textContent = 'Extracting (' + Math.round(b64.length / 1024) + ' KB)…';
 
-  // Cloud-reachability cache for this session.
-  // Reset to null on every page load — re-probed on first scan.
-  if (typeof window._cloudOCRReachable === 'undefined') {
-    window._cloudOCRReachable = null;
+  if (typeof window._appsScriptOCRReachable === 'undefined') window._appsScriptOCRReachable = null;
+  if (typeof window._cloudOCRReachable      === 'undefined') window._cloudOCRReachable      = null;
+
+  // Tier 1 — Apps Script → Anthropic
+  if (window._appsScriptOCRReachable !== false) {
+    sendToAppsScriptOCR(b64, mediaType, bar);
+    return;
   }
 
-  // If we already know cloud is unreachable this session, skip straight to offline.
-  if (window._cloudOCRReachable === false) {
-    if (bar) bar.textContent = 'Extracting (offline)…';
-    return runOfflineOCR(b64, mediaType, bar);
+  // Tier 2 — Cloudflare Worker
+  if (window._cloudOCRReachable !== false) {
+    sendToCloudflareOCR(b64, mediaType, bar);
+    return;
   }
 
-  // Try cloud with a 10s timeout. On hospital WiFi this fails fast and we fall through.
+  // Tier 3 — Offline (Tesseract / ML Kit)
+  if (bar) bar.textContent = 'Extracting (offline)…';
+  runOfflineOCR(b64, mediaType, bar);
+}
+
+// Tier 1: fetch API key from Apps Script, then call Anthropic directly.
+// Same network path as import.html — works on hospital WiFi.
+function sendToAppsScriptOCR(b64, mediaType, bar) {
+  if (bar) bar.textContent = 'Extracting (via Apps Script)…';
+
+  var STICKER_PROMPT =
+    'Hospital patient sticker from Kelowna General Hospital (KGH). ' +
+    'Extract the printed fields from the sticker ONLY — ignore any handwriting.\n\n' +
+    'Return a single JSON object with exactly these fields:\n' +
+    '  last, first, hcn, ins, insProvince, dob, sex, mrp, admitDate\n\n' +
+    'Rules:\n' +
+    '  last / first  — from "Last,First" name line\n' +
+    '  hcn           — digits ONLY from the "HCN" field (BC PHN, 10 digits, starts with 9)\n' +
+    '  ins           — digits ONLY from the "INS" field (out-of-province insurance number)\n' +
+    '                  IMPORTANT: HCN and INS are different fields — do not mix them up.\n' +
+    '                  If both fields are present and both are different numbers, extract each separately.\n' +
+    '  insProvince   — the 2-letter province abbreviation printed after the INS number (e.g. "AB" for Alberta),\n' +
+    '                  or "" if the INS is blank or has no province code\n' +
+    '  dob           — date after "DOB", format DD Mon YYYY e.g. "26 Oct 1958"\n' +
+    '  sex           — M or F (from "L:M" or "L:F" field, or "Sex: M/F")\n' +
+    '  mrp           — text after "MRP" e.g. "CardiologyMRP,KGH Kelowna"\n' +
+    '  admitDate     — date after "ADM", same format as dob\n\n' +
+    'Return ONLY valid JSON, no markdown, no explanation.';
+
+  // Step 1: get API key from Apps Script
+  fetch(SHEETS_URL + '?action=getAnthropicKey&key=' + SHARED_KEY, { redirect: 'follow' })
+    .then(function(r) {
+      if (!r.ok) throw new Error('Apps Script key fetch: HTTP ' + r.status);
+      return r.json();
+    })
+    .then(function(j) {
+      if (!j.ok) throw new Error(j.error || 'No API key returned');
+      var apiKey = j.key || '';
+      if (!apiKey) throw new Error('No API key returned');
+
+      // Step 2: call Anthropic directly
+      return fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5-20250929',
+          max_tokens: 500,
+          messages: [{ role: 'user', content: [
+            { type: 'image', source: { type: 'base64', media_type: mediaType, data: b64 } },
+            { type: 'text', text: STICKER_PROMPT }
+          ]}]
+        })
+      });
+    })
+    .then(function(r) {
+      if (!r.ok) throw new Error('Anthropic HTTP ' + r.status);
+      return r.json();
+    })
+    .then(function(j) {
+      var raw = (j.content || []).map(function(c) { return c.text || ''; }).join('');
+      var clean = raw.replace(/```json|```/g, '').trim();
+      var p = JSON.parse(clean);
+      p._engine = 'apps-script';
+      window._appsScriptOCRReachable = true;
+      handleOCRResult(p, bar);
+    })
+    .catch(function(err) {
+      console.warn('[OCR] Apps Script path failed:', err.message, '— trying Cloudflare');
+      window._appsScriptOCRReachable = false;
+      if (bar) bar.textContent = 'Extracting (cloud fallback)…';
+      sendToCloudflareOCR(b64, mediaType, bar);
+    });
+}
+
+// Tier 2: Cloudflare Worker (original path — works off hospital WiFi).
+function sendToCloudflareOCR(b64, mediaType, bar) {
+  if (bar) bar.textContent = 'Extracting (cloud)…';
+
   var xhr = new XMLHttpRequest();
   xhr.open('POST', OCR_WORKER_URL, true);
   xhr.setRequestHeader('Content-Type', 'application/json');
@@ -7959,8 +8148,47 @@ function handleOCRResult(data, bar) {
 
   if (p.last)  document.getElementById('f-last').value  = p.last;
   if (p.first) document.getElementById('f-first').value = p.first;
-  if (p.phn)   document.getElementById('f-phn').value   = (p.phn + '').replace(/\D/g,'').slice(0,10);
-  if (p.dob)   document.getElementById('f-dob').value   = p.dob;
+
+  // ── PHN disambiguation (v3.75) ─────────────────────────────────
+  // Stickers have two number fields: HCN (BC PHN, 10 digits, starts with 9)
+  // and INS (out-of-province health number, different length/format).
+  // Always use HCN as the PHN. If INS differs and carries a province code,
+  // append it to the notes field so it isn't lost.
+  var rawHCN  = String(p.hcn || p.phn || '').replace(/\D/g,'');
+  var rawINS  = String(p.ins  || '').replace(/\D/g,'');
+  var insProv = String(p.insProvince || '').trim().toUpperCase();
+
+  // Pick the best PHN: prefer the 10-digit starts-with-9 number
+  var bestPhn = '';
+  if (rawHCN.length === 10 && rawHCN[0] === '9') {
+    bestPhn = rawHCN;
+  } else if (rawINS.length === 10 && rawINS[0] === '9') {
+    // INS happens to be a valid BC PHN — use it
+    bestPhn = rawINS;
+    rawINS = '';  // don't double-note it
+  } else {
+    // Neither looks like a clean BC PHN; use whatever we have, flag for review
+    bestPhn = (rawHCN || rawINS).slice(0, 10);
+  }
+
+  if (bestPhn) {
+    var phnEl = document.getElementById('f-phn');
+    phnEl.value = bestPhn.slice(0, 10);
+    // Trigger the red-border check
+    phnEl.dispatchEvent(new Event('input'));
+  }
+
+  // Append out-of-province insurance number to notes (non-destructive)
+  if (rawINS && rawINS !== bestPhn && insProv && insProv !== 'BC') {
+    var insNote = insProv + ' healthcare: ' + rawINS;
+    var notesEl = document.getElementById('f-notes');
+    if (notesEl) {
+      var existing = notesEl.value.trim();
+      notesEl.value = existing ? existing + '; ' + insNote : insNote;
+    }
+  }
+  // ── end PHN disambiguation ─────────────────────────────────────
+  if (p.dob)   document.getElementById('f-dob').value   = dispDate(fmtClaimDate(p.dob));
   if (p.sex)   { apSexPill(p.sex); }
   if (p.ward && WARDS[p.ward]) { document.getElementById('f-ward').value = p.ward; wardChange(); }
   if (p.mrp) {
@@ -7993,6 +8221,7 @@ function handleOCRResult(data, bar) {
     bar.className = 'ocr-bar ocr-ok';
     var engineTag = '';
     if (p._engine === 'cloud')          engineTag = '☁️ ';
+    else if (p._engine === 'apps-script') engineTag = '🏥 ';
     else if (p._engine === 'tesseract') engineTag = '📱 ';
     else if (p._engine === 'mlkit')     engineTag = '📱 ';
     bar.textContent = engineTag + '✓ Extracted: ' + (p.last||'?') + ', ' + (p.first||'?') + (p.phn ? ' · ' + p.phn : '');
@@ -8315,17 +8544,15 @@ function _dischStep1(pid) {
   var btns = '';
   if (isCCUWard && isMRP) {
     // CCU/ICU ward, MRP role → CCU Daily default
-    // v3.59: compute correct CCU band at render time (was hard-coded 'CCU_DAILY')
-    var todayCcuFee = ccuFeeForDate(p, TODAY);
-    btns += vbtn('CCU Daily',      todayCcuFee, todayCcuFee, true);
+    // v3.60: write CCU_DAILY placeholder; export consolidates.
+    btns += vbtn('CCU Daily',      'CCU_DAILY', 'CCU_DAILY', true);
     btns += vbtn('Daily\n33008',   '33008',     '33008',     false);
     btns += vbtn('Directive',      '33006',     '33006',     false);
   } else if (isMRP) {
     // Ward MRP → Daily 33008 default always
     btns += vbtn('Daily\n33008',   '33008',     '33008',     true);
-    // v3.59: compute correct CCU band at render time (was hard-coded 'CCU_DAILY')
-    var todayCcuFee2 = ccuFeeForDate(p, TODAY);
-    btns += vbtn('CCU Daily',      todayCcuFee2, todayCcuFee2, false);
+    // v3.60: write CCU_DAILY placeholder; export consolidates.
+    btns += vbtn('CCU Daily',      'CCU_DAILY', 'CCU_DAILY', false);
     btns += vbtn('Directive',      '33006',     '33006',     false);
   } else {
     // Consultant role → Combined Daily or Directive only (no CCU Daily)
@@ -8551,7 +8778,10 @@ function _buildAndDownloadCSV(claims, filename) {
     // this. Stripping happens here at the boundary, not at storage.
     var icdRaw = String(c.icd || '3062');
     var icdOut = icdRaw.replace(/\./g, '');
-    return [doc.num||'',c.alias||'',first,last,pn,c.phn||'','',sex,dob,'','',c.fee,icdOut,'',c.units||1,'100','MSP',c.date,c.startTime||'',_cet(c),c.notes||'',c.refby||'','',rn,loc,'OA040','','','','','','MSP','','','','','',''].join(',');
+    // MOST add-on (78720) and CCU codes carry no notes in the iClinic CSV
+    var _NOTE_FREE = { '1411':1, '1421':1, '1431':1, 'CCU_DAILY':1, '78720':1 };
+    var _csvNotes = _NOTE_FREE[c.fee] ? '' : (c.notes || '');
+    return [doc.num||'',c.alias||'',first,last,pn,c.phn||'','',sex,dob,'','',c.fee,icdOut,'',c.units||1,'100','MSP',c.date,c.startTime||'',_cet(c),_csvNotes,c.refby||'','',rn,loc,'OA040','','','','','','MSP','','','','','',''].join(',');
   });
   var blob=new Blob([hdr+'\n'+rows.join('\n')],{type:'text/csv;charset=utf-8;'});
   var url=URL.createObjectURL(blob);
@@ -9132,8 +9362,38 @@ function renderMediteachPreview(patients) {
       _idx: i, _ward: loc.ward, _room: loc.room,
       _list: care.list, _care: care.care, _role: care.role,
       _icd: icd, _mrp: _mrp, _include: !existing, _existing: existing,
-      _matches: matches  // v3.38: full match list for conflict detection
+      _matches: matches,  // v3.38: full match list for conflict detection
+      _mrpTransition: null,
+      _existingPid: null,
+      _existingMrp: ''
     });
+  });
+
+  // v3.66: MRP transition detection — compares the existing local patient's
+  // stored MRP/role against the role inferred from the Meditech attending.
+  // Only fires when there is exactly one local match so we don't conflict
+  // with the duplicate-detection banner. Two outcomes flagged:
+  //   - left-cardiology   : was on Cardiology service, attending now non-Cardiology
+  //                          (e.g. moved to CSICU, became Hospitalist primary).
+  //                          Auto-UNCHECKED — doctor must explicitly confirm.
+  //   - joined-cardiology : was off-service / different MRP, attending now
+  //                          a cardiologist. Auto-checked (pulling onto our
+  //                          service is the normal expected action).
+  _mitPats.forEach(function(p) {
+    if (!p._matches || p._matches.length !== 1) return;
+    var ep = p._matches[0];
+    p._existingPid = ep.id;
+    p._existingMrp = String(ep.mrp || '').trim();
+    if (!p._existingMrp) return;            // no prior MRP recorded → nothing to compare
+    var wasCardiology = (ep.role === 'mrp') && /cardiology/i.test(p._existingMrp);
+    var isCardiology  = (p._role === 'mrp');
+    if (wasCardiology && !isCardiology)      p._mrpTransition = 'left-cardiology';
+    else if (!wasCardiology && isCardiology) p._mrpTransition = 'joined-cardiology';
+    // Override default _include for transitions. Existing matches normally
+    // default to _include=false (skipped); we want left-cardiology to stay
+    // unchecked (explicit confirm) and joined-cardiology to be auto-checked.
+    if (p._mrpTransition === 'joined-cardiology') p._include = true;
+    if (p._mrpTransition === 'left-cardiology')   p._include = false;
   });
 
   // v3.38: Detect demographic conflicts surfaced by the Meditech list.
@@ -9179,15 +9439,17 @@ function renderMediteachPreview(patients) {
   });
   window._mitConflicts = _mitConflicts;  // for console inspection
 
-  var onCnt  = _mitPats.filter(function(p) { return p._list === 'on'  && p._include; }).length;
-  var offCnt = _mitPats.filter(function(p) { return p._list === 'off' && p._include; }).length;
-  var exCnt  = _mitPats.filter(function(p) { return p._existing; }).length;
+  var onCnt    = _mitPats.filter(function(p) { return p._list === 'on'  && p._include; }).length;
+  var offCnt   = _mitPats.filter(function(p) { return p._list === 'off' && p._include; }).length;
+  var exCnt    = _mitPats.filter(function(p) { return p._existing; }).length;
+  var leftCnt  = _mitPats.filter(function(p) { return p._mrpTransition === 'left-cardiology'; }).length;
+  var joinCnt  = _mitPats.filter(function(p) { return p._mrpTransition === 'joined-cardiology'; }).length;
 
   // ── Discharge candidates ───────────────────────────────
   // For each currently active on-service patient, check whether they:
   //   (a) are missing from the imported Meditech list, OR
   //   (b) appear in the imported list but with a cardiac surgeon as attending
-  // Either case → flag as a discharge candidate (pre-checked, user can uncheck).
+  // Pre-checked; user can uncheck any false positive (e.g. OCR missed a row).
   // Name match: case-insensitive last + first-token, same rule as _existing.
   function nameKey(last, first) {
     return String(last  || '').toLowerCase().trim() + '|' +
@@ -9202,7 +9464,7 @@ function renderMediteachPreview(patients) {
     var match = importedByKey[nameKey(p.last, p.first)];
     var reason = null;
     if (!match) {
-      reason = 'Not on Meditech list';
+      reason = 'No longer on Meditech Import List';
     } else if (isCardiacSurgeonAttending(match.attending)) {
       reason = '→ Cardiac Surgery (' + (match.attending || '').trim() + ')';
     }
@@ -9220,6 +9482,8 @@ function renderMediteachPreview(patients) {
   sumEl.innerHTML = '<div class="imp-sum">' +
     _mitPats.length + ' patients &bull; ' + onCnt + ' on service &bull; ' + offCnt + ' off service' +
     (exCnt ? ' &bull; ' + exCnt + ' already on list (skipped)' : '') +
+    (leftCnt ? ' &bull; <span style="color:var(--red-t)">⚠ ' + leftCnt + ' MRP review</span>' : '') +
+    (joinCnt ? ' &bull; ' + joinCnt + ' joining Cardiology' : '') +
     (_mitDisch.length ? ' &bull; ' + _mitDisch.length + ' to remove' : '') +
     '</div>';
 
@@ -9301,15 +9565,32 @@ function renderMediteachPreview(patients) {
       '<div style="height:10px"></div>';
   }
 
-  document.getElementById('mit-rows').innerHTML = conflictHtml + dischHtml + _mitPats.map(function(p) {
-    return '<div class="imp-row' + (p._existing ? ' existing' : '') + '" id="imp-row-' + p._idx + '">' +
+  // v3.66: row renderer extracted so transition rows can be rendered in
+  // their own sections (above the rest of the import list) while preserving
+  // the original _idx → _mitPats[idx] invariant that toggleImpRow relies on.
+  function renderImpRow(p) {
+    var rowCls   = 'imp-row';
+    var rowStyle = '';
+    var nameTag  = '';
+    var transChip = '';
+    if (p._mrpTransition === 'left-cardiology') {
+      rowStyle  = ' style="border-color:#eab8b3;background:var(--red-bg)"';
+      nameTag   = ' <span style="color:var(--red-t);font-size:10px;font-weight:700">⚠ MRP changed</span>';
+      transChip = '<span class="chip chip-red">⚠ MRP: ' + esc(p._existingMrp || '?') + ' → ' + esc(p._mrp || 'Other') + '</span>';
+    } else if (p._mrpTransition === 'joined-cardiology') {
+      rowStyle  = ' style="border-color:#d4a84a;background:var(--amber-bg)"';
+      nameTag   = ' <span style="color:var(--amber-t);font-size:10px;font-weight:700">joining Cardiology</span>';
+      transChip = '<span class="chip chip-amber">→ Cardiology (was ' + esc(p._existingMrp || '?') + ')</span>';
+    } else if (p._existing) {
+      rowCls += ' existing';
+      nameTag = ' <span style="color:var(--green-t);font-size:10px;font-weight:700">already on list</span>';
+    }
+    return '<div class="' + rowCls + '" id="imp-row-' + p._idx + '"' + rowStyle + '>' +
       '<div class="imp-chk' + (p._include ? ' on' : '') + '" id="imp-chk-' + p._idx + '" onclick="toggleImpRow(' + p._idx + ')">' +
         (p._include ? '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>' : '') +
       '</div>' +
       '<div class="imp-info">' +
-        '<div class="imp-name">' + esc(p.last) + ', ' + esc(p.first) +
-          (p._existing ? ' <span style="color:var(--green-t);font-size:10px;font-weight:700">already on list</span>' : '') +
-        '</div>' +
+        '<div class="imp-name">' + esc(p.last) + ', ' + esc(p.first) + nameTag + '</div>' +
         '<div class="imp-meta">' + esc(p.attending || '') + (p._room ? ' Rm ' + p._room : '') +
           ' &bull; Age ' + (p.age || '?') + ' ' + (p.sex || '') + ' &bull; ' + esc(p.los || '') + '</div>' +
         '<div class="imp-meta" style="color:var(--text)">Dx: ' + esc(p.reason || '') + '</div>' +
@@ -9317,10 +9598,41 @@ function renderMediteachPreview(patients) {
           '<span class="chip ' + (p._list === 'on' ? 'chip-blue' : 'chip-amber') + '">' +
             (p._list === 'on' ? 'On: ' + wardLabel(p._ward) : 'Off: ' + wardLabel(p._ward)) +
           '</span>' +
+          transChip +
         '</div>' +
       '</div>' +
       '</div>';
-  }).join('');
+  }
+
+  // MRP transitions appear in their own sections above the rest so the
+  // doctor sees them before scrolling. left-cardiology rows are flagged
+  // most prominently because they affect which service bills the patient.
+  var transLeft   = _mitPats.filter(function(p) { return p._mrpTransition === 'left-cardiology'; });
+  var transJoined = _mitPats.filter(function(p) { return p._mrpTransition === 'joined-cardiology'; });
+  var restRows    = _mitPats.filter(function(p) { return !p._mrpTransition; });
+
+  var mrpHtml = '';
+  if (transLeft.length) {
+    mrpHtml +=
+      '<div class="sec-lbl" style="color:var(--red-t);margin-top:4px">' +
+        '⚠ MRP changed — review before committing (' + transLeft.length + ')' +
+      '</div>' +
+      '<div style="font-size:10px;color:var(--text2);margin-bottom:6px;line-height:1.4">' +
+        'Auto-unchecked. Check the row to confirm the patient has moved off ' +
+        'Cardiology service — list/role/care will switch to off-service consultant.' +
+      '</div>' +
+      transLeft.map(renderImpRow).join('');
+  }
+  if (transJoined.length) {
+    mrpHtml +=
+      '<div class="sec-lbl" style="color:var(--amber-t);margin-top:4px">' +
+        'MRP changed TO Cardiology (' + transJoined.length + ')' +
+      '</div>' +
+      transJoined.map(renderImpRow).join('');
+  }
+
+  document.getElementById('mit-rows').innerHTML =
+    conflictHtml + dischHtml + mrpHtml + restRows.map(renderImpRow).join('');
 
   document.getElementById('mit-actions').style.display = 'block';
 }
@@ -9366,8 +9678,42 @@ function confirmMediteachImport() {
     p.dischargeDate = TODAY;                                // DD/MM/YYYY display
     p.dischargedAt  = Date.now();                           // epoch ms — drives "recently discharged" sort
     p.discharged    = true;
+    p.dischargeNote = d.reason;                             // non-billing Sheets note
     if (SHEETS_URL) push('savePatient', p);
     logChange(p, 'Discharged via Meditech import', d.reason);
+  });
+
+  // ── MRP transitions ───────────────────────────────────
+  // v3.66: existing matches that have an MRP transition flagged AND have
+  // been confirmed (left-cardiology auto-unchecked, joined-cardiology
+  // auto-checked, both user-overridable). Mutates the existing patient
+  // in place — does NOT create a new record.
+  var toTransition = _mitPats.filter(function(p) {
+    return p._include && p._existing && p._mrpTransition && p._existingPid;
+  });
+  toTransition.forEach(function(p) {
+    var ep = st.patients.find(function(pp) { return pp.id === p._existingPid; });
+    if (!ep) return;
+    var prev = ep.mrp + '/' + ep.list + '/' + ep.role + '/' + ep.care;
+    // Always refresh ward/bed from the Meditech list — that's the freshest
+    // location signal regardless of transition direction.
+    ep.ward = p._ward;
+    ep.bed  = p._room;
+    if (p._mrpTransition === 'left-cardiology') {
+      ep.mrp  = p._mrp || 'Other';
+      ep.list = 'off';
+      ep.role = 'consultant';
+      ep.care = 'directive';
+    } else if (p._mrpTransition === 'joined-cardiology') {
+      ep.mrp  = 'Cardiology';
+      ep.list = 'on';
+      ep.role = 'mrp';
+      ep.care = (ep.ward === 'CCU' || ep.ward === 'CSICU' || ep.ward === 'ICUA' || ep.ward === 'ICUB')
+                ? 'ccu' : 'daily';
+    }
+    if (SHEETS_URL) push('savePatient', ep);
+    logChange(ep, 'MRP transition via Meditech import',
+              prev + ' → ' + ep.mrp + '/' + ep.list + '/' + ep.role + '/' + ep.care);
   });
 
   // ── Imports ───────────────────────────────────────────
@@ -9401,8 +9747,9 @@ function confirmMediteachImport() {
   render();
 
   var msg = [];
-  if (toImport.length) msg.push(toImport.length + ' imported');
-  if (toDisch.length)  msg.push(toDisch.length  + ' discharged');
+  if (toImport.length)     msg.push(toImport.length     + ' imported');
+  if (toTransition.length) msg.push(toTransition.length + ' MRP changed');
+  if (toDisch.length)      msg.push(toDisch.length      + ' discharged');
   showToast(msg.length ? msg.join(', ') : 'Nothing to change');
 
   _mitPats  = [];
@@ -9419,6 +9766,7 @@ function confirmMediteachImport() {
 async function init() {
   updateDailyTotal();
   await loadLocal();
+  purgeOldPatients(); // remove patients discharged > 21 days ago
 
   // ── SANDBOX: seed dummy patients ─────────────────────────────────────
   if (typeof SANDBOX_MODE !== 'undefined' && SANDBOX_MODE) {
@@ -9456,7 +9804,6 @@ async function init() {
   }
   // ── end sandbox seed ──────────────────────────────────────────────────
 
-  purgeOldPatients(); // remove patients discharged > 21 days ago
   st.loaded = true;
   if (st.doc) {
     document.getElementById('doc-label').textContent = st.doc.alias;
@@ -9506,6 +9853,18 @@ async function init() {
   } else if (typeof SANDBOX_MODE !== 'undefined' && SANDBOX_MODE) {
     setSyncState('synced');
     document.getElementById('sync-dot').title = 'Sandbox — no live data';
+  }
+
+  // v3.75 — PHN field: flag red in real-time if fewer than 10 digits are entered.
+  // The phn-short class applies a red border so the doctor can see immediately that
+  // the number is incomplete (common when OCR reads an out-of-province INS instead
+  // of the BC HCN, or when a sticker is partially obscured).
+  var phnInput = document.getElementById('f-phn');
+  if (phnInput) {
+    phnInput.addEventListener('input', function() {
+      var digits = this.value.replace(/\D/g, '');
+      this.classList.toggle('phn-short', digits.length > 0 && digits.length < 10);
+    });
   }
 }
 
@@ -9789,9 +10148,38 @@ function pad(n) { return String(n).padStart(2, '0'); }
 function wardLabel(w) { return String((WARDS[w] && WARDS[w].label) || w || ''); }
 
 // time string "HH:MM" → total minutes
+// Accept any reasonable time format → HH:MM (24-hour).
+// Handles: 14:30, 7:40, 740, 1430, 7:40am, 2:30PM, 7am, 7 am
+function parseTime24(s) {
+  if (!s) return '';
+  s = String(s).trim();
+  if (!s) return '';
+  var ampm = s.match(/\s*([ap])\.?m?\.?$/i);
+  s = s.replace(/\s*[ap]\.?m?\.?$/i, '').trim();
+  var h, m;
+  var c = s.match(/^(\d{1,2})[:\s](\d{2})$/);
+  if (c) { h = parseInt(c[1]); m = parseInt(c[2]); }
+  else if (/^\d{3,4}$/.test(s)) {
+    if (s.length === 3) { h = parseInt(s[0]);      m = parseInt(s.slice(1)); }
+    else                { h = parseInt(s.slice(0,2)); m = parseInt(s.slice(2)); }
+  }
+  else if (/^\d{1,2}$/.test(s)) { h = parseInt(s); m = 0; }
+  else return '';
+  if (isNaN(h) || isNaN(m) || m > 59) return '';
+  if (ampm) {
+    var ap = ampm[1].toLowerCase();
+    if (ap === 'p' && h < 12) h += 12;
+    if (ap === 'a' && h === 12) h = 0;
+  }
+  if (h > 23) return '';
+  return pad(h) + ':' + pad(m);
+}
+
 function t2m(t) {
   if (!t) return 0;
-  var p = t.split(':');
+  var n = parseTime24(String(t));
+  var s = n || String(t);
+  var p = s.split(':');
   return parseInt(p[0]) * 60 + parseInt(p[1] || 0);
 }
 
@@ -10139,6 +10527,18 @@ function dbgCopyLast() {
 }
 </script>
 
+<!-- Tips drawer backdrop -->
+<div id="tips-drawer-backdrop" onclick="closeTips()"></div>
+
+<!-- Tips drawer -->
+<div id="tips-drawer">
+  <div class="tips-drawer-head">
+    <h3 id="tips-drawer-title">💡 Tips</h3>
+    <button class="tips-close-btn" onclick="closeTips()">×</button>
+  </div>
+  <div id="tips-drawer-body"></div>
+</div>
+
 <!-- ══════════════════════════════════════════════════════
      SANDBOX: Tips system — pane-aware help drawer
      ══════════════════════════════════════════════════════ -->
@@ -10190,7 +10590,7 @@ var TIPS = {
         { icon:'✏️', text:'Every auto-filled field can be edited before submitting. Nothing is locked.' }
       ]},
       { heading: 'Required fields', items: [
-        { icon:'🔢', text:'<strong>PHN must be exactly 10 digits.</strong> The app will block submission if it\'s missing or wrong.' },
+        { icon:'🔢', text:'<strong>PHN must be exactly 10 digits.</strong> The field turns red if incomplete — fix it before submitting.' },
         { icon:'🏷️', text:'<strong>Last name is also required.</strong> DOB, sex, and ward can be added or corrected later via Edit.' }
       ]},
       { heading: 'Claim types', items: [
