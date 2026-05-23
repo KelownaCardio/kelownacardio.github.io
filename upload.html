@@ -66,9 +66,8 @@ v1.7  2026-05-11  Referring MD search parity with main app: 3-tier system.
                   ICD-9 list already matched index.html as of v1.6.
 
 v1.8  2026-05-12  Three claim-data cleanups:
-                  • 'MOST add-on' note removed from MOST modifier claims —
+                  • 'MOST add-on' note removed from 03701 modifier claims —
                     the fee code itself already communicates the modifier.
-                    [v1.16: corrected fee code 03701 -> 78720]
                   • 'CCU day N' note removed from 1411/1421/1431 claims —
                     the fee code already encodes the band (1411 = day 1,
                     1421 = days 2–7, 1431 = day 8+). User-typed notes still
@@ -178,248 +177,6 @@ v1.12 2026-05-14  ICD-9 search: tiered (Tier 1 local cardiology codes,
                   handlers) before deleting. A function search across
                   the file is the cheapest sanity check.
 
-v1.23 2026-05-16  Generic "+claim" pill replaces "No consult" — the
-                  third option on the Consult / first visit card.
-                  Use case: first-visit billing that isn't a 33010/33012
-                  consult — procedures (33015 ECG, 33060 echo, 33075
-                  Holter, 33027 pacemaker, etc), complex discharge
-                  78717, or any standalone non-consult fee.
-
-                  When "+claim" is selected:
-                    - A fee-code text input appears at the top of the
-                      section (placeholder lists common procedure codes)
-                    - Date / Diagnosis / Referring MD / Notes remain
-                      visible (re-used from the consult layout)
-                    - Start time / End time, +MOST toggle, CCFPP
-                      modifier section, and mod-banner are hidden
-                  buildClaims's consult block split into two branches:
-                    - consult/limited → existing 33010/33012 + MOST +
-                      CCFPP modifier logic, unchanged
-                    - claim → single push of {fee, date, icd, refby,
-                      notes} with claimType='procedure'. Fee input
-                      blank ⇒ section pushes nothing, equivalent to
-                      the old No-consult skip.
-                  Internal state: legacy 'none' value remapped to
-                  'claim' on entry for backward compatibility (no other
-                  caller currently uses 'none', but the alias prevents
-                  surprises).
-                  Fee codes for CCU day 1 specifically should still be
-                  entered via the calendar in CCU mode — that writes
-                  CCU_DAILY and the export-time consolidation rolls
-                  consecutive days into proper 1411/1421/1431 bands.
-
-v1.22 2026-05-16  Removed combined CSV export button — upload.html is
-                  data-entry-and-review only, not a submission gateway.
-                  Per Kathryn's workflow: write claims back to the
-                  Sheet from this dashboard (Accept & clear / Send to
-                  Google Sheet), then export iClinic CSV exclusively
-                  from the Sheet menu (⬇ Export now). One commit
-                  surface, fewer ways to accidentally double-submit.
-                  Removed:
-                    - The green "② Download combined iClinic CSV &
-                      mark submitted" button
-                    - The orphaned exportCombinedIclinic() function
-                  Card title renamed from "Export" → "Save to Sheet"
-                  to match the new scope. Intro text reminds the user
-                  that CSV export happens in the Sheet, not here.
-
-v1.21 (existing — photo backup to Drive with Downloads fallback)
-v1.20 2026-05-16  Photo backup system — hedge against silent data loss.
-                  Triggered by Ravestein bug: her CCU claim never landed
-                  in the Sheet despite the upload-tool save flow
-                  appearing successful. With v1.19 hardening, silent
-                  failures shouldn't happen again — but as a belt-and-
-                  suspenders layer, we now also auto-save the original
-                  card photo to disk so EVERY captured card has a
-                  permanent audit trail independent of the Sheets save.
-
-                  Two features:
-
-                  1. AUTO-SAVE TOGGLE (top of page, per-device setting):
-                     "💾 Auto-save card photos to disk". When enabled,
-                     every captured card photo is also downloaded to
-                     the user's Downloads folder with filename
-                     kgh-{PHN}-{YYYYMMDD-HHmm}.jpg. Default OFF so
-                     iPad users don't get spammed; enable on the
-                     laptop browser where Downloads folder is useful.
-                     Setting persists in localStorage as
-                     kgh_auto_download_thumbs.
-
-                  2. RECOVERY PANEL: "🔍 Recover saved photos" button
-                     opens a modal showing every kghthumb:{PHN} entry
-                     currently in browser localStorage as a grid of
-                     thumbnails. Each has its own download button.
-                     "Download all" downloads everything sequentially
-                     (200ms gap — iOS Safari may prompt for multi-
-                     download permission, user clicks Allow once).
-                     Use this NOW on the iPad to recover any pre-v1.20
-                     captures before they're lost to a cache clear.
-
-                  Internals:
-                  - saveThumbToStorage extended to call
-                    downloadThumbToDisk when auto-download is enabled.
-                    No behaviour change for users with the toggle off.
-                  - downloadThumbToDisk uses <a download> + click() —
-                    works on iOS Safari (single user-gesture download
-                    → Save to Files prompt) and desktop browsers
-                    (direct to Downloads).
-                  - Recovery modal enumerates all kghthumb:* keys in
-                    localStorage and sorts by PHN, with byte count
-                    summary at the top so user can see how close to
-                    the ~5MB cap they are.
-
-v1.19 2026-05-16  Save reliability hardening — diagnosed via Ravestein
-                  bug (CCU day 1 added but missing from Sheet). Five
-                  silent-failure paths fixed in exportSheets:
-
-                  1. CCU now writes CCU_DAILY placeholder in buildClaims
-                     (matches PWA v3.60). Previously upload.html
-                     computed 1411/1421/1431 at submit time using
-                     ccuUnion logic, which conflicted with PWA's
-                     placeholder approach AND bypassed the Apps Script
-                     ccuConsolidateForExport rollup (which only
-                     operates on CCU_DAILY rows). So upload-tool CCU
-                     claims shipped as one row per day to iClinic
-                     instead of the BC MSP standard one row per band
-                     with units.
-
-                  2. ICD validation failure now LOUD — instead of just
-                     a quiet status banner that's easily missed, shows
-                     "⛔ NOTHING SAVED — N claims have invalid ICD"
-                     with per-claim breakdown (fee + date + bad ICD
-                     value) plus a 6-second toast. User cannot
-                     accidentally think the save succeeded when it
-                     was aborted.
-
-                  3. Patient save errors no longer swallowed. The
-                     pushOnePatient chain now collects {name, phn,
-                     error} for every savePatient call that returned
-                     {ok:false} or threw a network error, and surfaces
-                     them in the final status. Previously these were
-                     silently caught and ignored; if Apps Script
-                     blocked a patient row (e.g. bad DOB format), the
-                     user had no way to know.
-
-                  4. Duplicate-skip feedback made unmissable. Apps
-                     Script returns a `duplicates` array when
-                     saveHistoricalBatch's phn|fee|date|alias dedup
-                     skips an incoming claim. Previously appended to
-                     the same status string and easy to miss.
-                     Now split into its own labeled section with each
-                     skipped claim listed (name + fee + date + alias).
-                     If inserted=0, prepends "⚠ ZERO claims saved" to
-                     the top of the status with a warning toast.
-
-                  5. Form no longer clears when inserted=0. If every
-                     claim was skipped/failed, keep the form populated
-                     so the user can review and fix without re-entry.
-                     Form clears only on partial or full success.
-
-                  Also fixed outdated "Uploaded Claims tab" message —
-                  that tab is archived post-migration; claims write to
-                  the Claims tab now.
-
-                  Edit (saveHistEdit) and Delete (deleteHist) paths
-                  audited and confirmed correctly wired — they POST
-                  saveClaim/deleteClaim with full merged claim objects
-                  preserving createdAt/ward/room. No changes needed.
-
-v1.18.2 2026-05-16 CCU placeholder approach restored (matches PWA v3.60).
-                  CCU_DAILY is the canonical placeholder; export-time
-                  consolidation handles banding. Three Data Check
-                  changes:
-                  1. CCU band mismatch detector (auditCcuBands)
-                     neutralized to a no-op stub. The band stored on
-                     each row no longer needs to match its position-in-
-                     episode — the Apps Script ccuConsolidateForExport()
-                     handles it.
-                  2. CCU_DAILY moved into the tracked-fees bucket
-                     (needs ICD; recommends refby). Treated like any
-                     other claim fee.
-                  3. The "Legacy CCU_DAILY in fee column" red flag
-                     removed — CCU_DAILY is no longer "legacy", it's
-                     the expected state for new CCU days.
-                  Patient banding rows from earlier manual cleanup
-                  (1411/1421/1431) export correctly via the existing
-                  ccuConsolidateForExport pass-through path; they
-                  produce one CSV row per day (verbose but valid).
-                  To consolidate them, run the new revertCcuBandsToCcuDaily
-                  cleanup function from the Apps Script editor — converts
-                  every banded CCU row in the Claims tab back to
-                  CCU_DAILY so they roll up on next export.
-
-v1.18.1 2026-05-16 CCFPP modifier codes added to recognized fee list.
-                  v1.18 surfaced 46 amber "Unrecognised fee code"
-                  warnings — all of them were legitimate CCFPP codes
-                  (1200/1201/1202 evening/night/weekend bases, and
-                  1205/1206/1207 their >45-min consult increments)
-                  that the consult submit handler pushes automatically
-                  whenever applicable. They're now included in the
-                  tracked-fee bucket (same ICD-required + refby-
-                  recommended treatment as other claim fees) and
-                  removed from the "unrecognised" trip-wire.
-
-v1.18 2026-05-16  Data Check signal-to-noise + consult endTime hardening:
-                  1. Dropped the createdBy/createdAt detector (was 95+
-                     amber warnings on historical patient rows that
-                     pre-date the audit-trail rollout — pure noise that
-                     drowned out real issues). auditPatAudit is now a
-                     no-op stub, kept in the chain for future re-enable
-                     with smarter date-aware logic.
-                  2. Softened the consult missing-endTime detector.
-                     The Apps Script csvEndTime() auto-computes end
-                     time at export when startTime is present (start
-                     + 50min for 33010/33012). So missing endTime
-                     alone doesn't block iClinic acceptance. Now
-                     flagged only when BOTH start AND end are missing
-                     (which actually breaks export).
-                  3. Tightened consult submit handler with belt-and-
-                     suspenders endTime autofill: at submit time, if
-                     startTime is present but endTime is blank,
-                     auto-fills end = start + 50min and reflects in
-                     the UI. Mirrors the PWA v3.57 hardening. Prevents
-                     the OCR-populated form race that caused Marcetta
-                     and Osman to land with blank endTime (oninput
-                     wasn't firing on programmatic value sets, so the
-                     passive autofill in onStartTimeChange() never
-                     ran). Also adds a hard guard: consult with no
-                     start time refuses to submit with a toast.
-
-v1.17 2026-05-15  Data Check tab — Stage A (read-only detection).
-                  New "🔍 Data Check" mode-tab loads Patients + Claims +
-                  Uploaded Claims in one round-trip via the new
-                  getAllForDataCheck Apps Script action. Runs a per-
-                  patient audit detecting 14 issue types across three
-                  severities (🔴 blocking / 🟠 audit / 🟡 conflicts)
-                  plus orphan-claim cards for claims without a Patients
-                  row. Each card shows patient-row issues, claims-with-
-                  issues with the specific fee/date/source, and a
-                  collapsed "healthy claims" count.
-                  Filter chips (All / Blocking / Audit / Conflicts /
-                  Orphans) + name/PHN search. Severity-sorted listing.
-                  CCU banding mismatch detector recomputes 1411/1421/
-                  1431 per consecutive episode position and flags any
-                  claim whose stored fee disagrees — catches stale
-                  bands after backfills/edits. Legacy CCU_DAILY rows
-                  (manually cleaned by user; PWA v3.59 guards against
-                  new writes) also surface here as a defence-in-depth
-                  red flag if any slip through.
-                  Stage A is detection ONLY — no fix UI. Stage B
-                  (v1.18) will add inline fixes, propagation, PHN-less
-                  queue, and the 3-month-care prompt for orphan claims.
-                  Backend partner: Apps Script v2.21 (new
-                  getAllForDataCheck action — paste-in code delivered
-                  alongside this build).
-
-v1.16 2026-05-15  MOST fee code fix: 03701 -> 78720. The MOST advance
-                  care claim was being written with the wrong fee code
-                  (03701 is not a valid BC MSP code; 78720 is the
-                  correct MOST code). One-line fix in the consult
-                  submit handler; nothing else changed. The PWA
-                  index.html already used 78720 correctly — this just
-                  brings upload.html into alignment.
-                  Backend partner: Apps Script v2.20 (unchanged).
-
 v1.15 2026-05-14  Existing claims list: row visibility fix. The wrapper
                   card and "(N claims)" title were rendering, but the
                   rows themselves stayed hidden because the inner
@@ -459,6 +216,10 @@ v1.14 2026-05-14  ICD9_LOCAL rebuilt from the iClinic xlsx (385 codes,
                   is the single source of truth for the full 7,000+
                   iClinic codes.
 
+v1.17 2026-05-22  DOB label and placeholder changed from DD/MM/YYYY
+                  to DD/MMM/YYYY everywhere to match hospital sticker
+                  format and avoid month/day confusion. Storage format
+                  DD/MM/YYYY unchanged — display only.
 v1.16 2026-05-15  Validation hardening: exportSheets blocks submit if
                   any claim is missing a last name OR has a PHN that
                   is not exactly 10 digits. Previously empty-name claims
@@ -730,60 +491,6 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 .kgh-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .kgh-toast.warn{background:#7c4000}
 .kgh-toast.err{background:#b3201a}
-
-/* v1.17 — Data Check tab styles */
-.dc-summary{display:flex;gap:8px;flex-wrap:wrap;padding:10px 14px;background:var(--surface);border-bottom:.5px solid var(--border);position:sticky;top:91px;z-index:48}
-.dc-summary-pill{font-size:11px;font-weight:700;padding:4px 10px;border-radius:12px;background:var(--surface2);color:var(--text2);display:inline-flex;align-items:center;gap:4px}
-.dc-summary-pill.red{background:var(--red-bg);color:var(--red-t)}
-.dc-summary-pill.amber{background:var(--amber-bg);color:var(--amber-t)}
-.dc-summary-pill.yellow{background:#fff8d6;color:#806000}
-.dc-summary-pill.teal{background:var(--teal-bg);color:var(--teal-t)}
-.dc-filters{display:flex;gap:6px;flex-wrap:wrap;padding:8px 14px;background:var(--surface);border-bottom:.5px solid var(--border)}
-.dc-chip{font-size:11px;font-weight:600;padding:5px 11px;border-radius:14px;background:var(--surface2);color:var(--text2);cursor:pointer;border:.5px solid transparent;user-select:none;-webkit-user-select:none}
-.dc-chip.act{background:var(--blue-bg);color:var(--blue-t);border-color:var(--blue)}
-.dc-search{padding:8px 14px;background:var(--surface);border-bottom:.5px solid var(--border)}
-.dc-search input{width:100%;padding:8px 10px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:13px;background:var(--surface2);font-family:inherit;color:var(--text)}
-.dc-list{padding:10px 14px}
-.dc-empty{padding:40px 14px;text-align:center;color:var(--text3);font-size:13px}
-.dc-loading{padding:40px 14px;text-align:center;color:var(--text2);font-size:13px}
-.dc-error{padding:14px;margin:14px;background:var(--red-bg);color:var(--red-t);border-radius:var(--rsm);font-size:12px;white-space:pre-line}
-
-.dc-card{background:var(--surface);border-radius:var(--r);padding:12px;margin-bottom:10px;border:.5px solid var(--border);border-left:3px solid var(--text3)}
-.dc-card.sev-red{border-left-color:var(--red)}
-.dc-card.sev-amber{border-left-color:var(--amber)}
-.dc-card.sev-yellow{border-left-color:#e6c000}
-.dc-card.sev-teal{border-left-color:var(--teal)}
-
-.dc-card-hdr{display:flex;align-items:baseline;gap:8px;margin-bottom:4px;flex-wrap:wrap}
-.dc-card-name{font-size:14px;font-weight:700;color:var(--text)}
-.dc-card-phn{font-size:11px;font-family:ui-monospace,monospace;color:var(--text3)}
-.dc-card-count{font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;background:var(--surface2);color:var(--text2);margin-left:auto}
-.dc-card-count.red{background:var(--red-bg);color:var(--red-t)}
-.dc-card-count.amber{background:var(--amber-bg);color:var(--amber-t)}
-.dc-card-count.yellow{background:#fff8d6;color:#806000}
-.dc-card-meta{font-size:11px;color:var(--text2);margin-bottom:8px}
-
-.dc-section{margin-top:8px;padding-top:8px;border-top:.5px solid var(--border)}
-.dc-section-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:4px}
-
-.dc-issue{display:flex;gap:6px;font-size:12px;line-height:1.45;padding:3px 0;color:var(--text)}
-.dc-issue-icon{flex-shrink:0;width:14px;text-align:center;font-size:11px}
-.dc-issue.red .dc-issue-icon{color:var(--red-t)}
-.dc-issue.amber .dc-issue-icon{color:var(--amber-t)}
-.dc-issue.yellow .dc-issue-icon{color:#806000}
-.dc-issue-body{flex:1}
-.dc-issue-detail{color:var(--text2);font-size:11px;margin-top:1px}
-
-.dc-claim-row{padding:6px 8px;background:var(--surface2);border-radius:6px;margin-top:4px;font-size:11px}
-.dc-claim-meta{display:flex;gap:6px;align-items:baseline;flex-wrap:wrap;color:var(--text2)}
-.dc-claim-fee{font-family:ui-monospace,monospace;font-weight:700;color:var(--text)}
-.dc-claim-source{font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:var(--surface);color:var(--text3);text-transform:uppercase}
-
-.dc-collapsed{font-size:11px;color:var(--text3);cursor:pointer;padding:4px 0;user-select:none;-webkit-user-select:none}
-.dc-collapsed:hover{color:var(--text2)}
-
-.dc-reload-btn{font-size:11px;font-weight:600;padding:6px 12px;border-radius:var(--rsm);background:var(--surface2);color:var(--text);border:.5px solid var(--border2);cursor:pointer;font-family:inherit;margin-left:auto}
-.dc-reload-btn:hover{background:var(--surface)}
 </style>
 </head>
 <body>
@@ -791,7 +498,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:8px">
     <div class="hdr-title">KGH Historical Billing</div>
-    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.23</div>
+    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.15</div>
   </div>
   <div class="hdr-sub" id="hdr-sub">Single card mode</div>
 </div>
@@ -799,7 +506,6 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <div class="mode-bar">
   <div class="mode-tab active" id="tab-single" onclick="switchMode('single')">Single card</div>
   <div class="mode-tab" id="tab-batch" onclick="switchMode('batch')">Batch scan</div>
-  <div class="mode-tab" id="tab-datacheck" onclick="switchMode('datacheck')">🔍 Data Check</div>
 </div>
 
 <div class="container">
@@ -858,7 +564,6 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <!-- ═══════════════════════════════════════════════════
      SHARED: Patient + Billing form (used by both modes)
 ═══════════════════════════════════════════════════ -->
-<div id="shared-form">
 
 <!-- Patient -->
 <div class="card">
@@ -870,7 +575,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
   </div>
   <div class="row">
     <div><label>PHN * (10 digits)</label><input id="f-phn" type="text" inputmode="numeric" placeholder="9123456789" oninput="refreshPreview()" onblur="if(!window._ocrOriginal)lookupPatientFromSheets(this.value,'','')"></div>
-    <div><label>DOB (DD/MM/YYYY)</label><input id="f-dob" type="text" placeholder="15/03/1958" oninput="refreshPreview()"></div>
+    <div><label>DOB (DD/MMM/YYYY)</label><input id="f-dob" type="text" placeholder="15/Mar/1958" oninput="refreshPreview()"></div>
   </div>
   <div class="row">
     <div><label>Sex</label>
@@ -912,17 +617,9 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
   <div class="ctype-pick">
     <div class="ctype-pill sel" id="ct-consult" onclick="setConsultType('consult')">Consult</div>
     <div class="ctype-pill" id="ct-limited" onclick="setConsultType('limited')">Lmtd consult</div>
-    <div class="ctype-pill" id="ct-claim" onclick="setConsultType('claim')">+claim</div>
+    <div class="ctype-pill" id="ct-none" onclick="setConsultType('none')">No consult</div>
   </div>
   <div id="consult-fields">
-    <!-- v1.23: generic fee-code input, only shown in +claim mode (for procedures
-         or non-consult first visits like a standalone CCU day, MOST advance care,
-         complex discharge, etc). -->
-    <div id="claim-only-fields" style="display:none;margin-bottom:10px">
-      <label>Fee code <span style="font-weight:400;color:var(--text3)">(e.g. 33015 ECG, 33060 echo, 33075 Holter, 78717 complex d/c)</span></label>
-      <input id="c-claim-fee" type="text" placeholder="Enter fee code" oninput="refreshPreview()" autocomplete="off"
-             style="font-family:ui-monospace,'SF Mono',monospace;text-transform:uppercase">
-    </div>
     <div class="row">
       <div><label>Date</label><input id="c-date" type="date" onchange="onConsultDateChange()"></div>
       <div>
@@ -938,14 +635,11 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
         </div>
       </div>
     </div>
-    <!-- v1.23: consult-only fields (times + modifier banner). Hidden in +claim mode. -->
-    <div id="consult-only-fields-top">
-      <div class="row">
-        <div><label>Start time</label><input id="c-start" type="time" oninput="onStartTimeChange()"></div>
-        <div><label>End time</label><input id="c-end" type="time" oninput="updateModifierBanner()"></div>
-      </div>
-      <div id="mod-banner"></div>
+    <div class="row">
+      <div><label>Start time</label><input id="c-start" type="time" oninput="onStartTimeChange()"></div>
+      <div><label>End time</label><input id="c-end" type="time" oninput="updateModifierBanner()"></div>
     </div>
+    <div id="mod-banner"></div>
     <label>Referring MD</label>
     <div class="ref-wrap" id="ref-wrap">
       <input id="c-ref" type="text" placeholder="Search by last name…" oninput="onRefInput()" onblur="closeRefDdDelayed()" autocomplete="off">
@@ -958,8 +652,6 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
       </div>
       <button class="ref-confirmed-clear" onclick="clearRef()" title="Clear">✕</button>
     </div>
-    <!-- v1.23: consult-only fields (+MOST toggle + CCFPP). Hidden in +claim mode. -->
-    <div id="consult-only-fields-bottom">
     <div class="tgl-row" style="margin-top:10px">
       <div><div class="tgl-lbl">+MOST</div><div class="tgl-sub">MOST claim same day</div></div>
       <label class="tgl"><input type="checkbox" id="c-most" onchange="refreshPreview()"><div class="tgl-track"></div><div class="tgl-thumb"></div></label>
@@ -970,7 +662,6 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
              style="font-size:12px;font-family:ui-monospace,'SF Mono',monospace">
       <div id="ccfpp-note-hint" style="font-size:10px;color:var(--text3);margin-top:3px;display:none"></div>
     </div>
-    </div><!-- /consult-only-fields-bottom -->
     <div style="margin-top:10px">
       <label>Notes <span style="font-weight:400;color:var(--text3)">(added to all claims)</span></label>
       <textarea id="c-notes" rows="2" oninput="refreshPreview()" style="width:100%;padding:9px 10px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:13px;font-family:inherit;resize:vertical;background:var(--surface)" placeholder="e.g. Post-cath monitoring, transferred from Vernon"></textarea>
@@ -1029,42 +720,18 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 
 <!-- Export -->
 <div class="card">
-  <div class="card-title">Save to Sheet</div>
+  <div class="card-title">Export</div>
   <div id="confirmed-count-bar" style="display:none" class="confirmed-count"></div>
   <div style="font-size:12px;color:var(--text2);margin-bottom:10px">
-    Every action below auto-saves the card photo to your <strong>KGH Card Thumbnails</strong> Google Drive folder
-    as <code>PHN.YYYY-MM-DD-HHmm.jpg</code> for audit. Use <strong>Accept &amp; clear</strong> when the patient's
-    claims are already in the Sheet correctly. Use <strong>Send to Google Sheet</strong> when you've added or
-    edited claims that need to push.
-    <div style="margin-top:6px;font-size:11px;color:var(--text3)">
-      CSV export to iClinic happens from the Sheet itself — open the spreadsheet and use
-      <em>KGH Billing → ⬇ Export now (iClinic CSV)</em>. This dashboard is only for entry, search, and review.
-    </div>
+    <strong>Send to Sheets first</strong>, then use the combined iClinic export to download
+    all unsubmitted claims from both the Uploaded Claims and Claims tabs in one CSV,
+    sorted by last name. Exported claims are marked submitted and won't appear again —
+    but remain visible in claim history.
   </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-    <button class="btn btn-s" style="margin:0" onclick="acceptAndClear()">Accept &amp; clear<br><span style="font-size:10px;color:var(--text3);font-weight:400">(no claim changes)</span></button>
-    <button class="btn btn-p" style="margin:0" onclick="exportSheets()">Send to Google Sheet<br><span style="font-size:10px;color:rgba(255,255,255,.8);font-weight:400">(push changes)</span></button>
-  </div>
+  <button class="btn btn-p" onclick="exportSheets()">① Send to Google Sheets (Uploaded Claims tab)</button>
+  <button class="btn btn-g" style="margin-top:8px" onclick="exportCombinedIclinic()">② Download combined iClinic CSV &amp; mark submitted</button>
   <div id="export-status" class="status-bar" style="margin-top:8px"></div>
 </div>
-
-</div><!-- /shared-form -->
-
-<!-- ═══════════════════════════════════════════════════
-     DATA CHECK MODE (v1.17 — Stage A read-only detection)
-═══════════════════════════════════════════════════ -->
-<div id="datacheck-mode" style="display:none">
-
-<div id="dc-summary-bar" class="dc-summary" style="display:none"></div>
-<div id="dc-filters-bar" class="dc-filters" style="display:none"></div>
-<div id="dc-search-bar" class="dc-search" style="display:none">
-  <input id="dc-search-input" type="text" placeholder="Search name or PHN…" oninput="dcOnSearch()" autocomplete="off">
-</div>
-<div id="dc-content" class="dc-list">
-  <div class="dc-loading">Tap Data Check to load.</div>
-</div>
-
-</div><!-- /datacheck-mode -->
 
 </div><!-- /container -->
 
@@ -1103,6 +770,7 @@ var st = {
   dailyDates: [], combinedDates: [], directiveDates: [], ccuDates: [],
   claims: [],
   historicalClaims: [],   // v1.10 — populated from lookupPatient response
+  rangeAnchor: null,      // shift-click range fill anchor (ISO date)
 };
 var batch = {
   items: [], current: 0,
@@ -1132,6 +800,14 @@ function fmtName(s) {
   );
 }
 function isoToBc(iso) { if (!iso) return ''; var p=iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
+function fmtDOB(s) {
+  if (!s) return '';
+  var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var p = String(s).trim().split('/');
+  if (p.length !== 3) return s;
+  var m = parseInt(p[1], 10) - 1;
+  return p[0] + ' ' + (MON[m] || p[1]) + ' ' + p[2];
+}
 function monthLabel(d) { return d.toLocaleDateString('en-CA',{month:'long',year:'numeric'}); }
 function todayISO() { var d=new Date(); return d.getFullYear()+'-'+(d.getMonth()+1).toString().padStart(2,'0')+'-'+d.getDate().toString().padStart(2,'0'); }
 function esc(s) {
@@ -1436,23 +1112,12 @@ function setStatus(id,cls,msg) {
 // ─── Mode switch ──────────────────────────────────────────────────────────────
 function switchMode(m) {
   appMode = m;
-  // v1.17: shared form (Patient/Consult/Calendar/Preview/Export) is for entry
-  // modes only — hide it during data check
-  var inEntry = (m === 'single' || m === 'batch');
-  document.getElementById('shared-form').style.display = inEntry ? '' : 'none';
   document.getElementById('single-mode').style.display = m==='single' ? '' : 'none';
   document.getElementById('batch-mode').style.display  = m==='batch'  ? '' : 'none';
-  document.getElementById('datacheck-mode').style.display = m==='datacheck' ? '' : 'none';
   document.getElementById('tab-single').classList.toggle('active', m==='single');
   document.getElementById('tab-batch').classList.toggle('active', m==='batch');
-  document.getElementById('tab-datacheck').classList.toggle('active', m==='datacheck');
-  var sub = m==='single' ? 'Single card mode'
-          : m==='batch'  ? 'Batch scan mode'
-          : 'Data check mode';
-  document.getElementById('hdr-sub').textContent = sub;
+  document.getElementById('hdr-sub').textContent = m==='single' ? 'Single card mode' : 'Batch scan mode';
   updateConfirmedBar();
-  // v1.17: lazy-load data check on first activation
-  if (m === 'datacheck' && !dc.loaded && !dc.loading) loadDataCheck();
 }
 
 
@@ -1715,32 +1380,13 @@ function heRefSelect(id, num, name) {
 }
 
 // ─── Consult type / CCFPP ────────────────────────────────────────────────────
-// v1.23: three states now —
-//   'consult' / 'limited' → builds a 33010/33012 consult claim (with times,
-//                            optional MOST, CCFPP modifiers)
-//   'claim'              → builds a generic single-fee claim (procedure,
-//                            standalone first-visit billing not a consult).
-//                            Hides times/MOST/CCFPP; shows fee-code input.
-//                            If fee field is left blank, this section pushes
-//                            nothing (same effect as the old "No consult").
 function setConsultType(t) {
-  // Accept legacy 'none' as alias for new 'claim' state
-  if (t === 'none') t = 'claim';
   st.consultType = t;
-  ['consult','limited','claim'].forEach(function(x){
-    var el = document.getElementById('ct-'+x);
-    if (el) el.classList.toggle('sel', x===t);
+  ['consult','limited','none'].forEach(function(x){
+    document.getElementById('ct-'+x).classList.toggle('sel', x===t);
   });
-  // consult-fields wrapper always visible now (used by all three modes)
-  document.getElementById('consult-fields').style.display = '';
-  // Toggle the consult-specific sections (times + modifier banner + MOST + CCFPP)
-  var isConsult = (t === 'consult' || t === 'limited');
-  var topEl = document.getElementById('consult-only-fields-top');
-  var botEl = document.getElementById('consult-only-fields-bottom');
-  var claimEl = document.getElementById('claim-only-fields');
-  if (topEl)   topEl.style.display   = isConsult ? '' : 'none';
-  if (botEl)   botEl.style.display   = isConsult ? '' : 'none';
-  if (claimEl) claimEl.style.display = isConsult ? 'none' : '';
+  var show = t !== 'none';
+  document.getElementById('consult-fields').style.display = show ? '' : 'none';
   refreshPreview();
 }
 
@@ -1799,6 +1445,27 @@ var FEES_BY_TYPE = {
   combined: ['33008'],
   directive: ['33006']
 };
+
+// Silent range-fill variant of toggleDay — used by shift-click.
+// Skips days with historical claims, CCU/consult mutex, or duplicates without
+// popping modals or toasts. Adds the day if clean; does nothing otherwise.
+function rangeFillDay(iso) {
+  if (histClaimsOnDay(iso).length) return;
+  var dom = dominantHistType(iso);
+  if (st.calMode === 'ccu' && dom === 'consult') return;
+  if (st.calMode !== 'ccu' && dom === 'consult') return;
+  var alias = getAlias();
+  var dateBc = isoToBc(iso);
+  var modeFees = FEES_BY_TYPE[st.calMode] || [];
+  var dup = st.historicalClaims.filter(function(c){
+    return c.date === dateBc &&
+           String(c.alias||'').toUpperCase() === String(alias||'').toUpperCase() &&
+           modeFees.indexOf(c.fee) >= 0;
+  });
+  if (dup.length) return;
+  var arr = st[st.calMode+'Dates'];
+  if (arr.indexOf(iso) < 0) arr.push(iso);
+}
 
 function toggleDay(iso) {
   // v1.10 — historical claim on this day? open edit modal instead of toggling.
@@ -1896,7 +1563,26 @@ function renderCal() {
     else if (dc.indexOf('d-combined') >= 0)  { var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='comb';el.appendChild(l); }
     else if (dc.indexOf('d-directive') >= 0) { var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='dir';el.appendChild(l); }
     else if (dc.indexOf('d-consult') >= 0)   { var l=document.createElement('span');l.className='cal-day-lbl';l.textContent='cnslt';el.appendChild(l); }
-    (function(isoDate){ el.addEventListener('click', function(){ toggleDay(isoDate); }); })(iso);
+    (function(isoDate){
+      el.addEventListener('click', function(e){
+        if (e.shiftKey && st.rangeAnchor && st.rangeAnchor !== isoDate) {
+          // Fill range from anchor to clicked day (inclusive, both directions)
+          var a = st.rangeAnchor < isoDate ? st.rangeAnchor : isoDate;
+          var b = st.rangeAnchor < isoDate ? isoDate : st.rangeAnchor;
+          var cur = new Date(a+'T12:00:00'), end = new Date(b+'T12:00:00');
+          while (cur <= end) {
+            var di = cur.getFullYear()+'-'+(cur.getMonth()+1).toString().padStart(2,'0')+'-'+cur.getDate().toString().padStart(2,'0');
+            rangeFillDay(di);
+            cur.setDate(cur.getDate()+1);
+          }
+          st.rangeAnchor = null;
+          renderCal(); refreshPreview();
+        } else {
+          st.rangeAnchor = isoDate;
+          toggleDay(isoDate);
+        }
+      });
+    })(iso);
     grid.appendChild(el);
   }
 }
@@ -2040,7 +1726,7 @@ function updateModifierBanner() {
   var end     = (document.getElementById('c-end')||{}).value;
   var dateISO = (document.getElementById('c-date')||{}).value;
   var el      = document.getElementById('mod-banner');
-  if (!el || st.consultType === 'claim') { if(el) el.innerHTML=''; return; }
+  if (!el || st.consultType === 'none') { if(el) el.innerHTML=''; return; }
   if (!start && !dateISO) { el.innerHTML = ''; return; }
 
   var modBase  = getModifier(start, dateISO);
@@ -2148,33 +1834,19 @@ function buildClaims() {
   var claims = [];
   var cDate = consultDateISO();
 
-  // v1.23 — Consult/limited path: builds 33010/33012 with times + optional MOST + CCFPP modifiers
-  if ((st.consultType === 'consult' || st.consultType === 'limited') && cDate) {
+  if (st.consultType !== 'none' && cDate) {
     var start = document.getElementById('c-start').value;
     var end   = document.getElementById('c-end').value;
-    var fee   = st.consultType === 'consult' ? '33010' : '33012';
-    // v1.18: belt-and-suspenders endTime handling.
-    // The passive autofill in onStartTimeChange() only fires when the user
-    // TYPES a start time. OCR-populated forms set the value programmatically
-    // and oninput may not fire — leaving end blank at submit. This caused
-    // the Marcetta + Osman missing-endTime claims surfaced by Data Check.
-    // Mirrors PWA v3.57 hardening: every consult that lands in Sheets has
-    // both start and end times.
-    if (start && !end) {
-      end = minsToTime(t2m(start) + 50);          // default 50-min consult
-      document.getElementById('c-end').value = end; // reflect in UI for transparency
-    }
-    if (!start) {
-      showToast('Consult requires a start time — fill it in before submitting.', 'warn');
-      return;
-    }
+    var fee   = st.consultType === 'consult' ? '33010'
+                : st.consultType === 'limited' ? '33012'
+                : '';
     var ccfppNote = (document.getElementById('c-ccfpp-note')||{value:''}).value.trim();
     var extraNotes = (document.getElementById('c-notes')||{value:''}).value.trim();
     var fullNote = [ccfppNote, extraNotes].filter(function(s){return s;}).join(' | ');
     claims.push(Object.assign({},base,{ id:uid(), claimType:st.consultType, date:cDate, fee:fee, icd:dx, refby:refNum, refbyName:refName, startTime:start, endTime:end, notes:fullNote, _sortDate:cDate, _sortSub:0 }));
     if (document.getElementById('c-most').checked)
-      // v1.16: corrected fee code 03701 -> 78720 (03701 was wrong; 78720 is the actual MOST advance care code)
-      claims.push(Object.assign({},base,{ id:uid(), claimType:'most', date:cDate, fee:'78720', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:'', _sortDate:cDate, _sortSub:1 }));
+      // v1.8: 'MOST add-on' note removed — was redundant with the 03701 fee code itself
+      claims.push(Object.assign({},base,{ id:uid(), claimType:'most', date:cDate, fee:'03701', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:'', _sortDate:cDate, _sortSub:1 }));
     // Modifier claims (night / weekend+stat / evening)
     var modBase  = getModifier(start, cDate);
     var incUnits = consultIncUnits(start, end);
@@ -2185,32 +1857,6 @@ function buildClaims() {
         var incStart = minsToTime((t2m(start) + 30) % 1440);
         claims.push(Object.assign({},base,{ id:uid(), claimType:'modifier-inc', date:cDate, fee:modInc.inc, icd:dx, refby:refNum, refbyName:refName, startTime:incStart, endTime:'', notes:fullNote, _sortDate:cDate, _sortSub:2, _units:incUnits }));
       }
-    }
-  }
-
-  // v1.23 — Generic +claim path: single fee on the consult/first-visit date.
-  // For procedures (33015 ECG, 33060 echo, 33075 Holter, 33027 pacemaker,
-  // 78717 complex discharge, etc) or any non-consult first visit. If the
-  // fee field is left blank, nothing is pushed from this section — same
-  // effect as the old "No consult" state.
-  if (st.consultType === 'claim' && cDate) {
-    var claimFee = ((document.getElementById('c-claim-fee')||{}).value || '').trim().toUpperCase();
-    if (claimFee) {
-      var claimNotes = (document.getElementById('c-notes')||{value:''}).value.trim();
-      claims.push(Object.assign({},base,{
-        id: uid(),
-        claimType: 'procedure',
-        date: cDate,
-        fee: claimFee,
-        icd: dx,
-        refby: refNum,
-        refbyName: refName,
-        startTime: '',
-        endTime: '',
-        notes: claimNotes,
-        _sortDate: cDate,
-        _sortSub: 0
-      }));
     }
   }
 
@@ -2229,15 +1875,15 @@ function buildClaims() {
     claims.push(Object.assign({},base,{ id:uid(), claimType:'directive', date:iso, fee:'33006', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:extraNotes, _sortDate:iso, _sortSub:5 }));
   });
 
-  // v1.19 — CCU now writes CCU_DAILY placeholder (matches PWA v3.60).
-  // Apps Script ccuConsolidateForExport() rolls up consecutive CCU_DAILY days
-  // per patient+alias into properly-banded 1411 × 1 + 1421 × N + 1431 × M
-  // rows at export time. This produces the BC MSP standard one-row-per-band
-  // form instead of one row per day, AND eliminates the band-at-rest
-  // correctness problem when adding mid-episode dates.
+  // v1.10 — CCU day numbering counts historical CCU dates as priors.
+  // Union of historical + new selections, sorted by date; index → day number.
+  var ccuUnion = ccuDateUnion();
   st.ccuDates.slice().sort().forEach(function(iso){
+    var dn = ccuUnion.indexOf(iso) + 1;   // 1-based index in the chronological union
+    if (dn < 1) dn = 1;
+    var fee = dn===1 ? '1411' : dn<=7 ? '1421' : '1431';
     var ccuNote = extraNotes || '';
-    claims.push(Object.assign({},base,{ id:uid(), claimType:'ccu', date:iso, fee:'CCU_DAILY', icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:ccuNote, _sortDate:iso, _sortSub:6 }));
+    claims.push(Object.assign({},base,{ id:uid(), claimType:'ccu', date:iso, fee:fee, icd:dx, refby:refNum, refbyName:refName, startTime:'', endTime:'', notes:ccuNote, _sortDate:iso, _sortSub:6 }));
   });
 
   claims.sort(function(a,b){ return a._sortDate<b._sortDate?-1:a._sortDate>b._sortDate?1:a._sortSub-b._sortSub; });
@@ -2379,7 +2025,7 @@ function deleteClaim(c) {
 
 // ─── Clear form ───────────────────────────────────────────────────────────────
 function clearForm() {
-  ['f-last','f-first','f-phn','f-dob','f-ward','f-room','c-date','c-dx','c-ref','c-start','c-end','c-ccfpp-note','c-claim-fee','combined-reason'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
+  ['f-last','f-first','f-phn','f-dob','f-ward','f-room','c-date','c-dx','c-ref','c-start','c-end','c-ccfpp-note','combined-reason'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
   document.getElementById('f-sex').value='';
   document.getElementById('c-most').checked=false;
   clearIcd();
@@ -2443,11 +2089,10 @@ function loadBatchItem(idx) {
   // Store raw OCR output for corrections logging
   window._ocrOriginal = { last:item.last||'', first:item.first||'', phn:item.phn||'',
                            dob:item.dob||'', sex:item.sex||'', engine:'worker-batch' };
-  // v1.21 — show thumbnail from this batch session's OCR results.
-  // Pre-v1.21 also tried localStorage; now Drive is the audit store,
-  // and within-session we just keep _batchOCRResults in memory.
+  // Show thumbnail in photo zone (from OCR results or localStorage)
   var pz = document.getElementById('photo-zone');
-  var thumbSrc = (_batchOCRResults[idx] && _batchOCRResults[idx].thumb) || null;
+  var thumbSrc = (_batchOCRResults[idx] && _batchOCRResults[idx].thumb)
+               || loadThumbFromStorage(item.phn);
   if (thumbSrc) {
     pz.innerHTML = '<img src="'+thumbSrc+'" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;display:block">';
     pz.style.padding = '0';
@@ -2493,21 +2138,9 @@ function renderQueueBar() {
 }
 
 function batchConfirm() {
-  // v1.21 — Save card photo to Google Drive as audit trail.
-  // Was localStorage; now permanent Drive backup with auto-fallback
-  // to local Downloads folder if Drive fails (so photo is never lost).
+  // Save thumbnail for audit trail, keyed by PHN
   var phn = (document.getElementById('f-phn')||{}).value || '';
-  if (window._singleThumb) {
-    saveThumbToDrive(phn, window._singleThumb, function(ok, info){
-      if (ok) {
-        showToast('✓ Card photo saved to Drive', '', 2500);
-      } else if (info && info.fellBackToDisk) {
-        showToast('⚠ Drive failed — photo saved to Downloads (re-upload later)', 'warn', 5000);
-      } else {
-        showToast('⛔ Photo save failed (Drive + Downloads) — see console', 'err', 5000);
-      }
-    });
-  }
+  if (phn && window._singleThumb) saveThumbToStorage(phn, window._singleThumb);
   // Collect current preview claims into confirmed list
   document.querySelectorAll('.fee-inp').forEach(function(inp){ if (inp.dataset.id&&inp.value) _feeOverrides[inp.dataset.id]=inp.value; });
   st.claims.forEach(function(c){
@@ -2608,10 +2241,10 @@ function sendSingleOCR(b64) {
     window._ocrOriginal = { last:data.last||'', first:data.first||'', phn:data.phn||'',
                              dob:data.dob||'', sex:data.sex||'', engine:'worker',
                              capturedAt: Date.now() };
-    // v1.21 — Thumbnail no longer saved here. It's saved when the user
-    // takes a deliberate action (Accept & clear OR Send to Google Sheet),
-    // by which point the PHN is guaranteed populated (manually if OCR
-    // missed it). Photo is held in window._singleThumb meanwhile.
+    // Save cropped thumbnail to localStorage keyed by PHN for later audit
+    if (data.phn && data.phn.replace(/\D/g,'').length === 10) {
+      window._singleThumb && saveThumbToStorage(data.phn, window._singleThumb);
+    }
     refreshPreview();
     lookupPatientFromSheets(data.phn||'', data.last||'', data.dob||'');
   };
@@ -2694,152 +2327,18 @@ function makeBatchThumb(dataUrl) {
   return canvas.toDataURL('image/jpeg', 0.5);
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// v1.21 — Card photo backup → Google Drive (no localStorage)
-// ═══════════════════════════════════════════════════════════════════
-// Every captured card photo lands in the "KGH Card Thumbnails" folder
-// in the Apps Script owner's Drive, filename PHN.YYYY-MM-DD-HHmm.jpg.
-// Triggered from action buttons (Accept & clear / Send to Google Sheet)
-// AND from batchConfirm — i.e. every "card processed" step writes a
-// permanent audit thumbnail.
-//
-// The Apps Script side requires the new saveCardThumbnail action.
-// First call after deployment will prompt the script owner to grant
-// the Drive scope.
-//
-// Failure mode (Kathryn 2026-05-16): if Drive upload fails (network,
-// auth expired, scope missing), the photo auto-downloads to the
-// user's Downloads folder as a fallback. Filename matches what the
-// Drive copy would have been, so she can manually upload it later.
-// This guarantees zero photo loss — every captured card photo
-// either lands in Drive or in Downloads, never nowhere.
-
-function formatThumbDateStamp() {
-  var d = new Date();
-  var pad = function(n){ return n < 10 ? '0'+n : ''+n; };
-  return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) +
-         '-' + pad(d.getHours()) + pad(d.getMinutes());
-}
-
-function buildThumbFilename(phn, stamp) {
-  var digits = String(phn || '').replace(/\D/g,'');
-  var phnPart = digits || ('UNKNOWN-' + stamp.replace(/\D/g,''));
-  return phnPart + '.' + stamp + '.jpg';
-}
-
-// Fallback: dataURL → Downloads folder via <a download>. Works on iOS Safari
-// (single user-gesture download → "Save to Files" prompt) and on desktop
-// browsers (direct write to Downloads). Filename matches the Drive name
-// so Kathryn can re-upload manually if needed.
-function fallbackDownloadThumb(phn, dataUrl) {
-  if (!dataUrl) return false;
+function saveThumbToStorage(phn, thumbDataUrl) {
+  if (!phn || phn.replace(/\D/g,'').length !== 10) return;
   try {
-    var stamp = formatThumbDateStamp();
-    var filename = buildThumbFilename(phn, stamp);
-    var a = document.createElement('a');
-    a.href = dataUrl;
-    a.download = filename;
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(function(){ if (a.parentNode) a.parentNode.removeChild(a); }, 100);
-    return true;
+    localStorage.setItem('kghthumb:'+phn.replace(/\D/g,''), thumbDataUrl);
   } catch(e) {
-    console.warn('Fallback download failed:', e);
-    return false;
+    // Storage full — silently skip
   }
 }
 
-// Save card photo to Drive. PHN may be empty/short (will be normalized
-// to "UNKNOWN-{datestamp}" server-side). callback(ok, info) fires
-// after the request completes — non-blocking; the calling action
-// (export / clear) shouldn't wait on this for its own success.
-//
-// On Drive failure, automatically falls back to a local download.
-// `info.fellBackToDisk` will be true if the fallback fired.
-function saveThumbToDrive(phn, dataUrl, callback) {
-  function done(ok, info) {
-    info = info || {};
-    // v1.21 — On Drive failure, always fall back to local download so the
-    // photo is never lost. The calling code surfaces both outcomes.
-    if (!ok && dataUrl) {
-      var fallbackOk = fallbackDownloadThumb(phn, dataUrl);
-      info.fellBackToDisk = fallbackOk;
-      info.fallbackFilename = fallbackOk ? buildThumbFilename(phn, formatThumbDateStamp()) : null;
-    }
-    if (typeof callback === 'function') callback(ok, info);
-  }
-  if (!dataUrl) {
-    done(false, { error:'No photo to save' });
-    return;
-  }
-  var url = (document.getElementById('script-url')||{}).value || '';
-  if (!url) {
-    done(false, { error:'No Apps Script URL configured' });
-    return;
-  }
-  var payload = {
-    action:       'saveCardThumbnail',
-    key:          getScriptKey(),
-    phn:          String(phn || '').replace(/\D/g, ''),
-    dataUrl:      dataUrl,
-    dateUploaded: formatThumbDateStamp()
-  };
-  fetch(url, { method:'POST', body: JSON.stringify(payload) })
-    .then(function(r){ return r.text(); })
-    .then(function(text){
-      try {
-        var resp = JSON.parse(text);
-        if (resp && resp.ok) {
-          done(true, resp);
-        } else {
-          done(false, resp || { error:'Empty response' });
-        }
-      } catch(e) {
-        done(false, { error:'Bad JSON from Apps Script' });
-      }
-    })
-    .catch(function(err){
-      done(false, { error: 'Network: ' + (err && err.message ? err.message : err) });
-    });
-}
-
-// "Accept & clear" — for when the card has been reviewed and existing
-// Sheet data is correct (no claims to push). Always saves thumbnail
-// for audit, then clears form. Mirrors clearForm's reset behavior
-// but with the thumbnail save bolted on.
-function acceptAndClear() {
-  var phn = ((document.getElementById('f-phn')||{}).value || '').replace(/\D/g,'');
-  var photo = window._singleThumb;
-  if (!photo) {
-    // No photo to save — just clear and tell user
-    setStatus('export-status','st-info','No photo to save — form cleared.');
-    clearForm();
-    return;
-  }
-  setStatus('export-status','st-info','Saving card photo to Drive…');
-  saveThumbToDrive(phn, photo, function(ok, info) {
-    if (ok) {
-      var label = info.fileName || 'photo';
-      setStatus('export-status','st-ok',
-        '✓ Card photo saved to Drive (' + label + ') — form cleared.');
-      showToast('✓ Photo saved · ' + label, '', 3000);
-    } else if (info && info.fellBackToDisk) {
-      // v1.21 — Drive failed but local Downloads succeeded. Warn loud, mention manual re-upload.
-      setStatus('export-status','st-warn',
-        '⚠ Drive upload FAILED — photo saved to your Downloads folder instead.\n' +
-        '   Drive error: ' + (info.error || 'unknown') + '\n' +
-        '   Filename: ' + (info.fallbackFilename || '(see Downloads)') + '\n' +
-        '   Re-upload manually to your KGH Card Thumbnails Drive folder when you can.');
-      showToast('⚠ Drive failed — photo in Downloads instead', 'warn', 6000);
-    } else {
-      setStatus('export-status','st-warn',
-        '⛔ Photo NOT saved anywhere — both Drive and Downloads fallback failed.\n' +
-        '   Error: ' + (info && info.error ? info.error : 'unknown'));
-      showToast('⛔ Photo save failed completely', 'err', 6000);
-    }
-    clearForm();
-  });
+function loadThumbFromStorage(phn) {
+  if (!phn) return null;
+  try { return localStorage.getItem('kghthumb:'+phn.replace(/\D/g,'')); } catch(e) { return null; }
 }
 
 function runBatchOCR(idx) {
@@ -2965,7 +2464,7 @@ function checkClosePhnMatches(phn, lb) {
                matches.map(function(m) {
                  return '<div style="margin-top:6px;padding:6px;background:#fff;border-radius:6px;font-weight:normal;color:var(--text)">' +
                         '<b>' + esc(m.last) + ', ' + esc(m.first) + '</b>' +
-                        (m.dob ? ' · DOB ' + esc(m.dob) : '') +
+                        (m.dob ? ' · DOB ' + esc(fmtDOB(m.dob)) : '') +
                         ' · PHN <code>' + esc(m.phn) + '</code> ' +
                         '<span style="color:var(--text3)">(' + m.diffs +
                         ' digit' + (m.diffs===1?'':'s') + ' off)</span>' +
@@ -3044,7 +2543,7 @@ function renderLookupBanner(lb, data) {
     }
 
     lines.push('<b>Found:</b> ' + esc(p.last) + ', ' + esc(p.first) +
-               (p.dob ? ' · DOB ' + esc(p.dob) : '') +
+               (p.dob ? ' · DOB ' + esc(fmtDOB(p.dob)) : '') +
                (p.ward ? ' · ' + esc(p.ward) : '') + matchStr);
     // v1.13: Pre-fill any blanks from the matched patient — includes name
     // fields so a PHN-only lookup actually populates the form. Only writes
@@ -3547,21 +3046,14 @@ function exportSheets() {
   if (!url){ setStatus('export-status','st-warn','No Apps Script URL configured.'); return; }
   var claims=getExportClaims();
   if (!claims.length){ setStatus('export-status','st-warn','No claims to export.'); return; }
-  // v1.19 — LOUD ICD validation. Any one invalid ICD aborts the entire export.
-  // Make it impossible to miss: per-claim breakdown + toast + clear "NOTHING SAVED" message.
+  // v1.8: block submit if any claim has free-text ICD (e.g. "Angina", "NSTEMI").
+  // ICD9 must come from the dropdown so iClinic accepts it.
   var bad = claims.filter(function(c){ return !isValidIcd9(c.icd); });
   if (bad.length) {
-    var summary = bad.slice(0, 5).map(function(c){
-      var fee = c.fee || '?';
-      var dt  = c.date || '?';
-      return '  • ' + fee + ' on ' + dt + ' — ICD "' + (c.icd || '(blank)') + '"';
-    }).join('\n');
-    if (bad.length > 5) summary += '\n  ... and ' + (bad.length - 5) + ' more';
+    var sample = bad[0].icd || '(empty)';
     setStatus('export-status','st-warn',
-      '⛔ NOTHING SAVED — ' + bad.length + ' of ' + claims.length + ' claim' +
-      (claims.length===1?'':'s') + ' have invalid ICD9 codes:\n\n' + summary +
-      '\n\nPick the diagnosis from the dropdown (free text not accepted) and resubmit.');
-    showToast('⛔ Export blocked — ' + bad.length + ' claim(s) have bad ICD codes. See status for details.', 'err', 6000);
+      bad.length + ' claim' + (bad.length===1?'':'s') + ' have invalid ICD9 code "' + sample + '". ' +
+      'Pick the diagnosis from the dropdown — free text is not accepted.');
     var inp = document.getElementById('c-dx');
     if (inp) { inp.focus(); inp.scrollIntoView({block:'center',behavior:'smooth'}); }
     return;
@@ -3569,20 +3061,6 @@ function exportSheets() {
   setStatus('export-status','st-info','Saving patients…');
   var sampleClaim = claims[0] || {};
   var corrections = buildCorrections(sampleClaim.phn, sampleClaim.last, sampleClaim.first);
-
-  // v1.21 — Save card photo to Drive in parallel with patient/claim saves.
-  // Outcome reported in the final status message. Non-blocking — if Drive
-  // save fails, claims still go through (audit trail loss is preferable
-  // to blocking billing entry).
-  var thumbResult = null;   // null=pending, {ok:true,...}=saved, {ok:false,...}=failed
-  var thumbPhn = ((document.getElementById('f-phn')||{}).value || '').replace(/\D/g,'');
-  if (window._singleThumb) {
-    saveThumbToDrive(thumbPhn, window._singleThumb, function(ok, info){
-      thumbResult = Object.assign({ ok:ok }, info || {});
-    });
-  } else {
-    thumbResult = { ok:false, error:'No photo in this session', noPhoto:true };
-  }
 
   // v1.12: Build one patient row per unique PHN and push savePatient for each
   // BEFORE saveHistorical, so the patient row exists when claims arrive.
@@ -3592,10 +3070,6 @@ function exportSheets() {
   // points (main app, Meditech import, upload tool) now create patient rows.
   var patientsToSave = buildPatientsFromClaims(claims);
 
-  // v1.19 — track failed patient saves so they can be surfaced in the final
-  // status message instead of swallowed silently.
-  var patientFailures = [];
-
   // Sequentially push savePatient — Apps Script handles dedup by id.
   // Payload format follows upload.html convention: action/key flat in body
   // along with patient fields (not wrapped in a 'body' field).
@@ -3603,32 +3077,11 @@ function exportSheets() {
     if (idx >= patientsToSave.length) return Promise.resolve();
     setStatus('export-status','st-info',
       'Saving patient '+(idx+1)+' of '+patientsToSave.length+'…');
-    var pat = patientsToSave[idx];
-    var pp = Object.assign({}, pat, { action:'savePatient', key:getScriptKey() });
+    var pp = Object.assign({}, patientsToSave[idx],
+                           { action:'savePatient', key:getScriptKey() });
     return fetch(url, { method:'POST', body: JSON.stringify(pp) })
-      .then(function(r){ return r.text(); })
-      .then(function(text) {
-        // v1.19 — capture {ok:false, error:...} responses from Apps Script
-        try {
-          var resp = JSON.parse(text);
-          if (resp && resp.ok === false && resp.error) {
-            patientFailures.push({
-              name: (pat.last || '?') + ', ' + (pat.first || ''),
-              phn:  pat.phn || '?',
-              error: resp.error
-            });
-          }
-        } catch(e) {}
-        return pushOnePatient(idx+1);
-      })
-      .catch(function(err) {
-        patientFailures.push({
-          name: (pat.last || '?') + ', ' + (pat.first || ''),
-          phn:  pat.phn || '?',
-          error: 'Network error: ' + (err && err.message ? err.message : err)
-        });
-        return pushOnePatient(idx+1);
-      });
+      .then(function() { return pushOnePatient(idx+1); })
+      .catch(function() { return pushOnePatient(idx+1); });
   }
 
   pushOnePatient(0).then(function() {
@@ -3650,87 +3103,70 @@ function exportSheets() {
       var data; try{ data=JSON.parse(text); }catch(e){ data={}; }
       if (data.ok) {
         var ins=data.inserted||0, dups=data.duplicates||[];
-        // v1.19 — build a loud structured status combining all three outcomes:
-        // inserted / patient-failures / duplicates. Make duplicate-skip
-        // unmissable since that was the Ravestein silent-fail path.
-        // v1.21 — also report Drive thumbnail save outcome.
-        var lines = [];
-        var hadIssues = false;
-        if (ins > 0) {
-          lines.push('✓ Saved ' + ins + ' claim' + (ins===1?'':'s') + ' to Claims tab');
-        }
-        if (corrections.length) {
-          lines.push('  ' + corrections.length + ' OCR correction' + (corrections.length===1?'':'s') + ' logged');
-        }
-        // v1.21 — Drive thumbnail status. May still be pending if the parallel
-        // save hasn't completed yet; if so, just note it as "in progress".
-        // Fallback path: if Drive failed but local Downloads succeeded,
-        // surface that distinctly so the user knows where the photo is.
-        if (thumbResult) {
-          if (thumbResult.ok) {
-            lines.push('✓ Card photo saved to Drive: ' + (thumbResult.fileName || 'kgh-' + thumbPhn + '.jpg'));
-          } else if (thumbResult.noPhoto) {
-            lines.push('· No card photo to save (no upload this session)');
-          } else if (thumbResult.fellBackToDisk) {
-            hadIssues = true;
-            lines.push('⚠ DRIVE UPLOAD FAILED — photo saved to your Downloads folder instead');
-            lines.push('   Drive error: ' + (thumbResult.error || 'unknown'));
-            lines.push('   Local filename: ' + (thumbResult.fallbackFilename || '(see Downloads)'));
-            lines.push('   → Re-upload manually to your KGH Card Thumbnails Drive folder later');
-          } else {
-            hadIssues = true;
-            lines.push('⛔ CARD PHOTO LOST — both Drive AND Downloads fallback failed');
-            lines.push('   Error: ' + (thumbResult.error || 'unknown'));
-          }
-        } else {
-          lines.push('· Card photo upload to Drive still in progress…');
-        }
-        if (patientFailures.length) {
-          hadIssues = true;
-          lines.push('');
-          lines.push('⚠ ' + patientFailures.length + ' patient row save' + (patientFailures.length===1?'':'s') + ' FAILED:');
-          patientFailures.slice(0, 5).forEach(function(p){
-            lines.push('  • ' + p.name + ' (PHN ' + p.phn + ') — ' + p.error);
-          });
-          if (patientFailures.length > 5) lines.push('  ... and ' + (patientFailures.length - 5) + ' more');
-        }
+        var msg='Saved '+ins+' claim'+(ins===1?'':'s')+' to Uploaded Claims tab ✓'+(corrections.length?' · '+corrections.length+' OCR correction'+(corrections.length===1?'':'s')+' logged':'');
         if (dups.length) {
-          hadIssues = true;
-          lines.push('');
-          lines.push('⚠ ' + dups.length + ' claim' + (dups.length===1?'':'s') + ' SKIPPED as duplicates — already in Claims tab with same patient/fee/date/doctor:');
-          dups.slice(0, 10).forEach(function(d){
-            lines.push('  • ' + d.name + ' — ' + d.fee + ' on ' + d.date + ' (alias ' + d.alias + ')');
-          });
-          if (dups.length > 10) lines.push('  ... and ' + (dups.length - 10) + ' more');
-        }
-        // v1.19 — if NOTHING saved (zero inserts), make that crystal clear at top
-        if (ins === 0) {
-          lines.unshift('⚠ ZERO claims saved — see details below');
-          setStatus('export-status','st-warn', lines.join('\n'));
-          showToast('⚠ No claims saved — check status message', 'warn', 6000);
-        } else if (hadIssues) {
-          setStatus('export-status','st-warn', lines.join('\n'));
-          showToast('Saved ' + ins + ', but ' + (dups.length + patientFailures.length) + ' issue(s) — see status', 'warn', 5000);
-        } else {
-          setStatus('export-status','st-ok', lines.join('\n'));
-        }
+          msg+='\n\n⚠ '+dups.length+' duplicate'+(dups.length===1?'':'s')+' skipped:\n';
+          msg+=dups.map(function(d){ return '  '+d.name+' · '+d.fee+' · '+d.date+' ('+d.reason+')'; }).join('\n');
+          setStatus('export-status','st-warn',msg);
+        } else { setStatus('export-status','st-ok',msg); }
         // v1.11 — clear form on successful push as visual confirmation that processing is done.
-        // v1.19 — only clear form if we actually inserted something. If everything was
-        // skipped or failed, keep the form so user can review and fix.
-        if (ins > 0) clearForm();
+        // Status banner is in #export-status (separate from the form) so the message stays visible.
+        clearForm();
       } else {
-        setStatus('export-status','st-warn','⛔ Sheets error — nothing saved: '+JSON.stringify(data).slice(0,300));
-        showToast('⛔ Sheets error — nothing saved', 'err', 5000);
+        setStatus('export-status','st-warn','Sheets error: '+JSON.stringify(data).slice(0,200));
       }
     })
     .catch(function(err){
       clearTimeout(timer);
       if (err.name==='AbortError') return;
-      setStatus('export-status','st-warn','⛔ Network error — nothing saved: '+err.message);
-      showToast('⛔ Network error — nothing saved', 'err', 5000);
+      setStatus('export-status','st-warn','Network error: '+err.message);
     });
   }  // end sendHistoricalClaims
 }
+
+// Combined iClinic export: fetches ALL unsubmitted claims from both tabs,
+// deduplicates, downloads one CSV, then marks everything as submitted.
+function exportCombinedIclinic() {
+  var url = document.getElementById('script-url').value.trim();
+  if (!url){ setStatus('export-status','st-warn','Apps Script URL not configured.'); return; }
+  setStatus('export-status','st-info','Fetching unsubmitted claims from Sheets…');
+  var ctrl=new AbortController();
+  var timer=setTimeout(function(){ ctrl.abort(); }, 90000);
+  fetch(url, {
+    method:'POST',
+    body: JSON.stringify({ action:'getCombinedExport', key:getScriptKey() }),
+    signal: ctrl.signal
+  })
+  .then(function(r){ return r.text(); })
+  .then(function(text){
+    clearTimeout(timer);
+    var data; try{ data=JSON.parse(text); }catch(e){ data={}; }
+    if (!data.ok || !data.csv) {
+      setStatus('export-status','st-warn','No unsubmitted claims found, or Sheets error: '+JSON.stringify(data).slice(0,120));
+      return;
+    }
+    // Download the CSV
+    var a = document.createElement('a');
+    a.href = 'data:text/csv;charset=utf-8,'+encodeURIComponent(data.csv);
+    a.download = 'iClinic_KGH_combined_'+todayISO()+'.csv';
+    a.click();
+    var fromClaims   = data.fromClaims   || 0;
+    var fromUploaded = data.fromUploaded || 0;
+    var total        = data.total        || 0;
+    var dups         = data.duplicates   || 0;
+    setStatus('export-status','st-ok',
+      'Downloaded '+total+' claims'
+      +' ('+fromClaims+' from Claims, '+fromUploaded+' from Uploaded Claims)'
+      +(dups?' · '+dups+' cross-tab duplicate'+(dups===1?'':'s')+' removed':'')
+      +' — all marked submitted ✓');
+  })
+  .catch(function(err){
+    clearTimeout(timer);
+    if (err.name==='AbortError'){ setStatus('export-status','st-warn','Request timed out.'); return; }
+    setStatus('export-status','st-warn','Network error: '+err.message);
+  });
+}
+
 
 // ─── Crop modal ───────────────────────────────────────────────────────────────
 function openCropModal(dataUrl,onUse,onCancel) {
@@ -3796,633 +3232,11 @@ function cropUse() {
   var p=_cropPending;_cropPending=null;_cropState=null;if(p&&p.onUse)p.onUse(dataUrl);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// v1.17 — Data Check Stage A (read-only detection)
-// ═══════════════════════════════════════════════════════════════════════════
-// Loads Patients + Claims + Uploaded Claims via Apps Script's new
-// getAllForDataCheck action. Runs a per-patient audit detecting 14 issue
-// types, renders severity-sorted issue cards. Stage A is detection only —
-// no fix UI yet (that's Stage B in v1.18).
-//
-// CCU_DAILY rows are no longer expected in the fee column (manually cleaned
-// + PWA v3.59 prevents new writes). If any slip through, they're surfaced
-// as a banding mismatch.
-
-var dc = {
-  loaded:  false,
-  loading: false,
-  error:   null,
-  patients: [],
-  claims:   [],
-  uploaded: [],
-  audit:    null,   // {patientCards, orphanCards, counts}
-  filter:   'all',  // 'all' | 'red' | 'amber' | 'yellow' | 'orphan'
-  search:   ''
-};
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-function dcCleanStr(v) { return String(v == null ? '' : v).trim(); }
-function dcCleanPhn(v) { return dcCleanStr(v).replace(/\D/g, ''); }
-function dcSamePhn(a, b) {
-  var aa = dcCleanPhn(a), bb = dcCleanPhn(b);
-  return aa && bb && aa === bb;
-}
-// Names that look like nothing — empty, single char, OCR garbage routing codes,
-// punctuation-only. Garbage codes we've seen: MOS, REN, AGG, EDC, ACIN, MHL.
-function dcLooksGarbageName(s) {
-  var t = dcCleanStr(s).toUpperCase();
-  if (!t) return true;
-  if (t.length <= 1) return true;
-  if (/^[^A-Z]+$/.test(t)) return true;  // no letters at all
-  if (/^(MOS|REN|AGG|EDC|ACIN|MHL)\b/.test(t)) return true;
-  return false;
-}
-// DOB format check — expects DD/MM/YYYY
-function dcIsValidDobFormat(v) {
-  var s = dcCleanStr(v);
-  if (!s) return false;
-  return /^\d{2}\/\d{2}\/\d{4}$/.test(s);
-}
-// Date parsing for episode logic — DD/MM/YYYY to epoch ms
-function dcParseDate(s) {
-  var t = dcCleanStr(s);
-  if (!t) return 0;
-  var m = t.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (!m) return 0;
-  return new Date(parseInt(m[3]), parseInt(m[2]) - 1, parseInt(m[1])).getTime();
-}
-// Sunday of the ISO week containing date (BC billing weeks are Sun-Sat)
-function dcWeekStartSun(ms) {
-  var d = new Date(ms);
-  d.setHours(0,0,0,0);
-  d.setDate(d.getDate() - d.getDay());
-  return d.getTime();
-}
-
-// Severity ranking for sorting cards
-var DC_SEV = { red:3, amber:2, yellow:1, teal:0 };
-
-// ─── Issue definitions ───────────────────────────────────────────────────────
-// Each detector returns an array of issue objects:
-//   { sev:'red'|'amber'|'yellow', code, label, detail? }
-// Detectors are pure — no side effects, no DOM access.
-
-function auditPatLastName(p) {
-  var v = dcCleanStr(p.last);
-  if (!v) return [{ sev:'red', code:'pat-last-blank', label:'Patient last name is blank' }];
-  if (dcLooksGarbageName(v)) return [{ sev:'red', code:'pat-last-garbage', label:'Patient last name looks like OCR garbage', detail:'value: "' + v + '"' }];
-  return [];
-}
-function auditPatFirstName(p) {
-  if (!dcCleanStr(p.first)) return [{ sev:'amber', code:'pat-first-blank', label:'Patient first name is blank' }];
-  return [];
-}
-function auditPatPhn(p) {
-  var v = dcCleanPhn(p.phn);
-  if (!v) return [{ sev:'red', code:'pat-phn-blank', label:'Patient PHN is blank' }];
-  if (v.length !== 10) return [{ sev:'red', code:'pat-phn-len', label:'Patient PHN is not 10 digits', detail:'value: ' + v + ' (' + v.length + ' digits)' }];
-  return [];
-}
-function auditPatDob(p) {
-  var v = dcCleanStr(p.dob);
-  if (!v) return [{ sev:'amber', code:'pat-dob-blank', label:'Patient DOB is blank' }];
-  if (!dcIsValidDobFormat(v)) return [{ sev:'amber', code:'pat-dob-format', label:'Patient DOB format is not DD/MM/YYYY', detail:'value: "' + v + '"' }];
-  return [];
-}
-function auditPatSex(p) {
-  var v = dcCleanStr(p.sex).toUpperCase();
-  if (!v) return [{ sev:'amber', code:'pat-sex-blank', label:'Patient sex is blank' }];
-  if (v !== 'M' && v !== 'F' && v !== 'X') return [{ sev:'amber', code:'pat-sex-val', label:'Patient sex is not M/F/X', detail:'value: "' + v + '"' }];
-  return [];
-}
-function auditPatAudit(p) {
-  // v1.18: NEUTRALIZED — createdBy/createdAt are forward-only audit fields
-  // that didn't exist when most historical patient rows were created.
-  // Flagging absence here generated 95+ amber warnings that drowned out
-  // real signal. Kept as a no-op stub so the audit chain in runAudit()
-  // stays intact and can be re-enabled with smarter logic later (e.g.
-  // only flag rows updated after the field rollout date).
-  return [];
-}
-
-// Claim-level detectors. `p` may be null (orphan claim).
-function auditClaimRequiredByFee(c) {
-  var fee = dcCleanStr(c.fee);
-  var icd = dcCleanStr(c.icd);
-  var rby = dcCleanStr(c.refby) || dcCleanStr(c.refbyName);
-  var start = dcCleanStr(c.startTime);
-  var end = dcCleanStr(c.endTime);
-  var issues = [];
-  // Full consult 33010: needs refby, ICD, start
-  // Limited consult 33012: needs refby, ICD, start
-  // (endTime is auto-computed at export time by Apps Script csvEndTime when
-  //  startTime is present, so we don't block on missing endTime alone — we
-  //  only flag when BOTH start and end are missing, which makes export fail.)
-  if (fee === '33010' || fee === '33012') {
-    if (!rby)   issues.push({ sev:'red', code:'cl-consult-refby',  label:'Consult ' + fee + ' missing referring MD' });
-    if (!icd)   issues.push({ sev:'red', code:'cl-consult-icd',    label:'Consult ' + fee + ' missing ICD code' });
-    if (!start && !end) issues.push({ sev:'red', code:'cl-consult-times', label:'Consult ' + fee + ' missing both start and end time' });
-    else if (!start)    issues.push({ sev:'red',   code:'cl-consult-start', label:'Consult ' + fee + ' missing start time' });
-    // v1.18: if start present but end blank, export computes end = start + 50min.
-    // No issue flagged — the export pipeline handles it.
-  }
-  // Other tracked fees just need ICD; refby strongly recommended.
-  // v1.18.1: CCFPP modifier codes added — 1200/1201/1202 (evening/night/weekend
-  // bases) and 1205/1206/1207 (their >45min consult increments). These are
-  // pushed automatically by the consult submit handler when applicable; they
-  // inherit ICD and refby from the parent consult.
-  // v1.18.2: CCU_DAILY restored as a valid tracked fee — it's the canonical
-  // CCU placeholder that the export-time consolidation operates on.
-  else if (['33008','33006','1411','1421','1431','78717','78720',
-            '1200','1201','1202','1205','1206','1207',
-            'CCU_DAILY'].indexOf(fee) !== -1) {
-    if (!icd) issues.push({ sev:'red', code:'cl-claim-icd', label:'Claim ' + fee + ' missing ICD code' });
-    if (!rby) issues.push({ sev:'amber', code:'cl-claim-refby', label:'Claim ' + fee + ' missing referring MD' });
-  }
-  // Unknown fee codes — flag it
-  else if (fee && ['33010','33012','33008','33006','1411','1421','1431','78717','78720','CCU_DAILY',
-                   '1200','1201','1202','1205','1206','1207'].indexOf(fee) === -1) {
-    issues.push({ sev:'amber', code:'cl-fee-unknown', label:'Unrecognised fee code', detail:'value: "' + fee + '"' });
-  }
-  // v1.18.2: CCU_DAILY is the canonical placeholder for CCU days as of
-  // PWA v3.60 — export-time consolidation in Apps Script rolls these up
-  // into properly-banded 1411/1421/1431 rows. No longer flagged.
-  // (The "tracked fees" block above already treats CCU_DAILY like the
-  // other claim fees: needs ICD, recommends refby.)
-  return issues;
-}
-function auditClaimNameMismatch(c, p) {
-  if (!p) return [];
-  var cLast = dcCleanStr(c.last).toUpperCase();
-  var pLast = dcCleanStr(p.last).toUpperCase();
-  // Compare last name as primary; ignore if either side blank (other detector flags blank).
-  if (cLast && pLast && cLast !== pLast) {
-    return [{ sev:'yellow', code:'cl-name-mismatch', label:'Claim last name differs from Patients tab', detail:'claim: "' + dcCleanStr(c.last) + '" vs patient: "' + dcCleanStr(p.last) + '"' }];
-  }
-  return [];
-}
-
-// CCU banding detector — per-patient, looks at all 1411/1421/1431/CCU_DAILY
-// rows and recomputes the expected band for each based on consecutive
-// episode position. Returns issues attached to specific claim ids.
-// Returns a map: { claimId: [issues] }
-// v1.18.2: NEUTRALIZED. With CCU_DAILY restored as the canonical placeholder
-// (PWA v3.60), the band stored on each row is no longer expected to match
-// its position-in-episode — the Apps Script ccuConsolidateForExport() handles
-// banding at export time. Any 1411/1421/1431 still in the Sheet from prior
-// manual cleanup will export as-is (verbose but valid). New rows will be
-// CCU_DAILY and roll up correctly. Kept as a no-op stub to preserve the
-// audit chain shape and allow future re-enable if needed.
-function auditCcuBands(claimsForPatient) {
-  return {};
-}
-
-// Directive weekly limit — max 6 directives (33006) per Sun-Sat week per patient.
-// Returns map { claimId: [issues] } for any 33006 claim past the 6-per-week limit.
-function auditDirectiveLimit(claimsForPatient) {
-  var dir = claimsForPatient
-    .filter(function(c) { return dcCleanStr(c.fee) === '33006'; })
-    .map(function(c) { return { c:c, ms: dcParseDate(c.date) }; })
-    .filter(function(x) { return x.ms; })
-    .sort(function(a, b) { return a.ms - b.ms; });
-  if (!dir.length) return {};
-  var byWeek = {};
-  dir.forEach(function(x) {
-    var wk = dcWeekStartSun(x.ms);
-    if (!byWeek[wk]) byWeek[wk] = [];
-    byWeek[wk].push(x);
-  });
-  var out = {};
-  Object.keys(byWeek).forEach(function(wk) {
-    var wkClaims = byWeek[wk];
-    if (wkClaims.length > 6) {
-      // Flag every claim past position 6
-      wkClaims.forEach(function(x, idx) {
-        if (idx >= 6) {
-          out[x.c.id] = [{ sev:'amber', code:'cl-directive-over', label:'Directive #' + (idx+1) + ' in Sun-Sat week — exceeds 6/week limit', detail:'date: ' + x.c.date }];
-        }
-      });
-    }
-  });
-  return out;
-}
-
-// ─── Audit orchestrator ──────────────────────────────────────────────────────
-// Builds patient cards + orphan claim cards from raw Sheets data.
-function runAudit(patients, claims, uploaded) {
-  // Index patients by normalised PHN. If a PHN appears twice, the second is
-  // surfaced as a 'pat-dup' issue under the first.
-  var patByPhn = {};
-  var dupPats = [];
-  patients.forEach(function(p) {
-    var phn = dcCleanPhn(p.phn);
-    if (!phn) {
-      // Blank-PHN patient still gets a card (under a synthetic "blank-phn" bucket)
-      patByPhn['__noPhn_' + (p._rowIdx || Math.random())] = p;
-      return;
-    }
-    if (patByPhn[phn]) {
-      dupPats.push({ existing: patByPhn[phn], duplicate: p });
-    } else {
-      patByPhn[phn] = p;
-    }
-  });
-
-  // Tag every claim with its source so cards can show provenance.
-  var allClaims = [];
-  claims.forEach(function(c)   { allClaims.push(Object.assign({}, c, { _src:'Claims' })); });
-  uploaded.forEach(function(c) { allClaims.push(Object.assign({}, c, { _src:'Uploaded Claims' })); });
-
-  // Group claims by PHN
-  var claimsByPhn = {};
-  var orphanClaims = [];
-  allClaims.forEach(function(c) {
-    var phn = dcCleanPhn(c.phn);
-    if (!phn) {
-      orphanClaims.push({ claim:c, why:'blank PHN' });
-      return;
-    }
-    if (!patByPhn[phn]) {
-      orphanClaims.push({ claim:c, why:'no patient row for PHN ' + phn });
-      return;
-    }
-    if (!claimsByPhn[phn]) claimsByPhn[phn] = [];
-    claimsByPhn[phn].push(c);
-  });
-
-  // Build patient cards
-  var patientCards = [];
-  Object.keys(patByPhn).forEach(function(key) {
-    var p = patByPhn[key];
-    var phn = dcCleanPhn(p.phn);
-
-    // Demographic issues
-    var demoIssues = [].concat(
-      auditPatLastName(p),
-      auditPatFirstName(p),
-      auditPatPhn(p),
-      auditPatDob(p),
-      auditPatSex(p),
-      auditPatAudit(p)
-    );
-
-    // Duplicate-pat issue gets attached here if this is the "primary"
-    var dupHit = dupPats.find(function(d) { return dcSamePhn(d.existing.phn, p.phn); });
-    if (dupHit) {
-      demoIssues.push({ sev:'amber', code:'pat-dup', label:'Duplicate Patients row for this PHN', detail:'second row: ' + dcCleanStr(dupHit.duplicate.last) + ', ' + dcCleanStr(dupHit.duplicate.first) });
-    }
-
-    // Claims for this patient — run per-claim + per-episode detectors
-    var ptClaims = (claimsByPhn[phn] || []).slice();
-    var ccuMap = auditCcuBands(ptClaims);
-    var dirMap = auditDirectiveLimit(ptClaims);
-    var claimRecords = ptClaims.map(function(c) {
-      var issues = [].concat(
-        auditClaimRequiredByFee(c),
-        auditClaimNameMismatch(c, p),
-        ccuMap[c.id] || [],
-        dirMap[c.id] || []
-      );
-      return { claim:c, issues:issues, healthy: issues.length === 0 };
-    });
-
-    var totalIssues = demoIssues.length + claimRecords.reduce(function(n, r) { return n + r.issues.length; }, 0);
-    if (totalIssues === 0) return; // skip healthy patients
-
-    // Card severity = highest individual issue
-    var allIssues = demoIssues.concat(claimRecords.reduce(function(a, r) { return a.concat(r.issues); }, []));
-    var maxSev = allIssues.reduce(function(m, i) { return DC_SEV[i.sev] > DC_SEV[m] ? i.sev : m; }, 'yellow');
-
-    patientCards.push({
-      kind: 'patient',
-      patient: p,
-      phn: phn,
-      demoIssues: demoIssues,
-      claimRecords: claimRecords,
-      totalIssues: totalIssues,
-      severity: maxSev,
-      _sortKey: dcCleanStr(p.last).toUpperCase() + '|' + dcCleanStr(p.first).toUpperCase()
-    });
-  });
-
-  // Orphan claim cards — group by PHN (or by an "unknown" bucket for blank-PHN orphans)
-  var orphanByPhn = {};
-  orphanClaims.forEach(function(o) {
-    var key = dcCleanPhn(o.claim.phn) || '__blank__';
-    if (!orphanByPhn[key]) orphanByPhn[key] = { phn:key, claims:[], why:o.why };
-    orphanByPhn[key].claims.push(o.claim);
-  });
-  var orphanCards = Object.keys(orphanByPhn).map(function(k) {
-    var o = orphanByPhn[k];
-    return {
-      kind: 'orphan',
-      phn: k === '__blank__' ? '' : k,
-      claims: o.claims,
-      why: o.why,
-      severity: 'red',
-      totalIssues: o.claims.length,
-      _sortKey: dcCleanStr((o.claims[0]||{}).last).toUpperCase() + '|' + dcCleanStr((o.claims[0]||{}).first).toUpperCase()
-    };
-  });
-
-  // Sort: severity desc, then last name asc
-  function sevSort(a, b) {
-    var d = DC_SEV[b.severity] - DC_SEV[a.severity];
-    if (d) return d;
-    return a._sortKey < b._sortKey ? -1 : a._sortKey > b._sortKey ? 1 : 0;
-  }
-  patientCards.sort(sevSort);
-  orphanCards.sort(sevSort);
-
-  // Counts for summary bar
-  var counts = { red:0, amber:0, yellow:0, orphan: orphanCards.length, total: patientCards.length + orphanCards.length };
-  patientCards.forEach(function(c) { counts[c.severity] = (counts[c.severity] || 0) + 1; });
-
-  return { patientCards: patientCards, orphanCards: orphanCards, counts: counts };
-}
-
-// ─── Data load ───────────────────────────────────────────────────────────────
-function loadDataCheck(force) {
-  if (dc.loading) return;
-  if (dc.loaded && !force) return;
-  dc.loading = true;
-  dc.error = null;
-  renderDataCheck();
-  var url = document.getElementById('script-url').value.trim();
-  if (!url) {
-    dc.loading = false;
-    dc.error = 'Apps Script URL not configured.';
-    renderDataCheck();
-    return;
-  }
-  var ctrl = new AbortController();
-  var timer = setTimeout(function(){ ctrl.abort(); }, 60000);
-  fetch(url, {
-    method: 'POST',
-    body: JSON.stringify({ action:'getAllForDataCheck', key:getScriptKey() }),
-    signal: ctrl.signal
-  })
-  .then(function(r){ return r.text(); })
-  .then(function(text) {
-    clearTimeout(timer);
-    var data; try { data = JSON.parse(text); } catch(e) { data = null; }
-    if (!data || !data.ok) {
-      dc.error = 'Apps Script response: ' + (text || '').slice(0, 200);
-      dc.loading = false;
-      renderDataCheck();
-      return;
-    }
-    dc.patients = Array.isArray(data.patients) ? data.patients : [];
-    dc.claims   = Array.isArray(data.claims)   ? data.claims   : [];
-    dc.uploaded = Array.isArray(data.uploadedClaims) ? data.uploadedClaims : (Array.isArray(data.uploaded) ? data.uploaded : []);
-    try {
-      dc.audit = runAudit(dc.patients, dc.claims, dc.uploaded);
-    } catch (e) {
-      dc.error = 'Audit error: ' + (e && e.message ? e.message : e);
-      dc.loading = false;
-      renderDataCheck();
-      return;
-    }
-    dc.loaded = true;
-    dc.loading = false;
-    renderDataCheck();
-  })
-  .catch(function(err) {
-    clearTimeout(timer);
-    dc.error = 'Network error: ' + (err && err.message ? err.message : err);
-    dc.loading = false;
-    renderDataCheck();
-  });
-}
-
-// ─── Filter & search wiring ──────────────────────────────────────────────────
-function dcSetFilter(f) { dc.filter = f; renderDataCheck(); }
-function dcOnSearch() {
-  var el = document.getElementById('dc-search-input');
-  dc.search = (el ? el.value : '').trim().toLowerCase();
-  renderDataCheck();
-}
-function dcCardMatchesSearch(card, q) {
-  if (!q) return true;
-  if (card.kind === 'patient') {
-    var p = card.patient;
-    var hay = (dcCleanStr(p.last) + ' ' + dcCleanStr(p.first) + ' ' + dcCleanStr(p.phn)).toLowerCase();
-    return hay.indexOf(q) !== -1;
-  }
-  if (card.kind === 'orphan') {
-    var hay2 = card.phn + ' ' + card.claims.map(function(c){ return dcCleanStr(c.last) + ' ' + dcCleanStr(c.first); }).join(' ');
-    return hay2.toLowerCase().indexOf(q) !== -1;
-  }
-  return false;
-}
-function dcCardMatchesFilter(card, f) {
-  if (f === 'all') return true;
-  if (f === 'orphan') return card.kind === 'orphan';
-  if (f === 'red')    return card.severity === 'red'    || card.kind === 'orphan';
-  if (f === 'amber')  return card.severity === 'amber';
-  if (f === 'yellow') return card.severity === 'yellow';
-  return true;
-}
-
-// ─── Rendering ───────────────────────────────────────────────────────────────
-function dcEsc(s) {
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-function dcSevIcon(sev) {
-  return sev === 'red' ? '🔴' : sev === 'amber' ? '🟠' : sev === 'yellow' ? '🟡' : '⚫';
-}
-function dcRenderIssue(iss) {
-  return '<div class="dc-issue ' + iss.sev + '">' +
-           '<div class="dc-issue-icon">' + dcSevIcon(iss.sev) + '</div>' +
-           '<div class="dc-issue-body">' +
-             dcEsc(iss.label) +
-             (iss.detail ? '<div class="dc-issue-detail">' + dcEsc(iss.detail) + '</div>' : '') +
-           '</div>' +
-         '</div>';
-}
-function dcRenderClaimMeta(c) {
-  var fee = dcCleanStr(c.fee) || '—';
-  var date = dcCleanStr(c.date) || '—';
-  var src = dcCleanStr(c._src) || dcCleanStr(c.source) || '';
-  return '<div class="dc-claim-meta">' +
-           '<span class="dc-claim-fee">' + dcEsc(fee) + '</span>' +
-           '<span>' + dcEsc(date) + '</span>' +
-           (c.startTime ? '<span>' + dcEsc(c.startTime) + (c.endTime ? '–' + dcEsc(c.endTime) : '') + '</span>' : '') +
-           (src ? '<span class="dc-claim-source">' + dcEsc(src) + '</span>' : '') +
-         '</div>';
-}
-
-function dcRenderPatientCard(card) {
-  var p = card.patient;
-  var sev = card.severity;
-  var countCls = sev === 'red' ? 'red' : sev === 'amber' ? 'amber' : sev === 'yellow' ? 'yellow' : '';
-  var last = dcCleanStr(p.last) || '<i style="color:var(--text3)">(no last name)</i>';
-  var first = dcCleanStr(p.first) || '';
-  var phnDisp = dcCleanPhn(p.phn) || '<i style="color:var(--text3)">no PHN</i>';
-  var meta = [
-    dcCleanStr(p.dob) ? 'DOB ' + dcEsc(dcCleanStr(p.dob)) : '',
-    dcCleanStr(p.sex) ? dcEsc(dcCleanStr(p.sex)) : '',
-    dcCleanStr(p.ward) ? dcEsc(dcCleanStr(p.ward)) + (dcCleanStr(p.room) ? ' ' + dcEsc(dcCleanStr(p.room)) : '') : ''
-  ].filter(function(s){return s;}).join(' · ');
-
-  var html = '<div class="dc-card sev-' + sev + '">' +
-    '<div class="dc-card-hdr">' +
-      '<div class="dc-card-name">' + dcEsc(last) + (first ? ', ' + dcEsc(first) : '') + '</div>' +
-      '<div class="dc-card-phn">' + phnDisp + '</div>' +
-      '<div class="dc-card-count ' + countCls + '">' + card.totalIssues + ' issue' + (card.totalIssues === 1 ? '' : 's') + '</div>' +
-    '</div>' +
-    (meta ? '<div class="dc-card-meta">' + meta + '</div>' : '');
-
-  // Demo issues
-  if (card.demoIssues.length) {
-    html += '<div class="dc-section">' +
-      '<div class="dc-section-lbl">Patient row</div>' +
-      card.demoIssues.map(dcRenderIssue).join('') +
-    '</div>';
-  }
-
-  // Claims with issues
-  var problemClaims = card.claimRecords.filter(function(r){ return !r.healthy; });
-  var healthyCount  = card.claimRecords.length - problemClaims.length;
-  if (problemClaims.length) {
-    html += '<div class="dc-section">' +
-      '<div class="dc-section-lbl">Claims (' + problemClaims.length + ' with issues)</div>' +
-      problemClaims.map(function(r) {
-        return '<div class="dc-claim-row">' +
-          dcRenderClaimMeta(r.claim) +
-          r.issues.map(dcRenderIssue).join('') +
-        '</div>';
-      }).join('') +
-    '</div>';
-  }
-  if (healthyCount > 0) {
-    html += '<div class="dc-collapsed">✓ ' + healthyCount + ' healthy claim' + (healthyCount === 1 ? '' : 's') + ' (hidden)</div>';
-  }
-
-  html += '</div>';
-  return html;
-}
-
-function dcRenderOrphanCard(card) {
-  var phnDisp = card.phn || '<i style="color:var(--text3)">no PHN</i>';
-  var nameHint = '';
-  var firstClaim = card.claims[0] || {};
-  if (firstClaim.last || firstClaim.first) {
-    nameHint = dcCleanStr(firstClaim.last) + (firstClaim.first ? ', ' + dcCleanStr(firstClaim.first) : '');
-  }
-  var html = '<div class="dc-card sev-red">' +
-    '<div class="dc-card-hdr">' +
-      '<div class="dc-card-name">🔧 ' + (nameHint ? dcEsc(nameHint) : 'Orphan claims') + '</div>' +
-      '<div class="dc-card-phn">' + phnDisp + '</div>' +
-      '<div class="dc-card-count red">' + card.claims.length + ' orphan claim' + (card.claims.length === 1 ? '' : 's') + '</div>' +
-    '</div>' +
-    '<div class="dc-card-meta">' + dcEsc(card.why) + '</div>' +
-    '<div class="dc-section">' +
-      '<div class="dc-section-lbl">Stranded claims</div>' +
-      card.claims.map(function(c) {
-        return '<div class="dc-claim-row">' +
-          dcRenderClaimMeta(c) +
-          '<div class="dc-issue red">' +
-            '<div class="dc-issue-icon">🔴</div>' +
-            '<div class="dc-issue-body">No patient row to anchor this claim<div class="dc-issue-detail">name on claim: ' + dcEsc(dcCleanStr(c.last) + (c.first ? ', ' + dcCleanStr(c.first) : '') || '(blank)') + '</div></div>' +
-          '</div>' +
-        '</div>';
-      }).join('') +
-    '</div>' +
-  '</div>';
-  return html;
-}
-
-function renderDataCheck() {
-  var content = document.getElementById('dc-content');
-  var summary = document.getElementById('dc-summary-bar');
-  var filters = document.getElementById('dc-filters-bar');
-  var search  = document.getElementById('dc-search-bar');
-  if (!content) return;
-
-  // Loading state
-  if (dc.loading) {
-    summary.style.display = 'none';
-    filters.style.display = 'none';
-    search.style.display  = 'none';
-    content.innerHTML = '<div class="dc-loading">Loading Patients + Claims + Uploaded Claims from Sheets…</div>';
-    return;
-  }
-  // Error state
-  if (dc.error) {
-    summary.style.display = 'none';
-    filters.style.display = 'none';
-    search.style.display  = 'none';
-    content.innerHTML = '<div class="dc-error">⚠ ' + dcEsc(dc.error) + '\n\n' +
-      'Apps Script needs the new <b>getAllForDataCheck</b> action. ' +
-      'If you haven\'t deployed v2.21 yet, that\'s expected. Paste-in code provided separately.' +
-      '</div>' +
-      '<div style="text-align:center;margin-top:14px"><button class="dc-reload-btn" onclick="loadDataCheck(true)">↻ Try again</button></div>';
-    return;
-  }
-  // Not-yet-loaded state
-  if (!dc.loaded) {
-    summary.style.display = 'none';
-    filters.style.display = 'none';
-    search.style.display  = 'none';
-    content.innerHTML = '<div class="dc-loading">Tap to load data check.<br><br>' +
-      '<button class="dc-reload-btn" onclick="loadDataCheck(true)">↻ Load now</button></div>';
-    return;
-  }
-
-  // Audit complete — render summary + filters + cards
-  var a = dc.audit;
-  var c = a.counts;
-  var totalAll = c.total;
-  summary.innerHTML =
-    '<div class="dc-summary-pill">' + totalAll + ' card' + (totalAll === 1 ? '' : 's') + '</div>' +
-    (c.red    > 0 ? '<div class="dc-summary-pill red">🔴 ' + c.red + ' blocking</div>'  : '') +
-    (c.amber  > 0 ? '<div class="dc-summary-pill amber">🟠 ' + c.amber + ' audit</div>' : '') +
-    (c.yellow > 0 ? '<div class="dc-summary-pill yellow">🟡 ' + c.yellow + ' conflicts</div>' : '') +
-    (c.orphan > 0 ? '<div class="dc-summary-pill red">🔧 ' + c.orphan + ' orphan</div>' : '') +
-    '<button class="dc-reload-btn" onclick="loadDataCheck(true)">↻ Refresh</button>';
-  summary.style.display = '';
-
-  filters.innerHTML =
-    '<div class="dc-chip ' + (dc.filter==='all'?'act':'')    + '" onclick="dcSetFilter(\'all\')">All</div>' +
-    '<div class="dc-chip ' + (dc.filter==='red'?'act':'')    + '" onclick="dcSetFilter(\'red\')">🔴 Blocking</div>' +
-    '<div class="dc-chip ' + (dc.filter==='amber'?'act':'')  + '" onclick="dcSetFilter(\'amber\')">🟠 Audit</div>' +
-    '<div class="dc-chip ' + (dc.filter==='yellow'?'act':'') + '" onclick="dcSetFilter(\'yellow\')">🟡 Conflicts</div>' +
-    '<div class="dc-chip ' + (dc.filter==='orphan'?'act':'') + '" onclick="dcSetFilter(\'orphan\')">🔧 Orphans</div>';
-  filters.style.display = '';
-  search.style.display = '';
-
-  // Combine + filter
-  var allCards = a.orphanCards.concat(a.patientCards);  // orphans first
-  var visible = allCards.filter(function(card) {
-    return dcCardMatchesFilter(card, dc.filter) && dcCardMatchesSearch(card, dc.search);
-  });
-
-  if (!visible.length) {
-    if (totalAll === 0) {
-      content.innerHTML = '<div class="dc-empty">✓ No issues found across ' + dc.patients.length + ' patients and ' + (dc.claims.length + dc.uploaded.length) + ' claims.<br><span style="font-size:11px">All caught up.</span></div>';
-    } else {
-      content.innerHTML = '<div class="dc-empty">No cards match the current filter / search.</div>';
-    }
-    return;
-  }
-
-  // Per-card try/catch so one bad record can't blow up the render
-  content.innerHTML = visible.map(function(card) {
-    try {
-      return card.kind === 'orphan' ? dcRenderOrphanCard(card) : dcRenderPatientCard(card);
-    } catch (e) {
-      return '<div class="dc-card sev-red"><div class="dc-card-hdr"><div class="dc-card-name">Render error</div></div>' +
-             '<div class="dc-card-meta">' + dcEsc((e && e.message) || e) + '</div></div>';
-    }
-  }).join('');
-}
-
 // ─── Init ─────────────────────────────────────────────────────────────────────
 renderCal();
 refreshPreview();
+
+
 
 </script>
 
