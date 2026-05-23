@@ -9565,12 +9565,11 @@ async function init() {
       {id:_fid(),phn:'9000000010',last:'Lee',      first:'Kevin',   dob:'16/08/1963',sex:'M',ward:'ICUA',bed:'2',    list:'off',role:'consultant',  mrp:'Other',     care:'combined', icd:'4140',refby:'62120',refbyName:'Dr. Sharma, Priya #62120', discharged:false,admitDate:_sYday},
       {id:_fid(),phn:'900000011',last:'Kowalski', first:'Patricia',dob:'24/12/1985',sex:'F',ward:'ED',  bed:'Bay 2',list:'off',role:'consultant',  mrp:'Other',     care:'directive',icd:'4111',refby:'62130',refbyName:'Dr. Novak, Chris #62130', discharged:false,admitDate:_sToday}
     ];
-    // One pre-billed claim so Anderson shows the green tint on load
-    var _ba=(st.doc&&st.doc.alias)?st.doc.alias:'KBrown';
-    st.claims=[{id:'sb-claim-001',phn:'9000000001',last:'Anderson',first:'Mary',dob:'14/03/1948',sex:'F',
-      ward:'CCU',bed:'3',fee:'1411',feeCode:'1411',date:_sToday,startTime:'08:00',icd:'4269',
-      alias:_ba,performing:_ba,createdAt:new Date().toISOString(),createdBy:_ba}];
-    console.log('[sandbox] Seeded',st.patients.length,'patients');
+    // No pre-seeded claims — all missions must be completed fresh
+    st.claims = [];
+    // Clear signed-in doctor so sign_in mission always starts incomplete
+    st.doc = null;
+    console.log('[sandbox] Seeded',st.patients.length,'patients — doc and claims reset');
   }
   // ── end sandbox seed ──────────────────────────────────────────────────
 
