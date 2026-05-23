@@ -5038,7 +5038,7 @@ function _ptSummaryCalendarHTML(p, claims) {
       if (ccuClaim) tag = ccuClaim.fee;
     }
 
-    var tappable = (dayClaims.length > 0) || inSpan;
+    var tappable = (dayClaims.length > 0) || inSpan || !!window._cvCalMode;
     var onclick = tappable ? ' onclick="tapCalDay(\'' + dateStr + '\')"' : '';
     html += '<div class="' + cls + '"' + onclick + splitStyle + '>' +
               '<div class="cv-num">' + d + '</div>' +
