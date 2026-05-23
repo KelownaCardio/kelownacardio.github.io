@@ -216,6 +216,10 @@ v1.14 2026-05-14  ICD9_LOCAL rebuilt from the iClinic xlsx (385 codes,
                   is the single source of truth for the full 7,000+
                   iClinic codes.
 
+v1.18 2026-05-22  DOB display fully converted to DD/MMM/YYYY everywhere.
+                  fmtDOB() used on all fill paths (lookup, OCR, batch).
+                  parseDobDisplay() converts display format back to
+                  DD/MM/YYYY before sending to Apps Script.
 v1.17 2026-05-22  DOB label and placeholder changed from DD/MM/YYYY
                   to DD/MMM/YYYY everywhere to match hospital sticker
                   format and avoid month/day confusion. Storage format
@@ -807,6 +811,23 @@ function fmtDOB(s) {
   if (p.length !== 3) return s;
   var m = parseInt(p[1], 10) - 1;
   return p[0] + ' ' + (MON[m] || p[1]) + ' ' + p[2];
+}
+
+// Convert display format DD/MMM/YYYY or DD Mon YYYY → storage format DD/MM/YYYY
+// Passes through anything already in DD/MM/YYYY format unchanged.
+function parseDobDisplay(s) {
+  if (!s) return s;
+  var MON = {jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',
+             jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+  // Already DD/MM/YYYY
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return s;
+  // DD/MMM/YYYY e.g. 04/May/1960
+  var m1 = s.match(/^(\d{2})\/([A-Za-z]{3})\/(\d{4})$/);
+  if (m1) { var mo = MON[m1[2].toLowerCase()]; return mo ? m1[1]+'/'+mo+'/'+m1[3] : s; }
+  // DD Mon YYYY e.g. 04 May 1960
+  var m2 = s.match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/);
+  if (m2) { var mo2 = MON[m2[2].toLowerCase()]; return mo2 ? m2[1].padStart(2,'0')+'/'+mo2+'/'+m2[3] : s; }
+  return s;
 }
 function monthLabel(d) { return d.toLocaleDateString('en-CA',{month:'long',year:'numeric'}); }
 function todayISO() { var d=new Date(); return d.getFullYear()+'-'+(d.getMonth()+1).toString().padStart(2,'0')+'-'+d.getDate().toString().padStart(2,'0'); }
@@ -1820,7 +1841,7 @@ function buildClaims() {
   var last  = fmtName((document.getElementById('f-last').value||''));
   var first = fmtName((document.getElementById('f-first').value||''));
   var phn   = (document.getElementById('f-phn').value||'').replace(/\D/g,'');
-  var dob   = (document.getElementById('f-dob').value||'').trim();
+  var dob   = parseDobDisplay((document.getElementById('f-dob').value||'').trim());
   var sex   = document.getElementById('f-sex').value;
   var ward  = (document.getElementById('f-ward').value||'').trim();
   var room  = (document.getElementById('f-room').value||'').trim();
@@ -2061,7 +2082,7 @@ function loadBatchItem(idx) {
   if (item.last)  document.getElementById('f-last').value  = fmtName(item.last);
   if (item.first) document.getElementById('f-first').value = fmtName(item.first);
   if (item.phn)   document.getElementById('f-phn').value   = item.phn;
-  if (item.dob)   document.getElementById('f-dob').value   = item.dob;
+  if (item.dob)   document.getElementById('f-dob').value   = fmtDOB(item.dob);
   if (item.sex)   document.getElementById('f-sex').value   = item.sex;
   if (item.ward)  document.getElementById('f-ward').value  = item.ward;
   if (item.room)  document.getElementById('f-room').value  = item.room;
@@ -2229,7 +2250,7 @@ function sendSingleOCR(b64) {
     if (data.last) document.getElementById('f-last').value=fmtName(data.last);
     if (data.first) document.getElementById('f-first').value=fmtName(data.first);
     if (data.phn) document.getElementById('f-phn').value=data.phn;
-    if (data.dob) document.getElementById('f-dob').value=data.dob;
+    if (data.dob) document.getElementById('f-dob').value=fmtDOB(data.dob);
     if (data.sex) document.getElementById('f-sex').value=data.sex;
     if (data.ward) document.getElementById('f-ward').value=data.ward;
     if (data.room) document.getElementById('f-room').value=data.room;
@@ -2554,7 +2575,7 @@ function renderLookupBanner(lb, data) {
     }
     _fill('f-last',  p.last);
     _fill('f-first', p.first);
-    _fill('f-dob',   p.dob);
+    _fill('f-dob',   p.dob ? fmtDOB(p.dob) : '');
     _fill('f-sex',   p.sex);
     _fill('f-ward',  p.ward);
     _fill('f-room',  p.bed);
@@ -2833,7 +2854,7 @@ function deleteHist(id) {
 function refreshHistAndRedraw() {
   var phn  = (document.getElementById('f-phn').value || '').trim();
   var last = (document.getElementById('f-last').value || '').trim();
-  var dob  = (document.getElementById('f-dob').value || '').trim();
+  var dob  = parseDobDisplay((document.getElementById('f-dob').value || '').trim());
   if (!phn && !last) return;
   var url = document.getElementById('script-url').value.trim();
   if (!url) return;
