@@ -6253,13 +6253,14 @@ function submitConsult() {
   var modInc   = hasInc ? getModifierForIncrement(start, dateISO) : null;
 
   if (modBase) {
-    // Base modifier — CCFPP note here too
-    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start, fullNote, end, alias);
+    // Base modifier — first 30 min from consult start
+    var modBaseEnd = minsToTime((t2m(start) + 30) % (24 * 60));
+    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start, fullNote, modBaseEnd, alias);
 
     if (modInc) {
-      // Increment modifier — CCFPP note on all parts
+      // Increment modifier — start+30 to consult end
       var incStart = minsToTime((t2m(start) + 30) % (24 * 60));
-      addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, fullNote, null, alias);
+      addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, fullNote, end, alias);
     }
   }
   sv('patients', st.patients);
@@ -6813,10 +6814,11 @@ async function _addPatientCore(withClaim, skipNameDobDup) {
       var cIncUnits = consultIncUnits(cStart, cEnd);
       var cModInc   = cIncUnits > 0 ? getModifierForIncrement(cStart, cDateISO) : null;
       if (cModBase) {
-        addClaim(p, cModBase.base, cModBase.base, 1, cDateFmt, cLoc, cStart, cNotes, cEnd, cAlias);
+        var cModBaseEnd = minsToTime((t2m(cStart) + 30) % (24 * 60));
+        addClaim(p, cModBase.base, cModBase.base, 1, cDateFmt, cLoc, cStart, cNotes, cModBaseEnd, cAlias);
         if (cModInc) {
           var cIncStart = minsToTime((t2m(cStart) + 30) % (24 * 60));
-          addClaim(p, cModInc.inc, cModInc.inc, cIncUnits, cDateFmt, cLoc, cIncStart, cNotes, null, cAlias);
+          addClaim(p, cModInc.inc, cModInc.inc, cIncUnits, cDateFmt, cLoc, cIncStart, cNotes, cEnd, cAlias);
         }
       }
       sv('claims', st.claims);
@@ -7360,10 +7362,11 @@ async function apSubmit(addToList, _skipDupCheck) {
         var cIncUnits = consultIncUnits(cStart, cEnd);
         var cModInc   = cIncUnits > 0 ? getModifierForIncrement(cStart, cDateISO) : null;
         if (cModBase) {
-          addClaim(p, cModBase.base, cModBase.base, 1, cDateFmt, cLoc, cStart, fullN, cEnd, cAlias);
+          var cModBaseEnd2 = minsToTime((t2m(cStart) + 30) % (24 * 60));
+          addClaim(p, cModBase.base, cModBase.base, 1, cDateFmt, cLoc, cStart, fullN, cModBaseEnd2, cAlias);
           if (cModInc) {
             var cIncStart = minsToTime((t2m(cStart) + 30) % (24 * 60));
-            addClaim(p, cModInc.inc, cModInc.inc, cIncUnits, cDateFmt, cLoc, cIncStart, fullN, null, cAlias);
+            addClaim(p, cModInc.inc, cModInc.inc, cIncUnits, cDateFmt, cLoc, cIncStart, fullN, cEnd, cAlias);
           }
         }
         sv('claims', st.claims);

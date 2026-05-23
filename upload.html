@@ -1910,10 +1910,11 @@ function buildClaims() {
     var incUnits = consultIncUnits(start, end);
     var modInc   = incUnits > 0 ? getModifierForIncrement(start, cDate) : null;
     if (modBase) {
-      claims.push(Object.assign({},base,{ id:uid(), claimType:'modifier', date:cDate, fee:modBase.base, icd:dx, refby:refNum, refbyName:refName, startTime:start, endTime:end, notes:fullNote, _sortDate:cDate, _sortSub:2 }));
+      var modBaseEnd = minsToTime((t2m(start) + 30) % 1440);
+      claims.push(Object.assign({},base,{ id:uid(), claimType:'modifier', date:cDate, fee:modBase.base, icd:dx, refby:refNum, refbyName:refName, startTime:start, endTime:modBaseEnd, notes:fullNote, _sortDate:cDate, _sortSub:2 }));
       if (modInc) {
         var incStart = minsToTime((t2m(start) + 30) % 1440);
-        claims.push(Object.assign({},base,{ id:uid(), claimType:'modifier-inc', date:cDate, fee:modInc.inc, icd:dx, refby:refNum, refbyName:refName, startTime:incStart, endTime:'', notes:fullNote, _sortDate:cDate, _sortSub:2, _units:incUnits }));
+        claims.push(Object.assign({},base,{ id:uid(), claimType:'modifier-inc', date:cDate, fee:modInc.inc, icd:dx, refby:refNum, refbyName:refName, startTime:incStart, endTime:end, notes:fullNote, _sortDate:cDate, _sortSub:2, _units:incUnits }));
       }
     }
   }
