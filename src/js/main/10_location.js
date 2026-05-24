@@ -272,14 +272,14 @@ var CD_CRITERIA = {
     { id:'neuro', label:'Chronic Neuro Dz' }
   ],
   B: [
-    { id:'ses',     label:'Poor socioeconomic status' },
-    { id:'home',    label:'Unstable home environment' },
-    { id:'adl',     label:'Dependency for ADLs' },
-    { id:'mobil',   label:'Mobility/Accessibility issues' },
     { id:'age75',   label:'Age > 75' },
     { id:'bmi35',   label:'BMI > 35' },
     { id:'frail',   label:'Frail elderly' },
-    { id:'readmit', label:'High readmission rate' }
+    { id:'readmit', label:'High readmission rate' },
+    { id:'mobil',   label:'Mobility/Accessibility issues' },
+    { id:'adl',     label:'Dependency for ADLs' },
+    { id:'ses',     label:'Poor socioeconomic status' },
+    { id:'home',    label:'Unstable home environment' }
   ],
   C: [
     { id:'malig',   label:'Malignancy' }
@@ -372,9 +372,9 @@ function _cdRender(los) {
 
   var h =
     '<div style="font-size:13px;color:var(--amber-t);font-weight:700;margin-bottom:4px">' +
-      '\u26a0 LOS ' + los + ' days — check complex discharge criteria</div>' +
+      '\u26a0 Review for Complex D/C criteria</div>' +
     '<div style="font-size:11px;color:var(--text3);margin-bottom:8px">' +
-      'Rule: 2 major, or 1 major + 1 minor, or 1 major + malignancy.</div>' +
+      'LOS ' + los + ' days. Rule: 2 major, or 1 major + 1 minor, or 1 major + malignancy.</div>' +
     '<div style="max-height:46vh;overflow-y:auto;-webkit-overflow-scrolling:touch;' +
       'border:.5px solid var(--border2);border-radius:var(--rsm);padding:4px 9px 11px">' +
       group('A', 'A — Major comorbidities') +
@@ -386,6 +386,8 @@ function _cdRender(los) {
       addBtn +
       '<button class="btn btn-s" style="margin:0" data-pid="' + _cdPid + '" ' +
       'onclick="dischConfirmRemove(this)">Doesn\'t qualify — discharge without surcharge</button>' +
+      '<button class="btn btn-s" style="margin:0" ' +
+      'onclick="hideModal(\'disch-modal\')">Cancel — exit to review chart</button>' +
     '</div>';
   document.getElementById('disch-body').innerHTML = h;
 }
