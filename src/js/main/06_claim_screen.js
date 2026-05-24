@@ -88,9 +88,13 @@ function feeSearch(query) {
   if (!dd) return;
   var q = (query || '').toLowerCase().trim();
 
+  // 33010 / 33012 are entered via the consult card, not the Other form.
+  // 33005 (emergency visit) and 33014 (counselling) stay available here.
+  var isConsultCardCode = function(f) { return f.code === '33010' || f.code === '33012'; };
   var matches = q.length === 0
-    ? FEES.filter(function(f) { return f.cat !== 'Modifier' && f.cat !== 'CCU'; }).slice(0, 20)
+    ? FEES.filter(function(f) { return f.cat !== 'Modifier' && f.cat !== 'CCU' && !isConsultCardCode(f); }).slice(0, 20)
     : FEES.filter(function(f) {
+        if (isConsultCardCode(f)) return false;
         return f.code.toLowerCase().indexOf(q) !== -1 ||
                f.desc.toLowerCase().indexOf(q) !== -1 ||
                (f.cat  || '').toLowerCase().indexOf(q) !== -1;
@@ -158,7 +162,8 @@ function selectFeeCode(code, desc) {
   updateOtherPreview();
 }
 
-function buildOtherClaimForm(p) {
+function buildOtherClaimForm(p, opts) {
+  var withSubmit = !opts || opts.withSubmit !== false;
   var now      = new Date();
   var todayISO = localISODate(now);
   var nowTime  = pad(now.getHours()) + ':' + pad(now.getMinutes());
@@ -180,10 +185,6 @@ function buildOtherClaimForm(p) {
   h += '<div class="ref-dd" id="oc-fee-dd"></div>';
   h += '<input id="oc-fee" type="hidden">';
   h += '<div id="oc-fee-display" style="font-size:11px;color:var(--text2);margin-top:-4px;margin-bottom:6px"></div>';
-
-  h += '<div style="width:80px"><label>Units</label>' +
-       '<input id="oc-units" type="number" value="1" min="1" max="99" ' +
-       'oninput="updateOtherPreview()"></div>';
 
   // Date + start time
   h += '<div class="fl">';
@@ -236,7 +237,7 @@ function buildOtherClaimForm(p) {
   h += '<input id="oc-refby-name" type="hidden" value="' + esc(refVal) + '">';
 
   // Notes
-  h += '<label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(optional — CCFPP auto-added)</span></label>';
+  h += '<label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(optional)</span></label>';
   h += '<input id="oc-notes" placeholder="Optional" autocorrect="off">';
 
   h += buildPerformingPhysSelector();
@@ -245,13 +246,14 @@ function buildOtherClaimForm(p) {
   // Preview
   h += '<div class="cp" id="oc-preview"><div class="cp-title">Claim preview</div></div>';
 
-  h += '<button class="btn btn-p" onclick="claimSubmitOnce(submitOtherClaim)">Add claim</button>';
+  if (withSubmit) {
+    h += '<button class="btn btn-p" onclick="claimSubmitOnce(submitOtherClaim)">Add claim</button>';
+  }
   return h;
 }
 
 function updateOtherPreview() {
   var fee   = ((document.getElementById('oc-fee') || {}).value || '').trim();
-  var units = (document.getElementById('oc-units') || {}).value || '1';
   var prev  = document.getElementById('oc-preview');
   if (!prev) return;
   if (!fee) {
@@ -264,34 +266,17 @@ function updateOtherPreview() {
     '<div class="cp-row" style="display:flex;align-items:center;gap:6px">' +
     '<span class="cp-code">' + esc(fee) + '</span>' +
     '<span class="cp-desc" style="flex:1;min-width:0">' + esc(knownFee ? knownFee.desc : 'Custom fee code') + '</span>' +
-    '<span class="cp-units">×' + units + '</span>' +
     amt +
     '</div>';
 }
 
-function submitOtherClaim() {
-  var p = getP(_claimPid);
-  if (!checkDoc()) return;
-  var _fee = ((document.getElementById('oc-fee') || {}).value || '').trim();
-  if (_fee === '33005') {
-    var _s = ((document.getElementById('oc-start') || {}).value || '').trim();
-    var _e = ((document.getElementById('oc-end')   || {}).value || '').trim();
-    var _n = ((document.getElementById('oc-notes') || {}).value || '').trim();
-    var _em = [];
-    if (!_s) _em.push('start time');
-    if (!_e) _em.push('end time');
-    if (!_n) _em.push('description of emergency care');
-    if (_em.length) {
-      if (!_s) { var _se = document.getElementById('oc-start'); if (_se) _se.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
-      if (!_e) { var _ee = document.getElementById('oc-end');   if (_ee) _ee.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
-      if (!_n) { var _ne = document.getElementById('oc-notes'); if (_ne) _ne.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
-      showToast('Required for 33005: ' + _em.join(', '));
-      return;
-    }
-  }
-
-  var fee   = ((document.getElementById('oc-fee')   || {}).value || '').trim();
-  var units = parseInt((document.getElementById('oc-units') || {}).value || '1') || 1;
+// Shared Other-claim submit — reads the oc-* form, validates 33005, and
+// creates the single claim. Used by both the +Claim screen and Add Patient.
+// Per-claim ICD / referring-MD ride on the claim only (via pClone); the
+// patient's baseline is never rewritten — consistent with the consult form.
+// Returns true on success, false if validation blocked the save.
+function submitOtherClaimFor(p, alias) {
+  var fee     = ((document.getElementById('oc-fee')   || {}).value || '').trim();
   var dateISO = (document.getElementById('oc-date')  || {}).value || '';
   var start   = (document.getElementById('oc-start') || {}).value || '';
   var endTime = (document.getElementById('oc-end')   || {}).value || '';
@@ -301,29 +286,50 @@ function submitOtherClaim() {
   var refby   = (document.getElementById('oc-refby') || {}).value || p.refby || '';
   var refName = (document.getElementById('oc-refby-name') || {}).value || p.refbyName || '';
 
-  if (!fee)     { showToast('Enter a fee code'); return; }
-  if (!dateISO) { showToast('Enter a date');     return; }
+  if (!fee)     { showToast('Enter a fee code'); return false; }
+  if (!dateISO) { showToast('Enter a date');     return false; }
 
-  // Validate: must have referring MD and ICD before submitting
+  // 33005 (emergency visit) — start, end, and a description are mandatory.
+  if (fee === '33005') {
+    var em = [];
+    if (!start)   em.push('start time');
+    if (!endTime) em.push('end time');
+    if (!notes)   em.push('description of emergency care');
+    if (em.length) {
+      if (!start)   { var _se = document.getElementById('oc-start'); if (_se) _se.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
+      if (!endTime) { var _ee = document.getElementById('oc-end');   if (_ee) _ee.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
+      if (!notes)   { var _ne = document.getElementById('oc-notes'); if (_ne) _ne.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
+      showToast('Required for 33005: ' + em.join(', '));
+      return false;
+    }
+  }
+
+  var dateFmt = fmtD(parseISODate(dateISO));
+  // Units are always 1 for an Other claim.
+  var pClone  = Object.assign({}, p, { icd: icd, refby: refby, refbyName: refName });
+  addClaim(pClone, fee, fee, 1, dateFmt, loc, start, notes, endTime || '', alias);
+  sv('claims', st.claims);
+  return true;
+}
+
+// +Claim screen wrapper — validates the doctor + required fields, then
+// delegates to the shared submit and closes the claim screen.
+function submitOtherClaim() {
+  var p = getP(_claimPid);
+  if (!checkDoc()) return;
+
+  var fee     = ((document.getElementById('oc-fee')   || {}).value || '').trim();
+  var icd     = (document.getElementById('oc-icd')   || {}).value || p.icd || '';
+  var refby   = (document.getElementById('oc-refby') || {}).value || p.refby || '';
+  var refName = (document.getElementById('oc-refby-name') || {}).value || p.refbyName || '';
+
+  // Diagnosis + referring MD must be present.
   var validateP = Object.assign({}, p, { icd: icd, refby: refby, refbyName: refName });
   if (!validateRequiredForClaim(validateP)) { highlightMissingFields(); return; }
 
-  var dateFmt = fmtD(parseISODate(dateISO));
+  if (!submitOtherClaimFor(p, getPerformingAlias())) return;
 
-  // Back-populate to patient record so subsequent claims inherit
-  var patientUpdated = false;
-  if (icd && icd !== p.icd)                   { p.icd = icd; patientUpdated = true; }
-  if (refby && refby !== p.refby)             { p.refby = refby; p.refbyName = refName; patientUpdated = true; }
-  else if (refName && refName !== p.refbyName){ p.refbyName = refName; patientUpdated = true; }
-
-  var pClone = Object.assign({}, p, { icd: icd, refby: refby, refbyName: refName });
-
-  var alias = getPerformingAlias();
-  var c = addClaim(pClone, fee, fee, units, dateFmt, loc, start, notes, endTime || '', alias);
-  sv('patients', st.patients);
-  sv('claims',   st.claims);
-  if (patientUpdated && SHEETS_URL) push('savePatient', p);
-  showToast(fee + ' claim added for ' + p.last);
+  showToast((fee || 'Claim') + ' claim added for ' + p.last);
   closeClaimScreen();
 }
 
