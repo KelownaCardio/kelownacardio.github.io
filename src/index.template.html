@@ -360,7 +360,13 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 
 /* QUICK CLAIM BUTTONS */
 .bb { padding:4px 9px; font-size:10px; border-radius:var(--rpill); border:.5px solid var(--border2); background:var(--surface); cursor:pointer; font-family:inherit; color:var(--text); white-space:nowrap; font-weight:500; }
-.bb:hover { background:var(--surface2); }
+/* Hover only on real pointer devices — prevents iPad Safari's "stuck
+   hover" leaving a tapped pill greyed-out until you tap elsewhere.
+   .bb-done holds its green so a done pill never greys on hover. */
+@media (hover: hover) {
+  .bb:hover { background:var(--surface2); }
+  .bb-done:hover { background:var(--green); }
+}
 .bb-rnd  { background:var(--blue-bg);  border-color:#a8c4e8; color:var(--blue-t); }
 .bb-dir  { background:var(--amber-bg); border-color:#d4a84a; color:var(--amber-t); }
 .bb-ccu  { background:var(--red-bg);   border-color:#e0a090; color:var(--red-t); }
