@@ -68,21 +68,18 @@ function getClaimIcd(p) {
   return p.icd || '3062';
 }
 
-// Save ICD-9 and referring MD changes back to patient record
-function updatePatientFromClaimForm(p) {
-  var icd = getClaimIcd(p);
-  if (icd && icd !== p.icd) p.icd = icd;
-
+// Reads the per-claim diagnosis / referring-MD from the claim form.
+// These ride on the claim only — the patient's stored baseline is NOT
+// rewritten (consistent with the consult and Other-claim forms). To
+// change a patient's baseline, edit it on the patient card.
+function claimFormOverrides(p) {
   var rb = document.getElementById('cb-refby');
   var rn = document.getElementById('cb-refby-name');
-  if (rb && rb.value) {
-    if (rb.value !== p.refby || (!p.refbyName && rn && rn.value)) {
-      p.refby     = rb.value;
-      if (rn && rn.value && !looksLikeMRPService(rn.value)) p.refbyName = rn.value;
-    }
-  }
-  sv('patients', st.patients);
-  if (SHEETS_URL) push('savePatient', p);
+  return {
+    icd:       getClaimIcd(p),
+    refby:     (rb && rb.value) ? rb.value : (p.refby || ''),
+    refbyName: (rn && rn.value && !looksLikeMRPService(rn.value)) ? rn.value : (p.refbyName || '')
+  };
 }
 
 // ── Daily rounds (33008) ───────────────────────────────
@@ -102,11 +99,11 @@ function submitDaily() {
   var ds   = gv('cb-dal-start');
   var days = parseInt(gv('cb-dal-days')) || 1;
   if (!ds) { showToast('Enter start date'); return; }
-  updatePatientFromClaimForm(p);
-  if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
+  var pc = Object.assign({}, p, claimFormOverrides(p));
+  if (!validateRequiredForClaim(pc)) { highlightMissingFields(); return; }
   var alias = getPerformingAlias();
-  addClaim(p, '33008', '33008', days, fmtD(parseISODate(ds)), 'I', null, null, null, alias);
-  sv('patients', st.patients); sv('claims', st.claims);
+  addClaim(pc, '33008', '33008', days, fmtD(parseISODate(ds)), 'I', null, null, null, alias);
+  sv('claims', st.claims);
   showToast('33008 ×' + days + ' — ' + p.last);
   closeClaimScreen();
 }
@@ -145,8 +142,8 @@ function submitCombined() {
   if (!ds) { showToast('Enter date'); return; }
   var note2 = document.getElementById('cb-comb-note') ? gv('cb-comb-note') : '';
   if (v === 2 && !note2) { showToast('Note required for 2nd visit'); return; }
-  updatePatientFromClaimForm(p);
-  if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
+  var pc = Object.assign({}, p, claimFormOverrides(p));
+  if (!validateRequiredForClaim(pc)) { highlightMissingFields(); return; }
   // First combined daily for this patient — capture reason before submitting
   if (!p.combinedDailyReason) {
     openCombinedReasonModal(p.id, function() {
@@ -156,9 +153,9 @@ function submitCombined() {
   }
   var alias = getPerformingAlias();
   var baseNote = p.combinedDailyReason || '';
-  addClaim(p, '33008', '33008', 1, fmtD(parseISODate(ds)), 'I', null, baseNote, null, alias);
-  if (v === 2) addClaim(p, '33008', '33008', 1, fmtD(parseISODate(ds)), 'I', null, (baseNote ? baseNote + ' | ' : '') + (note2 || 'Second visit — patient unstable'), null, alias);
-  sv('patients', st.patients); sv('claims', st.claims);
+  addClaim(pc, '33008', '33008', 1, fmtD(parseISODate(ds)), 'I', null, baseNote, null, alias);
+  if (v === 2) addClaim(pc, '33008', '33008', 1, fmtD(parseISODate(ds)), 'I', null, (baseNote ? baseNote + ' | ' : '') + (note2 || 'Second visit — patient unstable'), null, alias);
+  sv('claims', st.claims);
   showToast('Combined daily ×' + v + ' — ' + p.last);
   closeClaimScreen();
 }
@@ -190,11 +187,11 @@ function submitDirective() {
   var cnt  = dirCountThisWeek(p.phn, ds);
   var note = (document.getElementById('cb-dir-note') ? gv('cb-dir-note') : '').trim();
   if (cnt >= 2 && !note) { showToast('Note required for 3rd directive in the same Sun–Sat week'); return; }
-  updatePatientFromClaimForm(p);
-  if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
+  var pc = Object.assign({}, p, claimFormOverrides(p));
+  if (!validateRequiredForClaim(pc)) { highlightMissingFields(); return; }
   var alias = getPerformingAlias();
-  addClaim(p, '33006', '33006', 1, fmtD(parseISODate(ds)), 'I', null, note, null, alias);
-  sv('patients', st.patients); sv('claims', st.claims);
+  addClaim(pc, '33006', '33006', 1, fmtD(parseISODate(ds)), 'I', null, note, null, alias);
+  sv('claims', st.claims);
   showToast('33006 directive — ' + p.last);
   closeClaimScreen();
 }
@@ -221,12 +218,12 @@ function buildCCUForm(p) {
 
 function submitCCU(isDuplicate) {
   var p = getP(_claimPid); if (!checkDoc()) return;
-  updatePatientFromClaimForm(p);
-  if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
+  var pc = Object.assign({}, p, claimFormOverrides(p));
+  if (!validateRequiredForClaim(pc)) { highlightMissingFields(); return; }
   var alias = getPerformingAlias();
   // v3.60: write CCU_DAILY placeholder; export consolidates.
-  addClaim(p, 'CCU_DAILY', 'CCU_DAILY', 1, TODAY, 'I', null, null, null, alias);
-  sv('patients', st.patients); sv('claims', st.claims);
+  addClaim(pc, 'CCU_DAILY', 'CCU_DAILY', 1, TODAY, 'I', null, null, null, alias);
+  sv('claims', st.claims);
   showToast('CCU daily recorded' + (isDuplicate ? ' (duplicate)' : '') + ' — ' + p.last);
   closeClaimScreen();
 }

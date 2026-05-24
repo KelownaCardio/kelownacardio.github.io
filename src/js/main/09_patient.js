@@ -4,95 +4,6 @@
 //                 chart photo OCR, ward/room selectors
 // ═══════════════════════════════════════════════════════
 
-// PHN duplicate merge modal
-function openMergeModal(existing, isReadmit) {
-  var newLast = (gv('f-last') || '').trim().toLowerCase();
-  var newDob  = (gv('f-dob')  || '').trim();
-  var lastMatch = existing.last && newLast && existing.last.toLowerCase() === newLast;
-  var dobMatch  = existing.dob  && newDob  && fmtClaimDate(existing.dob) === fmtClaimDate(newDob);
-  var matchScore = (lastMatch ? 1 : 0) + (dobMatch ? 1 : 0);
-
-  var statusBadge = isReadmit
-    ? '<span style="background:var(--amber-bg);color:var(--amber-t);padding:2px 8px;border-radius:var(--rpill);font-size:10px;font-weight:700">Previously discharged</span>'
-    : '<span style="background:var(--red-bg);color:var(--red-t);padding:2px 8px;border-radius:var(--rpill);font-size:10px;font-weight:700">Currently on list</span>';
-
-  var matchBadge = matchScore === 2
-    ? '<div style="color:var(--green-t);font-weight:700;font-size:12px;margin-top:8px">✓ Last name and DOB both match — likely same patient</div>'
-    : matchScore === 1
-    ? '<div style="color:var(--amber-t);font-weight:700;font-size:12px;margin-top:8px">⚠ Partial match (' + (lastMatch ? 'last name' : 'DOB') + ' only) — review carefully</div>'
-    : '<div style="color:var(--red-t);font-weight:700;font-size:12px;margin-top:8px">✗ Neither last name nor DOB match — likely wrong PHN</div>';
-
-  var claimCount = st.claims.filter(function(c) { return samePhn(c.phn, existing.phn); }).length;
-
-  var h = statusBadge +
-    '<div style="margin:10px 0 4px;font-size:13px;font-weight:700">' + esc(existing.last) + ', ' + esc(existing.first) + '</div>' +
-    '<div style="font-size:11px;color:var(--text2)">PHN: ' + esc(existing.phn) + ' &bull; DOB: ' + esc(existing.dob ? dispDate(existing.dob) : '—') + ' &bull; ' + claimCount + ' claim(s)</div>' +
-    matchBadge +
-    '<div style="margin-top:14px;display:flex;flex-direction:column;gap:8px">';
-
-  if (matchScore >= 1) {
-    if (isReadmit) {
-      h += '<button class="btn btn-p" style="margin:0" onclick="mergePatient(\'readmit\')">Re-admit — restore to rounds list</button>';
-    } else {
-      h += '<button class="btn btn-p" style="margin:0" onclick="mergePatient(\'merge\')">Merge — keep existing patient &amp; claims</button>';
-    }
-  }
-  h += '<button class="btn btn-s" style="margin:0" onclick="mergePatient(\'review\')">Review PHN — may be entry error</button>';
-  h += '</div>';
-
-  document.getElementById('merge-title').textContent = 'PHN ' + existing.phn + ' already exists';
-  document.getElementById('merge-body').innerHTML = h;
-  showModal('merge-modal');
-}
-
-function mergePatient(action) {
-  hideModal('merge-modal');
-  if (action === 'review') {
-    // Focus PHN field for correction
-    var phnEl = document.getElementById('f-phn');
-    if (phnEl) { phnEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; phnEl.select(); phnEl.focus(); }
-    showToast('Check PHN — may be a transcription error');
-    return;
-  }
-  if (action === 'merge') {
-    // Just navigate to the existing patient's summary — no duplicate created
-    var existing = st.patients.find(function(x) { return x.phn === gv('f-phn') && !x.discharged; });
-    if (existing) {
-      showToast(existing.last + ' already on list — opening their record');
-      clearAddForm();
-      nav(0, document.querySelectorAll('.nb')[0]);
-      setTimeout(function() { openPatientSummary(existing.id); }, 300);
-    }
-    return;
-  }
-  if (action === 'readmit') {
-    // Re-activate the discharged patient with new ward/bed from the form
-    var existing = st.patients.find(function(x) { return x.phn === gv('f-phn') && x.discharged; });
-    if (!existing) return;
-    existing.discharged   = false;
-    existing.dischargedAt = null;
-    existing.dischargeDate = null;
-    existing.ward         = gv('f-ward') || existing.ward;
-    existing.bed          = gv('f-bed')  || existing.bed;
-    existing.list         = gv('f-list') || 'on';
-    // Update refby/icd if new values provided
-    var newRefby = gv('f-refby-num') || gv('f-refby');
-    var newIcd   = gv('f-icd');
-    if (newRefby) { existing.refby = newRefby; existing.refbyName = gv('f-refby-name') || existing.refbyName; }
-    if (newIcd)   existing.icd = newIcd;
-    sv('patients', st.patients);
-    if (SHEETS_URL) push('savePatient', existing);
-    logChange(existing, 'Re-admitted', existing.ward + (existing.bed ? ' Bed/Rm ' + existing.bed : ''));
-    showToast(existing.last + ' re-admitted');
-    clearAddForm();
-    nav(0, document.querySelectorAll('.nb')[0]);
-    render();
-  }
-}
-
-// Soft duplicate check — fires when last name + DOB match an existing
-// patient but PHN differs (suggests a PHN typo). Does NOT block: gives
-// the doctor the choice to fix the PHN or proceed as a new patient.
 // ── Hard duplicate block modal ────────────────────────────────────
 // Shown when 2-of-3 (PHN / last name / DOB) match an existing patient.
 // No bypass — user must dismiss and correct the form.
@@ -126,205 +37,6 @@ function openDuplicateBlockModal(existing, matchedFields) {
   document.getElementById('merge-title').textContent = 'Patient already exists';
   document.getElementById('merge-body').innerHTML = h;
   showModal('merge-modal');
-}
-
-function openPossibleDuplicateModal(existing, withClaim) {
-  // Legacy — route through hard block instead
-  openDuplicateBlockModal(existing, ['Last name', 'DOB']);
-}
-
-// ── Add patient — entry points ────────────────────────────
-function addPatientWithConsult() {
-  // Validate consult date before proceeding
-  var cDateISO = (document.getElementById('f-c-date') || {}).value || '';
-  if (!cDateISO) { showToast('Enter consult date'); return; }
-  _addPatientCore(true);
-}
-
-function addPatientOnly() {
-  _addPatientCore(false);
-}
-
-// Shared patient validation, creation and optional consult claim.
-// skipNameDobDup: set true when the user already saw the soft duplicate
-// warning and chose "Continue — different patient".
-async function _addPatientCore(withClaim, skipNameDobDup) {
-  var last = gv('f-last');
-  var phn  = gv('f-phn');
-  if (!last) { showToast('Enter patient last name'); return; }
-
-  var ward = gv('f-ward');
-  var icd  = gv('f-icd') || '';
-
-  var addMissing = [];
-  if (!phn)                                    addMissing.push('phn');
-  else if (String(phn).replace(/\D/g,'').length !== 10) addMissing.push('phn-len');
-  if (!gv('f-refby-num') && !gv('f-refby'))   addMissing.push('refby');
-  if (!icd)                                    addMissing.push('icd');
-  if (addMissing.length) {
-    if (addMissing.indexOf('phn') !== -1) {
-      var phnEl = document.getElementById('f-phn');
-      if (phnEl) { phnEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; phnEl.focus(); }
-    }
-    if (addMissing.indexOf('refby') !== -1) {
-      var refEl = document.getElementById('f-ref-search');
-      if (refEl) { refEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; refEl.placeholder = 'Required — type name or doctor #'; if (addMissing.indexOf('phn') === -1) refEl.focus(); }
-    }
-    if (addMissing.indexOf('icd') !== -1) {
-      var icdEl = document.getElementById('f-icd-search');
-      if (icdEl) { icdEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; icdEl.placeholder = 'Required — type diagnosis or code'; if (addMissing.indexOf('phn') === -1 && addMissing.indexOf('refby') === -1) icdEl.focus(); }
-    }
-    var msgs = [];
-    if (addMissing.indexOf('phn')     !== -1) msgs.push('PHN');
-    if (addMissing.indexOf('phn-len') !== -1) msgs.push('PHN must be 10 digits');
-    if (addMissing.indexOf('refby')   !== -1) msgs.push('referring MD');
-    if (addMissing.indexOf('icd')     !== -1) msgs.push('diagnosis');
-    showToast('Required: ' + msgs.join(', '));
-    return;
-  }
-
-  // PHN duplicate check — offer merge if last name and/or DOB match
-  var existing = st.patients.find(function(x) { return x.phn === phn && !x.discharged; });
-  if (existing) {
-    openMergeModal(existing);
-    return;
-  }
-  // Discharged patient with same PHN — offer to re-admit
-  var dischExisting = st.patients.find(function(x) { return x.phn === phn && x.discharged; });
-  if (dischExisting) {
-    openMergeModal(dischExisting, true);
-    return;
-  }
-
-  // Soft duplicate check: same LAST NAME + DOB but DIFFERENT PHN.
-  // Likely a PHN typo. Warn the user but allow them to proceed.
-  if (!skipNameDobDup) {
-    var lastLc = String(last || '').trim().toLowerCase();
-    var dobFmt = fmtClaimDate(gv('f-dob') || '');
-    if (lastLc && dobFmt) {
-      var nameDobMatch = st.patients.find(function(x) {
-        if (!x || x.phn === phn) return false;
-        var xLast = String(x.last || '').trim().toLowerCase();
-        var xDob  = x.dob ? fmtClaimDate(x.dob) : '';
-        return xLast === lastLc && xDob === dobFmt;
-      });
-      if (nameDobMatch) {
-        openPossibleDuplicateModal(nameDobMatch, withClaim);
-        return;
-      }
-    }
-
-    // v3.37: Typo-PHN catcher. Same last+first name as an existing patient,
-    // PHN differs by 1-2 digits → almost certainly a transcription error
-    // (e.g. 9050828076 vs 9050328076 — single-digit '8' vs '3'). Catches
-    // typos even when DOB is missing or also typo'd, which the name+DOB
-    // check above doesn't. Still soft — the doctor can override if the
-    // similar PHN is genuinely a different person.
-    var firstLc = String(gv('f-first') || '').trim().toLowerCase();
-    if (lastLc && firstLc && phn && phn.length === 10) {
-      var phnTypoMatch = st.patients.find(function(x) {
-        if (!x || !x.phn || x.phn === phn) return false;
-        var xPhn = String(x.phn);
-        if (xPhn.length !== phn.length) return false;
-        var xLast  = String(x.last  || '').trim().toLowerCase();
-        var xFirst = String(x.first || '').trim().toLowerCase();
-        if (xLast !== lastLc || xFirst !== firstLc) return false;
-        // Count digit differences
-        var diffs = 0;
-        for (var i = 0; i < phn.length; i++) if (phn[i] !== xPhn[i]) diffs++;
-        return diffs >= 1 && diffs <= 2;
-      });
-      if (phnTypoMatch) {
-        openPossibleDuplicateModal(phnTypoMatch, withClaim);
-        return;
-      }
-    }
-  }
-
-  var p = {
-    id:           'p' + Date.now(),
-    last:         fmtName(last),
-    first:        fmtName(gv('f-first')),
-    phn:          phn,
-    dob:          gv('f-dob'),
-    sex:          gv('f-sex'),
-    ward:         ward,
-    bed:          gv('f-bed'),
-    fac:          'OA040',
-    refby:        gv('f-refby-num') || gv('f-refby'),
-    refbyName:    gv('f-refby-name'),
-    role:         gv('f-role')   || 'consultant',
-    mrp:          gv('f-mrp')    || 'Cardiology',
-    list:         gv('f-list')   || 'on',
-    care:         gv('f-care')   || (gv('f-role') === 'mrp' ? 'daily' : 'directive'),
-    icd:          icd,
-    roundedToday: null,
-    createdBy:    (st.doc && st.doc.alias) || '',
-    createdAt:    Date.now()
-  };
-
-  saveCustomRoom(ward, p.bed);
-  st.patients.push(p);
-  sv('patients', st.patients);
-
-  // v3.36: AWAIT savePatient before creating claims. If the patient-row push
-  // fails (e.g. wifi hiccup), we'll know immediately and can refuse to write
-  // orphan claims. Previously this was fire-and-forget and a transient
-  // network failure would leave claims on Sheets but no matching patient row.
-  if (SHEETS_URL) {
-    var ok = await push('savePatient', p);
-    if (!ok) {
-      // Push failed — back the local state out and warn the user.
-      st.patients = st.patients.filter(function(x) { return x.id !== p.id; });
-      showToast('Could not save patient — check wifi and try again');
-      return;
-    }
-  }
-  logChange(p, 'Admitted', ward + (p.bed ? ' Bed/Rm ' + p.bed : ''));
-
-  // OCR corrections capture — if this patient was OCR'd, diff what the OCR
-  // produced against what was actually saved and log any corrections.
-  // Same pattern as upload.html. Cleared after each successful save so it
-  // doesn't bleed into the next patient.
-  if (window._ocrOriginal) {
-    var corrections = buildOCRCorrections(p);
-    if (corrections.length && SHEETS_URL) push('logOCRCorrections', { corrections: corrections });
-    window._ocrOriginal = null;
-  }
-
-  // Optionally create a consult claim at the same time
-  if (withClaim && st.doc) {
-    var cCode    = document.getElementById('f-c-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
-    var cDateISO = (document.getElementById('f-c-date')  || {}).value || '';
-    var cStart   = (document.getElementById('f-c-start') || {}).value || '';
-    var cEnd     = (document.getElementById('f-c-end')   || {}).value || '';
-    var cNotes   = (document.getElementById('f-c-notes') || {}).value || '';
-    var cPerf    = document.getElementById('f-c-performing-doc');
-    var cAlias   = (cPerf && cPerf.value) ? cPerf.value : st.doc.alias;
-    if (cDateISO) {
-      var cDateFmt = fmtD(parseISODate(cDateISO));
-      var cLoc     = p.ward === 'ED' ? 'E' : 'I';
-      addClaim(p, cCode, cCode, 1, cDateFmt, cLoc, cStart, cNotes, cEnd, cAlias);
-      if (_apMostOn) addClaim(p, '78720', '78720', 1, cDateFmt, cLoc, null, null, null, cAlias);
-      var cModBase  = getModifier(cStart, cDateISO);
-      var cIncUnits = consultIncUnits(cStart, cEnd);
-      var cModInc   = cIncUnits > 0 ? getModifierForIncrement(cStart, cDateISO) : null;
-      if (cModBase) {
-        var cModBaseEnd = minsToTime((t2m(cStart) + 30) % (24 * 60));
-        addClaim(p, cModBase.base, cModBase.base, 1, cDateFmt, cLoc, cStart, cNotes, cModBaseEnd, cAlias);
-        if (cModInc) {
-          var cIncStart = minsToTime((t2m(cStart) + 30) % (24 * 60));
-          addClaim(p, cModInc.inc, cModInc.inc, cIncUnits, cDateFmt, cLoc, cIncStart, cNotes, cEnd, cAlias);
-        }
-      }
-      sv('claims', st.claims);
-    }
-  }
-
-  var claimMsg = withClaim ? ' + consult claim' : '';
-  showToast(last + (p.list === 'consult-only' ? ' — claim only' : ' added to ' + (p.list === 'on' ? 'On' : 'Off') + ' Service') + claimMsg);
-  clearAddForm();
-  nav(0, document.querySelectorAll('.nb')[0]);
 }
 
 // Called from ward "+ Add" button — pre-fills ward and jumps to Add Patient
@@ -536,10 +248,7 @@ function saveCustomWard() {
 
 
 // ── Add-patient inline consult claim ─────────────────────
-var _apMostOn = true;
 
-// Called when the Add Patient pane opens and after clearAddForm.
-// Pre-fills date/time and injects the performing physician selector.
 // ── Add-patient v2 — claim type selector + submit ──────────────────
 var _apClaimType = 'consult';
 
@@ -559,28 +268,12 @@ function apSelectClaimType(type) {
     area.innerHTML = buildApCCUAdmitArea();
     var caDateEl = document.getElementById('ap-ca-date');
     if (caDateEl) caDateEl.value = localISODate();
-    injectApPerformingDoc();
   } else {
     // Other claim — unified form self-inits its date + performing selector.
     area.innerHTML = buildApOtherClaimArea();
   }
 }
 
-function injectApPerformingDoc() {
-  var perfWrap = document.getElementById('f-c-performing-wrap');
-  if (!perfWrap) return;
-  if (!st.doctors || !st.doctors.length) { perfWrap.innerHTML = ''; return; }
-  var curAlias = st.doc ? st.doc.alias : '';
-  var opts = st.doctors.map(function(d) {
-    return '<option value="' + esc(d.alias) + '"' + (d.alias === curAlias ? ' selected' : '') + '>' +
-           esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
-  }).join('');
-  perfWrap.innerHTML = '<label style="margin-top:6px">Performing physician</label>' +
-                       '<select id="f-c-performing-doc">' + opts + '</select>';
-  // Explicitly set value — guarantees default even when selected attribute is ignored
-  var sel = document.getElementById('f-c-performing-doc');
-  if (sel && curAlias) sel.value = curAlias;
-}
 
 function buildApConsultArea() {
   // Unified consult form, shared with the +Claim screen.
@@ -594,33 +287,16 @@ function buildApOtherClaimArea() {
 }
 
 function buildApCCUAdmitArea() {
+  // CCU admit (1411). Diagnosis / referring MD / performing physician use
+  // the shared buildIcdRefCard (cb-* ids) — same as every other claim form.
   var h = '';
   h += '<label>Date</label><input type="date" id="ap-ca-date">';
   h += '<label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(optional)</span></label>';
   h += '<textarea id="ap-ca-notes" rows="2" placeholder="Optional" autocorrect="off" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:6px"></textarea>';
-  h += '<div style="border-top:.5px solid var(--border);margin:4px 0 10px"></div>';
-  h += _buildApRefIcdHtml();
-  h += '<div id="f-c-performing-wrap"></div>';
+  h += buildIcdRefCard({});
   return h;
 }
 
-function _buildApRefIcdHtml() {
-  var h = '';
-  h += '<label>Diagnosis</label>';
-  h += '<div style="position:relative">';
-  h += '<input id="f-icd-search" placeholder="Type diagnosis or code..." autocorrect="off" autocomplete="off" style="padding-right:32px" data-dd="f-icd-dd" data-hidden="f-icd" oninput="icdSearchEl(this)" onfocus="icdSearchEl(this)">';
-  h += '<button type="button" tabindex="-1" onclick="clearSearchField(\'f-icd-search\',\'f-icd\',null,\'f-icd-dd\')" onpointerdown="event.preventDefault();clearSearchField(\'f-icd-search\',\'f-icd\',null,\'f-icd-dd\')" style="position:absolute;right:8px;top:9px;background:none;border:none;font-size:18px;line-height:1;color:var(--text3);cursor:pointer;padding:2px 4px;z-index:5">&times;</button>';
-  h += '</div>';
-  h += '<input id="f-icd" type="hidden"><div class="ref-dd" id="f-icd-dd"></div>';
-  h += '<label style="margin-top:4px">Referred by</label>';
-  h += '<div style="position:relative">';
-  h += '<input id="f-ref-search" placeholder="Type name or doctor #..." autocorrect="off" style="padding-right:32px" data-dd="f-ref-dd" data-hidden="f-refby" data-name="f-refby-name" oninput="refSearchEl(this)" onfocus="refSearchEl(this)">';
-  h += '<button type="button" tabindex="-1" onclick="clearSearchField(\'f-ref-search\',\'f-refby\',\'f-refby-name\',\'f-ref-dd\')" onpointerdown="event.preventDefault();clearSearchField(\'f-ref-search\',\'f-refby\',\'f-refby-name\',\'f-ref-dd\')" style="position:absolute;right:8px;top:9px;background:none;border:none;font-size:18px;line-height:1;color:var(--text3);cursor:pointer;padding:2px 4px;z-index:5">&times;</button>';
-  h += '</div>';
-  h += '<div class="ref-dd" id="f-ref-dd"></div>';
-  h += '<input id="f-refby" type="hidden"><input id="f-refby-name" type="hidden"><input id="f-refby-num" type="hidden">';
-  return h;
-}
 
 function apSexPill(val) {
   var hid = document.getElementById('f-sex');
@@ -695,15 +371,15 @@ async function apSubmit(addToList, _skipDupCheck) {
   var last = (document.getElementById('f-last') || {}).value || '';
   var phn  = gv('f-phn');
   if (!last) { showToast('Enter patient last name'); return; }
-  // Diagnosis / referring MD: the consult area uses the unified form
-  // (cb-* ids); the ccu-admit / other areas still use f-* ids.
-  var icd = gv('cb-icd') || gv('oc-icd') || gv('f-icd') || '';
+  // Diagnosis / referring MD — every claim form now uses the unified
+  // cb-* / oc-* ids.
+  var icd = gv('cb-icd') || gv('oc-icd') || '';
 
   // Validate required fields
   var addMissing = [];
   if (!phn)                                    addMissing.push('phn');
   else if (String(phn).replace(/\D/g,'').length !== 10) addMissing.push('phn-len');
-  if (!gv('cb-refby') && !gv('oc-refby') && !gv('f-refby-num') && !gv('f-refby')) addMissing.push('refby');
+  if (!gv('cb-refby') && !gv('oc-refby')) addMissing.push('refby');
   if (!icd)                                    addMissing.push('icd');
   if (_apClaimType === 'consult') {
     if (!(document.getElementById('cb-date')  || {}).value) addMissing.push('date');
@@ -722,11 +398,11 @@ async function apSubmit(addToList, _skipDupCheck) {
       if (phnEl) { phnEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; phnEl.focus(); }
     }
     if (addMissing.indexOf('refby') !== -1) {
-      var refEl = document.getElementById('cb-ref-search') || document.getElementById('oc-ref-search') || document.getElementById('f-ref-search');
+      var refEl = document.getElementById('cb-ref-search') || document.getElementById('oc-ref-search');
       if (refEl) { refEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; refEl.placeholder = 'Required — type name or doctor #'; }
     }
     if (addMissing.indexOf('icd') !== -1) {
-      var icdEl2 = document.getElementById('cb-icd-search') || document.getElementById('oc-icd-search') || document.getElementById('f-icd-search');
+      var icdEl2 = document.getElementById('cb-icd-search') || document.getElementById('oc-icd-search');
       if (icdEl2) { icdEl2.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; icdEl2.placeholder = 'Required — type diagnosis or code'; }
     }
     var msgs = [];
@@ -779,8 +455,8 @@ async function apSubmit(addToList, _skipDupCheck) {
     id: 'p' + Date.now(), fac: 'OA040', roundedToday: null,
     last: fmtName(last), first: fmtName(gv('f-first')),
     phn: phn, dob: gv('f-dob'), sex: gv('f-sex'),
-    refby:     gv('cb-refby') || gv('oc-refby') || gv('f-refby-num') || gv('f-refby'),
-    refbyName: gv('cb-refby-name') || gv('oc-refby-name') || gv('f-refby-name'),
+    refby:     gv('cb-refby') || gv('oc-refby'),
+    refbyName: gv('cb-refby-name') || gv('oc-refby-name'),
     icd: icd,
     createdBy: (st.doc && st.doc.alias) || '',
     createdAt: Date.now()
@@ -829,8 +505,8 @@ async function apSubmit(addToList, _skipDupCheck) {
   // Create claim
   if (st.doc) {
     // Performing physician — consult area uses cb-performing-doc (unified
-    // form); ccu-admit / other still inject f-c-performing-doc.
-    var cPerf  = document.getElementById('cb-performing-doc') || document.getElementById('f-c-performing-doc');
+    // form) — all claim forms now render cb-performing-doc.
+    var cPerf  = document.getElementById('cb-performing-doc');
     var cAlias = (cPerf && cPerf.value) ? cPerf.value : st.doc.alias;
 
     if (_apClaimType === 'consult') {
@@ -872,59 +548,8 @@ function initAddPatientConsult() {
   }
   consultFormOpened();
 }
-function toggleApConsultCode(code) {
-  document.getElementById('f-c-33010').className = 'ct-btn' + (code === '33010' ? ' ct-on-consult' : '');
-  document.getElementById('f-c-33012').className = 'ct-btn' + (code === '33012' ? ' ct-on-consult' : '');
-}
 
-function toggleApMost() {
-  _apMostOn = !_apMostOn;
-  document.getElementById('f-c-most').className = 'most-btn' + (_apMostOn ? ' on' : '');
-}
 
-function updateApConsultUI() {
-  var start   = gv('f-c-start');
-  var end     = gv('f-c-end');
-  var dateISO = gv('f-c-date');
-
-  // If start time changed, auto-update end to start + 50 min
-  var changed = (typeof event !== 'undefined' && event && event.target) ? event.target.id : '';
-  if (start && changed === 'f-c-start') {
-    var endEl = document.getElementById('f-c-end');
-    if (endEl) endEl.value = minsToTime(t2m(start) + 50);
-    end = gv('f-c-end');
-  }
-
-  var modBase  = getModifier(start, dateISO);
-  var hasInc   = consultHasIncrement(start, end);
-  var modInc   = hasInc ? getModifierForIncrement(start, dateISO) : null;
-  var incUnits = consultIncUnits(start, end);
-  var modEl    = document.getElementById('f-c-mod');
-  if (!modEl) return;
-
-  if (modBase) {
-    var banner = '<div class="mod-box ' + modBase.cls + '" style="margin-bottom:0;border-radius:var(--rsm) var(--rsm) 0 0">' +
-      '<span style="font-weight:700">' + modBase.label + '</span>' +
-      '<span style="font-size:10px;opacity:.75;margin-left:6px">' + modBase.base + ' ×1</span>' +
-      '</div>';
-    if (incUnits > 0) {
-      var incMod = modInc || modBase;
-      banner += '<div class="mod-box ' + incMod.cls + '" style="margin-top:1px;border-radius:0 0 var(--rsm) var(--rsm);opacity:.85">' +
-        '<span>Consult time &gt; 45 min</span>' +
-        '<span style="font-size:10px;font-weight:700;margin-left:6px">' + incMod.inc + ' ×' + incUnits + '</span>' +
-        '</div>';
-    } else {
-      banner += '<div style="font-size:11px;padding:5px 10px;color:var(--text3);' +
-        'border:.5px solid var(--border);border-top:none;border-radius:0 0 var(--rsm) var(--rsm);' +
-        'background:var(--surface2)">Consult ≤ 45 min — no increment</div>';
-    }
-    modEl.innerHTML = banner;
-  } else if (start && dateISO) {
-    modEl.innerHTML = '<div class="mod-box mod-day">✓ Daytime weekday — no call-out modifier</div>';
-  } else {
-    modEl.innerHTML = '';
-  }
-}
 
 function clearAddForm() {
   ['f-last','f-first','f-phn','f-dob'].forEach(function(id) {
