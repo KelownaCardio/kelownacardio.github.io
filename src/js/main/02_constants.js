@@ -196,7 +196,7 @@ var FEES = [
   { code:'33008',  desc:'Subsequent hospital visit / MRP daily / combined daily care',    amount:'$63.95',  cat:'Daily',     clr:'chip-green'  },
 
   // ── Cardiology procedures performed by the group ─────────────────
-  { code:'Y33025', desc:'Cardioversion (operation only)',                                 amount:'$105.70', cat:'Procedure', clr:'chip-red'   },
+  { code:'33025', desc:'Cardioversion (operation only)',                                 amount:'$105.70', cat:'Procedure', clr:'chip-red'   },
   { code:'00751',  desc:'Pericardiocentesis (pericardial puncture)',                      amount:'$258.25', cat:'Procedure', clr:'chip-red'   },
 
   // ── Discharge / planning ────────────────────────────────────────
@@ -223,8 +223,8 @@ var FEES = [
 // in the Sheets render with a meaningful label rather than a bare code.
 // NOT shown in the picker.
 var LEGACY_FEE_LABELS = {
-  '14101': 'Legacy code (was used for cardioversion; correct code is Y33025)',
-  '14105': 'Legacy code (was used for cardioversion; correct code is Y33025)',
+  '14101': 'Legacy code (was used for cardioversion; correct code is 33025)',
+  '14105': 'Legacy code (was used for cardioversion; correct code is 33025)',
   '14113': 'Legacy code (was used for temp pacemaker; correct code is 33030)'
 };
 
