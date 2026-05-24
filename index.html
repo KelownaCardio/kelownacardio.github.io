@@ -2124,12 +2124,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.77-2026-05-23-calendar-legend-pills';
+var BUILD_ID    = 'v3.78-2026-05-23-ccfpp-same-person-guard';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.77';
-var APP_BUILT   = '2026-05-20';
+var APP_VERSION = 'v3.78';
+var APP_BUILT   = '2026-05-23';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -2700,99 +2700,6 @@ function isWeekendOrStat(dateStr) {
   return dow === 0 || dow === 6 || isBCStat(dateStr);
 }
 
-// ── CCFPP detection + retroactive peer note update ─────
-// When a same-doctor 33010/33012 consult overlaps another same-doctor
-// 33010/33012 consult (both in a modifier window), CCFPP applies in
-// BOTH directions:
-//   - new patient gets a note listing each overlapping peer
-//   - each peer's consult + modifier claims get a retro note added
-// Returns the CCFPP note string for the new patient (empty if no overlap).
-// Side effect: mutates and pushes peer claims to Sheets.
-function ccfppDetectAndUpdate(newP, alias, dateISO, dateFmt, startStr, endStr) {
-  if (!startStr || !endStr) return '';
-  var thisMod = getModifier(startStr, dateISO);
-  if (!thisMod) return '';
-
-  var thisStartM = t2m(startStr);
-  var thisEndM   = t2m(endStr);
-  if (thisEndM < thisStartM) thisEndM += 1440;
-
-  var curD  = parseDMY(dateFmt);
-  var prevD = new Date(curD.getTime() - 86400000);
-  var nextD = new Date(curD.getTime() + 86400000);
-  var prevDateFmt = pad(prevD.getDate()) + '/' + pad(prevD.getMonth() + 1) + '/' + prevD.getFullYear();
-  var nextDateFmt = pad(nextD.getDate()) + '/' + pad(nextD.getMonth() + 1) + '/' + nextD.getFullYear();
-
-  var peers = [];
-  var seenPhn = {};
-
-  for (var i = 0; i < st.claims.length; i++) {
-    var c = st.claims[i];
-    if (c.alias !== alias) continue;
-    if (c.phn === newP.phn) continue;
-    if (c.fee !== '33010' && c.fee !== '33012') continue;
-    if (!c.startTime || !c.endTime) continue;
-
-    var isSame = c.date === dateFmt;
-    var isPrev = c.date === prevDateFmt;
-    var isNext = c.date === nextDateFmt;
-    if (!isSame && !isPrev && !isNext) continue;
-
-    var pStartM = t2m(c.startTime);
-    var pEndM   = t2m(c.endTime);
-    if (pEndM < pStartM) pEndM += 1440;
-
-    if (isPrev) {
-      if (pEndM <= 1440) continue; // didn't cross midnight
-      pStartM -= 1440; pEndM -= 1440;
-    } else if (isNext) {
-      if (thisEndM <= 1440) continue; // new claim doesn't cross midnight
-      pStartM += 1440; pEndM += 1440;
-    }
-
-    var pRefD = parseDMY(c.date);
-    var pISO  = pRefD.getFullYear() + '-' + pad(pRefD.getMonth() + 1) + '-' + pad(pRefD.getDate());
-    if (!getModifier(c.startTime, pISO)) continue;
-
-    // Real interval overlap
-    if (thisStartM < pEndM && pStartM < thisEndM) {
-      if (seenPhn[c.phn]) continue;
-      seenPhn[c.phn] = true;
-      peers.push(c);
-    }
-  }
-
-  if (!peers.length) return '';
-
-  // Build new patient's CCFPP note (one entry per peer)
-  var noteParts = peers.map(function(c) {
-    var pp = (st.patients || []).find(function(_pp) { return _pp.phn === c.phn; }) || {};
-    var name = ((pp.first || '') + ' ' + (pp.last || '')).trim() || '(unknown)';
-    return 'CCFPP ' + name + ' (' + (c.phn || '—') + ')';
-  });
-  var newPatientNote = noteParts.join(' | ');
-
-  // Retroactively add note to each peer's consult + modifier claims
-  var newName = ((newP.first || '') + ' ' + (newP.last || '')).trim() || '(unknown)';
-  var newFragment = 'CCFPP ' + newName + ' (' + (newP.phn || '—') + ')';
-  var peerFees = ['33010', '33012', '1200', '1201', '1202', '1205', '1206', '1207'];
-
-  peers.forEach(function(peer) {
-    st.claims.forEach(function(c) {
-      if (c.phn !== peer.phn) return;
-      if (c.alias !== alias) return;
-      if (c.date !== peer.date) return;
-      if (peerFees.indexOf(c.fee) === -1) return;
-      if (c.notes && c.notes.indexOf(newFragment) !== -1) return; // already noted
-      c.notes = c.notes ? c.notes + ' | ' + newFragment : newFragment;
-      if (SHEETS_URL) push('saveClaim', c);
-    });
-  });
-  sv('claims', st.claims);
-
-  return newPatientNote;
-}
-
 // ── CCFPP overlap detection + retroactive peer update ──
 // Returns the CCFPP note string for the NEW consult's claims, and
 // retroactively appends a CCFPP note to each overlapping peer's
@@ -2810,6 +2717,20 @@ function ccfppDetectAndUpdate(newP, alias, dateISO, dateFmt, startStr, endStr) {
 // dateFmt     — new consult's date (DD/MM/YYYY)
 // startStr    — new consult's HH:MM start
 // endStr      — new consult's HH:MM end
+// True when two patient records almost certainly describe the same
+// person — same surname (case-insensitive) and same date of birth.
+// Used to stop CCFPP from linking a patient to a duplicate of itself
+// (e.g. "Marie Ehman" and "Marie Kathleen Ehman" entered as two rows).
+function ccfppSamePerson_(a, b) {
+  var aLast = String((a && a.last) || '').trim().toLowerCase();
+  var bLast = String((b && b.last) || '').trim().toLowerCase();
+  if (!aLast || aLast !== bLast) return false;
+  var aDob = String((a && a.dob) || '').replace(/\D/g, '');
+  var bDob = String((b && b.dob) || '').replace(/\D/g, '');
+  if (!aDob || !bDob) return false;      // missing DOB — do not block
+  return aDob === bDob;
+}
+
 function ccfppDetectAndUpdate(newP, alias, dateISO, dateFmt, startStr, endStr) {
   if (!startStr || !endStr) return '';
   if (!getModifier(startStr, dateISO)) return '';
@@ -2858,6 +2779,14 @@ function ccfppDetectAndUpdate(newP, alias, dateISO, dateFmt, startStr, endStr) {
     var _prevRefD = parseDMY(c.date);
     var _prevISO  = _prevRefD.getFullYear() + '-' + pad(_prevRefD.getMonth() + 1) + '-' + pad(_prevRefD.getDate());
     if (!getModifier(c.startTime, _prevISO)) continue;
+
+    // Same-person guard — a candidate peer that shares this patient's
+    // surname AND date of birth is almost certainly the same person
+    // under a duplicate record. CCFPP cannot apply to oneself, so this
+    // peer is skipped in BOTH the new-consult note and the reciprocal
+    // peer update (both derive from peerPhns below).
+    var _peerPat = (st.patients || []).find(function(pp){ return pp.phn === c.phn; }) || {};
+    if (ccfppSamePerson_(newP, _peerPat)) continue;
 
     // Interval overlap
     if (thisStartM < prevEndM && prevStartM < thisEndM) {
