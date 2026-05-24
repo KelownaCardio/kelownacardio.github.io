@@ -256,33 +256,165 @@ function dischAddVisit(btn) {
   _dischStep2(pid);
 }
 
-// Step 2: Complex discharge prompt — Cardiology MRP, non-CCU/ICU ward, LOS > 4 only
+// ── Complex Discharge (78717) — criteria checklist ──────
+// Qualifies when LOS > 4 AND Cardiology MRP AND clinical criteria:
+//   (2 from A) OR (1 from A + 1 from B) OR (1 from A + C)
+// Note written to the 78717 claim mirrors the clerk's format:
+//   "Complex Discharge: CHF, BMI > 35, Age > 75"
+var CD_CRITERIA = {
+  A: [
+    { id:'cad',   label:'CAD' },
+    { id:'chf',   label:'CHF' },
+    { id:'dm',    label:'Diabetes' },
+    { id:'ckd',   label:'CKD' },
+    { id:'cvd',   label:'Cerebrovascular Dz' },
+    { id:'liver', label:'Liver Dz w/ synthetic dysfunction' },
+    { id:'neuro', label:'Chronic Neuro Dz' }
+  ],
+  B: [
+    { id:'ses',     label:'Poor socioeconomic status' },
+    { id:'home',    label:'Unstable home environment' },
+    { id:'adl',     label:'Dependency for ADLs' },
+    { id:'mobil',   label:'Mobility/Accessibility issues' },
+    { id:'age75',   label:'Age > 75' },
+    { id:'bmi35',   label:'BMI > 35' },
+    { id:'frail',   label:'Frail elderly' },
+    { id:'readmit', label:'High readmission rate' }
+  ],
+  C: [
+    { id:'malig',   label:'Malignancy' }
+  ]
+};
+// Patient.icd -> criterion id, for auto pre-tick (exact ICD-9 match only)
+var CD_ICD_MAP = {
+  '414':'cad', '428':'chf', '250':'dm', '585':'ckd',
+  '438':'cvd', '571':'liver', 'V800':'neuro', '199':'malig'
+};
+var _cdState = {};   // { criterionId: true } — ticked boxes
+var _cdPid   = '';   // patient id the checklist is open for
+
+// Age in whole years from DOB (DD/MM/YYYY storage format)
+function _cdAge(p) {
+  var ms = parseDMYsafe(fmtClaimDate((p && p.dob) || ''));
+  if (!ms) return 0;
+  return Math.floor((Date.now() - ms) / (365.25 * 86400000));
+}
+
+// Count ticked items per group and apply the qualifying rule
+function _cdEvaluate() {
+  function cnt(grp) {
+    return CD_CRITERIA[grp].filter(function(x) { return _cdState[x.id]; }).length;
+  }
+  var a = cnt('A'), b = cnt('B'), c = cnt('C');
+  return {
+    a: a, b: b, c: c,
+    qualifies: (a >= 2) || (a >= 1 && b >= 1) || (a >= 1 && c >= 1)
+  };
+}
+
+// Build the claim note from ticked boxes — mirrors the clerk's format
+function _cdNote() {
+  var picked = [];
+  ['A', 'B', 'C'].forEach(function(grp) {
+    CD_CRITERIA[grp].forEach(function(x) {
+      if (_cdState[x.id]) picked.push(x.label);
+    });
+  });
+  return 'Complex Discharge: ' + picked.join(', ');
+}
+
+function _cdToggle(id) {
+  _cdState[id] = !_cdState[id];
+  _cdRender(losdays(getP(_cdPid)));
+}
+
+// Render the criteria checklist into the discharge modal body
+function _cdRender(los) {
+  var ev = _cdEvaluate();
+
+  function chip(x) {
+    var on  = !!_cdState[x.id];
+    var css = on
+      ? 'border:1px solid var(--blue-t);background:var(--blue-bg);color:var(--blue-t);font-weight:700'
+      : 'border:1px solid var(--border2);background:var(--surface2);color:var(--text2)';
+    return '<button onclick="_cdToggle(\'' + x.id + '\')" ' +
+      'style="text-align:left;padding:9px 11px;border-radius:var(--rsm);font-size:13px;' +
+      'font-family:inherit;cursor:pointer;line-height:1.25;' + css + '">' +
+      (on ? '\u2713 ' : '') + esc(x.label) + '</button>';
+  }
+  function group(grp, title) {
+    return '<div style="font-size:11px;font-weight:700;color:var(--text3);' +
+      'text-transform:uppercase;letter-spacing:.4px;margin:11px 0 5px">' + title + '</div>' +
+      '<div style="display:flex;flex-direction:column;gap:5px">' +
+      CD_CRITERIA[grp].map(chip).join('') + '</div>';
+  }
+
+  var verdict;
+  if (ev.qualifies) {
+    verdict = '<div style="background:var(--green-bg);color:var(--green-t);font-weight:700;' +
+      'font-size:13px;padding:9px 11px;border-radius:var(--rsm)">' +
+      '\u2713 Qualifies — complex discharge surcharge applies</div>';
+  } else if (ev.a === 0) {
+    verdict = '<div style="background:var(--amber-bg);color:var(--amber-t);font-weight:600;' +
+      'font-size:12px;padding:9px 11px;border-radius:var(--rsm)">' +
+      'Select at least one major comorbidity (group A) to begin.</div>';
+  } else {
+    verdict = '<div style="background:var(--amber-bg);color:var(--amber-t);font-weight:600;' +
+      'font-size:12px;padding:9px 11px;border-radius:var(--rsm)">' +
+      'Add one more — a 2nd major comorbidity, any minor criterion, or malignancy.</div>';
+  }
+
+  var addBtn = ev.qualifies
+    ? '<button class="btn btn-g" style="margin:0" data-pid="' + _cdPid + '" ' +
+      'onclick="dischComplex(this)">Add 78717 &amp; continue</button>'
+    : '<button class="btn btn-g" style="margin:0;opacity:.4;pointer-events:none">' +
+      'Add 78717 &amp; continue</button>';
+
+  var h =
+    '<div style="font-size:13px;color:var(--amber-t);font-weight:700;margin-bottom:4px">' +
+      '\u26a0 LOS ' + los + ' days — check complex discharge criteria</div>' +
+    '<div style="font-size:11px;color:var(--text3);margin-bottom:8px">' +
+      'Rule: 2 major, or 1 major + 1 minor, or 1 major + malignancy.</div>' +
+    '<div style="max-height:46vh;overflow-y:auto;-webkit-overflow-scrolling:touch;' +
+      'border:.5px solid var(--border2);border-radius:var(--rsm);padding:4px 9px 11px">' +
+      group('A', 'A — Major comorbidities') +
+      group('B', 'B — Minor criteria') +
+      group('C', 'C — Malignancy') +
+    '</div>' +
+    '<div style="margin:9px 0 4px">' + verdict + '</div>' +
+    '<div style="display:flex;flex-direction:column;gap:8px">' +
+      addBtn +
+      '<button class="btn btn-s" style="margin:0" data-pid="' + _cdPid + '" ' +
+      'onclick="dischConfirmRemove(this)">Doesn\'t qualify — discharge without surcharge</button>' +
+    '</div>';
+  document.getElementById('disch-body').innerHTML = h;
+}
+
+// Step 2: Complex discharge — Cardiology MRP + LOS > 4 -> criteria checklist
 function _dischStep2(pid) {
   var p   = getP(pid);
   var los = losdays(p);
   // Complex discharge applies to ALL Cardiology MRP patients with LOS > 4, including CCU/ICU
   var isCardioMRP = p.role === 'mrp' && p.mrp === 'Cardiology';
   if (isCardioMRP && los > 4) {
-    var h = '<div style="font-size:13px;color:var(--amber-t);font-weight:700;margin-bottom:10px">' +
-      '⚠ LOS ' + los + ' days — does complex discharge apply?</div>' +
-      '<div style="display:flex;flex-direction:column;gap:8px">' +
-      '<button class="btn btn-g" style="margin:0" data-pid="' + pid + '" ' +
-      'onclick="dischComplex(this)">Yes — add 78717</button>' +
-      '<button class="btn btn-s" style="margin:0" data-pid="' + pid + '" ' +
-      'onclick="dischConfirmRemove(this)">No — patient doesn\'t qualify</button>' +
-      '</div>';
-    document.getElementById('disch-body').innerHTML = h;
+    _cdPid   = pid;
+    _cdState = {};
+    // Pre-tick only what the app can determine itself — MD still confirms each box
+    if (_cdAge(p) > 75) _cdState['age75'] = true;
+    var icdKey = String(p.icd || '').trim().toUpperCase();
+    if (CD_ICD_MAP[icdKey]) _cdState[CD_ICD_MAP[icdKey]] = true;
+    _cdRender(los);
   } else {
     _dischStep3(pid);
   }
 }
 
-// Add 78717 then go to step 3
+// Add 78717 with the criteria note, then go to step 3
 function dischComplex(btn) {
   var pid = btn.getAttribute('data-pid');
   var p   = getP(pid);
   if (!checkDoc()) return;
-  addClaim(p, '78717', '78717', 1, TODAY, 'I');
+  addClaim(p, '78717', '78717', 1, TODAY, 'I', null, _cdNote());
   sv('claims', st.claims);
   _dischStep3(pid);
 }

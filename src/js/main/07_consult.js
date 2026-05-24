@@ -181,15 +181,17 @@ function submitConsult() {
   updatePatientFromClaimForm(p);
   if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
 
-  // CCFPP — detect + retroactively update overlapping peer claims
+  // CCFPP — detect overlap. Returns a note only when this consult is the
+  // LATER of an overlapping pair; the note is for the 120x modifier claims.
   var ccfppNote = ccfppDetectAndUpdate(p, alias, dateISO, dateFmt, start, end);
 
-  // Combine user-entered notes with CCFPP auto-note (if any)
+  // userNote goes on the consult; the CCFPP note is added on TOP of it for
+  // the 120x modifier claims only (modNote), never on the 33010/33012 row.
   var userNote = (gv('cb-notes') || '').trim();
-  var fullNote = [userNote, ccfppNote].filter(function(s) { return s; }).join(' | ');
+  var modNote  = [userNote, ccfppNote].filter(function(s) { return s; }).join(' | ');
 
-  // Base consult — combined note on consult itself
-  addClaim(p, code, code, 1, dateFmt, loc, start, fullNote, gv('cb-end'), alias);
+  // Base consult (33010/33012) — doctor's note only, no CCFPP
+  addClaim(p, code, code, 1, dateFmt, loc, start, userNote, gv('cb-end'), alias);
 
   // MOST — standalone item, no CCFPP
   if (_mostOn) addClaim(p, '78720', '78720', 1, dateFmt, loc, null, null, null, alias);
@@ -202,12 +204,12 @@ function submitConsult() {
   if (modBase) {
     // Base modifier — first 30 min from consult start
     var modBaseEnd = minsToTime((t2m(start) + 30) % (24 * 60));
-    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start, fullNote, modBaseEnd, alias);
+    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start, modNote, modBaseEnd, alias);
 
     if (modInc) {
       // Increment modifier — start+30 to consult end
       var incStart = minsToTime((t2m(start) + 30) % (24 * 60));
-      addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, fullNote, end, alias);
+      addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, modNote, end, alias);
     }
   }
   sv('patients', st.patients);

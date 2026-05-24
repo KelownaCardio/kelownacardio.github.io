@@ -52,10 +52,17 @@ function isWeekendOrStat(dateStr) {
   return dow === 0 || dow === 6 || isBCStat(dateStr);
 }
 
-// ── CCFPP overlap detection + retroactive peer update ──
-// Returns the CCFPP note string for the NEW consult's claims, and
-// retroactively appends a CCFPP note to each overlapping peer's
-// existing consult + modifier claims, pushing the updates to Sheets.
+// ── CCFPP overlap detection (one-directional) ──────────
+// CCFPP ("continuing care from a previous patient") applies only to the
+// LATER of two overlapping call-out consults. The note is written to that
+// later consult's 120x call-out MODIFIER claims — never to the 33010/33012
+// consult row itself.
+//
+// ccfppDetectAndUpdate returns the note for the NEW consult's modifier
+// claims when the new consult is the later of the pair. When the new
+// consult is instead the EARLIER of the pair, the peer is the later one,
+// so its existing 120x modifier claims are retroactively annotated and
+// the function returns '' (new consult gets nothing).
 //
 // Triggers ONLY when:
 //   1. The new 33010/33012 consult falls in a modifier (call-out) window
@@ -69,6 +76,7 @@ function isWeekendOrStat(dateStr) {
 // dateFmt     — new consult's date (DD/MM/YYYY)
 // startStr    — new consult's HH:MM start
 // endStr      — new consult's HH:MM end
+
 // True when two patient records almost certainly describe the same
 // person — same surname (case-insensitive) and same date of birth.
 // Used to stop CCFPP from linking a patient to a duplicate of itself
@@ -82,6 +90,9 @@ function ccfppSamePerson_(a, b) {
   if (!aDob || !bDob) return false;      // missing DOB — do not block
   return aDob === bDob;
 }
+
+// 120x call-out modifier fee codes — CCFPP notes attach ONLY to these.
+var CCFPP_MODIFIER_FEES = ['1200','1201','1202','1205','1206','1207'];
 
 function ccfppDetectAndUpdate(newP, alias, dateISO, dateFmt, startStr, endStr) {
   if (!startStr || !endStr) return '';
@@ -99,8 +110,11 @@ function ccfppDetectAndUpdate(newP, alias, dateISO, dateFmt, startStr, endStr) {
   var prevDateFmt = pad(_prevDateD.getDate()) + '/' + pad(_prevDateD.getMonth() + 1) + '/' + _prevDateD.getFullYear();
   var nextDateFmt = pad(_nextDateD.getDate()) + '/' + pad(_nextDateD.getMonth() + 1) + '/' + _nextDateD.getFullYear();
 
-  // Collect all overlapping peer PHNs (deduplicated)
-  var peerPhns = [];
+  // Overlapping peers split by who starts LATER. The later-starting consult
+  // of each pair is the one that carries the CCFPP note.
+  var newIsSecond = [];  // peer PHNs where the NEW consult starts later → note on NEW consult's modifiers
+  var newIsFirst  = [];  // peer PHNs where the PEER starts later        → note on PEER's modifiers (retroactive)
+
   for (var _i = 0; _i < st.claims.length; _i++) {
     var c = st.claims[_i];
     if (c.alias !== alias) continue;
@@ -132,50 +146,50 @@ function ccfppDetectAndUpdate(newP, alias, dateISO, dateFmt, startStr, endStr) {
     var _prevISO  = _prevRefD.getFullYear() + '-' + pad(_prevRefD.getMonth() + 1) + '-' + pad(_prevRefD.getDate());
     if (!getModifier(c.startTime, _prevISO)) continue;
 
-    // Same-person guard — a candidate peer that shares this patient's
-    // surname AND date of birth is almost certainly the same person
-    // under a duplicate record. CCFPP cannot apply to oneself, so this
-    // peer is skipped in BOTH the new-consult note and the reciprocal
-    // peer update (both derive from peerPhns below).
+    // Same-person guard — skip a duplicate record of this same patient.
     var _peerPat = (st.patients || []).find(function(pp){ return pp.phn === c.phn; }) || {};
     if (ccfppSamePerson_(newP, _peerPat)) continue;
 
-    // Interval overlap
+    // Interval overlap → classify by who starts later (ties: new = later).
     if (thisStartM < prevEndM && prevStartM < thisEndM) {
-      if (peerPhns.indexOf(c.phn) === -1) peerPhns.push(c.phn);
+      if (thisStartM >= prevStartM) {
+        if (newIsSecond.indexOf(c.phn) === -1) newIsSecond.push(c.phn);
+      } else {
+        if (newIsFirst.indexOf(c.phn) === -1) newIsFirst.push(c.phn);
+      }
     }
   }
 
-  if (!peerPhns.length) return '';
+  // ── RETROACTIVE: the PEER starts later, so it is the second consult.
+  // Annotate the peer's existing 120x modifier claims only (never the
+  // 33010/33012 consult). The new consult, being earlier, gets nothing.
+  if (newIsFirst.length) {
+    var reverseNote = 'CCFPP ' + ((newP.first || '') + ' ' + (newP.last || '')).trim() + ' (' + (newP.phn || '—') + ')';
+    var dateMatches = [dateFmt, prevDateFmt, nextDateFmt];
+    newIsFirst.forEach(function(peerPhn) {
+      st.claims.forEach(function(c) {
+        if (c.phn   !== peerPhn) return;
+        if (c.alias !== alias)   return;
+        if (dateMatches.indexOf(c.date) === -1) return;
+        if (CCFPP_MODIFIER_FEES.indexOf(c.fee) === -1) return;
+        var existing = c.notes || '';
+        if (existing.indexOf(reverseNote) !== -1) return; // idempotent
+        c.notes = existing ? existing + ' | ' + reverseNote : reverseNote;
+        if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL) push('saveClaim', c);
+      });
+    });
+    sv('claims', st.claims);
+  }
 
-  // Build CCFPP note string for the NEW consult — one entry per peer
-  var newClaimNote = peerPhns.map(function(peerPhn) {
+  // ── FORWARD: the NEW consult starts later, so it is the second consult.
+  // Return the note string; submitConsult stamps it on the new consult's
+  // own 120x modifier claims (one entry per peer).
+  if (!newIsSecond.length) return '';
+  return newIsSecond.map(function(peerPhn) {
     var pat = (st.patients || []).find(function(pp) { return pp.phn === peerPhn; }) || {};
     var name = ((pat.first || '') + ' ' + (pat.last || '')).trim() || '(unknown)';
     return 'CCFPP ' + name + ' (' + peerPhn + ')';
   }).join(' | ');
-
-  // RETROACTIVELY update each peer's existing consult + modifier claims
-  // Append "CCFPP <newP first> <newP last> (<newP phn>)" to their notes.
-  var reverseNote = 'CCFPP ' + ((newP.first || '') + ' ' + (newP.last || '')).trim() + ' (' + (newP.phn || '—') + ')';
-  var feesForCcfpp = ['33010','33012','1200','1201','1202','1205','1206','1207'];
-  var dateMatches = [dateFmt, prevDateFmt, nextDateFmt];
-
-  peerPhns.forEach(function(peerPhn) {
-    st.claims.forEach(function(c) {
-      if (c.phn   !== peerPhn) return;
-      if (c.alias !== alias)   return;
-      if (dateMatches.indexOf(c.date) === -1) return;
-      if (feesForCcfpp.indexOf(c.fee) === -1) return;
-      var existing = c.notes || '';
-      if (existing.indexOf(reverseNote) !== -1) return; // idempotent
-      c.notes = existing ? existing + ' | ' + reverseNote : reverseNote;
-      if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL) push('saveClaim', c);
-    });
-  });
-  sv('claims', st.claims);
-
-  return newClaimNote;
 }
 
 // ── Call-out Modifier Detection ────────────────────────

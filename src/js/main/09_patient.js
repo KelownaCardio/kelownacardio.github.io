@@ -304,6 +304,11 @@ async function _addPatientCore(withClaim, skipNameDobDup) {
     if (cDateISO) {
       var cDateFmt = fmtD(parseISODate(cDateISO));
       var cLoc     = p.ward === 'ED' ? 'E' : 'I';
+      // CCFPP — same one-directional detection as the +Claim consult path.
+      // Previously the Add Patient path skipped this entirely. The note
+      // belongs on the 120x modifier claims only, never on the consult row.
+      var cCcfppNote = ccfppDetectAndUpdate(p, cAlias, cDateISO, cDateFmt, cStart, cEnd);
+      var cModNote   = [cNotes, cCcfppNote].filter(function(s) { return s; }).join(' | ');
       addClaim(p, cCode, cCode, 1, cDateFmt, cLoc, cStart, cNotes, cEnd, cAlias);
       if (_apMostOn) addClaim(p, '78720', '78720', 1, cDateFmt, cLoc, null, null, null, cAlias);
       var cModBase  = getModifier(cStart, cDateISO);
@@ -311,10 +316,10 @@ async function _addPatientCore(withClaim, skipNameDobDup) {
       var cModInc   = cIncUnits > 0 ? getModifierForIncrement(cStart, cDateISO) : null;
       if (cModBase) {
         var cModBaseEnd = minsToTime((t2m(cStart) + 30) % (24 * 60));
-        addClaim(p, cModBase.base, cModBase.base, 1, cDateFmt, cLoc, cStart, cNotes, cModBaseEnd, cAlias);
+        addClaim(p, cModBase.base, cModBase.base, 1, cDateFmt, cLoc, cStart, cModNote, cModBaseEnd, cAlias);
         if (cModInc) {
           var cIncStart = minsToTime((t2m(cStart) + 30) % (24 * 60));
-          addClaim(p, cModInc.inc, cModInc.inc, cIncUnits, cDateFmt, cLoc, cIncStart, cNotes, cEnd, cAlias);
+          addClaim(p, cModInc.inc, cModInc.inc, cIncUnits, cDateFmt, cLoc, cIncStart, cModNote, cEnd, cAlias);
         }
       }
       sv('claims', st.claims);
