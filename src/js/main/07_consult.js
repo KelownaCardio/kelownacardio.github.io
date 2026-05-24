@@ -1,11 +1,29 @@
 // ── 07_consult.js ──
 // ═══════════════════════════════════════════════════════
-// 07_consult.js — Consult form (33010/33012), MOST toggle,
-//                 start/end time, modifier detection, +15 button,
-//                 live claim preview, submit
+// 07_consult.js — Unified consult form (33010/33012)
+//
+// ONE consult form, shared by the +Claim screen and the Add Patient
+// screen. Built on the Add Patient template: flat layout, no claims-
+// preview card. Diagnosis + referring MD pre-fill from the patient but
+// are editable per-claim — a per-claim change rides on the claim row
+// only and never rewrites the patient's baseline record.
 // ═══════════════════════════════════════════════════════
 
-function buildConsultForm(p) {
+// MOST toggle state — reset to ON every time a fresh consult form builds.
+var _mostOn = true;
+
+// p may be a real patient object (+Claim screen) or {} on the Add Patient
+// screen (the patient does not exist yet — fields simply render blank).
+// opts.withSubmit — +Claim shows its own submit button; Add Patient uses
+// the screen's own submit buttons, so it passes { withSubmit:false }.
+function buildConsultForm(p, opts) {
+  p    = p    || {};
+  opts = opts || {};
+  var withSubmit = opts.withSubmit !== false;
+
+  // A freshly-built form always renders MOST as ON — keep the global in sync.
+  _mostOn = true;
+
   var now      = new Date();
   var todayISO = localISODate(now);
   var nowTime  = pad(now.getHours()) + ':' + pad(now.getMinutes());
@@ -33,29 +51,29 @@ function buildConsultForm(p) {
        '<input type="text" id="cb-start" value="' + nowTime + '" placeholder="14:30 or 2:30pm" oninput="updateConsultUI()" onblur="var v=parseTime24(this.value);if(v){this.value=v;updateConsultUI();}"></div>' +
        '</div>';
 
-  // End time — defaults to start+45, doctor adjusts if shorter
+  // End time — defaults to start + 50, doctor adjusts if shorter
   h += '<div class="fl" style="margin-bottom:9px">' +
        '<div class="f1"><label>End time' +
-       '<span style="font-size:10px;color:var(--text3)"> — adjust if &lt; 45 min</span></label>' +
+       '<span style="font-size:10px;color:var(--text3)"> — defaults to 50 min, adjust as needed</span></label>' +
        '<input type="text" id="cb-end" value="' + endTime + '" placeholder="14:30 or 2:30pm" oninput="updateConsultUI()" onblur="var v=parseTime24(this.value);if(v){this.value=v;updateConsultUI();}"></div>' +
        '</div>';
 
-  // Modifier display area
+  // Modifier banner
   h += '<div id="cb-mod"></div>';
-  h += '</div>';
 
-  // ICD-9 and referring MD
+  // Notes — folded into the consult card (Add Patient template style)
+  h += '<label style="margin-top:9px">Notes <span style="font-size:10px;color:var(--text3);font-weight:400">(optional)</span></label>';
+  h += '<textarea id="cb-notes" rows="2" placeholder="Add any claim notes..." autocorrect="off" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:0"></textarea>';
+  h += '</div>'; // end consult card
+
+  // Diagnosis + referring MD + performing physician.
+  // Pre-filled from the patient; editable per-claim (rides on the claim row,
+  // does not overwrite the patient baseline).
   h += buildIcdRefCard(p);
 
-  // Live claim preview
-  h += '<div class="cp" id="cb-preview"><div class="cp-title">Claims preview</div></div>';
-
-  // Optional notes
-  h += '<label style="margin-top:9px">Notes <span style="font-size:10px;color:var(--text3);font-weight:400">(optional)</span></label>';
-  h += '<textarea id="cb-notes" rows="2" placeholder="Add any claim notes..." autocorrect="off" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:9px"></textarea>';
-
-  // Submit button
-  h += '<button class="btn btn-p" onclick="claimSubmitOnce(submitConsult)">Add consult claims</button>';
+  if (withSubmit) {
+    h += '<button class="btn btn-p" onclick="claimSubmitOnce(submitConsult)">Add consult claims</button>';
+  }
   return h;
 }
 
@@ -68,91 +86,53 @@ function toggleConsultCode(code) {
 function toggleMost() {
   _mostOn = !_mostOn;
   document.getElementById('cb-most').className = 'most-btn' + (_mostOn ? ' on' : '');
-  updateConsultUI();
 }
 
 function updateConsultUI() {
   var start   = gv('cb-start');
   var end     = gv('cb-end');
   var dateISO = gv('cb-date');
+  if (!document.getElementById('cb-mod')) return; // form not on screen
 
-  // Track which field triggered this update so the end time follows the start time
-  // unless the doctor has manually edited the end. Start input always pulls end +45 min.
-  var endEl = document.getElementById('cb-end');
+  // End follows start (start + 50 min) unless the doctor edited end directly.
+  var endEl   = document.getElementById('cb-end');
   var changed = (typeof event !== 'undefined' && event && event.target) ? event.target.id : '';
   if (start && (changed === 'cb-start' || !end)) {
     if (endEl) endEl.value = minsToTime(t2m(start) + 50);
     end = gv('cb-end');
   }
 
-  var modBase = getModifier(start, dateISO);
-  var hasInc  = consultHasIncrement(start, end);
-  var modInc  = hasInc ? getModifierForIncrement(start, dateISO) : null;
-
-  // Modifier banner
+  var modBase  = getModifier(start, dateISO);
+  var hasInc   = consultHasIncrement(start, end);
+  var modInc   = hasInc ? getModifierForIncrement(start, dateISO) : null;
   var incUnits = consultIncUnits(start, end);
-  var modEl = document.getElementById('cb-mod');
-  if (modEl) {
-    if (modBase) {
-      // Line 1: base modifier from start time
-      var banner = '<div class="mod-box ' + modBase.cls + '" style="margin-bottom:0;border-radius:var(--rsm) var(--rsm) 0 0">' +
-        '<span style="font-weight:700">' + modBase.label + '</span>' +
-        '<span style="font-size:10px;opacity:.75;margin-left:6px">' + modBase.base + ' ×1</span>' +
-        '</div>';
-      // Line 2: increment based on duration
-      if (incUnits > 0) {
-        var incMod = modInc || modBase;
-        banner += '<div class="mod-box ' + incMod.cls + '" style="margin-top:1px;border-radius:0 0 var(--rsm) var(--rsm);opacity:.85">' +
-          '<span>Consult time &gt; 45 min</span>' +
-          '<span style="font-size:10px;font-weight:700;margin-left:6px">' + incMod.inc + ' ×' + incUnits + '</span>' +
-          '</div>';
-      } else {
-        banner += '<div style="font-size:11px;padding:5px 10px;color:var(--text3);' +
-          'border:.5px solid var(--border);border-top:none;border-radius:0 0 var(--rsm) var(--rsm);' +
-          'background:var(--surface2)">' +
-          'Consult ≤ 45 min — no increment</div>';
-      }
-      modEl.innerHTML = banner;
-    } else if (start) {
-      modEl.innerHTML = '<div class="mod-box mod-day">✓ Daytime weekday — no call-out modifier</div>';
-    } else {
-      modEl.innerHTML = '';
-    }
-  }
+  var modEl    = document.getElementById('cb-mod');
 
-  updateConsultPreview(modBase, modInc);
-}
-
-function updateConsultPreview(modBase, modInc) {
-  var p    = getP(_claimPid);
-  var code = document.getElementById('cb-33010') &&
-             document.getElementById('cb-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
-  var icd  = getClaimIcd(p);
-  var rows = [{ code:code, desc:'Cardiology consultation', u:1 }];
-  if (_mostOn) rows.push({ code:'78720', desc:'MOST — advance care planning', u:1 });
-  var incUnits2 = consultIncUnits(gv('cb-start'), gv('cb-end'));
   if (modBase) {
-    rows.push({ code:modBase.base, desc:modBase.label + ' — base (30 min)', u:1 });
-    if (incUnits2 > 0) {
-      var incMod2 = modInc || modBase;
-      rows.push({ code:incMod2.inc, desc:'Consult time > 45 min', u:incUnits2 });
+    var banner = '<div class="mod-box ' + modBase.cls + '" style="margin-bottom:0;border-radius:var(--rsm) var(--rsm) 0 0">' +
+      '<span style="font-weight:700">' + modBase.label + '</span>' +
+      '<span style="font-size:10px;opacity:.75;margin-left:6px">' + modBase.base + ' ×1</span>' +
+      '</div>';
+    if (incUnits > 0) {
+      var incMod = modInc || modBase;
+      banner += '<div class="mod-box ' + incMod.cls + '" style="margin-top:1px;border-radius:0 0 var(--rsm) var(--rsm);opacity:.85">' +
+        '<span>Consult time &gt; 45 min</span>' +
+        '<span style="font-size:10px;font-weight:700;margin-left:6px">' + incMod.inc + ' ×' + incUnits + '</span>' +
+        '</div>';
+    } else {
+      banner += '<div style="font-size:11px;padding:5px 10px;color:var(--text3);' +
+        'border:.5px solid var(--border);border-top:none;border-radius:0 0 var(--rsm) var(--rsm);' +
+        'background:var(--surface2)">Consult ≤ 45 min — no increment</div>';
     }
-  }
-  var prev = document.getElementById('cb-preview');
-  if (prev) {
-    prev.innerHTML =
-      '<div class="cp-title">Claims to add (ICD-9 ' + icd + ')</div>' +
-      rows.map(function(r) {
-        return '<div class="cp-row">' +
-               '<span class="cp-code">' + r.code + '</span>' +
-               '<span class="cp-desc">' + r.desc + '</span>' +
-               '<span class="cp-units">×' + r.u + '</span>' +
-               '</div>';
-      }).join('');
+    modEl.innerHTML = banner;
+  } else if (start && dateISO) {
+    modEl.innerHTML = '<div class="mod-box mod-day">✓ Daytime weekday — no call-out modifier</div>';
+  } else {
+    modEl.innerHTML = '';
   }
 }
 
-// Submit guard — prevents double/triple tap on mobile from firing twice
+// Submit guard — prevents double/triple tap on mobile from firing twice.
 var _submitGuard = false;
 function claimSubmitOnce(fn) {
   if (_submitGuard) return;
@@ -161,60 +141,70 @@ function claimSubmitOnce(fn) {
   fn();
 }
 
-function submitConsult() {
-  var p = getP(_claimPid);
-  if (!checkDoc()) return;
-
-  var alias   = getPerformingAlias();
+// ── Shared consult-claim creation ──────────────────────
+// Reads the unified consult form (cb-* ids) and creates the consult,
+// MOST, and call-out modifier claims for patient p. Used by BOTH the
+// +Claim screen (submitConsult) and the Add Patient screen
+// (_addPatientCore). Returns true on success, false if validation failed.
+//
+// Diagnosis / referring MD are read from the form and ride on the claim
+// rows as a per-claim override — they do NOT modify the patient record.
+// CCFPP detection runs here, so it now fires from BOTH entry points.
+function submitConsultClaims(p, alias) {
   var code    = document.getElementById('cb-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
   var dateISO = gv('cb-date');
   var start   = gv('cb-start');
   var end     = gv('cb-end');
-  if (!dateISO) { showToast('Enter date'); return; }
-  if (!start)   { showToast('Start time required for ' + code); return; }
-  if (!end)     { showToast('End time required for ' + code); return; }
+  if (!dateISO) { showToast('Enter consult date'); return false; }
+  if (!start)   { showToast('Start time required for ' + code); return false; }
+  if (!end)     { showToast('End time required for ' + code); return false; }
 
   var dateFmt = fmtD(parseISODate(dateISO));
   var loc     = p.ward === 'ED' ? 'E' : 'I';
 
-  // Save any ICD-9/referrer changes back to patient record
-  updatePatientFromClaimForm(p);
-  if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
+  // Per-claim diagnosis / referring MD — pre-filled from the patient but
+  // editable on the form. Rides on the claim rows only (override object).
+  var ov = {
+    icd:       getClaimIcd(p),
+    refby:     gv('cb-refby')      || p.refby     || '',
+    refbyName: gv('cb-refby-name') || p.refbyName || ''
+  };
 
-  // CCFPP — detect overlap. Returns a note only when this consult is the
-  // LATER of an overlapping pair; the note is for the 120x modifier claims.
+  var userNote  = (gv('cb-notes') || '').trim();
+  // CCFPP — one-directional detection. Note belongs on the 120x modifier
+  // claims only, never on the consult row.
   var ccfppNote = ccfppDetectAndUpdate(p, alias, dateISO, dateFmt, start, end);
+  var modNote   = [userNote, ccfppNote].filter(function(s) { return s; }).join(' | ');
 
-  // userNote goes on the consult; the CCFPP note is added on TOP of it for
-  // the 120x modifier claims only (modNote), never on the 33010/33012 row.
-  var userNote = (gv('cb-notes') || '').trim();
-  var modNote  = [userNote, ccfppNote].filter(function(s) { return s; }).join(' | ');
+  // Base consult — doctor's note only
+  addClaim(p, code, code, 1, dateFmt, loc, start, userNote, end, alias, ov);
 
-  // Base consult (33010/33012) — doctor's note only, no CCFPP
-  addClaim(p, code, code, 1, dateFmt, loc, start, userNote, gv('cb-end'), alias);
+  // MOST — standalone item, no CCFPP, no times
+  if (_mostOn) addClaim(p, '78720', '78720', 1, dateFmt, loc, null, null, null, alias, ov);
 
-  // MOST — standalone item, no CCFPP
-  if (_mostOn) addClaim(p, '78720', '78720', 1, dateFmt, loc, null, null, null, alias);
-
+  // Call-out modifiers — CCFPP note rides on these
   var modBase  = getModifier(start, dateISO);
   var incUnits = consultIncUnits(start, end);
-  var hasInc   = incUnits > 0;
-  var modInc   = hasInc ? getModifierForIncrement(start, dateISO) : null;
-
+  var modInc   = incUnits > 0 ? getModifierForIncrement(start, dateISO) : null;
   if (modBase) {
-    // Base modifier — first 30 min from consult start
     var modBaseEnd = minsToTime((t2m(start) + 30) % (24 * 60));
-    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start, modNote, modBaseEnd, alias);
-
+    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start, modNote, modBaseEnd, alias, ov);
     if (modInc) {
-      // Increment modifier — start+30 to consult end
       var incStart = minsToTime((t2m(start) + 30) % (24 * 60));
-      addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, modNote, end, alias);
+      addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, modNote, end, alias, ov);
     }
   }
-  sv('patients', st.patients);
   sv('claims', st.claims);
+  return true;
+}
+
+// +Claim screen consult submit.
+function submitConsult() {
+  var p = getP(_claimPid);
+  if (!checkDoc()) return;
+  if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
+  if (!submitConsultClaims(p, getPerformingAlias())) return;
+  sv('patients', st.patients);
   showToast('Consult claims added for ' + p.last);
   closeClaimScreen();
 }
-

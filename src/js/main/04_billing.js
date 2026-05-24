@@ -316,7 +316,11 @@ function ccuFeeForDate(p, dateStr) {
 function ccuFeeForToday(p) { return ccuFeeForDate(p, TODAY); }
 
 // ── Add Claim Helper ───────────────────────────────────
-function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, performingAlias) {
+function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, performingAlias, overrides) {
+  // overrides: optional { icd, refby, refbyName } — per-claim diagnosis /
+  // referring MD that ride on THIS claim row only. They never modify the
+  // patient record. When absent, the claim inherits the patient's values.
+  overrides = overrides || {};
   // v3.60: CCU_DAILY is the canonical placeholder for CCU days. The
   // Apps Script ccuConsolidateForExport() groups them by patient+alias,
   // segments into consecutive episodes, and emits properly-banded
@@ -345,11 +349,11 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, 
     first:     p.first || '',
     phn:       p.phn,
     fee:       fee,
-    icd:       p.icd || '3062',
+    icd:       (overrides.icd != null && overrides.icd !== '') ? overrides.icd : (p.icd || '3062'),
     units:     units || 1,
     date:      date,
-    refby:     p.refby     || '',
-    refbyName: p.refbyName || '',
+    refby:     (overrides.refby     != null && overrides.refby     !== '') ? overrides.refby     : (p.refby     || ''),
+    refbyName: (overrides.refbyName != null && overrides.refbyName !== '') ? overrides.refbyName : (p.refbyName || ''),
     notes:     notes       || '',
     startTime: _start,
     endTime:   endTime || '',
