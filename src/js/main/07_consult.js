@@ -77,11 +77,11 @@ function buildConsultForm(p, opts) {
   // Live CCFPP field — auto-populated when this consult overlaps another
   // call-out consult. Hidden until an overlap is detected. Read-only: the
   // note is appended to the 120x modifier claims automatically at submit.
-  h += '<div id="cb-ccfpp" style="display:none;margin-top:9px;padding:8px 10px;' +
-       'background:var(--blue-bg);border:1px solid var(--blue-t);border-radius:var(--rsm)">' +
-       '<div style="font-size:10px;font-weight:700;color:var(--blue-t);' +
+  h += '<div id="cb-ccfpp" style="margin-top:9px;padding:8px 10px;border-radius:var(--rsm);' +
+       'border:1px solid var(--border2);background:var(--surface2)">' +
+       '<div style="font-size:10px;font-weight:700;color:var(--text3);' +
        'text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">CCFPP — continuing care</div>' +
-       '<div id="cb-ccfpp-val" style="font-size:13px;color:var(--text2);font-weight:600"></div>' +
+       '<div id="cb-ccfpp-val" style="font-size:13px;color:var(--text3);font-weight:600">—</div>' +
        '</div>';
 
   // Notes — folded into the consult card (Add Patient template style)
@@ -154,20 +154,33 @@ function updateConsultUI() {
     modEl.innerHTML = '';
   }
 
-  // ── Live CCFPP preview ──────────────────────────────
-  var ccEl = document.getElementById('cb-ccfpp');
-  if (ccEl) {
-    var ccNote = '';
-    if (start && end && dateISO) {
-      ccNote = ccfppPreviewNote(currentConsultPatient(), getPerformingAlias(),
-                                dateISO, fmtD(parseISODate(dateISO)), start, end);
-    }
-    if (ccNote) {
-      var ccVal = document.getElementById('cb-ccfpp-val');
-      if (ccVal) ccVal.textContent = ccNote;
-      ccEl.style.display = 'block';
+  // ── Live CCFPP field — always visible, three states ──
+  //   1. no call-out window     → "Modifiers don't apply"
+  //   2. window, no overlap     → "No overlapping consult"
+  //   3. window + overlap       → "CCFPP: Last, First (PHN)"  (blue highlight)
+  var ccEl  = document.getElementById('cb-ccfpp');
+  var ccVal = document.getElementById('cb-ccfpp-val');
+  if (ccEl && ccVal) {
+    var ccText, ccMatch = false;
+    if (!modBase) {
+      ccText = "Modifiers don't apply";
     } else {
-      ccEl.style.display = 'none';
+      var ccNote = (start && end && dateISO)
+        ? ccfppPreviewNote(currentConsultPatient(), getPerformingAlias(),
+                           dateISO, fmtD(parseISODate(dateISO)), start, end)
+        : '';
+      if (ccNote) { ccText = ccNote; ccMatch = true; }
+      else        { ccText = 'No overlapping consult'; }
+    }
+    ccVal.textContent = ccText;
+    if (ccMatch) {
+      ccEl.style.border     = '1px solid var(--blue-t)';
+      ccEl.style.background = 'var(--blue-bg)';
+      ccVal.style.color     = 'var(--blue-t)';
+    } else {
+      ccEl.style.border     = '1px solid var(--border2)';
+      ccEl.style.background = 'var(--surface2)';
+      ccVal.style.color     = 'var(--text3)';
     }
   }
 }

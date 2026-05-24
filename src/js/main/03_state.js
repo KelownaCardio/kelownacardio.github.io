@@ -46,11 +46,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.81-2026-05-24-live-ccfpp-field';
+var BUILD_ID    = 'v3.82-2026-05-24-ccfpp-field-3state';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.81';
+var APP_VERSION = 'v3.82';
 var APP_BUILT   = '2026-05-24';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,

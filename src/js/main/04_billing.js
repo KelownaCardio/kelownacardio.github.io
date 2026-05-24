@@ -161,12 +161,18 @@ function _ccfppClassifyPeers(newP, alias, dateISO, dateFmt, startStr, endStr) {
   };
 }
 
+// Format a patient's name as "Last, First" for CCFPP notes.
+function _ccfppName(p) {
+  var last  = String((p && p.last)  || '').trim();
+  var first = String((p && p.first) || '').trim();
+  return last ? (last + (first ? ', ' + first : '')) : (first || '(unknown)');
+}
+
 // Build the CCFPP note for a set of peer PHNs — one entry per peer.
 function _ccfppNoteFor(peerPhns) {
   return peerPhns.map(function(peerPhn) {
     var pat = (st.patients || []).find(function(pp) { return pp.phn === peerPhn; }) || {};
-    var name = ((pat.first || '') + ' ' + (pat.last || '')).trim() || '(unknown)';
-    return 'CCFPP ' + name + ' (' + peerPhn + ')';
+    return 'CCFPP: ' + _ccfppName(pat) + ' (' + peerPhn + ')';
   }).join(' | ');
 }
 
@@ -187,7 +193,7 @@ function ccfppDetectAndUpdate(newP, alias, dateISO, dateFmt, startStr, endStr) {
   // RETROACTIVE: the PEER starts later — annotate its existing 120x
   // modifier claims only (never the 33010/33012 consult).
   if (cls.newIsFirst.length) {
-    var reverseNote = 'CCFPP ' + ((newP.first || '') + ' ' + (newP.last || '')).trim() + ' (' + (newP.phn || '—') + ')';
+    var reverseNote = 'CCFPP: ' + _ccfppName(newP) + ' (' + (newP.phn || '—') + ')';
     var dateMatches = [cls.dateFmt, cls.prevDateFmt, cls.nextDateFmt];
     cls.newIsFirst.forEach(function(peerPhn) {
       st.claims.forEach(function(c) {
