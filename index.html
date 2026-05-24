@@ -2130,11 +2130,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.89-2026-05-24-complex-discharge-checklist';
+var BUILD_ID    = 'v3.90-2026-05-24-claim-edit-delete-idfix';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.89';
+var APP_VERSION = 'v3.90';
 var APP_BUILT   = '2026-05-24';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -5432,7 +5432,7 @@ function parseDMYsafe(s) {
 function openClaimEdit(btn) {
   var cid = btn.getAttribute('data-cid');
   var pid = btn.getAttribute('data-pid');
-  var c   = st.claims.find(function(x) { return x.id === cid; });
+  var c   = st.claims.find(function(x) { return x.id != null && x.id !== '' && String(x.id) === String(cid); });
   var p   = getP(pid);
   if (!c) return;
 
@@ -5525,7 +5525,7 @@ function openClaimEdit(btn) {
 function saveClaimEdit(btn) {
   var cid = btn.getAttribute('data-cid');
   var pid = btn.getAttribute('data-pid');
-  var c   = st.claims.find(function(x) { return x.id === cid; });
+  var c   = st.claims.find(function(x) { return x.id != null && x.id !== '' && String(x.id) === String(cid); });
   var p   = getP(pid);
   if (!c) return;
 
@@ -5575,12 +5575,12 @@ function saveClaimEdit(btn) {
 function deleteClaimBtn(btn) {
   var cid = btn.getAttribute('data-cid');
   var pid = btn.getAttribute('data-pid');
-  var c   = st.claims.find(function(x) { return x.id === cid; });
+  var c   = st.claims.find(function(x) { return x.id != null && x.id !== '' && String(x.id) === String(cid); });
   if (!c) return;
 
   if (!confirm('Delete ' + getFeeLabel(c.fee) + ' on ' + dispDate(c.date) + '?')) return;
 
-  st.claims = st.claims.filter(function(x) { return x.id !== cid; });
+  st.claims = st.claims.filter(function(x) { return String(x.id) !== String(cid); });
   sv('claims', st.claims);
   if (SHEETS_URL) push('deleteClaim', { id: cid });
 
