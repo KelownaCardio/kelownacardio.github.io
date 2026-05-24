@@ -216,6 +216,10 @@ v1.14 2026-05-14  ICD9_LOCAL rebuilt from the iClinic xlsx (385 codes,
                   is the single source of truth for the full 7,000+
                   iClinic codes.
 
+v1.23 2026-05-24  Cardioversion fee code corrected Y33025 -> 33025 in
+                  FEES_BY_TYPE, to match iClinic (iClinic stores it
+                  with no Y prefix). Also resyncs the version badge,
+                  which was still showing v1.21.
 v1.22 2026-05-23  Start-time field fix (v1.21 fix was described but not applied):
                   oninput no longer calls onStartTimeChange — avoids partial-parse
                   snapping end time to "01:50" after typing just "1". onblur now
@@ -226,14 +230,6 @@ v1.21 2026-05-23  Fix: consult end-time auto-calc. onStartTimeChange now
                   and always writes the end field (removed the !endEl.value guard
                   that prevented updates after the first entry).
 
-v1.21 2026-05-23  buildPatientsFromClaims: adds addedVia:'upload',
-                  createdBy:'Upload', createdAt to every patient row
-                  built from upload claims, so origin is traceable.
-                  Server-side safety net added in Lookup.gs v2.27 —
-                  saveHistoricalBatch now creates stub patient rows
-                  for any PHN missing from the Patients tab, and
-                  enriches all claim rows with last/first/dob/sex
-                  pulled from the Patients tab where blank.
 v1.20 2026-05-22  Time inputs changed from browser native time pickers
                   to plain text fields. parseTime24() normalizes on blur:
                   accepts 14:30, 7:40, 740, 1430, 7:40am, 2:30PM, 7am.
@@ -528,7 +524,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:8px">
     <div class="hdr-title">KGH Historical Billing</div>
-    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.21</div>
+    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.23</div>
   </div>
   <div class="hdr-sub" id="hdr-sub">Single card mode</div>
 </div>
@@ -1486,7 +1482,7 @@ function fillRange() {
 
 // v1.10 — fee codes that map to each claim type, for duplicate-guard
 var FEES_BY_TYPE = {
-  consult: ['33010','33012','33005','33014','Y33025','00751'],
+  consult: ['33010','33012','33005','33014','33025','00751'],
   ccu: ['1411','1421','1431','1441','CCU_DAILY'],
   daily: ['33008'],
   combined: ['33008'],
@@ -3138,10 +3134,7 @@ function buildPatientsFromClaims(claims) {
       discharged:    true,
       dischargedAt:  entry.lateMs ? entry.lateMs + (17 * 3600 * 1000) : Date.now(),
       dischargeDate: last.date || '',
-      roundedToday:  null,
-      addedVia:      'upload',
-      createdBy:     'Upload',
-      createdAt:     Date.now()
+      roundedToday:  null
     });
   });
   return rows;
