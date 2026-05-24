@@ -1447,7 +1447,7 @@ var FEES = [
   { code:'33008',  desc:'Subsequent hospital visit / MRP daily / combined daily care',    amount:'$63.95',  cat:'Daily',     clr:'chip-green'  },
 
   // ── Cardiology procedures performed by the group ─────────────────
-  { code:'Y33025', desc:'Cardioversion (operation only)',                                 amount:'$105.70', cat:'Procedure', clr:'chip-red'   },
+  { code:'33025', desc:'Cardioversion (operation only)',                                 amount:'$105.70', cat:'Procedure', clr:'chip-red'   },
   { code:'00751',  desc:'Pericardiocentesis (pericardial puncture)',                      amount:'$258.25', cat:'Procedure', clr:'chip-red'   },
 
   // ── Discharge / planning ────────────────────────────────────────
@@ -1474,8 +1474,8 @@ var FEES = [
 // in the Sheets render with a meaningful label rather than a bare code.
 // NOT shown in the picker.
 var LEGACY_FEE_LABELS = {
-  '14101': 'Legacy code (was used for cardioversion; correct code is Y33025)',
-  '14105': 'Legacy code (was used for cardioversion; correct code is Y33025)',
+  '14101': 'Legacy code (was used for cardioversion; correct code is 33025)',
+  '14105': 'Legacy code (was used for cardioversion; correct code is 33025)',
   '14113': 'Legacy code (was used for temp pacemaker; correct code is 33030)'
 };
 
@@ -2124,11 +2124,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.83-2026-05-24-unified-other-claim';
+var BUILD_ID    = 'v3.85-2026-05-24-cardioversion-code-33025';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.83';
+var APP_VERSION = 'v3.85';
 var APP_BUILT   = '2026-05-24';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
