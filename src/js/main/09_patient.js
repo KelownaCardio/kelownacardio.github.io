@@ -304,11 +304,6 @@ async function _addPatientCore(withClaim, skipNameDobDup) {
     if (cDateISO) {
       var cDateFmt = fmtD(parseISODate(cDateISO));
       var cLoc     = p.ward === 'ED' ? 'E' : 'I';
-      // CCFPP — same one-directional detection as the +Claim consult path.
-      // Previously the Add Patient path skipped this entirely. The note
-      // belongs on the 120x modifier claims only, never on the consult row.
-      var cCcfppNote = ccfppDetectAndUpdate(p, cAlias, cDateISO, cDateFmt, cStart, cEnd);
-      var cModNote   = [cNotes, cCcfppNote].filter(function(s) { return s; }).join(' | ');
       addClaim(p, cCode, cCode, 1, cDateFmt, cLoc, cStart, cNotes, cEnd, cAlias);
       if (_apMostOn) addClaim(p, '78720', '78720', 1, cDateFmt, cLoc, null, null, null, cAlias);
       var cModBase  = getModifier(cStart, cDateISO);
@@ -316,10 +311,10 @@ async function _addPatientCore(withClaim, skipNameDobDup) {
       var cModInc   = cIncUnits > 0 ? getModifierForIncrement(cStart, cDateISO) : null;
       if (cModBase) {
         var cModBaseEnd = minsToTime((t2m(cStart) + 30) % (24 * 60));
-        addClaim(p, cModBase.base, cModBase.base, 1, cDateFmt, cLoc, cStart, cModNote, cModBaseEnd, cAlias);
+        addClaim(p, cModBase.base, cModBase.base, 1, cDateFmt, cLoc, cStart, cNotes, cModBaseEnd, cAlias);
         if (cModInc) {
           var cIncStart = minsToTime((t2m(cStart) + 30) % (24 * 60));
-          addClaim(p, cModInc.inc, cModInc.inc, cIncUnits, cDateFmt, cLoc, cIncStart, cModNote, cEnd, cAlias);
+          addClaim(p, cModInc.inc, cModInc.inc, cIncUnits, cDateFmt, cLoc, cIncStart, cNotes, cEnd, cAlias);
         }
       }
       sv('claims', st.claims);
@@ -590,28 +585,10 @@ function injectApPerformingDoc() {
 }
 
 function buildApConsultArea() {
-  var h = '';
-  h += '<div class="fl" style="margin-bottom:9px">';
-  h += '<button id="f-c-33010" class="ct-btn ct-on-consult" style="flex:1" onclick="toggleApConsultCode(\'33010\')">33010 — Full</button>';
-  h += '<button id="f-c-33012" class="ct-btn" style="flex:1" onclick="toggleApConsultCode(\'33012\')">33012 — Limited</button>';
-  h += '</div>';
-  h += '<button class="most-btn on" id="f-c-most" onclick="toggleApMost()">' +
-       '<svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>' +
-       '+ MOST (78720)</button>';
-  h += '<div id="f-c-mod" style="margin-top:6px"></div>';
-  h += '<div class="fl" style="margin-top:4px">';
-  h += '<div class="f1"><label>Date</label><input type="date" id="f-c-date" oninput="updateApConsultUI()"></div>';
-  h += '<div class="f1"><label>Start time</label><input type="text" id="f-c-start" placeholder="14:30 or 2:30pm" oninput="updateApConsultUI()" onblur="var v=parseTime24(this.value);if(v){this.value=v;updateApConsultUI();}"></div>';
-  h += '</div>';
-  h += '<div class="fl"><div class="f1"><label>End time <span style="font-size:10px;color:var(--text3)">— Defaults to 50min, adjust as needed</span></label><input type="text" id="f-c-end" placeholder="14:30 or 2:30pm" oninput="updateApConsultUI()" onblur="var v=parseTime24(this.value);if(v){this.value=v;updateApConsultUI();}"></div></div>';
-  h += '<label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(optional)</span></label>';
-  h += '<textarea id="f-c-notes" rows="2" placeholder="Optional" autocorrect="off" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:6px"></textarea>';
-  h += '<div style="border-top:.5px solid var(--border);margin:4px 0 10px"></div>';
-  h += _buildApRefIcdHtml();
-  h += '<div id="f-c-performing-wrap"></div>';
-  return h;
+  // Unified consult form, shared with the +Claim screen.
+  // withSubmit:false — the Add Patient screen has its own submit buttons.
+  return buildConsultForm({}, { withSubmit: false });
 }
-
 function buildApOtherClaimArea() {
   var h = '';
   h += '<div class="fl">';
@@ -729,18 +706,20 @@ async function apSubmit(addToList, _skipDupCheck) {
   var last = (document.getElementById('f-last') || {}).value || '';
   var phn  = gv('f-phn');
   if (!last) { showToast('Enter patient last name'); return; }
-  var icd = gv('f-icd') || '';
+  // Diagnosis / referring MD: the consult area uses the unified form
+  // (cb-* ids); the ccu-admit / other areas still use f-* ids.
+  var icd = gv('cb-icd') || gv('f-icd') || '';
 
   // Validate required fields
   var addMissing = [];
   if (!phn)                                    addMissing.push('phn');
   else if (String(phn).replace(/\D/g,'').length !== 10) addMissing.push('phn-len');
-  if (!gv('f-refby-num') && !gv('f-refby'))   addMissing.push('refby');
+  if (!gv('cb-refby') && !gv('f-refby-num') && !gv('f-refby')) addMissing.push('refby');
   if (!icd)                                    addMissing.push('icd');
   if (_apClaimType === 'consult') {
-    if (!(document.getElementById('f-c-date')  || {}).value) addMissing.push('date');
-    if (!(document.getElementById('f-c-start') || {}).value) addMissing.push('start time');
-    if (!(document.getElementById('f-c-end')   || {}).value) addMissing.push('end time');
+    if (!(document.getElementById('cb-date')  || {}).value) addMissing.push('date');
+    if (!(document.getElementById('cb-start') || {}).value) addMissing.push('start time');
+    if (!(document.getElementById('cb-end')   || {}).value) addMissing.push('end time');
   } else if (_apClaimType === 'ccu-admit') {
     if (!(document.getElementById('ap-ca-date') || {}).value) addMissing.push('date');
   } else if (_apClaimType === 'other') {
@@ -754,11 +733,11 @@ async function apSubmit(addToList, _skipDupCheck) {
       if (phnEl) { phnEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; phnEl.focus(); }
     }
     if (addMissing.indexOf('refby') !== -1) {
-      var refEl = document.getElementById('f-ref-search');
+      var refEl = document.getElementById('cb-ref-search') || document.getElementById('f-ref-search');
       if (refEl) { refEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; refEl.placeholder = 'Required — type name or doctor #'; }
     }
     if (addMissing.indexOf('icd') !== -1) {
-      var icdEl2 = document.getElementById('f-icd-search');
+      var icdEl2 = document.getElementById('cb-icd-search') || document.getElementById('f-icd-search');
       if (icdEl2) { icdEl2.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; icdEl2.placeholder = 'Required — type diagnosis or code'; }
     }
     var msgs = [];
@@ -811,8 +790,8 @@ async function apSubmit(addToList, _skipDupCheck) {
     id: 'p' + Date.now(), fac: 'OA040', roundedToday: null,
     last: fmtName(last), first: fmtName(gv('f-first')),
     phn: phn, dob: gv('f-dob'), sex: gv('f-sex'),
-    refby:     gv('f-refby-num') || gv('f-refby'),
-    refbyName: gv('f-refby-name'),
+    refby:     gv('cb-refby') || gv('f-refby-num') || gv('f-refby'),
+    refbyName: gv('cb-refby-name') || gv('f-refby-name'),
     icd: icd,
     createdBy: (st.doc && st.doc.alias) || '',
     createdAt: Date.now()
@@ -860,37 +839,15 @@ async function apSubmit(addToList, _skipDupCheck) {
 
   // Create claim
   if (st.doc) {
-    var cAlias = st.doc.alias;
-    var cPerf = document.getElementById('f-c-performing-doc');
-    if (cPerf && cPerf.value) cAlias = cPerf.value;
+    // Performing physician — consult area uses cb-performing-doc (unified
+    // form); ccu-admit / other still inject f-c-performing-doc.
+    var cPerf  = document.getElementById('cb-performing-doc') || document.getElementById('f-c-performing-doc');
+    var cAlias = (cPerf && cPerf.value) ? cPerf.value : st.doc.alias;
 
     if (_apClaimType === 'consult') {
-      var cCode    = (document.getElementById('f-c-33010') || {}).classList && document.getElementById('f-c-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
-      var cDateISO = (document.getElementById('f-c-date')  || {}).value || '';
-      var cStart   = (document.getElementById('f-c-start') || {}).value || '';
-      var cEnd     = (document.getElementById('f-c-end')   || {}).value || '';
-      var cNotes   = (document.getElementById('f-c-notes') || {}).value || '';
-      if (cDateISO) {
-        var cDateFmt = fmtD(parseISODate(cDateISO));
-        var cLoc     = p.ward === 'ED' ? 'E' : 'I';
-        // CCFPP — detect + retroactively update peer claims
-        var ccfppN   = ccfppDetectAndUpdate(p, cAlias, cDateISO, cDateFmt, cStart, cEnd);
-        var fullN    = [cNotes, ccfppN].filter(function(s) { return s; }).join(' | ');
-        addClaim(p, cCode, cCode, 1, cDateFmt, cLoc, cStart, fullN, cEnd, cAlias);
-        if (_apMostOn) addClaim(p, '78720', '78720', 1, cDateFmt, cLoc, null, null, null, cAlias);
-        var cModBase  = getModifier(cStart, cDateISO);
-        var cIncUnits = consultIncUnits(cStart, cEnd);
-        var cModInc   = cIncUnits > 0 ? getModifierForIncrement(cStart, cDateISO) : null;
-        if (cModBase) {
-          var cModBaseEnd2 = minsToTime((t2m(cStart) + 30) % (24 * 60));
-          addClaim(p, cModBase.base, cModBase.base, 1, cDateFmt, cLoc, cStart, fullN, cModBaseEnd2, cAlias);
-          if (cModInc) {
-            var cIncStart = minsToTime((t2m(cStart) + 30) % (24 * 60));
-            addClaim(p, cModInc.inc, cModInc.inc, cIncUnits, cDateFmt, cLoc, cIncStart, fullN, cEnd, cAlias);
-          }
-        }
-        sv('claims', st.claims);
-      }
+      // Unified shared submit — reads the cb-* consult form, runs CCFPP,
+      // and creates the consult + MOST + modifier claims.
+      submitConsultClaims(p, cAlias);
     } else if (_apClaimType === 'ccu-admit') {
       var caDateISO = (document.getElementById('ap-ca-date')  || {}).value || '';
       var caNotes   = (document.getElementById('ap-ca-notes') || {}).value || '';
@@ -925,30 +882,14 @@ async function apSubmit(addToList, _skipDupCheck) {
 }
 
 function initAddPatientConsult() {
-  // Build the claim area if it's empty (first load or after clear)
+  // The unified consult form self-initialises date/time/toggles when built.
+  // Ensure the area holds the form, then render the modifier banner.
   var area = document.getElementById('ap-claim-area');
-  if (area && !area.querySelector('#f-c-date')) {
-    area.innerHTML = buildApConsultArea();
+  if (area && !area.querySelector('#cb-date')) {
+    area.innerHTML = buildConsultForm({}, { withSubmit: false });
   }
-  var now = new Date();
-  var dateEl  = document.getElementById('f-c-date');
-  var startEl = document.getElementById('f-c-start');
-  var endEl   = document.getElementById('f-c-end');
-  if (dateEl)  dateEl.value  = localISODate(now);
-  if (startEl) startEl.value = pad(now.getHours()) + ':' + pad(now.getMinutes());
-  if (endEl)   endEl.value   = minsToTime(now.getHours() * 60 + now.getMinutes() + 50);
-  // Reset toggles
-  _apMostOn = true;
-  var mostEl = document.getElementById('f-c-most');
-  if (mostEl) mostEl.className = 'most-btn on';
-  var el10 = document.getElementById('f-c-33010');
-  var el12 = document.getElementById('f-c-33012');
-  if (el10) el10.className = 'ct-btn ct-on-consult';
-  if (el12) el12.className = 'ct-btn';
-  injectApPerformingDoc();
-  updateApConsultUI();
+  updateConsultUI();
 }
-
 function toggleApConsultCode(code) {
   document.getElementById('f-c-33010').className = 'ct-btn' + (code === '33010' ? ' ct-on-consult' : '');
   document.getElementById('f-c-33012').className = 'ct-btn' + (code === '33012' ? ' ct-on-consult' : '');
