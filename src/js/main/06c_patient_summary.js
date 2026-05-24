@@ -877,7 +877,7 @@ function parseDMYsafe(s) {
 function openClaimEdit(btn) {
   var cid = btn.getAttribute('data-cid');
   var pid = btn.getAttribute('data-pid');
-  var c   = st.claims.find(function(x) { return x.id === cid; });
+  var c   = st.claims.find(function(x) { return x.id != null && x.id !== '' && String(x.id) === String(cid); });
   var p   = getP(pid);
   if (!c) return;
 
@@ -970,7 +970,7 @@ function openClaimEdit(btn) {
 function saveClaimEdit(btn) {
   var cid = btn.getAttribute('data-cid');
   var pid = btn.getAttribute('data-pid');
-  var c   = st.claims.find(function(x) { return x.id === cid; });
+  var c   = st.claims.find(function(x) { return x.id != null && x.id !== '' && String(x.id) === String(cid); });
   var p   = getP(pid);
   if (!c) return;
 
@@ -1020,12 +1020,12 @@ function saveClaimEdit(btn) {
 function deleteClaimBtn(btn) {
   var cid = btn.getAttribute('data-cid');
   var pid = btn.getAttribute('data-pid');
-  var c   = st.claims.find(function(x) { return x.id === cid; });
+  var c   = st.claims.find(function(x) { return x.id != null && x.id !== '' && String(x.id) === String(cid); });
   if (!c) return;
 
   if (!confirm('Delete ' + getFeeLabel(c.fee) + ' on ' + dispDate(c.date) + '?')) return;
 
-  st.claims = st.claims.filter(function(x) { return x.id !== cid; });
+  st.claims = st.claims.filter(function(x) { return String(x.id) !== String(cid); });
   sv('claims', st.claims);
   if (SHEETS_URL) push('deleteClaim', { id: cid });
 
