@@ -12,6 +12,19 @@
 // MOST toggle state — reset to ON every time a fresh consult form builds.
 var _mostOn = true;
 
+// Which screen the consult form is on — set by the caller (+Claim vs Add
+// Patient) so the live CCFPP field can resolve the right patient context.
+var _consultCtx = 'claim';
+
+// The patient the consult form is currently for.
+function currentConsultPatient() {
+  if (_consultCtx === 'addpatient') {
+    // Add Patient — patient not created yet; build it from the form fields.
+    return { phn: gv('f-phn') || '', last: gv('f-last') || '', first: gv('f-first') || '' };
+  }
+  return getP(_claimPid) || {};
+}
+
 // p may be a real patient object (+Claim screen) or {} on the Add Patient
 // screen (the patient does not exist yet — fields simply render blank).
 // opts.withSubmit — +Claim shows its own submit button; Add Patient uses
@@ -60,6 +73,16 @@ function buildConsultForm(p, opts) {
 
   // Modifier banner
   h += '<div id="cb-mod"></div>';
+
+  // Live CCFPP field — auto-populated when this consult overlaps another
+  // call-out consult. Hidden until an overlap is detected. Read-only: the
+  // note is appended to the 120x modifier claims automatically at submit.
+  h += '<div id="cb-ccfpp" style="display:none;margin-top:9px;padding:8px 10px;' +
+       'background:var(--blue-bg);border:1px solid var(--blue-t);border-radius:var(--rsm)">' +
+       '<div style="font-size:10px;font-weight:700;color:var(--blue-t);' +
+       'text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">CCFPP — continuing care</div>' +
+       '<div id="cb-ccfpp-val" style="font-size:13px;color:var(--text2);font-weight:600"></div>' +
+       '</div>';
 
   // Notes — folded into the consult card (Add Patient template style)
   h += '<label style="margin-top:9px">Notes <span style="font-size:10px;color:var(--text3);font-weight:400">(optional)</span></label>';
@@ -129,6 +152,38 @@ function updateConsultUI() {
     modEl.innerHTML = '<div class="mod-box mod-day">✓ Daytime weekday — no call-out modifier</div>';
   } else {
     modEl.innerHTML = '';
+  }
+
+  // ── Live CCFPP preview ──────────────────────────────
+  var ccEl = document.getElementById('cb-ccfpp');
+  if (ccEl) {
+    var ccNote = '';
+    if (start && end && dateISO) {
+      ccNote = ccfppPreviewNote(currentConsultPatient(), getPerformingAlias(),
+                                dateISO, fmtD(parseISODate(dateISO)), start, end);
+    }
+    if (ccNote) {
+      var ccVal = document.getElementById('cb-ccfpp-val');
+      if (ccVal) ccVal.textContent = ccNote;
+      ccEl.style.display = 'block';
+    } else {
+      ccEl.style.display = 'none';
+    }
+  }
+}
+
+// Called when the consult form is shown (either screen). Renders from local
+// data immediately, then fires ONE background cloud refresh so a consult
+// entered on another device is picked up. Skipped if a sync ran in the last
+// 60s — in a rapid consult-to-consult session local data is already fresh.
+var _lastConsultSync = 0;
+function consultFormOpened() {
+  updateConsultUI();
+  if (typeof syncFromSheets === 'function' && (Date.now() - _lastConsultSync > 60000)) {
+    _lastConsultSync = Date.now();
+    Promise.resolve(syncFromSheets()).then(function() {
+      updateConsultUI();
+    }).catch(function() {});
   }
 }
 

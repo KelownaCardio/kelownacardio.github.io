@@ -883,12 +883,12 @@ async function apSubmit(addToList, _skipDupCheck) {
 
 function initAddPatientConsult() {
   // The unified consult form self-initialises date/time/toggles when built.
-  // Ensure the area holds the form, then render the modifier banner.
+  _consultCtx = 'addpatient';
   var area = document.getElementById('ap-claim-area');
   if (area && !area.querySelector('#cb-date')) {
     area.innerHTML = buildConsultForm({}, { withSubmit: false });
   }
-  updateConsultUI();
+  consultFormOpened();
 }
 function toggleApConsultCode(code) {
   document.getElementById('f-c-33010').className = 'ct-btn' + (code === '33010' ? ' ct-on-consult' : '');

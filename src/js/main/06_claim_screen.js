@@ -349,10 +349,8 @@ function selCT(type) {
 
   // Post-render setup for consult form
   if (type === 'consult') {
-    var now = new Date();
-    document.getElementById('cb-start').value = pad(now.getHours()) + ':' + pad(now.getMinutes());
-    document.getElementById('cb-date').value  = localISODate();
-    updateConsultUI();
+    _consultCtx = 'claim';
+    consultFormOpened();
   }
 }
 
