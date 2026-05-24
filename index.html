@@ -2124,12 +2124,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.78-2026-05-23-ccfpp-same-person-guard';
+var BUILD_ID    = 'v3.79-2026-05-24-complex-discharge-ccfpp-fix';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.78';
-var APP_BUILT   = '2026-05-23';
+var APP_VERSION = 'v3.79';
+var APP_BUILT   = '2026-05-24';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -2700,10 +2700,17 @@ function isWeekendOrStat(dateStr) {
   return dow === 0 || dow === 6 || isBCStat(dateStr);
 }
 
-// ── CCFPP overlap detection + retroactive peer update ──
-// Returns the CCFPP note string for the NEW consult's claims, and
-// retroactively appends a CCFPP note to each overlapping peer's
-// existing consult + modifier claims, pushing the updates to Sheets.
+// ── CCFPP overlap detection (one-directional) ──────────
+// CCFPP ("continuing care from a previous patient") applies only to the
+// LATER of two overlapping call-out consults. The note is written to that
+// later consult's 120x call-out MODIFIER claims — never to the 33010/33012
+// consult row itself.
+//
+// ccfppDetectAndUpdate returns the note for the NEW consult's modifier
+// claims when the new consult is the later of the pair. When the new
+// consult is instead the EARLIER of the pair, the peer is the later one,
+// so its existing 120x modifier claims are retroactively annotated and
+// the function returns '' (new consult gets nothing).
 //
 // Triggers ONLY when:
 //   1. The new 33010/33012 consult falls in a modifier (call-out) window
@@ -2717,6 +2724,7 @@ function isWeekendOrStat(dateStr) {
 // dateFmt     — new consult's date (DD/MM/YYYY)
 // startStr    — new consult's HH:MM start
 // endStr      — new consult's HH:MM end
+
 // True when two patient records almost certainly describe the same
 // person — same surname (case-insensitive) and same date of birth.
 // Used to stop CCFPP from linking a patient to a duplicate of itself
@@ -2730,6 +2738,9 @@ function ccfppSamePerson_(a, b) {
   if (!aDob || !bDob) return false;      // missing DOB — do not block
   return aDob === bDob;
 }
+
+// 120x call-out modifier fee codes — CCFPP notes attach ONLY to these.
+var CCFPP_MODIFIER_FEES = ['1200','1201','1202','1205','1206','1207'];
 
 function ccfppDetectAndUpdate(newP, alias, dateISO, dateFmt, startStr, endStr) {
   if (!startStr || !endStr) return '';
@@ -2747,8 +2758,11 @@ function ccfppDetectAndUpdate(newP, alias, dateISO, dateFmt, startStr, endStr) {
   var prevDateFmt = pad(_prevDateD.getDate()) + '/' + pad(_prevDateD.getMonth() + 1) + '/' + _prevDateD.getFullYear();
   var nextDateFmt = pad(_nextDateD.getDate()) + '/' + pad(_nextDateD.getMonth() + 1) + '/' + _nextDateD.getFullYear();
 
-  // Collect all overlapping peer PHNs (deduplicated)
-  var peerPhns = [];
+  // Overlapping peers split by who starts LATER. The later-starting consult
+  // of each pair is the one that carries the CCFPP note.
+  var newIsSecond = [];  // peer PHNs where the NEW consult starts later → note on NEW consult's modifiers
+  var newIsFirst  = [];  // peer PHNs where the PEER starts later        → note on PEER's modifiers (retroactive)
+
   for (var _i = 0; _i < st.claims.length; _i++) {
     var c = st.claims[_i];
     if (c.alias !== alias) continue;
@@ -2780,50 +2794,50 @@ function ccfppDetectAndUpdate(newP, alias, dateISO, dateFmt, startStr, endStr) {
     var _prevISO  = _prevRefD.getFullYear() + '-' + pad(_prevRefD.getMonth() + 1) + '-' + pad(_prevRefD.getDate());
     if (!getModifier(c.startTime, _prevISO)) continue;
 
-    // Same-person guard — a candidate peer that shares this patient's
-    // surname AND date of birth is almost certainly the same person
-    // under a duplicate record. CCFPP cannot apply to oneself, so this
-    // peer is skipped in BOTH the new-consult note and the reciprocal
-    // peer update (both derive from peerPhns below).
+    // Same-person guard — skip a duplicate record of this same patient.
     var _peerPat = (st.patients || []).find(function(pp){ return pp.phn === c.phn; }) || {};
     if (ccfppSamePerson_(newP, _peerPat)) continue;
 
-    // Interval overlap
+    // Interval overlap → classify by who starts later (ties: new = later).
     if (thisStartM < prevEndM && prevStartM < thisEndM) {
-      if (peerPhns.indexOf(c.phn) === -1) peerPhns.push(c.phn);
+      if (thisStartM >= prevStartM) {
+        if (newIsSecond.indexOf(c.phn) === -1) newIsSecond.push(c.phn);
+      } else {
+        if (newIsFirst.indexOf(c.phn) === -1) newIsFirst.push(c.phn);
+      }
     }
   }
 
-  if (!peerPhns.length) return '';
+  // ── RETROACTIVE: the PEER starts later, so it is the second consult.
+  // Annotate the peer's existing 120x modifier claims only (never the
+  // 33010/33012 consult). The new consult, being earlier, gets nothing.
+  if (newIsFirst.length) {
+    var reverseNote = 'CCFPP ' + ((newP.first || '') + ' ' + (newP.last || '')).trim() + ' (' + (newP.phn || '—') + ')';
+    var dateMatches = [dateFmt, prevDateFmt, nextDateFmt];
+    newIsFirst.forEach(function(peerPhn) {
+      st.claims.forEach(function(c) {
+        if (c.phn   !== peerPhn) return;
+        if (c.alias !== alias)   return;
+        if (dateMatches.indexOf(c.date) === -1) return;
+        if (CCFPP_MODIFIER_FEES.indexOf(c.fee) === -1) return;
+        var existing = c.notes || '';
+        if (existing.indexOf(reverseNote) !== -1) return; // idempotent
+        c.notes = existing ? existing + ' | ' + reverseNote : reverseNote;
+        if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL) push('saveClaim', c);
+      });
+    });
+    sv('claims', st.claims);
+  }
 
-  // Build CCFPP note string for the NEW consult — one entry per peer
-  var newClaimNote = peerPhns.map(function(peerPhn) {
+  // ── FORWARD: the NEW consult starts later, so it is the second consult.
+  // Return the note string; submitConsult stamps it on the new consult's
+  // own 120x modifier claims (one entry per peer).
+  if (!newIsSecond.length) return '';
+  return newIsSecond.map(function(peerPhn) {
     var pat = (st.patients || []).find(function(pp) { return pp.phn === peerPhn; }) || {};
     var name = ((pat.first || '') + ' ' + (pat.last || '')).trim() || '(unknown)';
     return 'CCFPP ' + name + ' (' + peerPhn + ')';
   }).join(' | ');
-
-  // RETROACTIVELY update each peer's existing consult + modifier claims
-  // Append "CCFPP <newP first> <newP last> (<newP phn>)" to their notes.
-  var reverseNote = 'CCFPP ' + ((newP.first || '') + ' ' + (newP.last || '')).trim() + ' (' + (newP.phn || '—') + ')';
-  var feesForCcfpp = ['33010','33012','1200','1201','1202','1205','1206','1207'];
-  var dateMatches = [dateFmt, prevDateFmt, nextDateFmt];
-
-  peerPhns.forEach(function(peerPhn) {
-    st.claims.forEach(function(c) {
-      if (c.phn   !== peerPhn) return;
-      if (c.alias !== alias)   return;
-      if (dateMatches.indexOf(c.date) === -1) return;
-      if (feesForCcfpp.indexOf(c.fee) === -1) return;
-      var existing = c.notes || '';
-      if (existing.indexOf(reverseNote) !== -1) return; // idempotent
-      c.notes = existing ? existing + ' | ' + reverseNote : reverseNote;
-      if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL) push('saveClaim', c);
-    });
-  });
-  sv('claims', st.claims);
-
-  return newClaimNote;
 }
 
 // ── Call-out Modifier Detection ────────────────────────
@@ -6211,15 +6225,17 @@ function submitConsult() {
   updatePatientFromClaimForm(p);
   if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
 
-  // CCFPP — detect + retroactively update overlapping peer claims
+  // CCFPP — detect overlap. Returns a note only when this consult is the
+  // LATER of an overlapping pair; the note is for the 120x modifier claims.
   var ccfppNote = ccfppDetectAndUpdate(p, alias, dateISO, dateFmt, start, end);
 
-  // Combine user-entered notes with CCFPP auto-note (if any)
+  // userNote goes on the consult; the CCFPP note is added on TOP of it for
+  // the 120x modifier claims only (modNote), never on the 33010/33012 row.
   var userNote = (gv('cb-notes') || '').trim();
-  var fullNote = [userNote, ccfppNote].filter(function(s) { return s; }).join(' | ');
+  var modNote  = [userNote, ccfppNote].filter(function(s) { return s; }).join(' | ');
 
-  // Base consult — combined note on consult itself
-  addClaim(p, code, code, 1, dateFmt, loc, start, fullNote, gv('cb-end'), alias);
+  // Base consult (33010/33012) — doctor's note only, no CCFPP
+  addClaim(p, code, code, 1, dateFmt, loc, start, userNote, gv('cb-end'), alias);
 
   // MOST — standalone item, no CCFPP
   if (_mostOn) addClaim(p, '78720', '78720', 1, dateFmt, loc, null, null, null, alias);
@@ -6232,12 +6248,12 @@ function submitConsult() {
   if (modBase) {
     // Base modifier — first 30 min from consult start
     var modBaseEnd = minsToTime((t2m(start) + 30) % (24 * 60));
-    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start, fullNote, modBaseEnd, alias);
+    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start, modNote, modBaseEnd, alias);
 
     if (modInc) {
       // Increment modifier — start+30 to consult end
       var incStart = minsToTime((t2m(start) + 30) % (24 * 60));
-      addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, fullNote, end, alias);
+      addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, modNote, end, alias);
     }
   }
   sv('patients', st.patients);
@@ -6785,6 +6801,11 @@ async function _addPatientCore(withClaim, skipNameDobDup) {
     if (cDateISO) {
       var cDateFmt = fmtD(parseISODate(cDateISO));
       var cLoc     = p.ward === 'ED' ? 'E' : 'I';
+      // CCFPP — same one-directional detection as the +Claim consult path.
+      // Previously the Add Patient path skipped this entirely. The note
+      // belongs on the 120x modifier claims only, never on the consult row.
+      var cCcfppNote = ccfppDetectAndUpdate(p, cAlias, cDateISO, cDateFmt, cStart, cEnd);
+      var cModNote   = [cNotes, cCcfppNote].filter(function(s) { return s; }).join(' | ');
       addClaim(p, cCode, cCode, 1, cDateFmt, cLoc, cStart, cNotes, cEnd, cAlias);
       if (_apMostOn) addClaim(p, '78720', '78720', 1, cDateFmt, cLoc, null, null, null, cAlias);
       var cModBase  = getModifier(cStart, cDateISO);
@@ -6792,10 +6813,10 @@ async function _addPatientCore(withClaim, skipNameDobDup) {
       var cModInc   = cIncUnits > 0 ? getModifierForIncrement(cStart, cDateISO) : null;
       if (cModBase) {
         var cModBaseEnd = minsToTime((t2m(cStart) + 30) % (24 * 60));
-        addClaim(p, cModBase.base, cModBase.base, 1, cDateFmt, cLoc, cStart, cNotes, cModBaseEnd, cAlias);
+        addClaim(p, cModBase.base, cModBase.base, 1, cDateFmt, cLoc, cStart, cModNote, cModBaseEnd, cAlias);
         if (cModInc) {
           var cIncStart = minsToTime((t2m(cStart) + 30) % (24 * 60));
-          addClaim(p, cModInc.inc, cModInc.inc, cIncUnits, cDateFmt, cLoc, cIncStart, cNotes, cEnd, cAlias);
+          addClaim(p, cModInc.inc, cModInc.inc, cIncUnits, cDateFmt, cLoc, cIncStart, cModNote, cEnd, cAlias);
         }
       }
       sv('claims', st.claims);
@@ -8420,33 +8441,165 @@ function dischAddVisit(btn) {
   _dischStep2(pid);
 }
 
-// Step 2: Complex discharge prompt — Cardiology MRP, non-CCU/ICU ward, LOS > 4 only
+// ── Complex Discharge (78717) — criteria checklist ──────
+// Qualifies when LOS > 4 AND Cardiology MRP AND clinical criteria:
+//   (2 from A) OR (1 from A + 1 from B) OR (1 from A + C)
+// Note written to the 78717 claim mirrors the clerk's format:
+//   "Complex Discharge: CHF, BMI > 35, Age > 75"
+var CD_CRITERIA = {
+  A: [
+    { id:'cad',   label:'CAD' },
+    { id:'chf',   label:'CHF' },
+    { id:'dm',    label:'Diabetes' },
+    { id:'ckd',   label:'CKD' },
+    { id:'cvd',   label:'Cerebrovascular Dz' },
+    { id:'liver', label:'Liver Dz w/ synthetic dysfunction' },
+    { id:'neuro', label:'Chronic Neuro Dz' }
+  ],
+  B: [
+    { id:'ses',     label:'Poor socioeconomic status' },
+    { id:'home',    label:'Unstable home environment' },
+    { id:'adl',     label:'Dependency for ADLs' },
+    { id:'mobil',   label:'Mobility/Accessibility issues' },
+    { id:'age75',   label:'Age > 75' },
+    { id:'bmi35',   label:'BMI > 35' },
+    { id:'frail',   label:'Frail elderly' },
+    { id:'readmit', label:'High readmission rate' }
+  ],
+  C: [
+    { id:'malig',   label:'Malignancy' }
+  ]
+};
+// Patient.icd -> criterion id, for auto pre-tick (exact ICD-9 match only)
+var CD_ICD_MAP = {
+  '414':'cad', '428':'chf', '250':'dm', '585':'ckd',
+  '438':'cvd', '571':'liver', 'V800':'neuro', '199':'malig'
+};
+var _cdState = {};   // { criterionId: true } — ticked boxes
+var _cdPid   = '';   // patient id the checklist is open for
+
+// Age in whole years from DOB (DD/MM/YYYY storage format)
+function _cdAge(p) {
+  var ms = parseDMYsafe(fmtClaimDate((p && p.dob) || ''));
+  if (!ms) return 0;
+  return Math.floor((Date.now() - ms) / (365.25 * 86400000));
+}
+
+// Count ticked items per group and apply the qualifying rule
+function _cdEvaluate() {
+  function cnt(grp) {
+    return CD_CRITERIA[grp].filter(function(x) { return _cdState[x.id]; }).length;
+  }
+  var a = cnt('A'), b = cnt('B'), c = cnt('C');
+  return {
+    a: a, b: b, c: c,
+    qualifies: (a >= 2) || (a >= 1 && b >= 1) || (a >= 1 && c >= 1)
+  };
+}
+
+// Build the claim note from ticked boxes — mirrors the clerk's format
+function _cdNote() {
+  var picked = [];
+  ['A', 'B', 'C'].forEach(function(grp) {
+    CD_CRITERIA[grp].forEach(function(x) {
+      if (_cdState[x.id]) picked.push(x.label);
+    });
+  });
+  return 'Complex Discharge: ' + picked.join(', ');
+}
+
+function _cdToggle(id) {
+  _cdState[id] = !_cdState[id];
+  _cdRender(losdays(getP(_cdPid)));
+}
+
+// Render the criteria checklist into the discharge modal body
+function _cdRender(los) {
+  var ev = _cdEvaluate();
+
+  function chip(x) {
+    var on  = !!_cdState[x.id];
+    var css = on
+      ? 'border:1px solid var(--blue-t);background:var(--blue-bg);color:var(--blue-t);font-weight:700'
+      : 'border:1px solid var(--border2);background:var(--surface2);color:var(--text2)';
+    return '<button onclick="_cdToggle(\'' + x.id + '\')" ' +
+      'style="text-align:left;padding:9px 11px;border-radius:var(--rsm);font-size:13px;' +
+      'font-family:inherit;cursor:pointer;line-height:1.25;' + css + '">' +
+      (on ? '\u2713 ' : '') + esc(x.label) + '</button>';
+  }
+  function group(grp, title) {
+    return '<div style="font-size:11px;font-weight:700;color:var(--text3);' +
+      'text-transform:uppercase;letter-spacing:.4px;margin:11px 0 5px">' + title + '</div>' +
+      '<div style="display:flex;flex-direction:column;gap:5px">' +
+      CD_CRITERIA[grp].map(chip).join('') + '</div>';
+  }
+
+  var verdict;
+  if (ev.qualifies) {
+    verdict = '<div style="background:var(--green-bg);color:var(--green-t);font-weight:700;' +
+      'font-size:13px;padding:9px 11px;border-radius:var(--rsm)">' +
+      '\u2713 Qualifies — complex discharge surcharge applies</div>';
+  } else if (ev.a === 0) {
+    verdict = '<div style="background:var(--amber-bg);color:var(--amber-t);font-weight:600;' +
+      'font-size:12px;padding:9px 11px;border-radius:var(--rsm)">' +
+      'Select at least one major comorbidity (group A) to begin.</div>';
+  } else {
+    verdict = '<div style="background:var(--amber-bg);color:var(--amber-t);font-weight:600;' +
+      'font-size:12px;padding:9px 11px;border-radius:var(--rsm)">' +
+      'Add one more — a 2nd major comorbidity, any minor criterion, or malignancy.</div>';
+  }
+
+  var addBtn = ev.qualifies
+    ? '<button class="btn btn-g" style="margin:0" data-pid="' + _cdPid + '" ' +
+      'onclick="dischComplex(this)">Add 78717 &amp; continue</button>'
+    : '<button class="btn btn-g" style="margin:0;opacity:.4;pointer-events:none">' +
+      'Add 78717 &amp; continue</button>';
+
+  var h =
+    '<div style="font-size:13px;color:var(--amber-t);font-weight:700;margin-bottom:4px">' +
+      '\u26a0 LOS ' + los + ' days — check complex discharge criteria</div>' +
+    '<div style="font-size:11px;color:var(--text3);margin-bottom:8px">' +
+      'Rule: 2 major, or 1 major + 1 minor, or 1 major + malignancy.</div>' +
+    '<div style="max-height:46vh;overflow-y:auto;-webkit-overflow-scrolling:touch;' +
+      'border:.5px solid var(--border2);border-radius:var(--rsm);padding:4px 9px 11px">' +
+      group('A', 'A — Major comorbidities') +
+      group('B', 'B — Minor criteria') +
+      group('C', 'C — Malignancy') +
+    '</div>' +
+    '<div style="margin:9px 0 4px">' + verdict + '</div>' +
+    '<div style="display:flex;flex-direction:column;gap:8px">' +
+      addBtn +
+      '<button class="btn btn-s" style="margin:0" data-pid="' + _cdPid + '" ' +
+      'onclick="dischConfirmRemove(this)">Doesn\'t qualify — discharge without surcharge</button>' +
+    '</div>';
+  document.getElementById('disch-body').innerHTML = h;
+}
+
+// Step 2: Complex discharge — Cardiology MRP + LOS > 4 -> criteria checklist
 function _dischStep2(pid) {
   var p   = getP(pid);
   var los = losdays(p);
   // Complex discharge applies to ALL Cardiology MRP patients with LOS > 4, including CCU/ICU
   var isCardioMRP = p.role === 'mrp' && p.mrp === 'Cardiology';
   if (isCardioMRP && los > 4) {
-    var h = '<div style="font-size:13px;color:var(--amber-t);font-weight:700;margin-bottom:10px">' +
-      '⚠ LOS ' + los + ' days — does complex discharge apply?</div>' +
-      '<div style="display:flex;flex-direction:column;gap:8px">' +
-      '<button class="btn btn-g" style="margin:0" data-pid="' + pid + '" ' +
-      'onclick="dischComplex(this)">Yes — add 78717</button>' +
-      '<button class="btn btn-s" style="margin:0" data-pid="' + pid + '" ' +
-      'onclick="dischConfirmRemove(this)">No — patient doesn\'t qualify</button>' +
-      '</div>';
-    document.getElementById('disch-body').innerHTML = h;
+    _cdPid   = pid;
+    _cdState = {};
+    // Pre-tick only what the app can determine itself — MD still confirms each box
+    if (_cdAge(p) > 75) _cdState['age75'] = true;
+    var icdKey = String(p.icd || '').trim().toUpperCase();
+    if (CD_ICD_MAP[icdKey]) _cdState[CD_ICD_MAP[icdKey]] = true;
+    _cdRender(los);
   } else {
     _dischStep3(pid);
   }
 }
 
-// Add 78717 then go to step 3
+// Add 78717 with the criteria note, then go to step 3
 function dischComplex(btn) {
   var pid = btn.getAttribute('data-pid');
   var p   = getP(pid);
   if (!checkDoc()) return;
-  addClaim(p, '78717', '78717', 1, TODAY, 'I');
+  addClaim(p, '78717', '78717', 1, TODAY, 'I', null, _cdNote());
   sv('claims', st.claims);
   _dischStep3(pid);
 }
