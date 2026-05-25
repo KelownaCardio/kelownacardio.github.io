@@ -17,7 +17,10 @@ function easterDate(y) {
 function bcStatHolidays(year) {
   var y = year;
   function nthMon(n, m) { var d=new Date(y,m,1); d.setDate(1+(8-d.getDay())%7+(n-1)*7); return d; }
-  function monBefore(m, day) { var d=new Date(y,m,day); while(d.getDay()!==1) d.setDate(d.getDate()-1); return d; }
+  // Victoria Day = the Monday STRICTLY BEFORE May 25. Start the search at
+  // day-1 so a year where May 25 itself is a Monday (e.g. 2026) correctly
+  // rolls back to the prior Monday instead of returning May 25.
+  function monBefore(m, day) { var d=new Date(y,m,day-1); while(d.getDay()!==1) d.setDate(d.getDate()-1); return d; }
   var easter = easterDate(y);
   var goodFri = new Date(easter); goodFri.setDate(easter.getDate()-2);
   var easterMon = new Date(easter); easterMon.setDate(easter.getDate()+1);
