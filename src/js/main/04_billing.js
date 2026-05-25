@@ -41,14 +41,18 @@ function bcStatHolidays(year) {
 }
 
 function isBCStat(dateStr) {
-  var d = new Date(dateStr);
+  // 'T12:00:00' forces LOCAL-time parsing — a bare ISO date string
+  // (YYYY-MM-DD) is otherwise parsed as UTC midnight, which lands on the
+  // previous calendar day in Vancouver and shifts the weekday by one.
+  var d = new Date(dateStr + 'T12:00:00');
   var key = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
   return bcStatHolidays(d.getFullYear()).indexOf(key) !== -1;
 }
 
 function isWeekendOrStat(dateStr) {
   if (!dateStr) return false;
-  var d = new Date(dateStr); var dow = d.getDay();
+  // 'T12:00:00' forces LOCAL-time parsing — see isBCStat note above.
+  var d = new Date(dateStr + 'T12:00:00'); var dow = d.getDay();
   return dow === 0 || dow === 6 || isBCStat(dateStr);
 }
 
