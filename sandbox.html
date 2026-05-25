@@ -360,7 +360,13 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 
 /* QUICK CLAIM BUTTONS */
 .bb { padding:4px 9px; font-size:10px; border-radius:var(--rpill); border:.5px solid var(--border2); background:var(--surface); cursor:pointer; font-family:inherit; color:var(--text); white-space:nowrap; font-weight:500; }
-.bb:hover { background:var(--surface2); }
+/* Hover only on real pointer devices — prevents iPad Safari's "stuck
+   hover" leaving a tapped pill greyed-out until you tap elsewhere.
+   .bb-done holds its green so a done pill never greys on hover. */
+@media (hover: hover) {
+  .bb:hover { background:var(--surface2); }
+  .bb-done:hover { background:var(--green); }
+}
 .bb-rnd  { background:var(--blue-bg);  border-color:#a8c4e8; color:var(--blue-t); }
 .bb-dir  { background:var(--amber-bg); border-color:#d4a84a; color:var(--amber-t); }
 .bb-ccu  { background:var(--red-bg);   border-color:#e0a090; color:var(--red-t); }
@@ -812,7 +818,7 @@ input[type=file] { display:none; }
 .cv-pick-btn.cv-pk-rec.cv-pk-combined  { border-color:#34804a; }
 
 /* ══════════════════════════════════════════════════════
-   SANDBOX / TRAINING UI — professional, restrained
+   SANDBOX / TRAINING UI — professional, restrained.
    All ids/classes are sb- prefixed to avoid app collisions.
    ══════════════════════════════════════════════════════ */
 #sb-banner {
@@ -828,160 +834,14 @@ input[type=file] { display:none; }
 }
 #sb-banner .sb-banner-text { opacity:.92; font-weight:500; }
 
-/* Floating launch buttons */
-.sb-fab {
-  position:fixed; bottom:18px; z-index:500;
-  background:#2e1a6e; color:#fff; border:none; border-radius:8px;
-  padding:9px 14px; font-size:12.5px; font-weight:600;
-  font-family:inherit; cursor:pointer;
-  display:flex; align-items:center; gap:7px;
-  box-shadow:0 3px 12px rgba(0,0,0,.22);
-  transition:transform .12s, background .2s;
-}
-.sb-fab:active { transform:scale(.97); }
-.sb-fab svg { width:15px; height:15px; stroke:currentColor; fill:none; stroke-width:2; }
-#sb-tour-btn { left:14px; }
-#sb-help-btn { right:14px; background:#fff; color:#2e1a6e; border:1px solid var(--border2); }
-#sb-tour-count {
-  background:rgba(255,255,255,.18); border-radius:9px;
-  padding:1px 7px; font-size:10.5px; font-weight:700;
-}
-#sb-tour-count.sb-done { background:#1a7a4a; }
-
-/* Bottom-sheet drawers (shared) */
-.sb-sheet-backdrop {
-  display:none; position:fixed; inset:0; z-index:590;
-  background:rgba(26,17,40,.42);
-}
-.sb-sheet-backdrop.open { display:block; }
-.sb-sheet {
-  position:fixed; bottom:0; left:0; right:0; z-index:600;
-  background:#fff; border-radius:14px 14px 0 0;
-  box-shadow:0 -6px 32px rgba(0,0,0,.2);
-  max-width:430px; margin:0 auto;
-  padding:0 0 env(safe-area-inset-bottom,14px);
-  max-height:82vh; overflow-y:auto;
-  transform:translateY(101%);
-  transition:transform .26s cubic-bezier(.4,0,.2,1);
-}
-.sb-sheet.open { transform:translateY(0); }
-.sb-sheet-head {
-  display:flex; align-items:center; justify-content:space-between;
-  padding:15px 18px 12px; border-bottom:1px solid var(--border);
-  position:sticky; top:0; background:#fff; z-index:1;
-}
-.sb-sheet-head h3 {
-  margin:0; font-size:14.5px; font-weight:700; color:#2e1a6e;
-  letter-spacing:-.1px;
-}
-.sb-sheet-head .sb-sub {
-  font-size:11px; color:var(--text2); font-weight:500; margin-top:2px;
-}
-.sb-close {
-  background:none; border:none; font-size:21px; line-height:1;
-  cursor:pointer; color:var(--text3); padding:0 2px; font-family:inherit;
-}
-
-/* Guide drawer content */
-.sb-guide-section {
-  font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text3);
-  text-transform:uppercase; padding:14px 18px 5px;
-}
-.sb-guide-item {
-  padding:8px 18px 9px; border-bottom:1px solid var(--border);
-  font-size:13px; line-height:1.5; color:var(--text);
-}
-.sb-guide-item:last-of-type { border-bottom:none; }
-.sb-guide-item strong { color:#2e1a6e; font-weight:700; }
-.sb-guide-item .sb-lead {
-  display:block; font-weight:700; color:#2e1a6e; margin-bottom:1px; font-size:13px;
-}
-.sb-note {
-  background:var(--surface2); border-left:3px solid #2e1a6e;
-  border-radius:0 6px 6px 0; padding:9px 13px;
-  margin:12px 18px 16px; font-size:11.5px; color:var(--text2); line-height:1.5;
-}
-
-/* Walkthrough drawer content */
-#sb-tour-body { padding-bottom:6px; }
-.sb-progress-wrap { padding:13px 18px 8px; }
-.sb-progress-track {
-  height:7px; background:var(--surface2); border-radius:4px; overflow:hidden;
-}
-.sb-progress-fill {
-  height:100%; width:0%; background:#2e1a6e; border-radius:4px;
-  transition:width .45s cubic-bezier(.4,0,.2,1);
-}
-.sb-progress-fill.sb-all-done { background:#1a7a4a; }
-.sb-progress-label {
-  font-size:11px; color:var(--text2); margin-top:5px; font-weight:600;
-}
-.sb-step {
-  display:flex; align-items:flex-start; gap:12px;
-  padding:12px 18px; border-bottom:1px solid var(--border);
-}
-.sb-step:last-of-type { border-bottom:none; }
-.sb-step-num {
-  flex-shrink:0; width:24px; height:24px; border-radius:50%;
-  background:var(--surface2); color:var(--text2);
-  font-size:12px; font-weight:700;
-  display:flex; align-items:center; justify-content:center;
-  border:1px solid var(--border2);
-}
-.sb-step.sb-step-done .sb-step-num {
-  background:#1a7a4a; color:#fff; border-color:#1a7a4a;
-}
-.sb-step-body { flex:1; min-width:0; }
-.sb-step-title {
-  font-size:13px; font-weight:700; color:var(--text); line-height:1.35;
-}
-.sb-step.sb-step-done .sb-step-title { color:var(--text2); font-weight:600; }
-.sb-step-tag {
-  font-size:9px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
-  color:#a06010; background:var(--amber-bg); border-radius:3px;
-  padding:1px 5px; margin-left:6px; vertical-align:1px;
-}
-.sb-step-desc {
-  font-size:12px; color:var(--text2); line-height:1.5; margin-top:3px;
-}
-.sb-step.sb-step-done .sb-step-desc { display:none; }
-.sb-tour-complete {
-  margin:14px 18px 18px; padding:13px 15px;
-  background:var(--green-bg); border:1px solid #9bd3b2; border-radius:9px;
-}
-.sb-tour-complete b { color:var(--green-t); font-size:13px; }
-.sb-tour-complete span { display:block; color:var(--green-t); font-size:11.5px; margin-top:3px; opacity:.9; }
-
-/* Step-complete confirmation toast */
-#sb-step-toast {
-  position:fixed; top:88px; left:50%; transform:translateX(-50%) translateY(-8px);
-  background:#1a7a4a; color:#fff; max-width:340px;
-  padding:9px 16px; border-radius:7px;
-  font-size:12.5px; font-weight:600; z-index:9999;
-  box-shadow:0 4px 18px rgba(0,0,0,.28);
-  display:flex; align-items:center; gap:8px;
-  opacity:0; transition:opacity .25s, transform .25s; pointer-events:none;
-}
-#sb-step-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
-
-/* In-pane sandbox hint */
-.sb-pane-hint {
-  background:var(--surface2); border:1px solid var(--border);
-  border-radius:8px; margin:10px 14px 0; padding:9px 12px;
-  font-size:11.5px; color:var(--text2); line-height:1.5;
-  display:flex; gap:8px; align-items:flex-start;
-}
-.sb-pane-hint svg { width:14px; height:14px; stroke:#2e1a6e; fill:none; stroke-width:2; flex-shrink:0; margin-top:1px; }
-
-/* ── Collapsible launch buttons (replaces .sb-fab) ── */
+/* Collapsible launch buttons */
 .sb-fab2 { position:fixed; bottom:18px; z-index:500; display:flex; align-items:stretch; }
 .sb-fab2-left  { left:14px; }
 .sb-fab2-right { right:14px; }
 .sb-fab2-body {
   background:#2e1a6e; color:#fff; border:none; cursor:pointer; font-family:inherit;
   font-size:12.5px; font-weight:600; display:flex; align-items:center; gap:7px;
-  padding:9px 13px; box-shadow:0 3px 12px rgba(0,0,0,.22);
-  transition:transform .12s;
+  padding:9px 13px; box-shadow:0 3px 12px rgba(0,0,0,.22); transition:transform .12s;
 }
 .sb-fab2-body:active { transform:scale(.97); }
 .sb-fab2-left  .sb-fab2-body { border-radius:8px 0 0 8px; }
@@ -1007,10 +867,116 @@ input[type=file] { display:none; }
 .sb-fab2.minimized .sb-fab2-min { display:none; }
 .sb-fab2.minimized .sb-fab2-body {
   border-radius:50% !important; width:40px; height:40px;
-  padding:0; justify-content:center; opacity:.9;
+  padding:0; justify-content:center; opacity:.92;
 }
 
-/* ── First-launch layout tour (coachmarks) ── */
+/* Bottom-sheet drawers */
+.sb-sheet-backdrop { display:none; position:fixed; inset:0; z-index:590; background:rgba(26,17,40,.42); }
+.sb-sheet-backdrop.open { display:block; }
+.sb-sheet {
+  position:fixed; bottom:0; left:0; right:0; z-index:600;
+  background:#fff; border-radius:14px 14px 0 0;
+  box-shadow:0 -6px 32px rgba(0,0,0,.2);
+  max-width:430px; margin:0 auto;
+  padding:0 0 env(safe-area-inset-bottom,14px);
+  max-height:82vh; overflow-y:auto;
+  transform:translateY(101%);
+  transition:transform .26s cubic-bezier(.4,0,.2,1);
+}
+.sb-sheet.open { transform:translateY(0); }
+.sb-sheet-head {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:15px 18px 12px; border-bottom:1px solid var(--border);
+  position:sticky; top:0; background:#fff; z-index:1;
+}
+.sb-sheet-head h3 { margin:0; font-size:14.5px; font-weight:700; color:#2e1a6e; letter-spacing:-.1px; }
+.sb-sheet-head .sb-sub { font-size:11px; color:var(--text2); font-weight:500; margin-top:2px; }
+.sb-close {
+  background:none; border:none; font-size:21px; line-height:1;
+  cursor:pointer; color:var(--text3); padding:0 2px; font-family:inherit;
+}
+
+/* Guide drawer content */
+.sb-guide-section {
+  font-size:10px; font-weight:700; letter-spacing:.08em; color:var(--text3);
+  text-transform:uppercase; padding:14px 18px 5px;
+}
+.sb-guide-item { padding:8px 18px 9px; border-bottom:1px solid var(--border); font-size:13px; line-height:1.5; color:var(--text); }
+.sb-guide-item:last-of-type { border-bottom:none; }
+.sb-guide-item strong { color:#2e1a6e; font-weight:700; }
+.sb-guide-item .sb-lead { display:block; font-weight:700; color:#2e1a6e; margin-bottom:1px; font-size:13px; }
+.sb-note {
+  background:var(--surface2); border-left:3px solid #2e1a6e; border-radius:0 6px 6px 0;
+  padding:9px 13px; margin:12px 18px 16px; font-size:11.5px; color:var(--text2); line-height:1.5;
+}
+
+/* Walkthrough drawer content */
+#sb-tour-body { padding-bottom:6px; }
+.sb-progress-wrap { padding:13px 18px 8px; }
+.sb-progress-track { height:7px; background:var(--surface2); border-radius:4px; overflow:hidden; }
+.sb-progress-fill {
+  height:100%; width:0%; background:#2e1a6e; border-radius:4px;
+  transition:width .45s cubic-bezier(.4,0,.2,1);
+}
+.sb-progress-fill.sb-all-done { background:#1a7a4a; }
+.sb-progress-label { font-size:11px; color:var(--text2); margin-top:5px; font-weight:600; }
+.sb-step { display:flex; align-items:flex-start; gap:12px; padding:12px 18px; border-bottom:1px solid var(--border); }
+.sb-step:last-of-type { border-bottom:none; }
+.sb-step-num {
+  flex-shrink:0; width:24px; height:24px; border-radius:50%;
+  background:var(--surface2); color:var(--text2);
+  font-size:12px; font-weight:700;
+  display:flex; align-items:center; justify-content:center; border:1px solid var(--border2);
+}
+.sb-step.sb-step-now .sb-step-num { background:#2e1a6e; color:#fff; border-color:#2e1a6e; }
+.sb-step.sb-step-done .sb-step-num { background:#1a7a4a; color:#fff; border-color:#1a7a4a; }
+.sb-step-body { flex:1; min-width:0; }
+.sb-step-title { font-size:13px; font-weight:700; color:var(--text); line-height:1.35; }
+.sb-step.sb-step-done .sb-step-title { color:var(--text2); font-weight:600; }
+.sb-step-tag {
+  font-size:9px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+  color:#a06010; background:var(--amber-bg); border-radius:3px;
+  padding:1px 5px; margin-left:6px; vertical-align:1px;
+}
+.sb-step-desc { font-size:12px; color:var(--text2); line-height:1.5; margin-top:3px; }
+.sb-step.sb-step-done .sb-step-desc { display:none; }
+.sb-step-desc b { color:#2e1a6e; }
+.sb-tour-complete {
+  margin:14px 18px 18px; padding:13px 15px;
+  background:var(--green-bg); border:1px solid #9bd3b2; border-radius:9px;
+}
+.sb-tour-complete b { color:var(--green-t); font-size:13px; }
+.sb-tour-complete span { display:block; color:var(--green-t); font-size:11.5px; margin-top:3px; opacity:.9; }
+.sb-drawer-action {
+  display:block; width:calc(100% - 36px); margin:4px 18px 14px;
+  background:none; border:1px solid var(--border2); border-radius:8px;
+  padding:9px; font-size:12px; font-weight:600; color:var(--text2);
+  cursor:pointer; font-family:inherit; text-align:center;
+}
+.sb-drawer-action:active { transform:scale(.99); }
+
+/* Step-complete toast */
+#sb-step-toast {
+  position:fixed; top:92px; left:50%; transform:translateX(-50%) translateY(-8px);
+  background:#1a7a4a; color:#fff; max-width:340px;
+  padding:9px 16px; border-radius:7px;
+  font-size:12.5px; font-weight:600; z-index:9999;
+  box-shadow:0 4px 18px rgba(0,0,0,.28);
+  display:flex; align-items:center; gap:8px;
+  opacity:0; transition:opacity .25s, transform .25s; pointer-events:none;
+}
+#sb-step-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+
+/* In-pane sandbox hint */
+.sb-pane-hint {
+  background:var(--surface2); border:1px solid var(--border);
+  border-radius:8px; margin:10px 14px 0; padding:9px 12px;
+  font-size:11.5px; color:var(--text2); line-height:1.5;
+  display:flex; gap:8px; align-items:flex-start;
+}
+.sb-pane-hint svg { width:14px; height:14px; stroke:#2e1a6e; fill:none; stroke-width:2; flex-shrink:0; margin-top:1px; }
+
+/* First-launch layout tour (coachmarks) */
 #sb-tour-mask { position:fixed; inset:0; z-index:700; display:none; }
 #sb-tour-mask.on { display:block; }
 #sb-tour-mask.sb-mask-dim { background:rgba(18,14,38,.66); }
@@ -1044,15 +1010,6 @@ input[type=file] { display:none; }
 }
 .sb-coach-btn.primary { background:#2e1a6e; color:#fff; border-color:#2e1a6e; }
 .sb-coach-btn:active  { transform:scale(.97); }
-
-/* ── Secondary actions inside drawers ── */
-.sb-drawer-action {
-  display:block; width:calc(100% - 36px); margin:4px 18px 14px;
-  background:none; border:1px solid var(--border2); border-radius:8px;
-  padding:9px; font-size:12px; font-weight:600; color:var(--text2);
-  cursor:pointer; font-family:inherit; text-align:center;
-}
-.sb-drawer-action:active { transform:scale(.99); }
 
 </style>
 </head>
@@ -1508,13 +1465,12 @@ var BC_PHYSICIANS_LOCAL = [["Aartsma","Durk Pieter","59243","Psychiatry","Vernon
 // 01_config.js — URLs, ward definitions, alias map
 // ═══════════════════════════════════════════════════════
 
-// ── SANDBOX BUILD ──────────────────────────────────────
-// This is the training copy of the app. SHEETS_URL is intentionally
-// blank so nothing is ever written to the live Google Sheet, and every
-// `if (SHEETS_URL)` network guard in the app short-circuits to a no-op.
-// All data lives in memory only and is wiped on page refresh.
+// ── SANDBOX BUILD ─────────────────────────────────────
+// Training copy. SHEETS_URL is intentionally blank so nothing is ever
+// written to the live Google Sheet — every `if (SHEETS_URL)` network
+// guard short-circuits. All data is in-memory and resets on refresh.
 var SANDBOX_MODE = true;
-var SHEETS_URL = '';   // SANDBOX — no backend writes
+var SHEETS_URL = '';   // SANDBOX — no backend
 var SHARED_KEY = 'kgh2026';
 
 var ALIAS_MAP = {
@@ -1763,7 +1719,7 @@ var FEES = [
   { code:'33008',  desc:'Subsequent hospital visit / MRP daily / combined daily care',    amount:'$63.95',  cat:'Daily',     clr:'chip-green'  },
 
   // ── Cardiology procedures performed by the group ─────────────────
-  { code:'Y33025', desc:'Cardioversion (operation only)',                                 amount:'$105.70', cat:'Procedure', clr:'chip-red'   },
+  { code:'33025', desc:'Cardioversion (operation only)',                                 amount:'$105.70', cat:'Procedure', clr:'chip-red'   },
   { code:'00751',  desc:'Pericardiocentesis (pericardial puncture)',                      amount:'$258.25', cat:'Procedure', clr:'chip-red'   },
 
   // ── Discharge / planning ────────────────────────────────────────
@@ -1790,8 +1746,8 @@ var FEES = [
 // in the Sheets render with a meaningful label rather than a bare code.
 // NOT shown in the picker.
 var LEGACY_FEE_LABELS = {
-  '14101': 'Legacy code (was used for cardioversion; correct code is Y33025)',
-  '14105': 'Legacy code (was used for cardioversion; correct code is Y33025)',
+  '14101': 'Legacy code (was used for cardioversion; correct code is 33025)',
+  '14105': 'Legacy code (was used for cardioversion; correct code is 33025)',
   '14113': 'Legacy code (was used for temp pacemaker; correct code is 33030)'
 };
 
@@ -2440,12 +2396,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'sandbox-v3.77-training';
+var BUILD_ID    = 'sandbox-v3.90-training';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
 var APP_VERSION = 'SANDBOX';
-var APP_BUILT   = '2026-05-24';
+var APP_BUILT   = '2026-05-25';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -3016,7 +2972,6 @@ function isWeekendOrStat(dateStr) {
   return dow === 0 || dow === 6 || isBCStat(dateStr);
 }
 
-// ══ SANDBOX: CCFPP block replaced with current (v3.86) implementation ══
 // ── CCFPP overlap detection (one-directional) ──────────
 // CCFPP ("continuing care from a previous patient") applies only to the
 // LATER of two overlapping call-out consults. The note is written to that
@@ -3179,34 +3134,6 @@ function ccfppDetectAndUpdate(newP, alias, dateISO, dateFmt, startStr, endStr) {
   // 120x modifier claims.
   return cls.newIsSecond.length ? _ccfppNoteFor(cls.newIsSecond) : '';
 }
-// ── CCFPP live-preview banner ──────────────────────────
-// Renders into elId the CCFPP note the consult would carry if submitted
-// now, using the pure ccfppPreviewNote(). Empty when no overlapping
-// same-doctor call-out consult exists. Safe to call on every keystroke.
-function renderCcfppBanner(elId, newP, alias, dateISO, startStr, endStr) {
-  var el = document.getElementById(elId);
-  if (!el) return;
-  var note = '';
-  try {
-    if (newP && startStr && endStr && dateISO) {
-      var dateFmt = fmtD(parseISODate(dateISO));
-      note = ccfppPreviewNote(newP, alias || '', dateISO, dateFmt, startStr, endStr) || '';
-    }
-  } catch (e) { note = ''; }
-  if (!note) { el.innerHTML = ''; return; }
-  var peers = note.split(' | ').map(function (s) { return s.replace(/^CCFPP:\s*/, ''); });
-  el.innerHTML =
-    '<div style="margin-top:6px;background:#eef0fb;border:1px solid #c4c9ee;' +
-      'border-left:3px solid #3b3a8f;border-radius:var(--rsm);padding:8px 11px">' +
-      '<div style="font-size:12px;font-weight:700;color:#2e2d6e">' +
-        'CCFPP &mdash; continuing care will be linked</div>' +
-      peers.map(function (pn) {
-        return '<div style="font-size:11.5px;color:#3b3a8f;margin-top:2px">' + esc(pn) + '</div>';
-      }).join('') +
-      '<div style="font-size:10.5px;color:var(--text3);margin-top:4px">' +
-        'Added automatically to the call-out modifier claims of both consults.</div>' +
-    '</div>';
-}
 
 // ── Call-out Modifier Detection ────────────────────────
 // Priority order per MSP rules:
@@ -3332,7 +3259,11 @@ function ccuFeeForDate(p, dateStr) {
 function ccuFeeForToday(p) { return ccuFeeForDate(p, TODAY); }
 
 // ── Add Claim Helper ───────────────────────────────────
-function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, performingAlias) {
+function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, performingAlias, overrides) {
+  // overrides: optional { icd, refby, refbyName } — per-claim diagnosis /
+  // referring MD that ride on THIS claim row only. They never modify the
+  // patient record. When absent, the claim inherits the patient's values.
+  overrides = overrides || {};
   // v3.60: CCU_DAILY is the canonical placeholder for CCU days. The
   // Apps Script ccuConsolidateForExport() groups them by patient+alias,
   // segments into consecutive episodes, and emits properly-banded
@@ -3361,11 +3292,11 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, 
     first:     p.first || '',
     phn:       p.phn,
     fee:       fee,
-    icd:       p.icd || '3062',
+    icd:       (overrides.icd != null && overrides.icd !== '') ? overrides.icd : (p.icd || '3062'),
     units:     units || 1,
     date:      date,
-    refby:     p.refby     || '',
-    refbyName: p.refbyName || '',
+    refby:     (overrides.refby     != null && overrides.refby     !== '') ? overrides.refby     : (p.refby     || ''),
+    refbyName: (overrides.refbyName != null && overrides.refbyName !== '') ? overrides.refbyName : (p.refbyName || ''),
     notes:     notes       || '',
     startTime: _start,
     endTime:   endTime || '',
@@ -4385,12 +4316,15 @@ function feeSearch(query) {
   if (!dd) return;
   var q = (query || '').toLowerCase().trim();
 
+  // 33010 / 33012 are entered via the consult card, not the Other form.
+  // 33005 (emergency visit) and 33014 (counselling) stay available here.
+  var isConsultCardCode = function(f) { return f.code === '33010' || f.code === '33012'; };
   var matches = q.length === 0
-    ? FEES.filter(function(f) { return f.cat !== 'Modifier' && f.cat !== 'CCU'; }).slice(0, 20)
+    ? FEES.filter(function(f) { return f.cat !== 'Modifier' && f.cat !== 'CCU' && !isConsultCardCode(f); }).slice(0, 20)
     : FEES.filter(function(f) {
+        if (isConsultCardCode(f)) return false;
         return f.code.toLowerCase().indexOf(q) !== -1 ||
-               f.desc.toLowerCase().indexOf(q) !== -1 ||
-               (f.cat  || '').toLowerCase().indexOf(q) !== -1;
+               f.desc.toLowerCase().indexOf(q) !== -1;
       }).slice(0, 15);
 
   if (!matches.length) {
@@ -4416,7 +4350,7 @@ function feeSearch(query) {
       'style="display:flex;align-items:center;gap:4px">' +
       '<span style="font-weight:700;color:' + col + ';margin-right:6px;min-width:50px">' + esc(f.code) + '</span>' +
       '<span style="flex:1;min-width:0">' + esc(f.desc) + '</span>' +
-      '<span style="font-size:10px;color:var(--text3);margin-left:6px">' + esc(f.cat) + '</span>' +
+      (f.cat && f.cat !== 'Consult' ? '<span style="font-size:10px;color:var(--text3);margin-left:6px">' + esc(f.cat) + '</span>' : '') +
       amt +
       '</div>';
   }).join('');
@@ -4455,7 +4389,8 @@ function selectFeeCode(code, desc) {
   updateOtherPreview();
 }
 
-function buildOtherClaimForm(p) {
+function buildOtherClaimForm(p, opts) {
+  var withSubmit = !opts || opts.withSubmit !== false;
   var now      = new Date();
   var todayISO = localISODate(now);
   var nowTime  = pad(now.getHours()) + ':' + pad(now.getMinutes());
@@ -4477,10 +4412,6 @@ function buildOtherClaimForm(p) {
   h += '<div class="ref-dd" id="oc-fee-dd"></div>';
   h += '<input id="oc-fee" type="hidden">';
   h += '<div id="oc-fee-display" style="font-size:11px;color:var(--text2);margin-top:-4px;margin-bottom:6px"></div>';
-
-  h += '<div style="width:80px"><label>Units</label>' +
-       '<input id="oc-units" type="number" value="1" min="1" max="99" ' +
-       'oninput="updateOtherPreview()"></div>';
 
   // Date + start time
   h += '<div class="fl">';
@@ -4533,7 +4464,7 @@ function buildOtherClaimForm(p) {
   h += '<input id="oc-refby-name" type="hidden" value="' + esc(refVal) + '">';
 
   // Notes
-  h += '<label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(optional — CCFPP auto-added)</span></label>';
+  h += '<label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(optional)</span></label>';
   h += '<input id="oc-notes" placeholder="Optional" autocorrect="off">';
 
   h += buildPerformingPhysSelector();
@@ -4542,13 +4473,14 @@ function buildOtherClaimForm(p) {
   // Preview
   h += '<div class="cp" id="oc-preview"><div class="cp-title">Claim preview</div></div>';
 
-  h += '<button class="btn btn-p" onclick="claimSubmitOnce(submitOtherClaim)">Add claim</button>';
+  if (withSubmit) {
+    h += '<button class="btn btn-p" onclick="claimSubmitOnce(submitOtherClaim)">Add claim</button>';
+  }
   return h;
 }
 
 function updateOtherPreview() {
   var fee   = ((document.getElementById('oc-fee') || {}).value || '').trim();
-  var units = (document.getElementById('oc-units') || {}).value || '1';
   var prev  = document.getElementById('oc-preview');
   if (!prev) return;
   if (!fee) {
@@ -4561,34 +4493,17 @@ function updateOtherPreview() {
     '<div class="cp-row" style="display:flex;align-items:center;gap:6px">' +
     '<span class="cp-code">' + esc(fee) + '</span>' +
     '<span class="cp-desc" style="flex:1;min-width:0">' + esc(knownFee ? knownFee.desc : 'Custom fee code') + '</span>' +
-    '<span class="cp-units">×' + units + '</span>' +
     amt +
     '</div>';
 }
 
-function submitOtherClaim() {
-  var p = getP(_claimPid);
-  if (!checkDoc()) return;
-  var _fee = ((document.getElementById('oc-fee') || {}).value || '').trim();
-  if (_fee === '33005') {
-    var _s = ((document.getElementById('oc-start') || {}).value || '').trim();
-    var _e = ((document.getElementById('oc-end')   || {}).value || '').trim();
-    var _n = ((document.getElementById('oc-notes') || {}).value || '').trim();
-    var _em = [];
-    if (!_s) _em.push('start time');
-    if (!_e) _em.push('end time');
-    if (!_n) _em.push('description of emergency care');
-    if (_em.length) {
-      if (!_s) { var _se = document.getElementById('oc-start'); if (_se) _se.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
-      if (!_e) { var _ee = document.getElementById('oc-end');   if (_ee) _ee.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
-      if (!_n) { var _ne = document.getElementById('oc-notes'); if (_ne) _ne.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
-      showToast('Required for 33005: ' + _em.join(', '));
-      return;
-    }
-  }
-
-  var fee   = ((document.getElementById('oc-fee')   || {}).value || '').trim();
-  var units = parseInt((document.getElementById('oc-units') || {}).value || '1') || 1;
+// Shared Other-claim submit — reads the oc-* form, validates 33005, and
+// creates the single claim. Used by both the +Claim screen and Add Patient.
+// Per-claim ICD / referring-MD ride on the claim only (via pClone); the
+// patient's baseline is never rewritten — consistent with the consult form.
+// Returns true on success, false if validation blocked the save.
+function submitOtherClaimFor(p, alias) {
+  var fee     = ((document.getElementById('oc-fee')   || {}).value || '').trim();
   var dateISO = (document.getElementById('oc-date')  || {}).value || '';
   var start   = (document.getElementById('oc-start') || {}).value || '';
   var endTime = (document.getElementById('oc-end')   || {}).value || '';
@@ -4598,29 +4513,50 @@ function submitOtherClaim() {
   var refby   = (document.getElementById('oc-refby') || {}).value || p.refby || '';
   var refName = (document.getElementById('oc-refby-name') || {}).value || p.refbyName || '';
 
-  if (!fee)     { showToast('Enter a fee code'); return; }
-  if (!dateISO) { showToast('Enter a date');     return; }
+  if (!fee)     { showToast('Enter a fee code'); return false; }
+  if (!dateISO) { showToast('Enter a date');     return false; }
 
-  // Validate: must have referring MD and ICD before submitting
+  // 33005 (emergency visit) — start, end, and a description are mandatory.
+  if (fee === '33005') {
+    var em = [];
+    if (!start)   em.push('start time');
+    if (!endTime) em.push('end time');
+    if (!notes)   em.push('description of emergency care');
+    if (em.length) {
+      if (!start)   { var _se = document.getElementById('oc-start'); if (_se) _se.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
+      if (!endTime) { var _ee = document.getElementById('oc-end');   if (_ee) _ee.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
+      if (!notes)   { var _ne = document.getElementById('oc-notes'); if (_ne) _ne.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
+      showToast('Required for 33005: ' + em.join(', '));
+      return false;
+    }
+  }
+
+  var dateFmt = fmtD(parseISODate(dateISO));
+  // Units are always 1 for an Other claim.
+  var pClone  = Object.assign({}, p, { icd: icd, refby: refby, refbyName: refName });
+  addClaim(pClone, fee, fee, 1, dateFmt, loc, start, notes, endTime || '', alias);
+  sv('claims', st.claims);
+  return true;
+}
+
+// +Claim screen wrapper — validates the doctor + required fields, then
+// delegates to the shared submit and closes the claim screen.
+function submitOtherClaim() {
+  var p = getP(_claimPid);
+  if (!checkDoc()) return;
+
+  var fee     = ((document.getElementById('oc-fee')   || {}).value || '').trim();
+  var icd     = (document.getElementById('oc-icd')   || {}).value || p.icd || '';
+  var refby   = (document.getElementById('oc-refby') || {}).value || p.refby || '';
+  var refName = (document.getElementById('oc-refby-name') || {}).value || p.refbyName || '';
+
+  // Diagnosis + referring MD must be present.
   var validateP = Object.assign({}, p, { icd: icd, refby: refby, refbyName: refName });
   if (!validateRequiredForClaim(validateP)) { highlightMissingFields(); return; }
 
-  var dateFmt = fmtD(parseISODate(dateISO));
+  if (!submitOtherClaimFor(p, getPerformingAlias())) return;
 
-  // Back-populate to patient record so subsequent claims inherit
-  var patientUpdated = false;
-  if (icd && icd !== p.icd)                   { p.icd = icd; patientUpdated = true; }
-  if (refby && refby !== p.refby)             { p.refby = refby; p.refbyName = refName; patientUpdated = true; }
-  else if (refName && refName !== p.refbyName){ p.refbyName = refName; patientUpdated = true; }
-
-  var pClone = Object.assign({}, p, { icd: icd, refby: refby, refbyName: refName });
-
-  var alias = getPerformingAlias();
-  var c = addClaim(pClone, fee, fee, units, dateFmt, loc, start, notes, endTime || '', alias);
-  sv('patients', st.patients);
-  sv('claims',   st.claims);
-  if (patientUpdated && SHEETS_URL) push('savePatient', p);
-  showToast(fee + ' claim added for ' + p.last);
+  showToast((fee || 'Claim') + ' claim added for ' + p.last);
   closeClaimScreen();
 }
 
@@ -4646,10 +4582,8 @@ function selCT(type) {
 
   // Post-render setup for consult form
   if (type === 'consult') {
-    var now = new Date();
-    document.getElementById('cb-start').value = pad(now.getHours()) + ':' + pad(now.getMinutes());
-    document.getElementById('cb-date').value  = localISODate();
-    updateConsultUI();
+    _consultCtx = 'claim';
+    consultFormOpened();
   }
 }
 
@@ -5764,7 +5698,7 @@ function parseDMYsafe(s) {
 function openClaimEdit(btn) {
   var cid = btn.getAttribute('data-cid');
   var pid = btn.getAttribute('data-pid');
-  var c   = st.claims.find(function(x) { return x.id === cid; });
+  var c   = st.claims.find(function(x) { return x.id != null && x.id !== '' && String(x.id) === String(cid); });
   var p   = getP(pid);
   if (!c) return;
 
@@ -5857,7 +5791,7 @@ function openClaimEdit(btn) {
 function saveClaimEdit(btn) {
   var cid = btn.getAttribute('data-cid');
   var pid = btn.getAttribute('data-pid');
-  var c   = st.claims.find(function(x) { return x.id === cid; });
+  var c   = st.claims.find(function(x) { return x.id != null && x.id !== '' && String(x.id) === String(cid); });
   var p   = getP(pid);
   if (!c) return;
 
@@ -5907,12 +5841,12 @@ function saveClaimEdit(btn) {
 function deleteClaimBtn(btn) {
   var cid = btn.getAttribute('data-cid');
   var pid = btn.getAttribute('data-pid');
-  var c   = st.claims.find(function(x) { return x.id === cid; });
+  var c   = st.claims.find(function(x) { return x.id != null && x.id !== '' && String(x.id) === String(cid); });
   if (!c) return;
 
   if (!confirm('Delete ' + getFeeLabel(c.fee) + ' on ' + dispDate(c.date) + '?')) return;
 
-  st.claims = st.claims.filter(function(x) { return x.id !== cid; });
+  st.claims = st.claims.filter(function(x) { return String(x.id) !== String(cid); });
   sv('claims', st.claims);
   if (SHEETS_URL) push('deleteClaim', { id: cid });
 
@@ -6412,12 +6346,43 @@ function saveLocationEdit(pid) {
 
 // ── 07_consult.js ──
 // ═══════════════════════════════════════════════════════
-// 07_consult.js — Consult form (33010/33012), MOST toggle,
-//                 start/end time, modifier detection, +15 button,
-//                 live claim preview, submit
+// 07_consult.js — Unified consult form (33010/33012)
+//
+// ONE consult form, shared by the +Claim screen and the Add Patient
+// screen. Built on the Add Patient template: flat layout, no claims-
+// preview card. Diagnosis + referring MD pre-fill from the patient but
+// are editable per-claim — a per-claim change rides on the claim row
+// only and never rewrites the patient's baseline record.
 // ═══════════════════════════════════════════════════════
 
-function buildConsultForm(p) {
+// MOST toggle state — reset to ON every time a fresh consult form builds.
+var _mostOn = true;
+
+// Which screen the consult form is on — set by the caller (+Claim vs Add
+// Patient) so the live CCFPP field can resolve the right patient context.
+var _consultCtx = 'claim';
+
+// The patient the consult form is currently for.
+function currentConsultPatient() {
+  if (_consultCtx === 'addpatient') {
+    // Add Patient — patient not created yet; build it from the form fields.
+    return { phn: gv('f-phn') || '', last: gv('f-last') || '', first: gv('f-first') || '' };
+  }
+  return getP(_claimPid) || {};
+}
+
+// p may be a real patient object (+Claim screen) or {} on the Add Patient
+// screen (the patient does not exist yet — fields simply render blank).
+// opts.withSubmit — +Claim shows its own submit button; Add Patient uses
+// the screen's own submit buttons, so it passes { withSubmit:false }.
+function buildConsultForm(p, opts) {
+  p    = p    || {};
+  opts = opts || {};
+  var withSubmit = opts.withSubmit !== false;
+
+  // A freshly-built form always renders MOST as ON — keep the global in sync.
+  _mostOn = true;
+
   var now      = new Date();
   var todayISO = localISODate(now);
   var nowTime  = pad(now.getHours()) + ':' + pad(now.getMinutes());
@@ -6445,30 +6410,39 @@ function buildConsultForm(p) {
        '<input type="text" id="cb-start" value="' + nowTime + '" placeholder="14:30 or 2:30pm" oninput="updateConsultUI()" onblur="var v=parseTime24(this.value);if(v){this.value=v;updateConsultUI();}"></div>' +
        '</div>';
 
-  // End time — defaults to start+45, doctor adjusts if shorter
+  // End time — defaults to start + 50, doctor adjusts if shorter
   h += '<div class="fl" style="margin-bottom:9px">' +
        '<div class="f1"><label>End time' +
-       '<span style="font-size:10px;color:var(--text3)"> — adjust if &lt; 45 min</span></label>' +
+       '<span style="font-size:10px;color:var(--text3)"> — defaults to 50 min, adjust as needed</span></label>' +
        '<input type="text" id="cb-end" value="' + endTime + '" placeholder="14:30 or 2:30pm" oninput="updateConsultUI()" onblur="var v=parseTime24(this.value);if(v){this.value=v;updateConsultUI();}"></div>' +
        '</div>';
 
-  // Modifier display area
+  // Modifier banner
   h += '<div id="cb-mod"></div>';
-  h += '<div id="cb-ccfpp"></div>';
-  h += '</div>';
 
-  // ICD-9 and referring MD
+  // Live CCFPP field — auto-populated when this consult overlaps another
+  // call-out consult. Hidden until an overlap is detected. Read-only: the
+  // note is appended to the 120x modifier claims automatically at submit.
+  h += '<div id="cb-ccfpp" style="margin-top:9px;padding:8px 10px;border-radius:var(--rsm);' +
+       'border:1px solid var(--border2);background:var(--surface2)">' +
+       '<div style="font-size:10px;font-weight:700;color:var(--text3);' +
+       'text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">CCFPP — continuing care</div>' +
+       '<div id="cb-ccfpp-val" style="font-size:13px;color:var(--text3);font-weight:600">—</div>' +
+       '</div>';
+
+  // Notes — folded into the consult card (Add Patient template style)
+  h += '<label style="margin-top:9px">Notes <span style="font-size:10px;color:var(--text3);font-weight:400">(optional)</span></label>';
+  h += '<textarea id="cb-notes" rows="2" placeholder="Add any claim notes..." autocorrect="off" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:0"></textarea>';
+  h += '</div>'; // end consult card
+
+  // Diagnosis + referring MD + performing physician.
+  // Pre-filled from the patient; editable per-claim (rides on the claim row,
+  // does not overwrite the patient baseline).
   h += buildIcdRefCard(p);
 
-  // Live claim preview
-  h += '<div class="cp" id="cb-preview"><div class="cp-title">Claims preview</div></div>';
-
-  // Optional notes
-  h += '<label style="margin-top:9px">Notes <span style="font-size:10px;color:var(--text3);font-weight:400">(optional)</span></label>';
-  h += '<textarea id="cb-notes" rows="2" placeholder="Add any claim notes..." autocorrect="off" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:9px"></textarea>';
-
-  // Submit button
-  h += '<button class="btn btn-p" onclick="claimSubmitOnce(submitConsult)">Add consult claims</button>';
+  if (withSubmit) {
+    h += '<button class="btn btn-p" onclick="claimSubmitOnce(submitConsult)">Add consult claims</button>';
+  }
   return h;
 }
 
@@ -6481,92 +6455,98 @@ function toggleConsultCode(code) {
 function toggleMost() {
   _mostOn = !_mostOn;
   document.getElementById('cb-most').className = 'most-btn' + (_mostOn ? ' on' : '');
-  updateConsultUI();
 }
 
 function updateConsultUI() {
   var start   = gv('cb-start');
   var end     = gv('cb-end');
   var dateISO = gv('cb-date');
+  if (!document.getElementById('cb-mod')) return; // form not on screen
 
-  // Track which field triggered this update so the end time follows the start time
-  // unless the doctor has manually edited the end. Start input always pulls end +45 min.
-  var endEl = document.getElementById('cb-end');
+  // End follows start (start + 50 min) unless the doctor edited end directly.
+  var endEl   = document.getElementById('cb-end');
   var changed = (typeof event !== 'undefined' && event && event.target) ? event.target.id : '';
   if (start && (changed === 'cb-start' || !end)) {
     if (endEl) endEl.value = minsToTime(t2m(start) + 50);
     end = gv('cb-end');
   }
 
-  var modBase = getModifier(start, dateISO);
-  var hasInc  = consultHasIncrement(start, end);
-  var modInc  = hasInc ? getModifierForIncrement(start, dateISO) : null;
-
-  // Modifier banner
+  var modBase  = getModifier(start, dateISO);
+  var hasInc   = consultHasIncrement(start, end);
+  var modInc   = hasInc ? getModifierForIncrement(start, dateISO) : null;
   var incUnits = consultIncUnits(start, end);
-  var modEl = document.getElementById('cb-mod');
-  if (modEl) {
-    if (modBase) {
-      // Line 1: base modifier from start time
-      var banner = '<div class="mod-box ' + modBase.cls + '" style="margin-bottom:0;border-radius:var(--rsm) var(--rsm) 0 0">' +
-        '<span style="font-weight:700">' + modBase.label + '</span>' +
-        '<span style="font-size:10px;opacity:.75;margin-left:6px">' + modBase.base + ' ×1</span>' +
-        '</div>';
-      // Line 2: increment based on duration
-      if (incUnits > 0) {
-        var incMod = modInc || modBase;
-        banner += '<div class="mod-box ' + incMod.cls + '" style="margin-top:1px;border-radius:0 0 var(--rsm) var(--rsm);opacity:.85">' +
-          '<span>Consult time &gt; 45 min</span>' +
-          '<span style="font-size:10px;font-weight:700;margin-left:6px">' + incMod.inc + ' ×' + incUnits + '</span>' +
-          '</div>';
-      } else {
-        banner += '<div style="font-size:11px;padding:5px 10px;color:var(--text3);' +
-          'border:.5px solid var(--border);border-top:none;border-radius:0 0 var(--rsm) var(--rsm);' +
-          'background:var(--surface2)">' +
-          'Consult ≤ 45 min — no increment</div>';
-      }
-      modEl.innerHTML = banner;
-    } else if (start) {
-      modEl.innerHTML = '<div class="mod-box mod-day">✓ Daytime weekday — no call-out modifier</div>';
-    } else {
-      modEl.innerHTML = '';
-    }
-  }
+  var modEl    = document.getElementById('cb-mod');
 
-  renderCcfppBanner('cb-ccfpp', getP(_claimPid), getPerformingAlias(), dateISO, start, end);
-  updateConsultPreview(modBase, modInc);
-}
-
-function updateConsultPreview(modBase, modInc) {
-  var p    = getP(_claimPid);
-  var code = document.getElementById('cb-33010') &&
-             document.getElementById('cb-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
-  var icd  = getClaimIcd(p);
-  var rows = [{ code:code, desc:'Cardiology consultation', u:1 }];
-  if (_mostOn) rows.push({ code:'78720', desc:'MOST — advance care planning', u:1 });
-  var incUnits2 = consultIncUnits(gv('cb-start'), gv('cb-end'));
   if (modBase) {
-    rows.push({ code:modBase.base, desc:modBase.label + ' — base (30 min)', u:1 });
-    if (incUnits2 > 0) {
-      var incMod2 = modInc || modBase;
-      rows.push({ code:incMod2.inc, desc:'Consult time > 45 min', u:incUnits2 });
+    var banner = '<div class="mod-box ' + modBase.cls + '" style="margin-bottom:0;border-radius:var(--rsm) var(--rsm) 0 0">' +
+      '<span style="font-weight:700">' + modBase.label + '</span>' +
+      '<span style="font-size:10px;opacity:.75;margin-left:6px">' + modBase.base + ' ×1</span>' +
+      '</div>';
+    if (incUnits > 0) {
+      var incMod = modInc || modBase;
+      banner += '<div class="mod-box ' + incMod.cls + '" style="margin-top:1px;border-radius:0 0 var(--rsm) var(--rsm);opacity:.85">' +
+        '<span>Consult time &gt; 45 min</span>' +
+        '<span style="font-size:10px;font-weight:700;margin-left:6px">' + incMod.inc + ' ×' + incUnits + '</span>' +
+        '</div>';
+    } else {
+      banner += '<div style="font-size:11px;padding:5px 10px;color:var(--text3);' +
+        'border:.5px solid var(--border);border-top:none;border-radius:0 0 var(--rsm) var(--rsm);' +
+        'background:var(--surface2)">Consult ≤ 45 min — no increment</div>';
     }
+    modEl.innerHTML = banner;
+  } else if (start && dateISO) {
+    modEl.innerHTML = '<div class="mod-box mod-day">✓ Daytime weekday — no call-out modifier</div>';
+  } else {
+    modEl.innerHTML = '';
   }
-  var prev = document.getElementById('cb-preview');
-  if (prev) {
-    prev.innerHTML =
-      '<div class="cp-title">Claims to add (ICD-9 ' + icd + ')</div>' +
-      rows.map(function(r) {
-        return '<div class="cp-row">' +
-               '<span class="cp-code">' + r.code + '</span>' +
-               '<span class="cp-desc">' + r.desc + '</span>' +
-               '<span class="cp-units">×' + r.u + '</span>' +
-               '</div>';
-      }).join('');
+
+  // ── Live CCFPP field — always visible, three states ──
+  //   1. no call-out window     → "Modifiers don't apply"
+  //   2. window, no overlap     → "No overlapping consult"
+  //   3. window + overlap       → "CCFPP: Last, First (PHN)"  (blue highlight)
+  var ccEl  = document.getElementById('cb-ccfpp');
+  var ccVal = document.getElementById('cb-ccfpp-val');
+  if (ccEl && ccVal) {
+    var ccText, ccMatch = false;
+    if (!modBase) {
+      ccText = "Modifiers don't apply";
+    } else {
+      var ccNote = (start && end && dateISO)
+        ? ccfppPreviewNote(currentConsultPatient(), getPerformingAlias(),
+                           dateISO, fmtD(parseISODate(dateISO)), start, end)
+        : '';
+      if (ccNote) { ccText = ccNote; ccMatch = true; }
+      else        { ccText = 'No overlapping consult'; }
+    }
+    ccVal.textContent = ccText;
+    if (ccMatch) {
+      ccEl.style.border     = '1px solid var(--blue-t)';
+      ccEl.style.background = 'var(--blue-bg)';
+      ccVal.style.color     = 'var(--blue-t)';
+    } else {
+      ccEl.style.border     = '1px solid var(--border2)';
+      ccEl.style.background = 'var(--surface2)';
+      ccVal.style.color     = 'var(--text3)';
+    }
   }
 }
 
-// Submit guard — prevents double/triple tap on mobile from firing twice
+// Called when the consult form is shown (either screen). Renders from local
+// data immediately, then fires ONE background cloud refresh so a consult
+// entered on another device is picked up. Skipped if a sync ran in the last
+// 60s — in a rapid consult-to-consult session local data is already fresh.
+var _lastConsultSync = 0;
+function consultFormOpened() {
+  updateConsultUI();
+  if (typeof syncFromSheets === 'function' && (Date.now() - _lastConsultSync > 60000)) {
+    _lastConsultSync = Date.now();
+    Promise.resolve(syncFromSheets()).then(function() {
+      updateConsultUI();
+    }).catch(function() {});
+  }
+}
+
+// Submit guard — prevents double/triple tap on mobile from firing twice.
 var _submitGuard = false;
 function claimSubmitOnce(fn) {
   if (_submitGuard) return;
@@ -6575,61 +6555,73 @@ function claimSubmitOnce(fn) {
   fn();
 }
 
-function submitConsult() {
-  var p = getP(_claimPid);
-  if (!checkDoc()) return;
-
-  var alias   = getPerformingAlias();
+// ── Shared consult-claim creation ──────────────────────
+// Reads the unified consult form (cb-* ids) and creates the consult,
+// MOST, and call-out modifier claims for patient p. Used by BOTH the
+// +Claim screen (submitConsult) and the Add Patient screen
+// (_addPatientCore). Returns true on success, false if validation failed.
+//
+// Diagnosis / referring MD are read from the form and ride on the claim
+// rows as a per-claim override — they do NOT modify the patient record.
+// CCFPP detection runs here, so it now fires from BOTH entry points.
+function submitConsultClaims(p, alias) {
   var code    = document.getElementById('cb-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
   var dateISO = gv('cb-date');
   var start   = gv('cb-start');
   var end     = gv('cb-end');
-  if (!dateISO) { showToast('Enter date'); return; }
-  if (!start)   { showToast('Start time required for ' + code); return; }
-  if (!end)     { showToast('End time required for ' + code); return; }
+  if (!dateISO) { showToast('Enter consult date'); return false; }
+  if (!start)   { showToast('Start time required for ' + code); return false; }
+  if (!end)     { showToast('End time required for ' + code); return false; }
 
   var dateFmt = fmtD(parseISODate(dateISO));
   var loc     = p.ward === 'ED' ? 'E' : 'I';
 
-  // Save any ICD-9/referrer changes back to patient record
-  updatePatientFromClaimForm(p);
-  if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
+  // Per-claim diagnosis / referring MD — pre-filled from the patient but
+  // editable on the form. Rides on the claim rows only (override object).
+  var ov = {
+    icd:       getClaimIcd(p),
+    refby:     gv('cb-refby')      || p.refby     || '',
+    refbyName: gv('cb-refby-name') || p.refbyName || ''
+  };
 
-  // CCFPP — detect + retroactively update overlapping peer claims
+  var userNote  = (gv('cb-notes') || '').trim();
+  // CCFPP — one-directional detection. Note belongs on the 120x modifier
+  // claims only, never on the consult row.
   var ccfppNote = ccfppDetectAndUpdate(p, alias, dateISO, dateFmt, start, end);
+  var modNote   = [userNote, ccfppNote].filter(function(s) { return s; }).join(' | ');
 
-  // Combine user-entered notes with CCFPP auto-note (if any)
-  var userNote = (gv('cb-notes') || '').trim();
-  var fullNote = [userNote, ccfppNote].filter(function(s) { return s; }).join(' | ');
+  // Base consult — doctor's note only
+  addClaim(p, code, code, 1, dateFmt, loc, start, userNote, end, alias, ov);
 
-  // Base consult — combined note on consult itself
-  addClaim(p, code, code, 1, dateFmt, loc, start, fullNote, gv('cb-end'), alias);
+  // MOST — standalone item, no CCFPP, no times
+  if (_mostOn) addClaim(p, '78720', '78720', 1, dateFmt, loc, null, null, null, alias, ov);
 
-  // MOST — standalone item, no CCFPP
-  if (_mostOn) addClaim(p, '78720', '78720', 1, dateFmt, loc, null, null, null, alias);
-
+  // Call-out modifiers — CCFPP note rides on these
   var modBase  = getModifier(start, dateISO);
   var incUnits = consultIncUnits(start, end);
-  var hasInc   = incUnits > 0;
-  var modInc   = hasInc ? getModifierForIncrement(start, dateISO) : null;
-
+  var modInc   = incUnits > 0 ? getModifierForIncrement(start, dateISO) : null;
   if (modBase) {
-    // Base modifier — first 30 min from consult start
     var modBaseEnd = minsToTime((t2m(start) + 30) % (24 * 60));
-    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start, fullNote, modBaseEnd, alias);
-
+    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start, modNote, modBaseEnd, alias, ov);
     if (modInc) {
-      // Increment modifier — start+30 to consult end
       var incStart = minsToTime((t2m(start) + 30) % (24 * 60));
-      addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, fullNote, end, alias);
+      addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, modNote, end, alias, ov);
     }
   }
-  sv('patients', st.patients);
   sv('claims', st.claims);
+  return true;
+}
+
+// +Claim screen consult submit.
+function submitConsult() {
+  var p = getP(_claimPid);
+  if (!checkDoc()) return;
+  if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
+  if (!submitConsultClaims(p, getPerformingAlias())) return;
+  sv('patients', st.patients);
   showToast('Consult claims added for ' + p.last);
   closeClaimScreen();
 }
-
 // ── 08_daily.js ──
 // ═══════════════════════════════════════════════════════
 // 08_daily.js — Daily, combined daily, directive, CCU forms
@@ -6700,21 +6692,18 @@ function getClaimIcd(p) {
   return p.icd || '3062';
 }
 
-// Save ICD-9 and referring MD changes back to patient record
-function updatePatientFromClaimForm(p) {
-  var icd = getClaimIcd(p);
-  if (icd && icd !== p.icd) p.icd = icd;
-
+// Reads the per-claim diagnosis / referring-MD from the claim form.
+// These ride on the claim only — the patient's stored baseline is NOT
+// rewritten (consistent with the consult and Other-claim forms). To
+// change a patient's baseline, edit it on the patient card.
+function claimFormOverrides(p) {
   var rb = document.getElementById('cb-refby');
   var rn = document.getElementById('cb-refby-name');
-  if (rb && rb.value) {
-    if (rb.value !== p.refby || (!p.refbyName && rn && rn.value)) {
-      p.refby     = rb.value;
-      if (rn && rn.value && !looksLikeMRPService(rn.value)) p.refbyName = rn.value;
-    }
-  }
-  sv('patients', st.patients);
-  if (SHEETS_URL) push('savePatient', p);
+  return {
+    icd:       getClaimIcd(p),
+    refby:     (rb && rb.value) ? rb.value : (p.refby || ''),
+    refbyName: (rn && rn.value && !looksLikeMRPService(rn.value)) ? rn.value : (p.refbyName || '')
+  };
 }
 
 // ── Daily rounds (33008) ───────────────────────────────
@@ -6734,11 +6723,11 @@ function submitDaily() {
   var ds   = gv('cb-dal-start');
   var days = parseInt(gv('cb-dal-days')) || 1;
   if (!ds) { showToast('Enter start date'); return; }
-  updatePatientFromClaimForm(p);
-  if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
+  var pc = Object.assign({}, p, claimFormOverrides(p));
+  if (!validateRequiredForClaim(pc)) { highlightMissingFields(); return; }
   var alias = getPerformingAlias();
-  addClaim(p, '33008', '33008', days, fmtD(parseISODate(ds)), 'I', null, null, null, alias);
-  sv('patients', st.patients); sv('claims', st.claims);
+  addClaim(pc, '33008', '33008', days, fmtD(parseISODate(ds)), 'I', null, null, null, alias);
+  sv('claims', st.claims);
   showToast('33008 ×' + days + ' — ' + p.last);
   closeClaimScreen();
 }
@@ -6777,8 +6766,8 @@ function submitCombined() {
   if (!ds) { showToast('Enter date'); return; }
   var note2 = document.getElementById('cb-comb-note') ? gv('cb-comb-note') : '';
   if (v === 2 && !note2) { showToast('Note required for 2nd visit'); return; }
-  updatePatientFromClaimForm(p);
-  if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
+  var pc = Object.assign({}, p, claimFormOverrides(p));
+  if (!validateRequiredForClaim(pc)) { highlightMissingFields(); return; }
   // First combined daily for this patient — capture reason before submitting
   if (!p.combinedDailyReason) {
     openCombinedReasonModal(p.id, function() {
@@ -6788,9 +6777,9 @@ function submitCombined() {
   }
   var alias = getPerformingAlias();
   var baseNote = p.combinedDailyReason || '';
-  addClaim(p, '33008', '33008', 1, fmtD(parseISODate(ds)), 'I', null, baseNote, null, alias);
-  if (v === 2) addClaim(p, '33008', '33008', 1, fmtD(parseISODate(ds)), 'I', null, (baseNote ? baseNote + ' | ' : '') + (note2 || 'Second visit — patient unstable'), null, alias);
-  sv('patients', st.patients); sv('claims', st.claims);
+  addClaim(pc, '33008', '33008', 1, fmtD(parseISODate(ds)), 'I', null, baseNote, null, alias);
+  if (v === 2) addClaim(pc, '33008', '33008', 1, fmtD(parseISODate(ds)), 'I', null, (baseNote ? baseNote + ' | ' : '') + (note2 || 'Second visit — patient unstable'), null, alias);
+  sv('claims', st.claims);
   showToast('Combined daily ×' + v + ' — ' + p.last);
   closeClaimScreen();
 }
@@ -6822,11 +6811,11 @@ function submitDirective() {
   var cnt  = dirCountThisWeek(p.phn, ds);
   var note = (document.getElementById('cb-dir-note') ? gv('cb-dir-note') : '').trim();
   if (cnt >= 2 && !note) { showToast('Note required for 3rd directive in the same Sun–Sat week'); return; }
-  updatePatientFromClaimForm(p);
-  if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
+  var pc = Object.assign({}, p, claimFormOverrides(p));
+  if (!validateRequiredForClaim(pc)) { highlightMissingFields(); return; }
   var alias = getPerformingAlias();
-  addClaim(p, '33006', '33006', 1, fmtD(parseISODate(ds)), 'I', null, note, null, alias);
-  sv('patients', st.patients); sv('claims', st.claims);
+  addClaim(pc, '33006', '33006', 1, fmtD(parseISODate(ds)), 'I', null, note, null, alias);
+  sv('claims', st.claims);
   showToast('33006 directive — ' + p.last);
   closeClaimScreen();
 }
@@ -6853,12 +6842,12 @@ function buildCCUForm(p) {
 
 function submitCCU(isDuplicate) {
   var p = getP(_claimPid); if (!checkDoc()) return;
-  updatePatientFromClaimForm(p);
-  if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
+  var pc = Object.assign({}, p, claimFormOverrides(p));
+  if (!validateRequiredForClaim(pc)) { highlightMissingFields(); return; }
   var alias = getPerformingAlias();
   // v3.60: write CCU_DAILY placeholder; export consolidates.
-  addClaim(p, 'CCU_DAILY', 'CCU_DAILY', 1, TODAY, 'I', null, null, null, alias);
-  sv('patients', st.patients); sv('claims', st.claims);
+  addClaim(pc, 'CCU_DAILY', 'CCU_DAILY', 1, TODAY, 'I', null, null, null, alias);
+  sv('claims', st.claims);
   showToast('CCU daily recorded' + (isDuplicate ? ' (duplicate)' : '') + ' — ' + p.last);
   closeClaimScreen();
 }
@@ -6869,95 +6858,6 @@ function submitCCU(isDuplicate) {
 //                 chart photo OCR, ward/room selectors
 // ═══════════════════════════════════════════════════════
 
-// PHN duplicate merge modal
-function openMergeModal(existing, isReadmit) {
-  var newLast = (gv('f-last') || '').trim().toLowerCase();
-  var newDob  = (gv('f-dob')  || '').trim();
-  var lastMatch = existing.last && newLast && existing.last.toLowerCase() === newLast;
-  var dobMatch  = existing.dob  && newDob  && fmtClaimDate(existing.dob) === fmtClaimDate(newDob);
-  var matchScore = (lastMatch ? 1 : 0) + (dobMatch ? 1 : 0);
-
-  var statusBadge = isReadmit
-    ? '<span style="background:var(--amber-bg);color:var(--amber-t);padding:2px 8px;border-radius:var(--rpill);font-size:10px;font-weight:700">Previously discharged</span>'
-    : '<span style="background:var(--red-bg);color:var(--red-t);padding:2px 8px;border-radius:var(--rpill);font-size:10px;font-weight:700">Currently on list</span>';
-
-  var matchBadge = matchScore === 2
-    ? '<div style="color:var(--green-t);font-weight:700;font-size:12px;margin-top:8px">✓ Last name and DOB both match — likely same patient</div>'
-    : matchScore === 1
-    ? '<div style="color:var(--amber-t);font-weight:700;font-size:12px;margin-top:8px">⚠ Partial match (' + (lastMatch ? 'last name' : 'DOB') + ' only) — review carefully</div>'
-    : '<div style="color:var(--red-t);font-weight:700;font-size:12px;margin-top:8px">✗ Neither last name nor DOB match — likely wrong PHN</div>';
-
-  var claimCount = st.claims.filter(function(c) { return samePhn(c.phn, existing.phn); }).length;
-
-  var h = statusBadge +
-    '<div style="margin:10px 0 4px;font-size:13px;font-weight:700">' + esc(existing.last) + ', ' + esc(existing.first) + '</div>' +
-    '<div style="font-size:11px;color:var(--text2)">PHN: ' + esc(existing.phn) + ' &bull; DOB: ' + esc(existing.dob ? dispDate(existing.dob) : '—') + ' &bull; ' + claimCount + ' claim(s)</div>' +
-    matchBadge +
-    '<div style="margin-top:14px;display:flex;flex-direction:column;gap:8px">';
-
-  if (matchScore >= 1) {
-    if (isReadmit) {
-      h += '<button class="btn btn-p" style="margin:0" onclick="mergePatient(\'readmit\')">Re-admit — restore to rounds list</button>';
-    } else {
-      h += '<button class="btn btn-p" style="margin:0" onclick="mergePatient(\'merge\')">Merge — keep existing patient &amp; claims</button>';
-    }
-  }
-  h += '<button class="btn btn-s" style="margin:0" onclick="mergePatient(\'review\')">Review PHN — may be entry error</button>';
-  h += '</div>';
-
-  document.getElementById('merge-title').textContent = 'PHN ' + existing.phn + ' already exists';
-  document.getElementById('merge-body').innerHTML = h;
-  showModal('merge-modal');
-}
-
-function mergePatient(action) {
-  hideModal('merge-modal');
-  if (action === 'review') {
-    // Focus PHN field for correction
-    var phnEl = document.getElementById('f-phn');
-    if (phnEl) { phnEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; phnEl.select(); phnEl.focus(); }
-    showToast('Check PHN — may be a transcription error');
-    return;
-  }
-  if (action === 'merge') {
-    // Just navigate to the existing patient's summary — no duplicate created
-    var existing = st.patients.find(function(x) { return x.phn === gv('f-phn') && !x.discharged; });
-    if (existing) {
-      showToast(existing.last + ' already on list — opening their record');
-      clearAddForm();
-      nav(0, document.querySelectorAll('.nb')[0]);
-      setTimeout(function() { openPatientSummary(existing.id); }, 300);
-    }
-    return;
-  }
-  if (action === 'readmit') {
-    // Re-activate the discharged patient with new ward/bed from the form
-    var existing = st.patients.find(function(x) { return x.phn === gv('f-phn') && x.discharged; });
-    if (!existing) return;
-    existing.discharged   = false;
-    existing.dischargedAt = null;
-    existing.dischargeDate = null;
-    existing.ward         = gv('f-ward') || existing.ward;
-    existing.bed          = gv('f-bed')  || existing.bed;
-    existing.list         = gv('f-list') || 'on';
-    // Update refby/icd if new values provided
-    var newRefby = gv('f-refby-num') || gv('f-refby');
-    var newIcd   = gv('f-icd');
-    if (newRefby) { existing.refby = newRefby; existing.refbyName = gv('f-refby-name') || existing.refbyName; }
-    if (newIcd)   existing.icd = newIcd;
-    sv('patients', st.patients);
-    if (SHEETS_URL) push('savePatient', existing);
-    logChange(existing, 'Re-admitted', existing.ward + (existing.bed ? ' Bed/Rm ' + existing.bed : ''));
-    showToast(existing.last + ' re-admitted');
-    clearAddForm();
-    nav(0, document.querySelectorAll('.nb')[0]);
-    render();
-  }
-}
-
-// Soft duplicate check — fires when last name + DOB match an existing
-// patient but PHN differs (suggests a PHN typo). Does NOT block: gives
-// the doctor the choice to fix the PHN or proceed as a new patient.
 // ── Hard duplicate block modal ────────────────────────────────────
 // Shown when 2-of-3 (PHN / last name / DOB) match an existing patient.
 // No bypass — user must dismiss and correct the form.
@@ -6991,205 +6891,6 @@ function openDuplicateBlockModal(existing, matchedFields) {
   document.getElementById('merge-title').textContent = 'Patient already exists';
   document.getElementById('merge-body').innerHTML = h;
   showModal('merge-modal');
-}
-
-function openPossibleDuplicateModal(existing, withClaim) {
-  // Legacy — route through hard block instead
-  openDuplicateBlockModal(existing, ['Last name', 'DOB']);
-}
-
-// ── Add patient — entry points ────────────────────────────
-function addPatientWithConsult() {
-  // Validate consult date before proceeding
-  var cDateISO = (document.getElementById('f-c-date') || {}).value || '';
-  if (!cDateISO) { showToast('Enter consult date'); return; }
-  _addPatientCore(true);
-}
-
-function addPatientOnly() {
-  _addPatientCore(false);
-}
-
-// Shared patient validation, creation and optional consult claim.
-// skipNameDobDup: set true when the user already saw the soft duplicate
-// warning and chose "Continue — different patient".
-async function _addPatientCore(withClaim, skipNameDobDup) {
-  var last = gv('f-last');
-  var phn  = gv('f-phn');
-  if (!last) { showToast('Enter patient last name'); return; }
-
-  var ward = gv('f-ward');
-  var icd  = gv('f-icd') || '';
-
-  var addMissing = [];
-  if (!phn)                                    addMissing.push('phn');
-  else if (String(phn).replace(/\D/g,'').length !== 10) addMissing.push('phn-len');
-  if (!gv('f-refby-num') && !gv('f-refby'))   addMissing.push('refby');
-  if (!icd)                                    addMissing.push('icd');
-  if (addMissing.length) {
-    if (addMissing.indexOf('phn') !== -1) {
-      var phnEl = document.getElementById('f-phn');
-      if (phnEl) { phnEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; phnEl.focus(); }
-    }
-    if (addMissing.indexOf('refby') !== -1) {
-      var refEl = document.getElementById('f-ref-search');
-      if (refEl) { refEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; refEl.placeholder = 'Required — type name or doctor #'; if (addMissing.indexOf('phn') === -1) refEl.focus(); }
-    }
-    if (addMissing.indexOf('icd') !== -1) {
-      var icdEl = document.getElementById('f-icd-search');
-      if (icdEl) { icdEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; icdEl.placeholder = 'Required — type diagnosis or code'; if (addMissing.indexOf('phn') === -1 && addMissing.indexOf('refby') === -1) icdEl.focus(); }
-    }
-    var msgs = [];
-    if (addMissing.indexOf('phn')     !== -1) msgs.push('PHN');
-    if (addMissing.indexOf('phn-len') !== -1) msgs.push('PHN must be 10 digits');
-    if (addMissing.indexOf('refby')   !== -1) msgs.push('referring MD');
-    if (addMissing.indexOf('icd')     !== -1) msgs.push('diagnosis');
-    showToast('Required: ' + msgs.join(', '));
-    return;
-  }
-
-  // PHN duplicate check — offer merge if last name and/or DOB match
-  var existing = st.patients.find(function(x) { return x.phn === phn && !x.discharged; });
-  if (existing) {
-    openMergeModal(existing);
-    return;
-  }
-  // Discharged patient with same PHN — offer to re-admit
-  var dischExisting = st.patients.find(function(x) { return x.phn === phn && x.discharged; });
-  if (dischExisting) {
-    openMergeModal(dischExisting, true);
-    return;
-  }
-
-  // Soft duplicate check: same LAST NAME + DOB but DIFFERENT PHN.
-  // Likely a PHN typo. Warn the user but allow them to proceed.
-  if (!skipNameDobDup) {
-    var lastLc = String(last || '').trim().toLowerCase();
-    var dobFmt = fmtClaimDate(gv('f-dob') || '');
-    if (lastLc && dobFmt) {
-      var nameDobMatch = st.patients.find(function(x) {
-        if (!x || x.phn === phn) return false;
-        var xLast = String(x.last || '').trim().toLowerCase();
-        var xDob  = x.dob ? fmtClaimDate(x.dob) : '';
-        return xLast === lastLc && xDob === dobFmt;
-      });
-      if (nameDobMatch) {
-        openPossibleDuplicateModal(nameDobMatch, withClaim);
-        return;
-      }
-    }
-
-    // v3.37: Typo-PHN catcher. Same last+first name as an existing patient,
-    // PHN differs by 1-2 digits → almost certainly a transcription error
-    // (e.g. 9050828076 vs 9050328076 — single-digit '8' vs '3'). Catches
-    // typos even when DOB is missing or also typo'd, which the name+DOB
-    // check above doesn't. Still soft — the doctor can override if the
-    // similar PHN is genuinely a different person.
-    var firstLc = String(gv('f-first') || '').trim().toLowerCase();
-    if (lastLc && firstLc && phn && phn.length === 10) {
-      var phnTypoMatch = st.patients.find(function(x) {
-        if (!x || !x.phn || x.phn === phn) return false;
-        var xPhn = String(x.phn);
-        if (xPhn.length !== phn.length) return false;
-        var xLast  = String(x.last  || '').trim().toLowerCase();
-        var xFirst = String(x.first || '').trim().toLowerCase();
-        if (xLast !== lastLc || xFirst !== firstLc) return false;
-        // Count digit differences
-        var diffs = 0;
-        for (var i = 0; i < phn.length; i++) if (phn[i] !== xPhn[i]) diffs++;
-        return diffs >= 1 && diffs <= 2;
-      });
-      if (phnTypoMatch) {
-        openPossibleDuplicateModal(phnTypoMatch, withClaim);
-        return;
-      }
-    }
-  }
-
-  var p = {
-    id:           'p' + Date.now(),
-    last:         fmtName(last),
-    first:        fmtName(gv('f-first')),
-    phn:          phn,
-    dob:          gv('f-dob'),
-    sex:          gv('f-sex'),
-    ward:         ward,
-    bed:          gv('f-bed'),
-    fac:          'OA040',
-    refby:        gv('f-refby-num') || gv('f-refby'),
-    refbyName:    gv('f-refby-name'),
-    role:         gv('f-role')   || 'consultant',
-    mrp:          gv('f-mrp')    || 'Cardiology',
-    list:         gv('f-list')   || 'on',
-    care:         gv('f-care')   || (gv('f-role') === 'mrp' ? 'daily' : 'directive'),
-    icd:          icd,
-    roundedToday: null,
-    createdBy:    (st.doc && st.doc.alias) || '',
-    createdAt:    Date.now()
-  };
-
-  saveCustomRoom(ward, p.bed);
-  st.patients.push(p);
-  sv('patients', st.patients);
-
-  // v3.36: AWAIT savePatient before creating claims. If the patient-row push
-  // fails (e.g. wifi hiccup), we'll know immediately and can refuse to write
-  // orphan claims. Previously this was fire-and-forget and a transient
-  // network failure would leave claims on Sheets but no matching patient row.
-  if (SHEETS_URL) {
-    var ok = await push('savePatient', p);
-    if (!ok) {
-      // Push failed — back the local state out and warn the user.
-      st.patients = st.patients.filter(function(x) { return x.id !== p.id; });
-      showToast('Could not save patient — check wifi and try again');
-      return;
-    }
-  }
-  logChange(p, 'Admitted', ward + (p.bed ? ' Bed/Rm ' + p.bed : ''));
-
-  // OCR corrections capture — if this patient was OCR'd, diff what the OCR
-  // produced against what was actually saved and log any corrections.
-  // Same pattern as upload.html. Cleared after each successful save so it
-  // doesn't bleed into the next patient.
-  if (window._ocrOriginal) {
-    var corrections = buildOCRCorrections(p);
-    if (corrections.length && SHEETS_URL) push('logOCRCorrections', { corrections: corrections });
-    window._ocrOriginal = null;
-  }
-
-  // Optionally create a consult claim at the same time
-  if (withClaim && st.doc) {
-    var cCode    = document.getElementById('f-c-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
-    var cDateISO = (document.getElementById('f-c-date')  || {}).value || '';
-    var cStart   = (document.getElementById('f-c-start') || {}).value || '';
-    var cEnd     = (document.getElementById('f-c-end')   || {}).value || '';
-    var cNotes   = (document.getElementById('f-c-notes') || {}).value || '';
-    var cPerf    = document.getElementById('f-c-performing-doc');
-    var cAlias   = (cPerf && cPerf.value) ? cPerf.value : st.doc.alias;
-    if (cDateISO) {
-      var cDateFmt = fmtD(parseISODate(cDateISO));
-      var cLoc     = p.ward === 'ED' ? 'E' : 'I';
-      addClaim(p, cCode, cCode, 1, cDateFmt, cLoc, cStart, cNotes, cEnd, cAlias);
-      if (_apMostOn) addClaim(p, '78720', '78720', 1, cDateFmt, cLoc, null, null, null, cAlias);
-      var cModBase  = getModifier(cStart, cDateISO);
-      var cIncUnits = consultIncUnits(cStart, cEnd);
-      var cModInc   = cIncUnits > 0 ? getModifierForIncrement(cStart, cDateISO) : null;
-      if (cModBase) {
-        var cModBaseEnd = minsToTime((t2m(cStart) + 30) % (24 * 60));
-        addClaim(p, cModBase.base, cModBase.base, 1, cDateFmt, cLoc, cStart, cNotes, cModBaseEnd, cAlias);
-        if (cModInc) {
-          var cIncStart = minsToTime((t2m(cStart) + 30) % (24 * 60));
-          addClaim(p, cModInc.inc, cModInc.inc, cIncUnits, cDateFmt, cLoc, cIncStart, cNotes, cEnd, cAlias);
-        }
-      }
-      sv('claims', st.claims);
-    }
-  }
-
-  var claimMsg = withClaim ? ' + consult claim' : '';
-  showToast(last + (p.list === 'consult-only' ? ' — claim only' : ' added to ' + (p.list === 'on' ? 'On' : 'Off') + ' Service') + claimMsg);
-  clearAddForm();
-  nav(0, document.querySelectorAll('.nb')[0]);
 }
 
 // Called from ward "+ Add" button — pre-fills ward and jumps to Add Patient
@@ -7401,10 +7102,7 @@ function saveCustomWard() {
 
 
 // ── Add-patient inline consult claim ─────────────────────
-var _apMostOn = true;
 
-// Called when the Add Patient pane opens and after clearAddForm.
-// Pre-fills date/time and injects the performing physician selector.
 // ── Add-patient v2 — claim type selector + submit ──────────────────
 var _apClaimType = 'consult';
 
@@ -7424,98 +7122,35 @@ function apSelectClaimType(type) {
     area.innerHTML = buildApCCUAdmitArea();
     var caDateEl = document.getElementById('ap-ca-date');
     if (caDateEl) caDateEl.value = localISODate();
-    injectApPerformingDoc();
   } else {
+    // Other claim — unified form self-inits its date + performing selector.
     area.innerHTML = buildApOtherClaimArea();
-    var dateEl = document.getElementById('ap-oc-date');
-    if (dateEl) dateEl.value = localISODate();
-    injectApPerformingDoc();
   }
 }
 
-function injectApPerformingDoc() {
-  var perfWrap = document.getElementById('f-c-performing-wrap');
-  if (!perfWrap) return;
-  if (!st.doctors || !st.doctors.length) { perfWrap.innerHTML = ''; return; }
-  var curAlias = st.doc ? st.doc.alias : '';
-  var opts = st.doctors.map(function(d) {
-    return '<option value="' + esc(d.alias) + '"' + (d.alias === curAlias ? ' selected' : '') + '>' +
-           esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
-  }).join('');
-  perfWrap.innerHTML = '<label style="margin-top:6px">Performing physician</label>' +
-                       '<select id="f-c-performing-doc">' + opts + '</select>';
-  // Explicitly set value — guarantees default even when selected attribute is ignored
-  var sel = document.getElementById('f-c-performing-doc');
-  if (sel && curAlias) sel.value = curAlias;
-}
 
 function buildApConsultArea() {
-  var h = '';
-  h += '<div class="fl" style="margin-bottom:9px">';
-  h += '<button id="f-c-33010" class="ct-btn ct-on-consult" style="flex:1" onclick="toggleApConsultCode(\'33010\')">33010 — Full</button>';
-  h += '<button id="f-c-33012" class="ct-btn" style="flex:1" onclick="toggleApConsultCode(\'33012\')">33012 — Limited</button>';
-  h += '</div>';
-  h += '<button class="most-btn on" id="f-c-most" onclick="toggleApMost()">' +
-       '<svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>' +
-       '+ MOST (78720)</button>';
-  h += '<div id="f-c-mod" style="margin-top:6px"></div>';
-  h += '<div id="f-c-ccfpp"></div>';
-  h += '<div class="fl" style="margin-top:4px">';
-  h += '<div class="f1"><label>Date</label><input type="date" id="f-c-date" oninput="updateApConsultUI()"></div>';
-  h += '<div class="f1"><label>Start time</label><input type="text" id="f-c-start" placeholder="14:30 or 2:30pm" oninput="updateApConsultUI()" onblur="var v=parseTime24(this.value);if(v){this.value=v;updateApConsultUI();}"></div>';
-  h += '</div>';
-  h += '<div class="fl"><div class="f1"><label>End time <span style="font-size:10px;color:var(--text3)">— Defaults to 50min, adjust as needed</span></label><input type="text" id="f-c-end" placeholder="14:30 or 2:30pm" oninput="updateApConsultUI()" onblur="var v=parseTime24(this.value);if(v){this.value=v;updateApConsultUI();}"></div></div>';
-  h += '<label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(optional)</span></label>';
-  h += '<textarea id="f-c-notes" rows="2" placeholder="Optional" autocorrect="off" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:6px"></textarea>';
-  h += '<div style="border-top:.5px solid var(--border);margin:4px 0 10px"></div>';
-  h += _buildApRefIcdHtml();
-  h += '<div id="f-c-performing-wrap"></div>';
-  return h;
+  // Unified consult form, shared with the +Claim screen.
+  // withSubmit:false — the Add Patient screen has its own submit buttons.
+  return buildConsultForm({}, { withSubmit: false });
 }
-
 function buildApOtherClaimArea() {
-  var h = '';
-  h += '<div class="fl">';
-  h += '<div class="f1"><label>Fee code</label><input id="ap-oc-fee" placeholder="e.g. 14101" autocorrect="off" autocomplete="off" style="text-transform:uppercase"></div>';
-  h += '<div class="f1"><label>Units</label><input id="ap-oc-units" inputmode="numeric" value="1"></div>';
-  h += '</div>';
-  h += '<label>Date</label><input type="date" id="ap-oc-date">';
-  h += '<label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(optional)</span></label>';
-  h += '<textarea id="ap-oc-notes" rows="2" placeholder="Optional" autocorrect="off" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:6px"></textarea>';
-  h += '<div style="border-top:.5px solid var(--border);margin:4px 0 10px"></div>';
-  h += _buildApRefIcdHtml();
-  h += '<div id="f-c-performing-wrap"></div>';
-  return h;
+  // Unified Other-claim form, shared with the +Claim screen.
+  // withSubmit:false — the Add Patient screen has its own submit buttons.
+  return buildOtherClaimForm({}, { withSubmit: false });
 }
 
 function buildApCCUAdmitArea() {
+  // CCU admit (1411). Diagnosis / referring MD / performing physician use
+  // the shared buildIcdRefCard (cb-* ids) — same as every other claim form.
   var h = '';
   h += '<label>Date</label><input type="date" id="ap-ca-date">';
   h += '<label style="margin-top:4px">Notes <span style="font-size:10px;color:var(--text3)">(optional)</span></label>';
   h += '<textarea id="ap-ca-notes" rows="2" placeholder="Optional" autocorrect="off" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:6px"></textarea>';
-  h += '<div style="border-top:.5px solid var(--border);margin:4px 0 10px"></div>';
-  h += _buildApRefIcdHtml();
-  h += '<div id="f-c-performing-wrap"></div>';
+  h += buildIcdRefCard({});
   return h;
 }
 
-function _buildApRefIcdHtml() {
-  var h = '';
-  h += '<label>Diagnosis</label>';
-  h += '<div style="position:relative">';
-  h += '<input id="f-icd-search" placeholder="Type diagnosis or code..." autocorrect="off" autocomplete="off" style="padding-right:32px" data-dd="f-icd-dd" data-hidden="f-icd" oninput="icdSearchEl(this)" onfocus="icdSearchEl(this)">';
-  h += '<button type="button" tabindex="-1" onclick="clearSearchField(\'f-icd-search\',\'f-icd\',null,\'f-icd-dd\')" onpointerdown="event.preventDefault();clearSearchField(\'f-icd-search\',\'f-icd\',null,\'f-icd-dd\')" style="position:absolute;right:8px;top:9px;background:none;border:none;font-size:18px;line-height:1;color:var(--text3);cursor:pointer;padding:2px 4px;z-index:5">&times;</button>';
-  h += '</div>';
-  h += '<input id="f-icd" type="hidden"><div class="ref-dd" id="f-icd-dd"></div>';
-  h += '<label style="margin-top:4px">Referred by</label>';
-  h += '<div style="position:relative">';
-  h += '<input id="f-ref-search" placeholder="Type name or doctor #..." autocorrect="off" style="padding-right:32px" data-dd="f-ref-dd" data-hidden="f-refby" data-name="f-refby-name" oninput="refSearchEl(this)" onfocus="refSearchEl(this)">';
-  h += '<button type="button" tabindex="-1" onclick="clearSearchField(\'f-ref-search\',\'f-refby\',\'f-refby-name\',\'f-ref-dd\')" onpointerdown="event.preventDefault();clearSearchField(\'f-ref-search\',\'f-refby\',\'f-refby-name\',\'f-ref-dd\')" style="position:absolute;right:8px;top:9px;background:none;border:none;font-size:18px;line-height:1;color:var(--text3);cursor:pointer;padding:2px 4px;z-index:5">&times;</button>';
-  h += '</div>';
-  h += '<div class="ref-dd" id="f-ref-dd"></div>';
-  h += '<input id="f-refby" type="hidden"><input id="f-refby-name" type="hidden"><input id="f-refby-num" type="hidden">';
-  return h;
-}
 
 function apSexPill(val) {
   var hid = document.getElementById('f-sex');
@@ -7590,23 +7225,25 @@ async function apSubmit(addToList, _skipDupCheck) {
   var last = (document.getElementById('f-last') || {}).value || '';
   var phn  = gv('f-phn');
   if (!last) { showToast('Enter patient last name'); return; }
-  var icd = gv('f-icd') || '';
+  // Diagnosis / referring MD — every claim form now uses the unified
+  // cb-* / oc-* ids.
+  var icd = gv('cb-icd') || gv('oc-icd') || '';
 
   // Validate required fields
   var addMissing = [];
   if (!phn)                                    addMissing.push('phn');
   else if (String(phn).replace(/\D/g,'').length !== 10) addMissing.push('phn-len');
-  if (!gv('f-refby-num') && !gv('f-refby'))   addMissing.push('refby');
+  if (!gv('cb-refby') && !gv('oc-refby')) addMissing.push('refby');
   if (!icd)                                    addMissing.push('icd');
   if (_apClaimType === 'consult') {
-    if (!(document.getElementById('f-c-date')  || {}).value) addMissing.push('date');
-    if (!(document.getElementById('f-c-start') || {}).value) addMissing.push('start time');
-    if (!(document.getElementById('f-c-end')   || {}).value) addMissing.push('end time');
+    if (!(document.getElementById('cb-date')  || {}).value) addMissing.push('date');
+    if (!(document.getElementById('cb-start') || {}).value) addMissing.push('start time');
+    if (!(document.getElementById('cb-end')   || {}).value) addMissing.push('end time');
   } else if (_apClaimType === 'ccu-admit') {
     if (!(document.getElementById('ap-ca-date') || {}).value) addMissing.push('date');
   } else if (_apClaimType === 'other') {
-    if (!gv('ap-oc-fee')) addMissing.push('fee');
-    if (!(document.getElementById('ap-oc-date') || {}).value) addMissing.push('date');
+    if (!gv('oc-fee')) addMissing.push('fee');
+    if (!(document.getElementById('oc-date') || {}).value) addMissing.push('date');
   }
 
   if (addMissing.length) {
@@ -7615,11 +7252,11 @@ async function apSubmit(addToList, _skipDupCheck) {
       if (phnEl) { phnEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; phnEl.focus(); }
     }
     if (addMissing.indexOf('refby') !== -1) {
-      var refEl = document.getElementById('f-ref-search');
+      var refEl = document.getElementById('cb-ref-search') || document.getElementById('oc-ref-search');
       if (refEl) { refEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; refEl.placeholder = 'Required — type name or doctor #'; }
     }
     if (addMissing.indexOf('icd') !== -1) {
-      var icdEl2 = document.getElementById('f-icd-search');
+      var icdEl2 = document.getElementById('cb-icd-search') || document.getElementById('oc-icd-search');
       if (icdEl2) { icdEl2.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; icdEl2.placeholder = 'Required — type diagnosis or code'; }
     }
     var msgs = [];
@@ -7672,8 +7309,8 @@ async function apSubmit(addToList, _skipDupCheck) {
     id: 'p' + Date.now(), fac: 'OA040', roundedToday: null,
     last: fmtName(last), first: fmtName(gv('f-first')),
     phn: phn, dob: gv('f-dob'), sex: gv('f-sex'),
-    refby:     gv('f-refby-num') || gv('f-refby'),
-    refbyName: gv('f-refby-name'),
+    refby:     gv('cb-refby') || gv('oc-refby'),
+    refbyName: gv('cb-refby-name') || gv('oc-refby-name'),
     icd: icd,
     createdBy: (st.doc && st.doc.alias) || '',
     createdAt: Date.now()
@@ -7721,37 +7358,15 @@ async function apSubmit(addToList, _skipDupCheck) {
 
   // Create claim
   if (st.doc) {
-    var cAlias = st.doc.alias;
-    var cPerf = document.getElementById('f-c-performing-doc');
-    if (cPerf && cPerf.value) cAlias = cPerf.value;
+    // Performing physician — consult area uses cb-performing-doc (unified
+    // form) — all claim forms now render cb-performing-doc.
+    var cPerf  = document.getElementById('cb-performing-doc');
+    var cAlias = (cPerf && cPerf.value) ? cPerf.value : st.doc.alias;
 
     if (_apClaimType === 'consult') {
-      var cCode    = (document.getElementById('f-c-33010') || {}).classList && document.getElementById('f-c-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
-      var cDateISO = (document.getElementById('f-c-date')  || {}).value || '';
-      var cStart   = (document.getElementById('f-c-start') || {}).value || '';
-      var cEnd     = (document.getElementById('f-c-end')   || {}).value || '';
-      var cNotes   = (document.getElementById('f-c-notes') || {}).value || '';
-      if (cDateISO) {
-        var cDateFmt = fmtD(parseISODate(cDateISO));
-        var cLoc     = p.ward === 'ED' ? 'E' : 'I';
-        // CCFPP — detect + retroactively update peer claims
-        var ccfppN   = ccfppDetectAndUpdate(p, cAlias, cDateISO, cDateFmt, cStart, cEnd);
-        var fullN    = [cNotes, ccfppN].filter(function(s) { return s; }).join(' | ');
-        addClaim(p, cCode, cCode, 1, cDateFmt, cLoc, cStart, fullN, cEnd, cAlias);
-        if (_apMostOn) addClaim(p, '78720', '78720', 1, cDateFmt, cLoc, null, null, null, cAlias);
-        var cModBase  = getModifier(cStart, cDateISO);
-        var cIncUnits = consultIncUnits(cStart, cEnd);
-        var cModInc   = cIncUnits > 0 ? getModifierForIncrement(cStart, cDateISO) : null;
-        if (cModBase) {
-          var cModBaseEnd2 = minsToTime((t2m(cStart) + 30) % (24 * 60));
-          addClaim(p, cModBase.base, cModBase.base, 1, cDateFmt, cLoc, cStart, fullN, cModBaseEnd2, cAlias);
-          if (cModInc) {
-            var cIncStart = minsToTime((t2m(cStart) + 30) % (24 * 60));
-            addClaim(p, cModInc.inc, cModInc.inc, cIncUnits, cDateFmt, cLoc, cIncStart, fullN, cEnd, cAlias);
-          }
-        }
-        sv('claims', st.claims);
-      }
+      // Unified shared submit — reads the cb-* consult form, runs CCFPP,
+      // and creates the consult + MOST + modifier claims.
+      submitConsultClaims(p, cAlias);
     } else if (_apClaimType === 'ccu-admit') {
       var caDateISO = (document.getElementById('ap-ca-date')  || {}).value || '';
       var caNotes   = (document.getElementById('ap-ca-notes') || {}).value || '';
@@ -7762,16 +7377,9 @@ async function apSubmit(addToList, _skipDupCheck) {
         sv('claims', st.claims);
       }
     } else if (_apClaimType === 'other') {
-      var ocFee     = gv('ap-oc-fee') || '';
-      var ocUnits   = parseInt(gv('ap-oc-units')) || 1;
-      var ocDateISO = (document.getElementById('ap-oc-date')  || {}).value || '';
-      var ocNotes   = (document.getElementById('ap-oc-notes') || {}).value || '';
-      if (ocFee && ocDateISO) {
-        var ocDateFmt = fmtD(parseISODate(ocDateISO));
-        var ocLoc = p.ward === 'ED' ? 'E' : 'I';
-        addClaim(p, ocFee, ocFee, ocUnits, ocDateFmt, ocLoc, null, ocNotes, null, cAlias);
-        sv('claims', st.claims);
-      }
+      // Unified shared submit — reads the oc-* form, validates 33005,
+      // and creates the single claim.
+      submitOtherClaimFor(p, cAlias);
     }
   }
 
@@ -7786,94 +7394,16 @@ async function apSubmit(addToList, _skipDupCheck) {
 }
 
 function initAddPatientConsult() {
-  // Build the claim area if it's empty (first load or after clear)
+  // The unified consult form self-initialises date/time/toggles when built.
+  _consultCtx = 'addpatient';
   var area = document.getElementById('ap-claim-area');
-  if (area && !area.querySelector('#f-c-date')) {
-    area.innerHTML = buildApConsultArea();
+  if (area && !area.querySelector('#cb-date')) {
+    area.innerHTML = buildConsultForm({}, { withSubmit: false });
   }
-  var now = new Date();
-  var dateEl  = document.getElementById('f-c-date');
-  var startEl = document.getElementById('f-c-start');
-  var endEl   = document.getElementById('f-c-end');
-  if (dateEl)  dateEl.value  = localISODate(now);
-  if (startEl) startEl.value = pad(now.getHours()) + ':' + pad(now.getMinutes());
-  if (endEl)   endEl.value   = minsToTime(now.getHours() * 60 + now.getMinutes() + 50);
-  // Reset toggles
-  _apMostOn = true;
-  var mostEl = document.getElementById('f-c-most');
-  if (mostEl) mostEl.className = 'most-btn on';
-  var el10 = document.getElementById('f-c-33010');
-  var el12 = document.getElementById('f-c-33012');
-  if (el10) el10.className = 'ct-btn ct-on-consult';
-  if (el12) el12.className = 'ct-btn';
-  injectApPerformingDoc();
-  updateApConsultUI();
+  consultFormOpened();
 }
 
-function toggleApConsultCode(code) {
-  document.getElementById('f-c-33010').className = 'ct-btn' + (code === '33010' ? ' ct-on-consult' : '');
-  document.getElementById('f-c-33012').className = 'ct-btn' + (code === '33012' ? ' ct-on-consult' : '');
-}
 
-function toggleApMost() {
-  _apMostOn = !_apMostOn;
-  document.getElementById('f-c-most').className = 'most-btn' + (_apMostOn ? ' on' : '');
-}
-
-function updateApConsultUI() {
-  var start   = gv('f-c-start');
-  var end     = gv('f-c-end');
-  var dateISO = gv('f-c-date');
-
-  // If start time changed, auto-update end to start + 50 min
-  var changed = (typeof event !== 'undefined' && event && event.target) ? event.target.id : '';
-  if (start && changed === 'f-c-start') {
-    var endEl = document.getElementById('f-c-end');
-    if (endEl) endEl.value = minsToTime(t2m(start) + 50);
-    end = gv('f-c-end');
-  }
-
-  var modBase  = getModifier(start, dateISO);
-  var hasInc   = consultHasIncrement(start, end);
-  var modInc   = hasInc ? getModifierForIncrement(start, dateISO) : null;
-  var incUnits = consultIncUnits(start, end);
-  var modEl    = document.getElementById('f-c-mod');
-
-  // CCFPP live preview — uses a stub patient (not yet saved in Add Patient)
-  var _apAlias = (document.getElementById('f-c-performing-doc') || {}).value ||
-                 (typeof st !== 'undefined' && st.doc && st.doc.alias) || '';
-  renderCcfppBanner('f-c-ccfpp', {
-    phn:   gv('f-phn'),
-    last:  gv('f-last'),
-    first: gv('f-first'),
-    dob:   gv('f-dob')
-  }, _apAlias, dateISO, start, end);
-
-  if (!modEl) return;
-
-  if (modBase) {
-    var banner = '<div class="mod-box ' + modBase.cls + '" style="margin-bottom:0;border-radius:var(--rsm) var(--rsm) 0 0">' +
-      '<span style="font-weight:700">' + modBase.label + '</span>' +
-      '<span style="font-size:10px;opacity:.75;margin-left:6px">' + modBase.base + ' ×1</span>' +
-      '</div>';
-    if (incUnits > 0) {
-      var incMod = modInc || modBase;
-      banner += '<div class="mod-box ' + incMod.cls + '" style="margin-top:1px;border-radius:0 0 var(--rsm) var(--rsm);opacity:.85">' +
-        '<span>Consult time &gt; 45 min</span>' +
-        '<span style="font-size:10px;font-weight:700;margin-left:6px">' + incMod.inc + ' ×' + incUnits + '</span>' +
-        '</div>';
-    } else {
-      banner += '<div style="font-size:11px;padding:5px 10px;color:var(--text3);' +
-        'border:.5px solid var(--border);border-top:none;border-radius:0 0 var(--rsm) var(--rsm);' +
-        'background:var(--surface2)">Consult ≤ 45 min — no increment</div>';
-    }
-    modEl.innerHTML = banner;
-  } else if (start && dateISO) {
-    modEl.innerHTML = '<div class="mod-box mod-day">✓ Daytime weekday — no call-out modifier</div>';
-  } else {
-    modEl.innerHTML = '';
-  }
-}
 
 function clearAddForm() {
   ['f-last','f-first','f-phn','f-dob'].forEach(function(id) {
@@ -8816,33 +8346,167 @@ function dischAddVisit(btn) {
   _dischStep2(pid);
 }
 
-// Step 2: Complex discharge prompt — Cardiology MRP, non-CCU/ICU ward, LOS > 4 only
+// ── Complex Discharge (78717) — criteria checklist ──────
+// Qualifies when LOS > 4 AND Cardiology MRP AND clinical criteria:
+//   (2 from A) OR (1 from A + 1 from B) OR (1 from A + C)
+// Note written to the 78717 claim mirrors the clerk's format:
+//   "Complex Discharge: CHF, BMI > 35, Age > 75"
+var CD_CRITERIA = {
+  A: [
+    { id:'cad',   label:'CAD' },
+    { id:'chf',   label:'CHF' },
+    { id:'dm',    label:'Diabetes' },
+    { id:'ckd',   label:'CKD' },
+    { id:'cvd',   label:'Cerebrovascular Dz' },
+    { id:'liver', label:'Liver Dz w/ synthetic dysfunction' },
+    { id:'neuro', label:'Chronic Neuro Dz' }
+  ],
+  B: [
+    { id:'age75',   label:'Age > 75' },
+    { id:'bmi35',   label:'BMI > 35' },
+    { id:'frail',   label:'Frail elderly' },
+    { id:'readmit', label:'High readmission rate' },
+    { id:'mobil',   label:'Mobility/Accessibility issues' },
+    { id:'adl',     label:'Dependency for ADLs' },
+    { id:'ses',     label:'Poor socioeconomic status' },
+    { id:'home',    label:'Unstable home environment' }
+  ],
+  C: [
+    { id:'malig',   label:'Malignancy' }
+  ]
+};
+// Patient.icd -> criterion id, for auto pre-tick (exact ICD-9 match only)
+var CD_ICD_MAP = {
+  '414':'cad', '428':'chf', '250':'dm', '585':'ckd',
+  '438':'cvd', '571':'liver', 'V800':'neuro', '199':'malig'
+};
+var _cdState = {};   // { criterionId: true } — ticked boxes
+var _cdPid   = '';   // patient id the checklist is open for
+
+// Age in whole years from DOB (DD/MM/YYYY storage format)
+function _cdAge(p) {
+  var ms = parseDMYsafe(fmtClaimDate((p && p.dob) || ''));
+  if (!ms) return 0;
+  return Math.floor((Date.now() - ms) / (365.25 * 86400000));
+}
+
+// Count ticked items per group and apply the qualifying rule
+function _cdEvaluate() {
+  function cnt(grp) {
+    return CD_CRITERIA[grp].filter(function(x) { return _cdState[x.id]; }).length;
+  }
+  var a = cnt('A'), b = cnt('B'), c = cnt('C');
+  return {
+    a: a, b: b, c: c,
+    qualifies: (a >= 2) || (a >= 1 && b >= 1) || (a >= 1 && c >= 1)
+  };
+}
+
+// Build the claim note from ticked boxes — mirrors the clerk's format
+function _cdNote() {
+  var picked = [];
+  ['A', 'B', 'C'].forEach(function(grp) {
+    CD_CRITERIA[grp].forEach(function(x) {
+      if (_cdState[x.id]) picked.push(x.label);
+    });
+  });
+  return 'Complex Discharge: ' + picked.join(', ');
+}
+
+function _cdToggle(id) {
+  _cdState[id] = !_cdState[id];
+  _cdRender(losdays(getP(_cdPid)));
+}
+
+// Render the criteria checklist into the discharge modal body
+function _cdRender(los) {
+  var ev = _cdEvaluate();
+
+  function chip(x) {
+    var on  = !!_cdState[x.id];
+    var css = on
+      ? 'border:1px solid var(--blue-t);background:var(--blue-bg);color:var(--blue-t);font-weight:700'
+      : 'border:1px solid var(--border2);background:var(--surface2);color:var(--text2)';
+    return '<button onclick="_cdToggle(\'' + x.id + '\')" ' +
+      'style="text-align:left;padding:9px 11px;border-radius:var(--rsm);font-size:13px;' +
+      'font-family:inherit;cursor:pointer;line-height:1.25;' + css + '">' +
+      (on ? '\u2713 ' : '') + esc(x.label) + '</button>';
+  }
+  function group(grp, title) {
+    return '<div style="font-size:11px;font-weight:700;color:var(--text3);' +
+      'text-transform:uppercase;letter-spacing:.4px;margin:11px 0 5px">' + title + '</div>' +
+      '<div style="display:flex;flex-direction:column;gap:5px">' +
+      CD_CRITERIA[grp].map(chip).join('') + '</div>';
+  }
+
+  var verdict;
+  if (ev.qualifies) {
+    verdict = '<div style="background:var(--green-bg);color:var(--green-t);font-weight:700;' +
+      'font-size:13px;padding:9px 11px;border-radius:var(--rsm)">' +
+      '\u2713 Qualifies — complex discharge surcharge applies</div>';
+  } else if (ev.a === 0) {
+    verdict = '<div style="background:var(--amber-bg);color:var(--amber-t);font-weight:600;' +
+      'font-size:12px;padding:9px 11px;border-radius:var(--rsm)">' +
+      'Select at least one major comorbidity (group A) to begin.</div>';
+  } else {
+    verdict = '<div style="background:var(--amber-bg);color:var(--amber-t);font-weight:600;' +
+      'font-size:12px;padding:9px 11px;border-radius:var(--rsm)">' +
+      'Add one more — a 2nd major comorbidity, any minor criterion, or malignancy.</div>';
+  }
+
+  var addBtn = ev.qualifies
+    ? '<button class="btn btn-g" style="margin:0" data-pid="' + _cdPid + '" ' +
+      'onclick="dischComplex(this)">Add 78717 &amp; continue</button>'
+    : '<button class="btn btn-g" style="margin:0;opacity:.4;pointer-events:none">' +
+      'Add 78717 &amp; continue</button>';
+
+  var h =
+    '<div style="font-size:13px;color:var(--amber-t);font-weight:700;margin-bottom:4px">' +
+      '\u26a0 Review for Complex D/C criteria</div>' +
+    '<div style="font-size:11px;color:var(--text3);margin-bottom:8px">' +
+      'LOS ' + los + ' days. Rule: 2 major, or 1 major + 1 minor, or 1 major + malignancy.</div>' +
+    '<div style="max-height:46vh;overflow-y:auto;-webkit-overflow-scrolling:touch;' +
+      'border:.5px solid var(--border2);border-radius:var(--rsm);padding:4px 9px 11px">' +
+      group('A', 'A — Major comorbidities') +
+      group('B', 'B — Minor criteria') +
+      group('C', 'C — Malignancy') +
+    '</div>' +
+    '<div style="margin:9px 0 4px">' + verdict + '</div>' +
+    '<div style="display:flex;flex-direction:column;gap:8px">' +
+      addBtn +
+      '<button class="btn btn-s" style="margin:0" data-pid="' + _cdPid + '" ' +
+      'onclick="dischConfirmRemove(this)">Doesn\'t qualify — discharge without surcharge</button>' +
+      '<button class="btn btn-s" style="margin:0" ' +
+      'onclick="hideModal(\'disch-modal\')">Cancel — exit to review chart</button>' +
+    '</div>';
+  document.getElementById('disch-body').innerHTML = h;
+}
+
+// Step 2: Complex discharge — Cardiology MRP + LOS > 4 -> criteria checklist
 function _dischStep2(pid) {
   var p   = getP(pid);
   var los = losdays(p);
   // Complex discharge applies to ALL Cardiology MRP patients with LOS > 4, including CCU/ICU
   var isCardioMRP = p.role === 'mrp' && p.mrp === 'Cardiology';
   if (isCardioMRP && los > 4) {
-    var h = '<div style="font-size:13px;color:var(--amber-t);font-weight:700;margin-bottom:10px">' +
-      '⚠ LOS ' + los + ' days — does complex discharge apply?</div>' +
-      '<div style="display:flex;flex-direction:column;gap:8px">' +
-      '<button class="btn btn-g" style="margin:0" data-pid="' + pid + '" ' +
-      'onclick="dischComplex(this)">Yes — add 78717</button>' +
-      '<button class="btn btn-s" style="margin:0" data-pid="' + pid + '" ' +
-      'onclick="dischConfirmRemove(this)">No — patient doesn\'t qualify</button>' +
-      '</div>';
-    document.getElementById('disch-body').innerHTML = h;
+    _cdPid   = pid;
+    _cdState = {};
+    // Pre-tick only what the app can determine itself — MD still confirms each box
+    if (_cdAge(p) > 75) _cdState['age75'] = true;
+    var icdKey = String(p.icd || '').trim().toUpperCase();
+    if (CD_ICD_MAP[icdKey]) _cdState[CD_ICD_MAP[icdKey]] = true;
+    _cdRender(los);
   } else {
     _dischStep3(pid);
   }
 }
 
-// Add 78717 then go to step 3
+// Add 78717 with the criteria note, then go to step 3
 function dischComplex(btn) {
   var pid = btn.getAttribute('data-pid');
   var p   = getP(pid);
   if (!checkDoc()) return;
-  addClaim(p, '78717', '78717', 1, TODAY, 'I');
+  addClaim(p, '78717', '78717', 1, TODAY, 'I', null, _cdNote());
   sv('claims', st.claims);
   _dischStep3(pid);
 }
@@ -9922,41 +9586,48 @@ async function init() {
     sv('doctors', st.doctors);
   }
 
-  // ── SANDBOX: seed sample patients ────────────────────────────────────
-  // Eleven fictional patients with obviously-fake PHNs (all begin 90000…).
-  // Designed to support the guided walkthrough: a long-stay Cardiology MRP
-  // patient for the discharge prompt, one record with a surname typo, and
-  // one with a deliberately short PHN.
+  // ── SANDBOX: seed sample data ────────────────────────────────────────
+  // Eleven fictional patients (fake PHNs all begin 90000…) plus one seeded
+  // consult claim so the CCFPP walkthrough step works from a single consult.
   if (typeof SANDBOX_MODE !== 'undefined' && SANDBOX_MODE) {
     var _MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    function _sbDaysAgo(n) {
+    function _sbAgo(n) {
       var d = new Date(); d.setDate(d.getDate() - n);
-      return String(d.getDate()).padStart(2,'0') + '/' + _MON[d.getMonth()] + '/' + d.getFullYear();
+      return pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + '/' + d.getFullYear();
+    }
+    function _sbTodayFmt() {
+      var d = new Date();
+      return pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + '/' + d.getFullYear();
     }
     var _sid = 900; function _fid() { return 'sb-' + String(++_sid); }
     st.patients = [
-      // CICU — on service (Cardiology MRP)
-      {id:_fid(),fac:'OA040',phn:'9000000017',last:'Hollis',   first:'Margaret',dob:'14/03/1948',sex:'F',ward:'CCU', bed:'3',    list:'on', role:'mrp',       mrp:'Cardiology',care:'ccu',      icd:'4280',refby:'62100',refbyName:'Dr. Singh, Arjun #62100',  discharged:false,admitDate:_sbDaysAgo(1),createdBy:'(sample)'},
-      {id:_fid(),fac:'OA040',phn:'9000000025',last:'Tan',      first:'Raymond', dob:'22/07/1955',sex:'M',ward:'CCU', bed:'6',    list:'on', role:'mrp',       mrp:'Cardiology',care:'ccu',      icd:'4100',refby:'62101',refbyName:'Dr. Okafor, James #62101', discharged:false,admitDate:_sbDaysAgo(2),createdBy:'(sample)'},
-      // 2S — on service (Cardiology MRP) — Whitfeild is a deliberate surname typo
-      {id:_fid(),fac:'OA040',phn:'9000000033',last:'Whitfeild',first:'Eleanor', dob:'05/11/1951',sex:'F',ward:'2S',  bed:'224',  list:'on', role:'mrp',       mrp:'Cardiology',care:'daily',    icd:'4281',refby:'',     refbyName:'',                          discharged:false,admitDate:_sbDaysAgo(3),createdBy:'(sample)'},
-      {id:_fid(),fac:'OA040',phn:'9000000041',last:'Okonkwo',  first:'David',   dob:'30/06/1968',sex:'M',ward:'2S',  bed:'225A', list:'on', role:'mrp',       mrp:'Cardiology',care:'daily',    icd:'4273',refby:'',     refbyName:'',                          discharged:false,admitDate:_sbDaysAgo(1),createdBy:'(sample)'},
-      // 2W — on service (Cardiology MRP) — Penhale is the long-stay discharge demo (LOS > 4)
-      {id:_fid(),fac:'OA040',phn:'9000000058',last:'Penhale',  first:'Arthur',  dob:'18/02/1944',sex:'M',ward:'2W',  bed:'208',  list:'on', role:'mrp',       mrp:'Cardiology',care:'daily',    icd:'4254',refby:'',     refbyName:'',                          discharged:false,admitDate:_sbDaysAgo(6),createdBy:'(sample)'},
-      {id:_fid(),fac:'OA040',phn:'9000000066',last:'Mercier',  first:'Joan',    dob:'09/09/1959',sex:'F',ward:'2W',  bed:'213',  list:'on', role:'mrp',       mrp:'Cardiology',care:'daily',    icd:'4251',refby:'',     refbyName:'',                          discharged:false,admitDate:_sbDaysAgo(2),createdBy:'(sample)'},
-      // Off service — consulting on other wards
-      {id:_fid(),fac:'OA040',phn:'9000000074',last:'Delaney',  first:'Susan',   dob:'12/04/1972',sex:'F',ward:'4A',  bed:'408',  list:'off',role:'consultant',mrp:'Other',     care:'directive', icd:'4150',refby:'62110',refbyName:'Dr. Leung, Michael #62110', discharged:false,admitDate:_sbDaysAgo(1),createdBy:'(sample)'},
-      {id:_fid(),fac:'OA040',phn:'9000000082',last:'Alvarez',  first:'Miguel',  dob:'27/10/1965',sex:'M',ward:'5B',  bed:'512',  list:'off',role:'consultant',mrp:'Other',     care:'directive', icd:'4151',refby:'62112',refbyName:'Dr. Wilson, Anne #62112',  discharged:false,admitDate:_sbDaysAgo(1),createdBy:'(sample)'},
-      {id:_fid(),fac:'OA040',phn:'9000000090',last:'Klassen',  first:'Dorothy', dob:'03/01/1950',sex:'F',ward:'3E',  bed:'',     list:'off',role:'consultant',mrp:'Other',     care:'directive', icd:'4210',refby:'62115',refbyName:'Dr. Hoffman, Peter #62115', discharged:false,admitDate:_sbDaysAgo(2),createdBy:'(sample)'},
-      {id:_fid(),fac:'OA040',phn:'9000000108',last:'Lindqvist',first:'Kevin',   dob:'16/08/1961',sex:'M',ward:'ICUA',bed:'2',    list:'off',role:'consultant',mrp:'Other',     care:'combined',  icd:'4140',refby:'62120',refbyName:'Dr. Sharma, Priya #62120',  discharged:false,admitDate:_sbDaysAgo(2),createdBy:'(sample)'},
-      // ED — off service — Kowalski has a deliberately short (9-digit) PHN
-      {id:_fid(),fac:'OA040',phn:'900000011', last:'Kowalski', first:'Patricia',dob:'24/12/1985',sex:'F',ward:'ED',  bed:'Bay 2',list:'off',role:'consultant',mrp:'Other',     care:'directive', icd:'4111',refby:'62130',refbyName:'Dr. Novak, Chris #62130',  discharged:false,admitDate:_sbDaysAgo(1),createdBy:'(sample)'}
+      {id:_fid(),phn:'9000000017',last:'Hollis',   first:'Margaret',dob:'14/03/1948',sex:'F',ward:'CCU', bed:'3',    list:'on', role:'mrp',       mrp:'Cardiology',care:'ccu',      icd:'4280',refby:'62100',refbyName:'Dr. Singh, Arjun #62100',  discharged:false,admitDate:_sbAgo(1),createdBy:'(sample)'},
+      {id:_fid(),phn:'9000000025',last:'Tan',      first:'Raymond', dob:'22/07/1955',sex:'M',ward:'CCU', bed:'6',    list:'on', role:'mrp',       mrp:'Cardiology',care:'ccu',      icd:'4100',refby:'62101',refbyName:'Dr. Okafor, James #62101', discharged:false,admitDate:_sbAgo(2),createdBy:'(sample)'},
+      {id:_fid(),phn:'9000000033',last:'Whitfeild',first:'Eleanor', dob:'05/11/1951',sex:'F',ward:'2S',  bed:'224',  list:'on', role:'mrp',       mrp:'Cardiology',care:'daily',    icd:'4281',refby:'',     refbyName:'',                          discharged:false,admitDate:_sbAgo(3),createdBy:'(sample)'},
+      {id:_fid(),phn:'9000000041',last:'Okonkwo',  first:'David',   dob:'30/06/1968',sex:'M',ward:'2S',  bed:'225A', list:'on', role:'mrp',       mrp:'Cardiology',care:'daily',    icd:'4273',refby:'',     refbyName:'',                          discharged:false,admitDate:_sbAgo(1),createdBy:'(sample)'},
+      {id:_fid(),phn:'9000000058',last:'Penhale',  first:'Arthur',  dob:'18/02/1944',sex:'M',ward:'2W',  bed:'208',  list:'on', role:'mrp',       mrp:'Cardiology',care:'daily',    icd:'4254',refby:'',     refbyName:'',                          discharged:false,admitDate:_sbAgo(6),createdBy:'(sample)'},
+      {id:_fid(),phn:'9000000066',last:'Mercier',  first:'Joan',    dob:'09/09/1959',sex:'F',ward:'2W',  bed:'213',  list:'on', role:'mrp',       mrp:'Cardiology',care:'daily',    icd:'4251',refby:'',     refbyName:'',                          discharged:false,admitDate:_sbAgo(2),createdBy:'(sample)'},
+      {id:_fid(),phn:'9000000074',last:'Delaney',  first:'Susan',   dob:'12/04/1972',sex:'F',ward:'4A',  bed:'408',  list:'off',role:'consultant',mrp:'Other',     care:'directive', icd:'4150',refby:'62110',refbyName:'Dr. Leung, Michael #62110', discharged:false,admitDate:_sbAgo(1),createdBy:'(sample)'},
+      {id:_fid(),phn:'9000000082',last:'Alvarez',  first:'Miguel',  dob:'27/10/1965',sex:'M',ward:'5B',  bed:'512',  list:'off',role:'consultant',mrp:'Other',     care:'directive', icd:'4151',refby:'62112',refbyName:'Dr. Wilson, Anne #62112',  discharged:false,admitDate:_sbAgo(1),createdBy:'(sample)'},
+      {id:_fid(),phn:'9000000090',last:'Klassen',  first:'Dorothy', dob:'03/01/1950',sex:'F',ward:'3E',  bed:'',     list:'off',role:'consultant',mrp:'Other',     care:'directive', icd:'4210',refby:'62115',refbyName:'Dr. Hoffman, Peter #62115', discharged:false,admitDate:_sbAgo(2),createdBy:'(sample)'},
+      {id:_fid(),phn:'9000000108',last:'Lindqvist',first:'Kevin',   dob:'16/08/1961',sex:'M',ward:'ICUA',bed:'2',    list:'off',role:'consultant',mrp:'Other',     care:'combined',  icd:'4140',refby:'62120',refbyName:'Dr. Sharma, Priya #62120',  discharged:false,admitDate:_sbAgo(2),createdBy:'(sample)'},
+      {id:_fid(),phn:'900000011', last:'Kowalski', first:'Patricia',dob:'24/12/1985',sex:'F',ward:'ED',  bed:'Bay 2',list:'off',role:'consultant',mrp:'Other',     care:'directive', icd:'4111',refby:'62130',refbyName:'Dr. Novak, Chris #62130',  discharged:false,admitDate:_sbAgo(1),createdBy:'(sample)'}
     ];
-    // No pre-seeded claims — every walkthrough step is completed fresh.
-    st.claims = [];
-    // Clear any signed-in doctor so the sign-in step always starts incomplete.
-    st.doc = null;
-    console.log('[sandbox] Seeded ' + st.patients.length + ' sample patients; doc and claims reset.');
+    // One seeded consult claim — an early-evening consult for Susan Delaney.
+    // The CCFPP walkthrough step has the user add a consult that overlaps it,
+    // so a single new consult is enough to demonstrate CCFPP. alias is stamped
+    // with the signed-in physician by the training overlay after sign-in.
+    st.claims = [{
+      id:'sb-claim-ccfpp', alias:'', last:'Delaney', first:'Susan',
+      phn:'9000000074', fee:'33010', icd:'4150', units:1,
+      date:_sbTodayFmt(), refby:'62110', refbyName:'Dr. Leung, Michael #62110',
+      notes:'', startTime:'18:00', endTime:'18:50',
+      createdBy:'(sample)', createdAt:Date.now()
+    }];
+    st.doc = null; // always start signed-out so the sign-in step is fresh
+    var _dl = document.getElementById('doc-label'); if (_dl) _dl.textContent = 'Sign in';
+    var _dd = document.getElementById('doc-dot');   if (_dd) _dd.classList.remove('on');
+    console.log('[sandbox] Seeded ' + st.patients.length + ' patients + 1 consult claim.');
   }
   // ── end sandbox seed ──────────────────────────────────────────────────
     // Restore any custom wards saved from previous sessions
@@ -10655,9 +10326,9 @@ function dbgCopyLast() {
 
 <!-- ══════════════════════════════════════════════════════
      SANDBOX OVERLAY — training layer (self-contained)
-     Adds: simulated OCR · collapsible launch buttons ·
-     first-launch layout tour · context Guide · Guided
-     Walkthrough with saved progress.
+     Built for the v3.90 app. Adds: simulated OCR ·
+     collapsible launch buttons · first-launch layout tour ·
+     context Guide · Guided Walkthrough with saved progress.
      This whole block, plus the sb- CSS, the banner, the
      FAB/tour/drawer HTML and the seed block in init(), is
      the entire training layer and can be re-applied to a
@@ -10667,7 +10338,7 @@ function dbgCopyLast() {
 (function () {
   'use strict';
 
-  /* ── persistence helpers (kgh-sandbox:* survives the app cache wipe) ── */
+  /* ── persistence (kgh-sandbox:* survives the app's cache wipe) ── */
   var LS_PROGRESS = 'kgh-sandbox:progress';
   var LS_TOURSEEN = 'kgh-sandbox:tourSeen';
   var LS_FABMIN   = 'kgh-sandbox:fabMin';
@@ -10676,7 +10347,7 @@ function dbgCopyLast() {
 
   /* ───────────────────────────────────────────────
      1. Simulated OCR — replaces sendToOCR so no image
-     leaves the device; fills the next sample patient.
+        leaves the device; fills the next sample patient.
      ─────────────────────────────────────────────── */
   var SB_OCR_SAMPLES = [
     { last:'Harrington', first:'George', phn:'9000000116', dob:'07 Mar 1953', sex:'M', ward:'2S',  room:'221', mrp:'Cardiology' },
@@ -10735,13 +10406,13 @@ function dbgCopyLast() {
         ]},
         { h:'Reading the list', items:[
           { lead:'Geographic vs Alphabetical', t:'Geographic groups patients by ward for efficient rounding. Alphabetical lists everyone A–Z for quick lookup.' },
-          { lead:'Patient cards', t:'A <strong>green</strong> card has already been billed today; an untinted card has not. Each card shows ward, bed, MRP and the working diagnosis.' },
-          { lead:'Daily total', t:'The figure at the top of the screen is today\u2019s billed total. Tap it to review every claim entered today.' }
+          { lead:'Patient cards', t:'Each card has a quick-bill button — <strong>+ Daily</strong>, <strong>+ CCU daily</strong>, <strong>+ Directive</strong> or <strong>+ Combined daily</strong> — that records today\u2019s visit in one tap and turns green when done.' },
+          { lead:'Daily total', t:'Once you bill anything, a green running total appears next to the date. Tap it to review every claim entered today.' }
         ]},
         { h:'Taking action on a patient', items:[
-          { lead:'Record a visit', t:'Tap a card to open it. Quick-bill buttons — <strong>+ Daily</strong>, <strong>+ Directive</strong>, <strong>+ Combined daily</strong> — record a claim in one tap. <strong>+ Claim</strong> opens the full claim screen for anything else.' },
-          { lead:'Edit or move', t:'Inside a card you can Edit demographics, view Claims history, or Move the patient to another ward.' },
-          { lead:'Discharging a patient', t:'Choosing Discharge runs several checks: it flags any unbilled days in the admission, offers to add today\u2019s visit, and — for Cardiology MRP patients staying more than 4 days — asks whether the complex-discharge fee (78717) applies. You confirm the discharge date to finish.' }
+          { lead:'Open a card', t:'Tap a patient\u2019s card to open their summary — claims history, the pencil to edit demographics, and the discharge action.' },
+          { lead:'Edit demographics', t:'The pencil icon opens the editable record: name, PHN, date of birth, ward and bed. This is also how you move a patient to a different ward.' },
+          { lead:'Discharging a patient', t:'The discharge action runs several checks: it flags any unbilled days in the admission, offers to add today\u2019s visit, and — for Cardiology MRP patients staying more than 4 days — asks whether the complex-discharge fee (78717) applies. You confirm the discharge date to finish.' }
         ]}
       ]
     },
@@ -10751,20 +10422,19 @@ function dbgCopyLast() {
         { h:'Capturing demographics', items:[
           { lead:'Photograph the label', t:'Tap the camera box and photograph the patient sticker or Meditech chart header. The app reads name, PHN, date of birth, ward and room. <strong>Training:</strong> the camera is simulated and fills sample data.' },
           { lead:'Always check the fields', t:'OCR is accurate but not infallible. Check every auto-filled field against the source before submitting — especially the PHN.' },
-          { lead:'PHN and name', t:'PHN must be exactly 10 digits; the field stays red until it is. Last name is required. Date of birth, sex and ward can be completed later.' }
+          { lead:'PHN and name', t:'PHN must be exactly 10 digits. Last name is required. Date of birth, sex and ward can be completed later.' }
         ]},
         { h:'Choosing the claim', items:[
-          { lead:'Claim types', t:'<strong>Consult (33010)</strong> is a full new consultation. <strong>Limited (33012)</strong> is a repeat or limited consult. <strong>CCU Admit</strong> records a CICU admission day. <strong>Other Claim</strong> lets you pick any fee code.' },
-          { lead:'Consult times', t:'A consult needs a start and end time. From these the app calculates the fee and detects any call-out modifier automatically.' }
+          { lead:'Claim types', t:'<strong>Consult</strong> records a new consultation (33010 full / 33012 limited). <strong>CCU Admit</strong> records a CICU admission day. <strong>Other</strong> lets you pick any fee code.' },
+          { lead:'Consult times', t:'A consult needs a start and end time. End defaults to start + 50 minutes; adjust it if the consult was shorter.' }
         ]},
         { h:'What the app does for you', items:[
-          { lead:'Call-out modifiers', t:'If the consult start time falls in the evening (18:00–22:59), overnight (23:00–07:59), or on a weekend or statutory holiday, the app adds the call-out modifier claim itself and shows it in the preview. You never enter it manually.' },
-          { lead:'CCFPP', t:'When two of your call-out consults overlap in time, a <strong>CCFPP banner</strong> appears on the consult card naming the linked patient. The cross-reference note is written onto the modifier claims of both consults automatically.' }
+          { lead:'Call-out modifiers', t:'Change the start time and watch the modifier banner. An evening (18:00–22:59), overnight (23:00–07:59), weekend or statutory-holiday start adds the call-out modifier automatically — you never enter it by hand.' },
+          { lead:'CCFPP', t:'The <strong>CCFPP — continuing care</strong> field sits below the modifier. When this consult overlaps another of your call-out consults, it turns blue and names the linked patient; the cross-reference note is written to both consults\u2019 modifier claims automatically.' }
         ]},
         { h:'Submitting', items:[
           { lead:'Submit & add to list', t:'Bills the claim and adds the patient to your rounds list.' },
-          { lead:'Submit claim only — not following', t:'Bills a one-time consult without adding the patient to your list.' },
-          { lead:'No claim — add to list', t:'Registers a patient with no charge — useful when you will bill on a later day.' }
+          { lead:'Submit claim only — not following', t:'Bills a one-time consult without adding the patient to your list.' }
         ]}
       ]
     },
@@ -10775,7 +10445,7 @@ function dbgCopyLast() {
           { lead:'What appears here', t:'Patients discharged within the last 21 days. After 21 days they are removed automatically.' },
           { lead:'Search', t:'Use the search box to find a discharged patient by name.' },
           { lead:'Claim history', t:'Tap a card to review every claim from that admission.' },
-          { lead:'Re-admit', t:'If a patient was discharged in error, open their card and choose Re-admit to return them to the active list.' }
+          { lead:'Re-admit', t:'If a patient was discharged in error, open their card and re-admit them to the active list.' }
         ]}
       ]
     }
@@ -10808,16 +10478,17 @@ function dbgCopyLast() {
     document.getElementById('sb-guide-backdrop').classList.remove('open');
   };
 
-  /* Track the active pane so the Guide is context-aware */
+  /* Track active pane so the Guide is context-aware */
   if (typeof window.nav === 'function') {
     var _origNav = window.nav;
     window.nav = function (n, el) { _sbPane = n; return _origNav.apply(this, arguments); };
   }
 
   /* ───────────────────────────────────────────────
-     4. Guided Walkthrough (progress saved to storage)
+     4. Guided Walkthrough — easy steps first, then the
+        camera, modifiers and CCFPP. Progress is saved.
      ─────────────────────────────────────────────── */
-  var SB_VISIT_FEES = ['CCU_DAILY','1411','1421','1431','33008','33006'];
+  var SB_VISIT_FEES = ['CCU_DAILY','33008','33006','1411','1421','1431'];
   var SB_MOD_FEES   = ['1200','1201','1202','1205','1206','1207'];
   function sbClaimCode(c) { return String((c && (c.feeCode || c.fee)) || ''); }
   function sbClaims()     { return (typeof st !== 'undefined' && st.claims)   ? st.claims   : []; }
@@ -10825,35 +10496,43 @@ function dbgCopyLast() {
 
   var SB_STEPS = [
     { id:'sign_in', title:'Sign in',
-      desc:'Tap the name chip at the top right and select a physician. Claims are attributed to whoever is signed in.',
+      desc:'Tap the name chip at the top right of the screen and pick a physician from the list. Every claim is attributed to whoever is signed in.',
       check:function(){ return !!(typeof st!=='undefined' && st.doc && st.doc.alias); } },
+
     { id:'bill_visit', title:'Record a daily visit',
-      desc:'On the Rounds list, open a CICU patient (Hollis or Tan) and use a quick-bill button to record today\u2019s visit.',
+      desc:'On the Rounds list, find <b>Margaret Hollis</b> in CICU and tap her <b>+ CCU daily</b> button. The card turns green to show today\u2019s visit is billed.',
       check:function(){ return sbClaims().some(function(c){ return SB_VISIT_FEES.indexOf(sbClaimCode(c))>=0; }); } },
-    { id:'photo_add', title:'Add a patient from a label photo',
-      desc:'Go to Add Patient and tap the camera box. Photograph anything — the simulated OCR fills a sample patient. Review the fields it populated.',
-      check:function(){ return window._sbOcrUsed===true; } },
-    { id:'consult_modifier', title:'Submit a call-out consult',
-      desc:'In Add Patient, choose Consult and enter an evening start time such as 19:30. Watch the call-out modifier appear in the preview on its own, then submit.',
-      check:function(){ return sbClaims().some(function(c){ return SB_MOD_FEES.indexOf(sbClaimCode(c))>=0; }); } },
-    { id:'ccfpp', title:'See CCFPP link two consults', tag:'Advanced',
-      desc:'Submit a second call-out consult whose time overlaps the first (same day, same physician). A CCFPP banner appears on the consult card and the cross-reference note is written to both consults.',
-      check:function(){ return sbClaims().some(function(c){ return /CCFPP/i.test(String((c&&c.notes)||'')); }); } },
-    { id:'fix_typo', title:'Correct a surname typo',
-      desc:'Eleanor Whitfeild on 2S has a misspelled surname. Open her card, choose Edit, and correct it to Whitfield.',
+
+    { id:'fix_typo', title:'Correct a surname spelling',
+      desc:'On 2S, <b>Eleanor Whitfeild</b> has a misspelled surname. Tap her card, tap the pencil icon, change the last name to <b>Whitfield</b> and save.',
       check:function(){ var pt=sbPatients().filter(function(p){return p&&p.first==='Eleanor';})[0];
         if(!pt) return true; return String(pt.last||'').toLowerCase()==='whitfield'; } },
-    { id:'fix_phn', title:'Complete an invalid PHN',
-      desc:'Patricia Kowalski (Off Service, ED) has a 9-digit PHN — the field shows red. Open her card, choose Edit, and complete the PHN to 10 digits.',
+
+    { id:'fix_phn', title:'Complete an incomplete PHN',
+      desc:'On Off Service, <b>Patricia Kowalski</b> in the ED has only a 9-digit PHN. Open her card, tap the pencil, and finish the PHN so it has all <b>10 digits</b>.',
       check:function(){ var pt=sbPatients().filter(function(p){return p&&p.first==='Patricia'&&p.last==='Kowalski';})[0];
         if(!pt) return true; return String(pt.phn||'').replace(/\D/g,'').length===10; } },
+
     { id:'move_patient', title:'Move a patient to another ward',
-      desc:'Open any patient card, choose Move, pick a different ward and confirm. The card relocates in the Geographic view.',
+      desc:'Pick any patient, open their card and tap the pencil. Change the <b>Ward</b> to a different one and save — the patient moves in the Geographic view.',
       check:function(){ if(!_sbSeedWardsReady) return false;
         return sbPatients().some(function(p){ return p && _sbSeedWards[p.id] && p.ward!==_sbSeedWards[p.id]; }); } },
+
     { id:'discharge', title:'Discharge a patient',
-      desc:'Arthur Penhale on 2W was admitted 6 days ago. Open his card and choose Discharge — you\u2019ll see the unbilled-day check, the today\u2019s-visit prompt, and the complex-discharge (78717) question because the stay exceeds 4 days.',
-      check:function(){ return sbPatients().some(function(p){ return p && p.discharged===true && /^sb-/.test(String(p.id||'')); }); } }
+      desc:'<b>Arthur Penhale</b> on 2W was admitted 6 days ago. Open his card and choose <b>Discharge</b>. Step through the checks — because his stay is over 4 days you\u2019ll be asked about the complex-discharge fee (78717) — then confirm.',
+      check:function(){ return sbPatients().some(function(p){ return p && p.discharged===true && /^sb-/.test(String(p.id||'')); }); } },
+
+    { id:'photo_add', title:'Add a patient with the camera',
+      desc:'Go to <b>Add Patient</b> and tap the camera box. Photograph anything — the simulated camera fills in a sample patient. Check the name, PHN and date of birth it produced.',
+      check:function(){ return window._sbOcrUsed===true; } },
+
+    { id:'modifier', title:'See a call-out modifier',
+      desc:'Staying on that Add Patient consult, set the <b>Start time</b> to <b>21:00</b>. A blue call-out modifier appears on its own. Then tap <b>Submit &amp; add to list</b>.',
+      check:function(){ return sbClaims().some(function(c){ return SB_MOD_FEES.indexOf(sbClaimCode(c))>=0; }); } },
+
+    { id:'ccfpp', title:'Trigger a CCFPP link', tag:'Advanced',
+      desc:'Add one more patient with the camera. On the consult, set the <b>Start time</b> to <b>18:15</b>. The <b>CCFPP — continuing care</b> field turns blue and names Susan Delaney, whose consult overlaps this one. Submit to record the link.',
+      check:function(){ return sbClaims().some(function(c){ return /CCFPP/i.test(String((c&&c.notes)||'')); }); } }
   ];
 
   var _sbDone = sbLoad(LS_PROGRESS) || {};
@@ -10867,6 +10546,18 @@ function dbgCopyLast() {
     });
     if (Object.keys(_sbSeedWards).length) _sbSeedWardsReady = true;
   }
+
+  /* Stamp the seeded CCFPP consult with the signed-in physician's alias —
+     CCFPP only links consults by the same performing doctor. */
+  function sbStampSeedClaim() {
+    if (typeof st === 'undefined' || !st.doc || !st.doc.alias) return;
+    sbClaims().forEach(function (c) {
+      if (c && String(c.id || '').indexOf('sb-claim') === 0 && c.alias !== st.doc.alias) {
+        c.alias = st.doc.alias;
+      }
+    });
+  }
+
   function sbStepToast(title) {
     var t = document.getElementById('sb-step-toast');
     if (!t) return;
@@ -10877,9 +10568,11 @@ function dbgCopyLast() {
     clearTimeout(t._sbTimer);
     t._sbTimer = setTimeout(function () { t.classList.remove('show'); }, 2600);
   }
+
   window.sbCheckProgress = function () {
     if (typeof st === 'undefined' || !st.loaded) return;
     sbInitSeedWards();
+    sbStampSeedClaim();
     var changed = false;
     SB_STEPS.forEach(function (s) {
       if (_sbDone[s.id]) return;
@@ -10894,6 +10587,7 @@ function dbgCopyLast() {
     }
     sbUpdateCount();
   };
+
   function sbDoneCount() { return SB_STEPS.filter(function (s) { return _sbDone[s.id]; }).length; }
   function sbUpdateCount() {
     var done = sbDoneCount(), total = SB_STEPS.length;
@@ -10909,32 +10603,39 @@ function dbgCopyLast() {
     sbUpdateCount();
     sbRenderTour();
   };
+
   function sbRenderTour() {
     var body = document.getElementById('sb-tour-body');
     if (!body) return;
     var done = sbDoneCount(), total = SB_STEPS.length;
     var pct = Math.round(done / total * 100);
+    var firstOpen = -1;
+    for (var i = 0; i < SB_STEPS.length; i++) { if (!_sbDone[SB_STEPS[i].id]) { firstOpen = i; break; } }
+
     var html = '<div class="sb-progress-wrap">' +
       '<div class="sb-progress-track"><div class="sb-progress-fill' +
         (done === total ? ' sb-all-done' : '') + '" style="width:' + pct + '%"></div></div>' +
       '<div class="sb-progress-label">' + done + ' of ' + total + ' steps complete · progress is saved</div>' +
       '</div>';
-    SB_STEPS.forEach(function (s, i) {
+
+    SB_STEPS.forEach(function (s, idx) {
       var isDone = !!_sbDone[s.id];
-      html += '<div class="sb-step' + (isDone ? ' sb-step-done' : '') + '">' +
+      var isNow  = (idx === firstOpen);
+      html += '<div class="sb-step' + (isDone ? ' sb-step-done' : (isNow ? ' sb-step-now' : '')) + '">' +
         '<div class="sb-step-num">' + (isDone
           ? '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'
-          : (i + 1)) + '</div>' +
+          : (idx + 1)) + '</div>' +
         '<div class="sb-step-body">' +
           '<div class="sb-step-title">' + s.title +
             (s.tag ? '<span class="sb-step-tag">' + s.tag + '</span>' : '') + '</div>' +
           '<div class="sb-step-desc">' + s.desc + '</div>' +
         '</div></div>';
     });
+
     if (done === total) {
       html += '<div class="sb-tour-complete">' +
         '<b>Walkthrough complete.</b>' +
-        '<span>You\u2019ve covered sign-in, rounding, label capture, consults and modifiers, CCFPP, record corrections, ward moves and discharge.</span>' +
+        '<span>You\u2019ve covered sign-in, daily billing, record corrections, ward moves, discharge, label capture, call-out modifiers and CCFPP.</span>' +
         '</div>';
     } else {
       html += '<div class="sb-note">Steps tick off on their own as you complete them, and your progress is saved if you leave and come back. ' +
@@ -10943,6 +10644,7 @@ function dbgCopyLast() {
     html += '<button class="sb-drawer-action" onclick="sbResetProgress()">Reset walkthrough progress</button>';
     body.innerHTML = html;
   }
+
   window.sbOpenTour = function () {
     sbRenderTour();
     document.getElementById('sb-tour-sheet').classList.add('open');
@@ -10957,7 +10659,7 @@ function dbgCopyLast() {
      5. First-launch layout tour (coachmarks)
      ─────────────────────────────────────────────── */
   var SB_TOUR = [
-    { sel:null, title:'Welcome to the training sandbox',
+    { sel:null, title:'Welcome to the KCA Billing App training sandbox',
       text:'This is a safe copy of the billing app — nothing here reaches the real system. Here\u2019s a quick orientation to the layout. Tap <strong>Next</strong> to step through it.' },
     { sel:'.nav', title:'The three main sections',
       text:'<strong>Rounds</strong> is your patient list. <strong>Add Patient</strong> registers someone new or starts a consult. <strong>Recently Discharged</strong> holds patients sent home in the last 21 days.' },
