@@ -2130,12 +2130,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.90-2026-05-24-claim-edit-delete-idfix';
+var BUILD_ID    = 'v3.91-2026-05-25-weekend-modifier-tz-fix';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.90';
-var APP_BUILT   = '2026-05-24';
+var APP_VERSION = 'v3.91';
+var APP_BUILT   = '2026-05-25';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -2695,14 +2695,18 @@ function bcStatHolidays(year) {
 }
 
 function isBCStat(dateStr) {
-  var d = new Date(dateStr);
+  // 'T12:00:00' forces LOCAL-time parsing — a bare ISO date string
+  // (YYYY-MM-DD) is otherwise parsed as UTC midnight, which lands on the
+  // previous calendar day in Vancouver and shifts the weekday by one.
+  var d = new Date(dateStr + 'T12:00:00');
   var key = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
   return bcStatHolidays(d.getFullYear()).indexOf(key) !== -1;
 }
 
 function isWeekendOrStat(dateStr) {
   if (!dateStr) return false;
-  var d = new Date(dateStr); var dow = d.getDay();
+  // 'T12:00:00' forces LOCAL-time parsing — see isBCStat note above.
+  var d = new Date(dateStr + 'T12:00:00'); var dow = d.getDay();
   return dow === 0 || dow === 6 || isBCStat(dateStr);
 }
 
