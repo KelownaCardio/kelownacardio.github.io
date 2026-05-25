@@ -973,6 +973,87 @@ input[type=file] { display:none; }
 }
 .sb-pane-hint svg { width:14px; height:14px; stroke:#2e1a6e; fill:none; stroke-width:2; flex-shrink:0; margin-top:1px; }
 
+/* ── Collapsible launch buttons (replaces .sb-fab) ── */
+.sb-fab2 { position:fixed; bottom:18px; z-index:500; display:flex; align-items:stretch; }
+.sb-fab2-left  { left:14px; }
+.sb-fab2-right { right:14px; }
+.sb-fab2-body {
+  background:#2e1a6e; color:#fff; border:none; cursor:pointer; font-family:inherit;
+  font-size:12.5px; font-weight:600; display:flex; align-items:center; gap:7px;
+  padding:9px 13px; box-shadow:0 3px 12px rgba(0,0,0,.22);
+  transition:transform .12s;
+}
+.sb-fab2-body:active { transform:scale(.97); }
+.sb-fab2-left  .sb-fab2-body { border-radius:8px 0 0 8px; }
+.sb-fab2-right .sb-fab2-body { border-radius:0 8px 8px 0; }
+.sb-fab2-ico { width:15px; height:15px; stroke:currentColor; fill:none; stroke-width:2; flex-shrink:0; }
+.sb-fab2-count {
+  background:rgba(255,255,255,.18); border-radius:9px;
+  padding:1px 7px; font-size:10.5px; font-weight:700;
+}
+.sb-fab2-count.sb-done { background:#1a7a4a; }
+.sb-fab2-min {
+  background:#23145a; color:#fff; border:none; cursor:pointer;
+  padding:0 9px; display:flex; align-items:center;
+  box-shadow:0 3px 12px rgba(0,0,0,.22);
+}
+.sb-fab2-left  .sb-fab2-min { border-radius:0 8px 8px 0; }
+.sb-fab2-right .sb-fab2-min { border-radius:8px 0 0 8px; }
+.sb-fab2-min svg { width:13px; height:13px; stroke:currentColor; fill:none; stroke-width:3; }
+#sb-help-fab .sb-fab2-body { background:#fff; color:#2e1a6e; border:1px solid var(--border2); }
+#sb-help-fab .sb-fab2-min  { background:#eef0fb; color:#2e1a6e; border:1px solid var(--border2); }
+.sb-fab2.minimized .sb-fab2-label,
+.sb-fab2.minimized .sb-fab2-count,
+.sb-fab2.minimized .sb-fab2-min { display:none; }
+.sb-fab2.minimized .sb-fab2-body {
+  border-radius:50% !important; width:40px; height:40px;
+  padding:0; justify-content:center; opacity:.9;
+}
+
+/* ── First-launch layout tour (coachmarks) ── */
+#sb-tour-mask { position:fixed; inset:0; z-index:700; display:none; }
+#sb-tour-mask.on { display:block; }
+#sb-tour-mask.sb-mask-dim { background:rgba(18,14,38,.66); }
+#sb-spot {
+  position:fixed; border-radius:9px; pointer-events:none;
+  box-shadow:0 0 0 9999px rgba(18,14,38,.66), 0 0 0 2px #fff;
+  transition:top .26s cubic-bezier(.4,0,.2,1), left .26s cubic-bezier(.4,0,.2,1),
+             width .26s cubic-bezier(.4,0,.2,1), height .26s cubic-bezier(.4,0,.2,1);
+}
+#sb-spot.hidden { display:none; }
+#sb-coach {
+  position:fixed; z-index:702; max-width:300px; width:calc(100vw - 36px);
+  background:#fff; border-radius:12px; box-shadow:0 12px 38px rgba(0,0,0,.34);
+  padding:15px 16px 13px;
+}
+#sb-coach.centered { left:50%; top:50%; transform:translate(-50%,-50%); }
+.sb-coach-step  { font-size:10px; font-weight:700; letter-spacing:.08em; color:#7a78b8; text-transform:uppercase; }
+.sb-coach-title { font-size:15px; font-weight:700; color:#2e1a6e; margin:3px 0 5px; letter-spacing:-.2px; }
+.sb-coach-text  { font-size:12.5px; line-height:1.5; color:var(--text); }
+.sb-coach-text strong { color:#2e1a6e; }
+.sb-coach-actions { display:flex; align-items:center; gap:8px; margin-top:14px; }
+.sb-coach-spacer  { flex:1; }
+.sb-coach-skip {
+  background:none; border:none; font-size:11.5px; color:var(--text3);
+  cursor:pointer; font-family:inherit; padding:4px 2px;
+}
+.sb-coach-btn {
+  background:#fff; color:#2e1a6e; border:1px solid var(--border2);
+  border-radius:7px; padding:7px 14px; font-size:12.5px; font-weight:600;
+  cursor:pointer; font-family:inherit;
+}
+.sb-coach-btn.primary { background:#2e1a6e; color:#fff; border-color:#2e1a6e; }
+.sb-coach-btn:active  { transform:scale(.97); }
+
+/* ── Secondary actions inside drawers ── */
+.sb-drawer-action {
+  display:block; width:calc(100% - 36px); margin:4px 18px 14px;
+  background:none; border:1px solid var(--border2); border-radius:8px;
+  padding:9px; font-size:12px; font-weight:600; color:var(--text2);
+  cursor:pointer; font-family:inherit; text-align:center;
+}
+.sb-drawer-action:active { transform:scale(.99); }
+
 </style>
 </head>
 <body>
@@ -983,15 +1064,32 @@ input[type=file] { display:none; }
   <span class="sb-banner-text">Sample data only — nothing is saved, everything resets on refresh</span>
 </div>
 
-<!-- ══ SANDBOX: floating launchers ══ -->
-<button id="sb-tour-btn" class="sb-fab" onclick="sbOpenTour()">
-  <svg viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-  Walkthrough <span id="sb-tour-count">0/9</span>
-</button>
-<button id="sb-help-btn" class="sb-fab" onclick="sbOpenGuide()">
-  <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-  Guide
-</button>
+<!-- ══ SANDBOX: floating launchers (collapsible) ══ -->
+<div id="sb-tour-fab" class="sb-fab2 sb-fab2-left">
+  <button class="sb-fab2-body" onclick="sbFabBody('tour')">
+    <svg class="sb-fab2-ico" viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+    <span class="sb-fab2-label">Walkthrough</span>
+    <span id="sb-tour-count" class="sb-fab2-count">0/9</span>
+  </button>
+  <button class="sb-fab2-min" onclick="sbFabMin('tour')" aria-label="Minimize walkthrough" title="Minimize">
+    <svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+  </button>
+</div>
+<div id="sb-help-fab" class="sb-fab2 sb-fab2-right">
+  <button class="sb-fab2-min" onclick="sbFabMin('help')" aria-label="Minimize guide" title="Minimize">
+    <svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+  </button>
+  <button class="sb-fab2-body" onclick="sbFabBody('help')">
+    <svg class="sb-fab2-ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    <span class="sb-fab2-label">Guide</span>
+  </button>
+</div>
+
+<!-- ══ SANDBOX: layout tour (coachmarks) ══ -->
+<div id="sb-tour-mask">
+  <div id="sb-spot" class="hidden"></div>
+  <div id="sb-coach"></div>
+</div>
 
 <!-- ══ SANDBOX: Guide drawer ══ -->
 <div id="sb-guide-backdrop" class="sb-sheet-backdrop" onclick="sbCloseGuide()"></div>
@@ -2918,103 +3016,18 @@ function isWeekendOrStat(dateStr) {
   return dow === 0 || dow === 6 || isBCStat(dateStr);
 }
 
-// ── CCFPP detection + retroactive peer note update ─────
-// When a same-doctor 33010/33012 consult overlaps another same-doctor
-// 33010/33012 consult (both in a modifier window), CCFPP applies in
-// BOTH directions:
-//   - new patient gets a note listing each overlapping peer
-//   - each peer's consult + modifier claims get a retro note added
-// Returns the CCFPP note string for the new patient (empty if no overlap).
-// Side effect: mutates and pushes peer claims to Sheets.
-function ccfppDetectAndUpdate(newP, alias, dateISO, dateFmt, startStr, endStr) {
-  if (!startStr || !endStr) return '';
-  var thisMod = getModifier(startStr, dateISO);
-  if (!thisMod) return '';
-
-  var thisStartM = t2m(startStr);
-  var thisEndM   = t2m(endStr);
-  if (thisEndM < thisStartM) thisEndM += 1440;
-
-  var curD  = parseDMY(dateFmt);
-  var prevD = new Date(curD.getTime() - 86400000);
-  var nextD = new Date(curD.getTime() + 86400000);
-  var prevDateFmt = pad(prevD.getDate()) + '/' + pad(prevD.getMonth() + 1) + '/' + prevD.getFullYear();
-  var nextDateFmt = pad(nextD.getDate()) + '/' + pad(nextD.getMonth() + 1) + '/' + nextD.getFullYear();
-
-  var peers = [];
-  var seenPhn = {};
-
-  for (var i = 0; i < st.claims.length; i++) {
-    var c = st.claims[i];
-    if (c.alias !== alias) continue;
-    if (c.phn === newP.phn) continue;
-    if (c.fee !== '33010' && c.fee !== '33012') continue;
-    if (!c.startTime || !c.endTime) continue;
-
-    var isSame = c.date === dateFmt;
-    var isPrev = c.date === prevDateFmt;
-    var isNext = c.date === nextDateFmt;
-    if (!isSame && !isPrev && !isNext) continue;
-
-    var pStartM = t2m(c.startTime);
-    var pEndM   = t2m(c.endTime);
-    if (pEndM < pStartM) pEndM += 1440;
-
-    if (isPrev) {
-      if (pEndM <= 1440) continue; // didn't cross midnight
-      pStartM -= 1440; pEndM -= 1440;
-    } else if (isNext) {
-      if (thisEndM <= 1440) continue; // new claim doesn't cross midnight
-      pStartM += 1440; pEndM += 1440;
-    }
-
-    var pRefD = parseDMY(c.date);
-    var pISO  = pRefD.getFullYear() + '-' + pad(pRefD.getMonth() + 1) + '-' + pad(pRefD.getDate());
-    if (!getModifier(c.startTime, pISO)) continue;
-
-    // Real interval overlap
-    if (thisStartM < pEndM && pStartM < thisEndM) {
-      if (seenPhn[c.phn]) continue;
-      seenPhn[c.phn] = true;
-      peers.push(c);
-    }
-  }
-
-  if (!peers.length) return '';
-
-  // Build new patient's CCFPP note (one entry per peer)
-  var noteParts = peers.map(function(c) {
-    var pp = (st.patients || []).find(function(_pp) { return _pp.phn === c.phn; }) || {};
-    var name = ((pp.first || '') + ' ' + (pp.last || '')).trim() || '(unknown)';
-    return 'CCFPP ' + name + ' (' + (c.phn || '—') + ')';
-  });
-  var newPatientNote = noteParts.join(' | ');
-
-  // Retroactively add note to each peer's consult + modifier claims
-  var newName = ((newP.first || '') + ' ' + (newP.last || '')).trim() || '(unknown)';
-  var newFragment = 'CCFPP ' + newName + ' (' + (newP.phn || '—') + ')';
-  var peerFees = ['33010', '33012', '1200', '1201', '1202', '1205', '1206', '1207'];
-
-  peers.forEach(function(peer) {
-    st.claims.forEach(function(c) {
-      if (c.phn !== peer.phn) return;
-      if (c.alias !== alias) return;
-      if (c.date !== peer.date) return;
-      if (peerFees.indexOf(c.fee) === -1) return;
-      if (c.notes && c.notes.indexOf(newFragment) !== -1) return; // already noted
-      c.notes = c.notes ? c.notes + ' | ' + newFragment : newFragment;
-      if (SHEETS_URL) push('saveClaim', c);
-    });
-  });
-  sv('claims', st.claims);
-
-  return newPatientNote;
-}
-
-// ── CCFPP overlap detection + retroactive peer update ──
-// Returns the CCFPP note string for the NEW consult's claims, and
-// retroactively appends a CCFPP note to each overlapping peer's
-// existing consult + modifier claims, pushing the updates to Sheets.
+// ══ SANDBOX: CCFPP block replaced with current (v3.86) implementation ══
+// ── CCFPP overlap detection (one-directional) ──────────
+// CCFPP ("continuing care from a previous patient") applies only to the
+// LATER of two overlapping call-out consults. The note is written to that
+// later consult's 120x call-out MODIFIER claims — never to the 33010/33012
+// consult row itself.
+//
+// ccfppDetectAndUpdate returns the note for the NEW consult's modifier
+// claims when the new consult is the later of the pair. When the new
+// consult is instead the EARLIER of the pair, the peer is the later one,
+// so its existing 120x modifier claims are retroactively annotated and
+// the function returns '' (new consult gets nothing).
 //
 // Triggers ONLY when:
 //   1. The new 33010/33012 consult falls in a modifier (call-out) window
@@ -3028,24 +3041,44 @@ function ccfppDetectAndUpdate(newP, alias, dateISO, dateFmt, startStr, endStr) {
 // dateFmt     — new consult's date (DD/MM/YYYY)
 // startStr    — new consult's HH:MM start
 // endStr      — new consult's HH:MM end
-function ccfppDetectAndUpdate(newP, alias, dateISO, dateFmt, startStr, endStr) {
-  if (!startStr || !endStr) return '';
-  if (!getModifier(startStr, dateISO)) return '';
 
-  // New consult range in minutes from midnight of dateFmt
+// True when two patient records almost certainly describe the same
+// person — same surname (case-insensitive) and same date of birth.
+// Used to stop CCFPP from linking a patient to a duplicate of itself
+// (e.g. "Marie Ehman" and "Marie Kathleen Ehman" entered as two rows).
+function ccfppSamePerson_(a, b) {
+  var aLast = String((a && a.last) || '').trim().toLowerCase();
+  var bLast = String((b && b.last) || '').trim().toLowerCase();
+  if (!aLast || aLast !== bLast) return false;
+  var aDob = String((a && a.dob) || '').replace(/\D/g, '');
+  var bDob = String((b && b.dob) || '').replace(/\D/g, '');
+  if (!aDob || !bDob) return false;      // missing DOB — do not block
+  return aDob === bDob;
+}
+
+// 120x call-out modifier fee codes — CCFPP notes attach ONLY to these.
+var CCFPP_MODIFIER_FEES = ['1200','1201','1202','1205','1206','1207'];
+
+// Shared peer classifier — PURE, no side effects. Returns the overlapping
+// peers split by who starts later, plus the prev/next date strings, or
+// null when CCFPP cannot apply (no times, or not in a modifier window).
+function _ccfppClassifyPeers(newP, alias, dateISO, dateFmt, startStr, endStr) {
+  if (!startStr || !endStr) return null;
+  if (!getModifier(startStr, dateISO)) return null;
+
   var thisStartM = t2m(startStr);
   var thisEndM   = t2m(endStr);
   if (thisEndM < thisStartM) thisEndM += 1440; // new consult crosses midnight
 
-  // Compute DD/MM/YYYY strings for prev and next dates
   var _curDateD  = parseDMY(dateFmt);
   var _prevDateD = new Date(_curDateD.getTime() - 86400000);
   var _nextDateD = new Date(_curDateD.getTime() + 86400000);
   var prevDateFmt = pad(_prevDateD.getDate()) + '/' + pad(_prevDateD.getMonth() + 1) + '/' + _prevDateD.getFullYear();
   var nextDateFmt = pad(_nextDateD.getDate()) + '/' + pad(_nextDateD.getMonth() + 1) + '/' + _nextDateD.getFullYear();
 
-  // Collect all overlapping peer PHNs (deduplicated)
-  var peerPhns = [];
+  var newIsSecond = [];  // peer PHNs where the NEW consult starts later
+  var newIsFirst  = [];  // peer PHNs where the PEER starts later
+
   for (var _i = 0; _i < st.claims.length; _i++) {
     var c = st.claims[_i];
     if (c.alias !== alias) continue;
@@ -3072,47 +3105,107 @@ function ccfppDetectAndUpdate(newP, alias, dateISO, dateFmt, startStr, endStr) {
       prevEndM   += 1440;
     }
 
-    // Prev claim must also be in a modifier window (use its own date)
     var _prevRefD = parseDMY(c.date);
     var _prevISO  = _prevRefD.getFullYear() + '-' + pad(_prevRefD.getMonth() + 1) + '-' + pad(_prevRefD.getDate());
     if (!getModifier(c.startTime, _prevISO)) continue;
 
-    // Interval overlap
+    var _peerPat = (st.patients || []).find(function(pp){ return pp.phn === c.phn; }) || {};
+    if (ccfppSamePerson_(newP, _peerPat)) continue;
+
     if (thisStartM < prevEndM && prevStartM < thisEndM) {
-      if (peerPhns.indexOf(c.phn) === -1) peerPhns.push(c.phn);
+      if (thisStartM >= prevStartM) {
+        if (newIsSecond.indexOf(c.phn) === -1) newIsSecond.push(c.phn);
+      } else {
+        if (newIsFirst.indexOf(c.phn) === -1) newIsFirst.push(c.phn);
+      }
     }
   }
+  return {
+    newIsSecond: newIsSecond, newIsFirst: newIsFirst,
+    dateFmt: dateFmt, prevDateFmt: prevDateFmt, nextDateFmt: nextDateFmt
+  };
+}
 
-  if (!peerPhns.length) return '';
+// Format a patient's name as "Last, First" for CCFPP notes.
+function _ccfppName(p) {
+  var last  = String((p && p.last)  || '').trim();
+  var first = String((p && p.first) || '').trim();
+  return last ? (last + (first ? ', ' + first : '')) : (first || '(unknown)');
+}
 
-  // Build CCFPP note string for the NEW consult — one entry per peer
-  var newClaimNote = peerPhns.map(function(peerPhn) {
+// Build the CCFPP note for a set of peer PHNs — one entry per peer.
+function _ccfppNoteFor(peerPhns) {
+  return peerPhns.map(function(peerPhn) {
     var pat = (st.patients || []).find(function(pp) { return pp.phn === peerPhn; }) || {};
-    var name = ((pat.first || '') + ' ' + (pat.last || '')).trim() || '(unknown)';
-    return 'CCFPP ' + name + ' (' + peerPhn + ')';
+    return 'CCFPP: ' + _ccfppName(pat) + ' (' + peerPhn + ')';
   }).join(' | ');
+}
 
-  // RETROACTIVELY update each peer's existing consult + modifier claims
-  // Append "CCFPP <newP first> <newP last> (<newP phn>)" to their notes.
-  var reverseNote = 'CCFPP ' + ((newP.first || '') + ' ' + (newP.last || '')).trim() + ' (' + (newP.phn || '—') + ')';
-  var feesForCcfpp = ['33010','33012','1200','1201','1202','1205','1206','1207'];
-  var dateMatches = [dateFmt, prevDateFmt, nextDateFmt];
+// PURE preview — the CCFPP note the NEW consult would carry on its 120x
+// modifier claims if submitted now. No mutation; safe to call on every
+// keystroke for the live consult-form field.
+function ccfppPreviewNote(newP, alias, dateISO, dateFmt, startStr, endStr) {
+  var cls = _ccfppClassifyPeers(newP, alias, dateISO, dateFmt, startStr, endStr);
+  if (!cls || !cls.newIsSecond.length) return '';
+  return _ccfppNoteFor(cls.newIsSecond);
+}
 
-  peerPhns.forEach(function(peerPhn) {
-    st.claims.forEach(function(c) {
-      if (c.phn   !== peerPhn) return;
-      if (c.alias !== alias)   return;
-      if (dateMatches.indexOf(c.date) === -1) return;
-      if (feesForCcfpp.indexOf(c.fee) === -1) return;
-      var existing = c.notes || '';
-      if (existing.indexOf(reverseNote) !== -1) return; // idempotent
-      c.notes = existing ? existing + ' | ' + reverseNote : reverseNote;
-      if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL) push('saveClaim', c);
+// Detection + retroactive peer update — called at submit time.
+function ccfppDetectAndUpdate(newP, alias, dateISO, dateFmt, startStr, endStr) {
+  var cls = _ccfppClassifyPeers(newP, alias, dateISO, dateFmt, startStr, endStr);
+  if (!cls) return '';
+
+  // RETROACTIVE: the PEER starts later — annotate its existing 120x
+  // modifier claims only (never the 33010/33012 consult).
+  if (cls.newIsFirst.length) {
+    var reverseNote = 'CCFPP: ' + _ccfppName(newP) + ' (' + (newP.phn || '—') + ')';
+    var dateMatches = [cls.dateFmt, cls.prevDateFmt, cls.nextDateFmt];
+    cls.newIsFirst.forEach(function(peerPhn) {
+      st.claims.forEach(function(c) {
+        if (c.phn   !== peerPhn) return;
+        if (c.alias !== alias)   return;
+        if (dateMatches.indexOf(c.date) === -1) return;
+        if (CCFPP_MODIFIER_FEES.indexOf(c.fee) === -1) return;
+        var existing = c.notes || '';
+        if (existing.indexOf(reverseNote) !== -1) return; // idempotent
+        c.notes = existing ? existing + ' | ' + reverseNote : reverseNote;
+        if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL) push('saveClaim', c);
+      });
     });
-  });
-  sv('claims', st.claims);
+    sv('claims', st.claims);
+  }
 
-  return newClaimNote;
+  // FORWARD: the NEW consult starts later — return the note for its own
+  // 120x modifier claims.
+  return cls.newIsSecond.length ? _ccfppNoteFor(cls.newIsSecond) : '';
+}
+// ── CCFPP live-preview banner ──────────────────────────
+// Renders into elId the CCFPP note the consult would carry if submitted
+// now, using the pure ccfppPreviewNote(). Empty when no overlapping
+// same-doctor call-out consult exists. Safe to call on every keystroke.
+function renderCcfppBanner(elId, newP, alias, dateISO, startStr, endStr) {
+  var el = document.getElementById(elId);
+  if (!el) return;
+  var note = '';
+  try {
+    if (newP && startStr && endStr && dateISO) {
+      var dateFmt = fmtD(parseISODate(dateISO));
+      note = ccfppPreviewNote(newP, alias || '', dateISO, dateFmt, startStr, endStr) || '';
+    }
+  } catch (e) { note = ''; }
+  if (!note) { el.innerHTML = ''; return; }
+  var peers = note.split(' | ').map(function (s) { return s.replace(/^CCFPP:\s*/, ''); });
+  el.innerHTML =
+    '<div style="margin-top:6px;background:#eef0fb;border:1px solid #c4c9ee;' +
+      'border-left:3px solid #3b3a8f;border-radius:var(--rsm);padding:8px 11px">' +
+      '<div style="font-size:12px;font-weight:700;color:#2e2d6e">' +
+        'CCFPP &mdash; continuing care will be linked</div>' +
+      peers.map(function (pn) {
+        return '<div style="font-size:11.5px;color:#3b3a8f;margin-top:2px">' + esc(pn) + '</div>';
+      }).join('') +
+      '<div style="font-size:10.5px;color:var(--text3);margin-top:4px">' +
+        'Added automatically to the call-out modifier claims of both consults.</div>' +
+    '</div>';
 }
 
 // ── Call-out Modifier Detection ────────────────────────
@@ -6361,6 +6454,7 @@ function buildConsultForm(p) {
 
   // Modifier display area
   h += '<div id="cb-mod"></div>';
+  h += '<div id="cb-ccfpp"></div>';
   h += '</div>';
 
   // ICD-9 and referring MD
@@ -6439,6 +6533,7 @@ function updateConsultUI() {
     }
   }
 
+  renderCcfppBanner('cb-ccfpp', getP(_claimPid), getPerformingAlias(), dateISO, start, end);
   updateConsultPreview(modBase, modInc);
 }
 
@@ -7364,6 +7459,7 @@ function buildApConsultArea() {
        '<svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>' +
        '+ MOST (78720)</button>';
   h += '<div id="f-c-mod" style="margin-top:6px"></div>';
+  h += '<div id="f-c-ccfpp"></div>';
   h += '<div class="fl" style="margin-top:4px">';
   h += '<div class="f1"><label>Date</label><input type="date" id="f-c-date" oninput="updateApConsultUI()"></div>';
   h += '<div class="f1"><label>Start time</label><input type="text" id="f-c-start" placeholder="14:30 or 2:30pm" oninput="updateApConsultUI()" onblur="var v=parseTime24(this.value);if(v){this.value=v;updateApConsultUI();}"></div>';
@@ -7742,6 +7838,17 @@ function updateApConsultUI() {
   var modInc   = hasInc ? getModifierForIncrement(start, dateISO) : null;
   var incUnits = consultIncUnits(start, end);
   var modEl    = document.getElementById('f-c-mod');
+
+  // CCFPP live preview — uses a stub patient (not yet saved in Add Patient)
+  var _apAlias = (document.getElementById('f-c-performing-doc') || {}).value ||
+                 (typeof st !== 'undefined' && st.doc && st.doc.alias) || '';
+  renderCcfppBanner('f-c-ccfpp', {
+    phn:   gv('f-phn'),
+    last:  gv('f-last'),
+    first: gv('f-first'),
+    dob:   gv('f-dob')
+  }, _apAlias, dateISO, start, end);
+
   if (!modEl) return;
 
   if (modBase) {
@@ -10548,29 +10655,37 @@ function dbgCopyLast() {
 
 <!-- ══════════════════════════════════════════════════════
      SANDBOX OVERLAY — training layer (self-contained)
-     Sits on top of the v3.77 app. Safe to regenerate: this
-     whole block plus the sb- CSS, banner, FABs, drawers and
-     the seed block in init() are the entire training layer.
+     Adds: simulated OCR · collapsible launch buttons ·
+     first-launch layout tour · context Guide · Guided
+     Walkthrough with saved progress.
+     This whole block, plus the sb- CSS, the banner, the
+     FAB/tour/drawer HTML and the seed block in init(), is
+     the entire training layer and can be re-applied to a
+     future build.
      ══════════════════════════════════════════════════════ -->
 <script>
 (function () {
   'use strict';
 
+  /* ── persistence helpers (kgh-sandbox:* survives the app cache wipe) ── */
+  var LS_PROGRESS = 'kgh-sandbox:progress';
+  var LS_TOURSEEN = 'kgh-sandbox:tourSeen';
+  var LS_FABMIN   = 'kgh-sandbox:fabMin';
+  function sbLoad(k)   { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
+  function sbSave(k,v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+
   /* ───────────────────────────────────────────────
-     1. Simulated OCR
-     Replaces sendToOCR so no image is sent anywhere.
-     Photographing anything fills the Add Patient form
-     with the next sample patient in the rotation.
+     1. Simulated OCR — replaces sendToOCR so no image
+     leaves the device; fills the next sample patient.
      ─────────────────────────────────────────────── */
   var SB_OCR_SAMPLES = [
-    { last:'Harrington', first:'George',   phn:'9000000116', dob:'07 Mar 1953', sex:'M', ward:'2S',  room:'221',  mrp:'Cardiology' },
-    { last:'Beaulieu',   first:'Yvonne',   phn:'9000000124', dob:'19 Nov 1947', sex:'F', ward:'2W',  room:'205',  mrp:'Cardiology' },
-    { last:'Friesen',    first:'Walter',   phn:'9000000132', dob:'02 Jun 1961', sex:'M', ward:'CCU', room:'4',    mrp:'Cardiology' },
-    { last:'Nakamura',   first:'Aiko',     phn:'9000000140', dob:'25 Sep 1970', sex:'F', ward:'2S',  room:'229',  mrp:'Cardiology' }
+    { last:'Harrington', first:'George', phn:'9000000116', dob:'07 Mar 1953', sex:'M', ward:'2S',  room:'221', mrp:'Cardiology' },
+    { last:'Beaulieu',   first:'Yvonne', phn:'9000000124', dob:'19 Nov 1947', sex:'F', ward:'2W',  room:'205', mrp:'Cardiology' },
+    { last:'Friesen',    first:'Walter', phn:'9000000132', dob:'02 Jun 1961', sex:'M', ward:'CCU', room:'4',   mrp:'Cardiology' },
+    { last:'Nakamura',   first:'Aiko',   phn:'9000000140', dob:'25 Sep 1970', sex:'F', ward:'2S',  room:'229', mrp:'Cardiology' }
   ];
   var _sbOcrIdx = 0;
   window._sbOcrUsed = false;
-
   window.sendToOCR = function (b64, mediaType, bar) {
     if (bar) { bar.className = 'ocr-bar'; bar.textContent = 'Reading sticker…'; }
     setTimeout(function () {
@@ -10579,9 +10694,8 @@ function dbgCopyLast() {
       window._sbOcrUsed = true;
       try {
         handleOCRResult({
-          last: s.last, first: s.first, phn: s.phn, dob: s.dob,
-          sex: s.sex, ward: s.ward, room: s.room, mrp: s.mrp,
-          _engine: 'sandbox'
+          last:s.last, first:s.first, phn:s.phn, dob:s.dob,
+          sex:s.sex, ward:s.ward, room:s.room, mrp:s.mrp, _engine:'sandbox'
         }, bar);
       } catch (e) {
         if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'Sandbox OCR error'; }
@@ -10591,23 +10705,40 @@ function dbgCopyLast() {
   };
 
   /* ───────────────────────────────────────────────
-     2. Guide drawer — context help per screen
+     2. Collapsible launch buttons
+     ─────────────────────────────────────────────── */
+  var _fabMin = sbLoad(LS_FABMIN) || { tour:false, help:false };
+  function sbApplyFabMin() {
+    var t = document.getElementById('sb-tour-fab');
+    var h = document.getElementById('sb-help-fab');
+    if (t) t.classList.toggle('minimized', !!_fabMin.tour);
+    if (h) h.classList.toggle('minimized', !!_fabMin.help);
+  }
+  window.sbFabMin = function (which) {
+    _fabMin[which] = true; sbSave(LS_FABMIN, _fabMin); sbApplyFabMin();
+  };
+  window.sbFabBody = function (which) {
+    if (_fabMin[which]) { _fabMin[which] = false; sbSave(LS_FABMIN, _fabMin); sbApplyFabMin(); return; }
+    if (which === 'tour') sbOpenTour(); else sbOpenGuide();
+  };
+
+  /* ───────────────────────────────────────────────
+     3. Guide drawer — context help per screen
      ─────────────────────────────────────────────── */
   var SB_GUIDE = {
     0: {
-      title: 'Guide — Rounds',
-      sub:   'Reviewing and billing your patient list',
-      sections: [
-        { h: 'Before you bill', items: [
+      title:'Guide — Rounds', sub:'Reviewing and billing your patient list',
+      sections:[
+        { h:'Before you bill', items:[
           { lead:'Sign in first', t:'Tap the name chip at the top right and choose your name. Every claim is attributed to the signed-in physician.' },
           { lead:'On / Off Service', t:'The toggle splits your list. <strong>On Service</strong> is the wards where you are MRP — CICU, 2S, 2W. <strong>Off Service</strong> is consult and directive patients elsewhere.' }
         ]},
-        { h: 'Reading the list', items: [
+        { h:'Reading the list', items:[
           { lead:'Geographic vs Alphabetical', t:'Geographic groups patients by ward for efficient rounding. Alphabetical lists everyone A–Z for quick lookup.' },
           { lead:'Patient cards', t:'A <strong>green</strong> card has already been billed today; an untinted card has not. Each card shows ward, bed, MRP and the working diagnosis.' },
           { lead:'Daily total', t:'The figure at the top of the screen is today\u2019s billed total. Tap it to review every claim entered today.' }
         ]},
-        { h: 'Taking action on a patient', items: [
+        { h:'Taking action on a patient', items:[
           { lead:'Record a visit', t:'Tap a card to open it. Quick-bill buttons — <strong>+ Daily</strong>, <strong>+ Directive</strong>, <strong>+ Combined daily</strong> — record a claim in one tap. <strong>+ Claim</strong> opens the full claim screen for anything else.' },
           { lead:'Edit or move', t:'Inside a card you can Edit demographics, view Claims history, or Move the patient to another ward.' },
           { lead:'Discharging a patient', t:'Choosing Discharge runs several checks: it flags any unbilled days in the admission, offers to add today\u2019s visit, and — for Cardiology MRP patients staying more than 4 days — asks whether the complex-discharge fee (78717) applies. You confirm the discharge date to finish.' }
@@ -10615,23 +10746,22 @@ function dbgCopyLast() {
       ]
     },
     1: {
-      title: 'Guide — Add Patient',
-      sub:   'Registering a patient and submitting a claim',
-      sections: [
-        { h: 'Capturing demographics', items: [
+      title:'Guide — Add Patient', sub:'Registering a patient and submitting a claim',
+      sections:[
+        { h:'Capturing demographics', items:[
           { lead:'Photograph the label', t:'Tap the camera box and photograph the patient sticker or Meditech chart header. The app reads name, PHN, date of birth, ward and room. <strong>Training:</strong> the camera is simulated and fills sample data.' },
           { lead:'Always check the fields', t:'OCR is accurate but not infallible. Check every auto-filled field against the source before submitting — especially the PHN.' },
           { lead:'PHN and name', t:'PHN must be exactly 10 digits; the field stays red until it is. Last name is required. Date of birth, sex and ward can be completed later.' }
         ]},
-        { h: 'Choosing the claim', items: [
+        { h:'Choosing the claim', items:[
           { lead:'Claim types', t:'<strong>Consult (33010)</strong> is a full new consultation. <strong>Limited (33012)</strong> is a repeat or limited consult. <strong>CCU Admit</strong> records a CICU admission day. <strong>Other Claim</strong> lets you pick any fee code.' },
           { lead:'Consult times', t:'A consult needs a start and end time. From these the app calculates the fee and detects any call-out modifier automatically.' }
         ]},
-        { h: 'What the app does for you', items: [
+        { h:'What the app does for you', items:[
           { lead:'Call-out modifiers', t:'If the consult start time falls in the evening (18:00–22:59), overnight (23:00–07:59), or on a weekend or statutory holiday, the app adds the call-out modifier claim itself and shows it in the preview. You never enter it manually.' },
-          { lead:'CCFPP', t:'When two of your call-out consults overlap in time, the app writes a CCFPP cross-reference note onto the modifier claims of both consults — automatically, and retroactively for the earlier one.' }
+          { lead:'CCFPP', t:'When two of your call-out consults overlap in time, a <strong>CCFPP banner</strong> appears on the consult card naming the linked patient. The cross-reference note is written onto the modifier claims of both consults automatically.' }
         ]},
-        { h: 'Submitting', items: [
+        { h:'Submitting', items:[
           { lead:'Submit & add to list', t:'Bills the claim and adds the patient to your rounds list.' },
           { lead:'Submit claim only — not following', t:'Bills a one-time consult without adding the patient to your list.' },
           { lead:'No claim — add to list', t:'Registers a patient with no charge — useful when you will bill on a later day.' }
@@ -10639,10 +10769,9 @@ function dbgCopyLast() {
       ]
     },
     2: {
-      title: 'Guide — Recently Discharged',
-      sub:   'Patients discharged in the last 21 days',
-      sections: [
-        { h: 'Using this list', items: [
+      title:'Guide — Recently Discharged', sub:'Patients discharged in the last 21 days',
+      sections:[
+        { h:'Using this list', items:[
           { lead:'What appears here', t:'Patients discharged within the last 21 days. After 21 days they are removed automatically.' },
           { lead:'Search', t:'Use the search box to find a discharged patient by name.' },
           { lead:'Claim history', t:'Tap a card to review every claim from that admission.' },
@@ -10651,22 +10780,21 @@ function dbgCopyLast() {
       ]
     }
   };
-
   var _sbPane = 0;
 
   function sbGuideHTML(p) {
     var d = SB_GUIDE[p] || SB_GUIDE[0];
-    var html = '';
+    var html = '<button class="sb-drawer-action" onclick="sbCloseGuide();sbNavTourStart(true)">' +
+               '↻ Replay the layout tour</button>';
     d.sections.forEach(function (sec) {
       html += '<div class="sb-guide-section">' + sec.h + '</div>';
       sec.items.forEach(function (it) {
         html += '<div class="sb-guide-item"><span class="sb-lead">' + it.lead + '</span>' + it.t + '</div>';
       });
     });
-    html += '<div class="sb-note">Training environment — all changes are held in memory only and reset when the page is refreshed.</div>';
+    html += '<div class="sb-note">Training environment — patient data is held in memory only and resets when the page is refreshed. Your Walkthrough progress is saved.</div>';
     return html;
   }
-
   window.sbOpenGuide = function () {
     var d = SB_GUIDE[_sbPane] || SB_GUIDE[0];
     document.getElementById('sb-guide-title').textContent = d.title;
@@ -10680,109 +10808,56 @@ function dbgCopyLast() {
     document.getElementById('sb-guide-backdrop').classList.remove('open');
   };
 
-  /* Track the active pane so the Guide button is context-aware */
+  /* Track the active pane so the Guide is context-aware */
   if (typeof window.nav === 'function') {
     var _origNav = window.nav;
-    window.nav = function (n, el) {
-      _sbPane = n;
-      return _origNav.apply(this, arguments);
-    };
+    window.nav = function (n, el) { _sbPane = n; return _origNav.apply(this, arguments); };
   }
 
   /* ───────────────────────────────────────────────
-     3. Guided Walkthrough
+     4. Guided Walkthrough (progress saved to storage)
      ─────────────────────────────────────────────── */
-  var SB_VISIT_FEES = ['CCU_DAILY', '1411', '1421', '1431', '33008', '33006'];
-  var SB_MOD_FEES   = ['1200', '1201', '1202', '1205', '1206', '1207'];
-
+  var SB_VISIT_FEES = ['CCU_DAILY','1411','1421','1431','33008','33006'];
+  var SB_MOD_FEES   = ['1200','1201','1202','1205','1206','1207'];
   function sbClaimCode(c) { return String((c && (c.feeCode || c.fee)) || ''); }
   function sbClaims()     { return (typeof st !== 'undefined' && st.claims)   ? st.claims   : []; }
   function sbPatients()   { return (typeof st !== 'undefined' && st.patients) ? st.patients : []; }
 
   var SB_STEPS = [
-    {
-      id: 'sign_in',
-      title: 'Sign in',
-      desc: 'Tap the name chip at the top right and select a physician. Claims are attributed to whoever is signed in.',
-      check: function () { return !!(typeof st !== 'undefined' && st.doc && st.doc.alias); }
-    },
-    {
-      id: 'bill_visit',
-      title: 'Record a daily visit',
-      desc: 'On the Rounds list, open a CICU patient (Hollis or Tan) and use a quick-bill button to record today\u2019s visit.',
-      check: function () {
-        return sbClaims().some(function (c) { return SB_VISIT_FEES.indexOf(sbClaimCode(c)) >= 0; });
-      }
-    },
-    {
-      id: 'photo_add',
-      title: 'Add a patient from a label photo',
-      desc: 'Go to Add Patient and tap the camera box. Photograph anything — the simulated OCR fills a sample patient. Review the fields it populated.',
-      check: function () { return window._sbOcrUsed === true; }
-    },
-    {
-      id: 'consult_modifier',
-      title: 'Submit a call-out consult',
-      desc: 'In Add Patient, choose Consult and enter an evening start time such as 19:30. Watch the call-out modifier appear in the preview on its own, then submit.',
-      check: function () {
-        return sbClaims().some(function (c) { return SB_MOD_FEES.indexOf(sbClaimCode(c)) >= 0; });
-      }
-    },
-    {
-      id: 'ccfpp',
-      title: 'See CCFPP link two consults',
-      tag: 'Advanced',
-      desc: 'Submit a second call-out consult whose time overlaps the first (same day, same physician). The app writes a CCFPP cross-reference note onto both consults\u2019 modifier claims.',
-      check: function () {
-        return sbClaims().some(function (c) { return /CCFPP/i.test(String((c && c.notes) || '')); });
-      }
-    },
-    {
-      id: 'fix_typo',
-      title: 'Correct a surname typo',
-      desc: 'Eleanor Whitfeild on 2S has a misspelled surname. Open her card, choose Edit, and correct it to Whitfield.',
-      check: function () {
-        var pt = sbPatients().filter(function (p) { return p && p.first === 'Eleanor'; })[0];
-        if (!pt) return true;
-        return String(pt.last || '').toLowerCase() === 'whitfield';
-      }
-    },
-    {
-      id: 'fix_phn',
-      title: 'Complete an invalid PHN',
-      desc: 'Patricia Kowalski (Off Service, ED) has a 9-digit PHN — the field shows red. Open her card, choose Edit, and complete the PHN to 10 digits.',
-      check: function () {
-        var pt = sbPatients().filter(function (p) { return p && p.first === 'Patricia' && p.last === 'Kowalski'; })[0];
-        if (!pt) return true;
-        return String(pt.phn || '').replace(/\D/g, '').length === 10;
-      }
-    },
-    {
-      id: 'move_patient',
-      title: 'Move a patient to another ward',
-      desc: 'Open any patient card, choose Move, pick a different ward and confirm. The card relocates in the Geographic view.',
-      check: function () {
-        if (!_sbSeedWardsReady) return false;
-        return sbPatients().some(function (p) {
-          return p && _sbSeedWards[p.id] && p.ward !== _sbSeedWards[p.id];
-        });
-      }
-    },
-    {
-      id: 'discharge',
-      title: 'Discharge a patient',
-      desc: 'Arthur Penhale on 2W was admitted 6 days ago. Open his card and choose Discharge — you\u2019ll see the unbilled-day check, the today\u2019s-visit prompt, and the complex-discharge (78717) question because the stay exceeds 4 days.',
-      check: function () {
-        return sbPatients().some(function (p) {
-          return p && p.discharged === true && /^sb-/.test(String(p.id || ''));
-        });
-      }
-    }
+    { id:'sign_in', title:'Sign in',
+      desc:'Tap the name chip at the top right and select a physician. Claims are attributed to whoever is signed in.',
+      check:function(){ return !!(typeof st!=='undefined' && st.doc && st.doc.alias); } },
+    { id:'bill_visit', title:'Record a daily visit',
+      desc:'On the Rounds list, open a CICU patient (Hollis or Tan) and use a quick-bill button to record today\u2019s visit.',
+      check:function(){ return sbClaims().some(function(c){ return SB_VISIT_FEES.indexOf(sbClaimCode(c))>=0; }); } },
+    { id:'photo_add', title:'Add a patient from a label photo',
+      desc:'Go to Add Patient and tap the camera box. Photograph anything — the simulated OCR fills a sample patient. Review the fields it populated.',
+      check:function(){ return window._sbOcrUsed===true; } },
+    { id:'consult_modifier', title:'Submit a call-out consult',
+      desc:'In Add Patient, choose Consult and enter an evening start time such as 19:30. Watch the call-out modifier appear in the preview on its own, then submit.',
+      check:function(){ return sbClaims().some(function(c){ return SB_MOD_FEES.indexOf(sbClaimCode(c))>=0; }); } },
+    { id:'ccfpp', title:'See CCFPP link two consults', tag:'Advanced',
+      desc:'Submit a second call-out consult whose time overlaps the first (same day, same physician). A CCFPP banner appears on the consult card and the cross-reference note is written to both consults.',
+      check:function(){ return sbClaims().some(function(c){ return /CCFPP/i.test(String((c&&c.notes)||'')); }); } },
+    { id:'fix_typo', title:'Correct a surname typo',
+      desc:'Eleanor Whitfeild on 2S has a misspelled surname. Open her card, choose Edit, and correct it to Whitfield.',
+      check:function(){ var pt=sbPatients().filter(function(p){return p&&p.first==='Eleanor';})[0];
+        if(!pt) return true; return String(pt.last||'').toLowerCase()==='whitfield'; } },
+    { id:'fix_phn', title:'Complete an invalid PHN',
+      desc:'Patricia Kowalski (Off Service, ED) has a 9-digit PHN — the field shows red. Open her card, choose Edit, and complete the PHN to 10 digits.',
+      check:function(){ var pt=sbPatients().filter(function(p){return p&&p.first==='Patricia'&&p.last==='Kowalski';})[0];
+        if(!pt) return true; return String(pt.phn||'').replace(/\D/g,'').length===10; } },
+    { id:'move_patient', title:'Move a patient to another ward',
+      desc:'Open any patient card, choose Move, pick a different ward and confirm. The card relocates in the Geographic view.',
+      check:function(){ if(!_sbSeedWardsReady) return false;
+        return sbPatients().some(function(p){ return p && _sbSeedWards[p.id] && p.ward!==_sbSeedWards[p.id]; }); } },
+    { id:'discharge', title:'Discharge a patient',
+      desc:'Arthur Penhale on 2W was admitted 6 days ago. Open his card and choose Discharge — you\u2019ll see the unbilled-day check, the today\u2019s-visit prompt, and the complex-discharge (78717) question because the stay exceeds 4 days.',
+      check:function(){ return sbPatients().some(function(p){ return p && p.discharged===true && /^sb-/.test(String(p.id||'')); }); } }
   ];
 
-  var _sbDone        = {};
-  var _sbSeedWards   = {};
-  var _sbSeedWardsReady = false;
+  var _sbDone = sbLoad(LS_PROGRESS) || {};
+  var _sbSeedWards = {}, _sbSeedWardsReady = false;
 
   function sbInitSeedWards() {
     if (_sbSeedWardsReady) return;
@@ -10792,7 +10867,6 @@ function dbgCopyLast() {
     });
     if (Object.keys(_sbSeedWards).length) _sbSeedWardsReady = true;
   }
-
   function sbStepToast(title) {
     var t = document.getElementById('sb-step-toast');
     if (!t) return;
@@ -10803,7 +10877,6 @@ function dbgCopyLast() {
     clearTimeout(t._sbTimer);
     t._sbTimer = setTimeout(function () { t.classList.remove('show'); }, 2600);
   }
-
   window.sbCheckProgress = function () {
     if (typeof st === 'undefined' || !st.loaded) return;
     sbInitSeedWards();
@@ -10814,67 +10887,62 @@ function dbgCopyLast() {
       try { ok = !!s.check(); } catch (e) { ok = false; }
       if (ok) { _sbDone[s.id] = true; changed = true; sbStepToast(s.title); }
     });
-    sbUpdateCount();
     if (changed) {
+      sbSave(LS_PROGRESS, _sbDone);
       var sheet = document.getElementById('sb-tour-sheet');
       if (sheet && sheet.classList.contains('open')) sbRenderTour();
     }
+    sbUpdateCount();
   };
-
-  function sbDoneCount() {
-    return SB_STEPS.filter(function (s) { return _sbDone[s.id]; }).length;
-  }
-
+  function sbDoneCount() { return SB_STEPS.filter(function (s) { return _sbDone[s.id]; }).length; }
   function sbUpdateCount() {
-    var done  = sbDoneCount();
-    var total = SB_STEPS.length;
+    var done = sbDoneCount(), total = SB_STEPS.length;
     var badge = document.getElementById('sb-tour-count');
     if (!badge) return;
     badge.textContent = done + '/' + total;
     badge.classList.toggle('sb-done', done === total);
   }
-
+  window.sbResetProgress = function () {
+    if (!window.confirm('Reset Walkthrough progress? This clears the step checklist only — sample patients are unaffected.')) return;
+    _sbDone = {};
+    sbSave(LS_PROGRESS, _sbDone);
+    sbUpdateCount();
+    sbRenderTour();
+  };
   function sbRenderTour() {
     var body = document.getElementById('sb-tour-body');
     if (!body) return;
-    var done  = sbDoneCount();
-    var total = SB_STEPS.length;
-    var pct   = Math.round(done / total * 100);
-
+    var done = sbDoneCount(), total = SB_STEPS.length;
+    var pct = Math.round(done / total * 100);
     var html = '<div class="sb-progress-wrap">' +
       '<div class="sb-progress-track"><div class="sb-progress-fill' +
         (done === total ? ' sb-all-done' : '') + '" style="width:' + pct + '%"></div></div>' +
-      '<div class="sb-progress-label">' + done + ' of ' + total + ' steps complete</div>' +
+      '<div class="sb-progress-label">' + done + ' of ' + total + ' steps complete · progress is saved</div>' +
       '</div>';
-
     SB_STEPS.forEach(function (s, i) {
       var isDone = !!_sbDone[s.id];
       html += '<div class="sb-step' + (isDone ? ' sb-step-done' : '') + '">' +
         '<div class="sb-step-num">' + (isDone
-            ? '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'
-            : (i + 1)) +
-        '</div>' +
+          ? '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'
+          : (i + 1)) + '</div>' +
         '<div class="sb-step-body">' +
           '<div class="sb-step-title">' + s.title +
-            (s.tag ? '<span class="sb-step-tag">' + s.tag + '</span>' : '') +
-          '</div>' +
+            (s.tag ? '<span class="sb-step-tag">' + s.tag + '</span>' : '') + '</div>' +
           '<div class="sb-step-desc">' + s.desc + '</div>' +
-        '</div>' +
-      '</div>';
+        '</div></div>';
     });
-
     if (done === total) {
       html += '<div class="sb-tour-complete">' +
         '<b>Walkthrough complete.</b>' +
         '<span>You\u2019ve covered sign-in, rounding, label capture, consults and modifiers, CCFPP, record corrections, ward moves and discharge.</span>' +
         '</div>';
     } else {
-      html += '<div class="sb-note">Steps tick off on their own as you complete them. ' +
+      html += '<div class="sb-note">Steps tick off on their own as you complete them, and your progress is saved if you leave and come back. ' +
         'Open the Guide (bottom right) any time for help with the current screen.</div>';
     }
+    html += '<button class="sb-drawer-action" onclick="sbResetProgress()">Reset walkthrough progress</button>';
     body.innerHTML = html;
   }
-
   window.sbOpenTour = function () {
     sbRenderTour();
     document.getElementById('sb-tour-sheet').classList.add('open');
@@ -10886,13 +10954,102 @@ function dbgCopyLast() {
   };
 
   /* ───────────────────────────────────────────────
-     4. Start up
+     5. First-launch layout tour (coachmarks)
      ─────────────────────────────────────────────── */
+  var SB_TOUR = [
+    { sel:null, title:'Welcome to the training sandbox',
+      text:'This is a safe copy of the billing app — nothing here reaches the real system. Here\u2019s a quick orientation to the layout. Tap <strong>Next</strong> to step through it.' },
+    { sel:'.nav', title:'The three main sections',
+      text:'<strong>Rounds</strong> is your patient list. <strong>Add Patient</strong> registers someone new or starts a consult. <strong>Recently Discharged</strong> holds patients sent home in the last 21 days.' },
+    { sel:'.doc-chip', title:'Sign in here',
+      text:'Tap this chip and choose your name. Every claim is attributed to the signed-in physician — always sign in before billing.' },
+    { sel:'#list-sel-bar', title:'List controls',
+      text:'On the Rounds list: switch between <strong>On Service</strong> and <strong>Off Service</strong> patients, search the list, and toggle <strong>Geographic</strong> (grouped by ward) or <strong>Alphabetical</strong> order.' },
+    { sel:'#hdr-date', title:'Today\u2019s billing total',
+      text:'The date sits here. Once you bill anything, a green running total appears alongside it — tap that total to review every claim entered today.' },
+    { sel:'#sb-tour-fab', title:'Your training tools',
+      text:'The <strong>Guided Walkthrough</strong> takes you through the billing workflow step by step and saves your progress. The <strong>Guide</strong> button on the right gives help for whichever screen you\u2019re on. Either button can be minimized if it covers something you need.' }
+  ];
+  var _tourIdx = 0, _tourReplay = false;
+
+  function sbPositionCoach(rect, visible) {
+    var coach = document.getElementById('sb-coach');
+    coach.classList.remove('centered');
+    if (!visible) { coach.classList.add('centered'); coach.style.left = ''; coach.style.top = ''; return; }
+    var cw = coach.offsetWidth, ch = coach.offsetHeight;
+    var vw = window.innerWidth, vh = window.innerHeight, gap = 12, top;
+    if (rect.bottom + gap + ch <= vh - 8)      top = rect.bottom + gap;
+    else if (rect.top - gap - ch >= 8)         top = rect.top - gap - ch;
+    else                                       top = Math.max(8, vh - ch - 8);
+    var left = rect.left + rect.width / 2 - cw / 2;
+    left = Math.max(12, Math.min(left, vw - cw - 12));
+    coach.style.left = left + 'px';
+    coach.style.top  = top + 'px';
+  }
+  function sbTourRender() {
+    var step  = SB_TOUR[_tourIdx];
+    var mask  = document.getElementById('sb-tour-mask');
+    var spot  = document.getElementById('sb-spot');
+    var coach = document.getElementById('sb-coach');
+    mask.classList.add('on');
+    var el   = step.sel ? document.querySelector(step.sel) : null;
+    var rect = el ? el.getBoundingClientRect() : null;
+    var visible = !!(rect && rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight);
+    if (visible) {
+      var pad = 6;
+      spot.classList.remove('hidden');
+      mask.classList.remove('sb-mask-dim');
+      spot.style.top    = (rect.top - pad) + 'px';
+      spot.style.left   = (rect.left - pad) + 'px';
+      spot.style.width  = (rect.width + pad * 2) + 'px';
+      spot.style.height = (rect.height + pad * 2) + 'px';
+    } else {
+      spot.classList.add('hidden');
+      mask.classList.add('sb-mask-dim');
+    }
+    var isLast = _tourIdx === SB_TOUR.length - 1;
+    coach.innerHTML =
+      '<div class="sb-coach-step">Step ' + (_tourIdx + 1) + ' of ' + SB_TOUR.length + '</div>' +
+      '<div class="sb-coach-title">' + step.title + '</div>' +
+      '<div class="sb-coach-text">' + step.text + '</div>' +
+      '<div class="sb-coach-actions">' +
+        (_tourIdx > 0
+          ? '<button class="sb-coach-btn" onclick="sbTourPrev()">Back</button>'
+          : '<button class="sb-coach-skip" onclick="sbTourEnd()">Skip tour</button>') +
+        '<div class="sb-coach-spacer"></div>' +
+        '<button class="sb-coach-btn primary" onclick="sbTourNext()">' + (isLast ? 'Done' : 'Next') + '</button>' +
+      '</div>';
+    sbPositionCoach(rect, visible);
+  }
+  function _tourResize() { if (document.getElementById('sb-tour-mask').classList.contains('on')) sbTourRender(); }
+  window.sbTourNext = function () {
+    if (_tourIdx < SB_TOUR.length - 1) { _tourIdx++; sbTourRender(); }
+    else sbTourEnd();
+  };
+  window.sbTourPrev = function () { if (_tourIdx > 0) { _tourIdx--; sbTourRender(); } };
+  window.sbTourEnd = function () {
+    document.getElementById('sb-tour-mask').classList.remove('on');
+    window.removeEventListener('resize', _tourResize);
+    sbSave(LS_TOURSEEN, true);
+    if (!_tourReplay) setTimeout(function () { sbOpenTour(); }, 320);
+  };
+  window.sbNavTourStart = function (replay) {
+    _tourReplay = !!replay;
+    _tourIdx = 0;
+    if (typeof nav === 'function') { try { nav(0, document.querySelectorAll('.nb')[0]); } catch (e) {} }
+    window.addEventListener('resize', _tourResize);
+    sbTourRender();
+  };
+
+  /* ───────────────────────────────────────────────
+     6. Start up
+     ─────────────────────────────────────────────── */
+  sbApplyFabMin();
   sbUpdateCount();
   setTimeout(function () {
     sbInitSeedWards();
     sbCheckProgress();
-    sbOpenTour();           /* one-time onboarding nudge */
+    if (!sbLoad(LS_TOURSEEN)) sbNavTourStart(false);
   }, 1600);
   setInterval(sbCheckProgress, 1800);
 })();
