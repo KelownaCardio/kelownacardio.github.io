@@ -197,7 +197,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="KGH Cards">
 <meta name="theme-color" content="#1a5fa8">
-<link rel="apple-touch-icon" href="icon-192.svg">
+<link rel="apple-touch-icon" href="icon.png">
 <style>
 :root {
   --bg:#f5f4f7; --surface:#fff; --surface2:#f0eff5;
@@ -2130,11 +2130,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.92-2026-05-26-textmonth-dob-norm-no-false-wifi-banner';
+var BUILD_ID    = 'v3.91-2026-05-26-dob-format-push-reject-orphan-tag';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.92';
+var APP_VERSION = 'v3.91';
 var APP_BUILT   = '2026-05-26';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -2664,10 +2664,7 @@ async function push(action, body) {
         delete window._pendingPush[body.id];
       }
       console.warn('push rejected by server — ' + action + ': ' + window._lastPushError);
-      // Connection is fine — we got a clean 200 + JSON. This is a data
-      // rejection, not a connectivity failure, so do NOT raise the wifi
-      // banner; the caller surfaces the specific error to the user.
-      setSyncState('synced');
+      setSyncState('error');
       return false;
     }
     window._lastPushError = null;
@@ -2701,10 +2698,7 @@ function easterDate(y) {
 function bcStatHolidays(year) {
   var y = year;
   function nthMon(n, m) { var d=new Date(y,m,1); d.setDate(1+(8-d.getDay())%7+(n-1)*7); return d; }
-  // Victoria Day = the Monday STRICTLY BEFORE May 25. Start the search at
-  // day-1 so a year where May 25 itself is a Monday (e.g. 2026) correctly
-  // rolls back to the prior Monday instead of returning May 25.
-  function monBefore(m, day) { var d=new Date(y,m,day-1); while(d.getDay()!==1) d.setDate(d.getDate()-1); return d; }
+  function monBefore(m, day) { var d=new Date(y,m,day); while(d.getDay()!==1) d.setDate(d.getDate()-1); return d; }
   var easter = easterDate(y);
   var goodFri = new Date(easter); goodFri.setDate(easter.getDate()-2);
   var easterMon = new Date(easter); easterMon.setDate(easter.getDate()+1);
@@ -2728,18 +2722,14 @@ function bcStatHolidays(year) {
 }
 
 function isBCStat(dateStr) {
-  // 'T12:00:00' forces LOCAL-time parsing — a bare ISO date string
-  // (YYYY-MM-DD) is otherwise parsed as UTC midnight, which lands on the
-  // previous calendar day in Vancouver and shifts the weekday by one.
-  var d = new Date(dateStr + 'T12:00:00');
+  var d = new Date(dateStr);
   var key = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
   return bcStatHolidays(d.getFullYear()).indexOf(key) !== -1;
 }
 
 function isWeekendOrStat(dateStr) {
   if (!dateStr) return false;
-  // 'T12:00:00' forces LOCAL-time parsing — see isBCStat note above.
-  var d = new Date(dateStr + 'T12:00:00'); var dow = d.getDay();
+  var d = new Date(dateStr); var dow = d.getDay();
   return dow === 0 || dow === 6 || isBCStat(dateStr);
 }
 
@@ -5350,18 +5340,6 @@ function fmtClaimDate(d) {
   if (d instanceof Date && !isNaN(d)) {
     return pad(d.getDate()) + '/' + pad(d.getMonth()+1) + '/' + d.getFullYear();
   }
-  // v3.92: named-month dates — "18 Jan 1944", "18/Jan/1944", "18-January-1944".
-  // The month is spelled out, so this is unambiguous (no day/month inference) —
-  // safe to normalise to DD/MM/YYYY. Both OCR display formatting and manual
-  // entry following the "DD/MMM/YYYY" field hint produce this shape.
-  if (typeof d === 'string') {
-    var _tm = d.trim().match(/^(\d{1,2})[\s\/.\-]+([A-Za-z]{3,9})[\s\/.\-]+(\d{4})$/);
-    if (_tm) {
-      var _mon = _tm[2].charAt(0).toUpperCase() + _tm[2].slice(1,3).toLowerCase();
-      var _mi  = _MONTHS.indexOf(_mon);
-      if (_mi !== -1) return pad(parseInt(_tm[1],10)) + '/' + pad(_mi+1) + '/' + _tm[3];
-    }
-  }
   // Unknown format — return as-is rather than risk MM/DD mis-parse via new Date(string)
   return String(d);
 }
@@ -7091,7 +7069,7 @@ async function apSubmit(addToList, _skipDupCheck) {
   var p = {
     id: 'p' + Date.now(), fac: 'OA040', roundedToday: null,
     last: fmtName(last), first: fmtName(gv('f-first')),
-    phn: phn, dob: fmtClaimDate(gv('f-dob')), sex: gv('f-sex'),
+    phn: phn, dob: gv('f-dob'), sex: gv('f-sex'),
     refby:     gv('cb-refby') || gv('oc-refby'),
     refbyName: gv('cb-refby-name') || gv('oc-refby-name'),
     icd: icd,
@@ -9328,10 +9306,7 @@ function confirmMediteachImport() {
       role:        p._role || 'consultant',
       icd:         p._icd,
       roundedToday:null,
-      mrp:         p._mrp || 'Other',
-      createdBy:   'Meditech import',
-      createdAt:   new Date().toISOString(),
-      addedVia:    'meditech'
+      mrp:         p._mrp || 'Other'
     };
     st.patients.push(newPt);
     if (SHEETS_URL) push('savePatient', newPt);
