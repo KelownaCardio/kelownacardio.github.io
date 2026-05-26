@@ -558,7 +558,10 @@ function confirmMediteachImport() {
       role:        p._role || 'consultant',
       icd:         p._icd,
       roundedToday:null,
-      mrp:         p._mrp || 'Other'
+      mrp:         p._mrp || 'Other',
+      createdBy:   'Meditech import',
+      createdAt:   new Date().toISOString(),
+      addedVia:    'meditech'
     };
     st.patients.push(newPt);
     if (SHEETS_URL) push('savePatient', newPt);

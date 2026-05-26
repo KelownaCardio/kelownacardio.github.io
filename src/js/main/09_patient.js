@@ -459,7 +459,8 @@ async function apSubmit(addToList, _skipDupCheck) {
     refbyName: gv('cb-refby-name') || gv('oc-refby-name'),
     icd: icd,
     createdBy: (st.doc && st.doc.alias) || '',
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    addedVia:  'app'
   };
 
   if (addToList) {
