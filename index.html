@@ -7054,7 +7054,8 @@ async function apSubmit(addToList, _skipDupCheck) {
     refbyName: gv('cb-refby-name') || gv('oc-refby-name'),
     icd: icd,
     createdBy: (st.doc && st.doc.alias) || '',
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    addedVia:  'app'
   };
 
   if (addToList) {
@@ -9283,7 +9284,10 @@ function confirmMediteachImport() {
       role:        p._role || 'consultant',
       icd:         p._icd,
       roundedToday:null,
-      mrp:         p._mrp || 'Other'
+      mrp:         p._mrp || 'Other',
+      createdBy:   'Meditech import',
+      createdAt:   new Date().toISOString(),
+      addedVia:    'meditech'
     };
     st.patients.push(newPt);
     if (SHEETS_URL) push('savePatient', newPt);
