@@ -576,6 +576,7 @@ function clearAddForm() {
 }
 
 function resetPhotoZone() {
+  dismissExistingPatientBanner();
   document.getElementById('photo-zone').innerHTML =
     '<svg style="width:26px;height:26px;stroke:var(--text3);fill:none;stroke-width:1.5" viewBox="0 0 24 24">' +
       '<path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>' +
@@ -691,6 +692,7 @@ function handleStickerPhoto(inp) {
 }
 
 function processStickerOCR(croppedDataUrl, bar) {
+  dismissExistingPatientBanner();
   var pz = document.getElementById('photo-zone');
   if (pz) {
     pz.innerHTML = '<img src="' + croppedDataUrl + '" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;display:block">';
@@ -757,17 +759,26 @@ function sendToAppsScriptOCR(b64, mediaType, bar) {
   if (bar) bar.textContent = 'Extracting (via Apps Script)…';
 
   var STICKER_PROMPT =
-    'Hospital patient sticker from Kelowna General Hospital (KGH). ' +
-    'Extract the printed fields from the sticker ONLY — ignore any handwriting.\n\n' +
+    'Hospital patient sticker or Meditech chart header from Kelowna ' +
+    'General Hospital (KGH). Extract the printed fields ONLY — ignore ' +
+    'any handwriting.\n\n' +
     'Return a single JSON object with exactly these fields:\n' +
-    '  last, first, phn, dob, sex, mrp, admitDate\n\n' +
+    '  last, first, phn, dob, sex, mrp, admitDate, locationCode, roomBed\n\n' +
     'Rules:\n' +
     '  last / first  — from "Last,First" name line\n' +
     '  phn           — the HCN number (10 digits after "HCN")\n' +
     '  dob           — date after "DOB", format DD Mon YYYY e.g. "26 Oct 1958"\n' +
     '  sex           — M or F (from "L:M" or "L:F" field, or "Sex: M/F")\n' +
     '  mrp           — text after "MRP" e.g. "CardiologyMRP,KGH Kelowna"\n' +
-    '  admitDate     — date after "ADM", same format as dob\n\n' +
+    '  admitDate     — date after "ADM", same format as dob\n' +
+    '  locationCode  — ward / unit on the admission line, e.g. "KELKGHS2S",\n' +
+    '                  "KELKGHICSI", or worded forms like\n' +
+    '                  "KGH Emergency Department". Blank if not shown.\n' +
+    '  roomBed       — room-bed token beside it, e.g. "KGHS0221-A",\n' +
+    '                  "KGHI2607-A", "KGH-Main-7". Blank if not shown.\n\n' +
+    'On a Meditech chart header the location is one line, e.g.\n' +
+    '  "ADM ACIN, KELKGHS2S  KGHS0221 -A"\n' +
+    '  → locationCode "KELKGHS2S", roomBed "KGHS0221-A".\n' +
     'Return ONLY valid JSON, no markdown, no explanation.';
 
   // Step 1: get API key from Apps Script
@@ -1080,6 +1091,16 @@ function handleOCRResult(data, bar) {
     catch (e) { if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'Bad JSON in response'; } return; }
   }
 
+  // Meditech chart headers carry a location line ("ADM …, <unit> <room-bed>")
+  // that single-photo OCR now returns as locationCode + roomBed. Decode it
+  // with the shared parseLocCode() — fill ward/room only when OCR did not
+  // already supply them and the decode is meaningful.
+  if ((p.locationCode || p.roomBed) && typeof parseLocCode === 'function') {
+    var _loc = parseLocCode(p.locationCode || '', p.roomBed || '');
+    if (!p.ward && _loc.ward && _loc.ward !== 'OTHER') p.ward = _loc.ward;
+    if (!p.room && _loc.room) p.room = _loc.room;
+  }
+
   // Persist the full OCR result for two purposes:
   //   1. window._lastOCR — debug from console: console.log(window._lastOCR._meta)
   //   2. window._ocrOriginal — snapshot of what OCR produced, used by
@@ -1140,6 +1161,65 @@ function handleOCRResult(data, bar) {
     else if (p._engine === 'mlkit')     engineTag = '📱 ';
     bar.textContent = engineTag + '✓ Extracted: ' + (p.last||'?') + ', ' + (p.first||'?') + (p.phn ? ' · ' + p.phn : '');
   }
+
+  // ── Existing-patient fast-path ──────────────────────────────────
+  // If the sticker PHN already matches a patient in the database, show a
+  // banner offering Restore / Go-to-patient so the doctor can skip
+  // re-entering the whole form.
+  var _ocrPhn = String(p.phn || '').replace(/\D/g, '').slice(0, 10);
+  if (_ocrPhn.length === 10 && typeof st !== 'undefined' && st.patients) {
+    var _existing = st.patients.filter(function(x) {
+      return x && String(x.phn || '').replace(/\D/g, '').slice(0, 10) === _ocrPhn;
+    })[0];
+    if (_existing) showExistingPatientBanner(_existing);
+  }
+}
+
+// ── Existing-patient banner (sticker fast-path) ─────────────────────
+// Rendered into the Add Patient pane when an OCR'd sticker PHN matches a
+// patient already in st.patients. Discharged → offer Restore (reuses the
+// On/Off Service chooser). Still on a list → offer to jump to them.
+function showExistingPatientBanner(match) {
+  dismissExistingPatientBanner();
+  var bar = document.getElementById('ocr-bar');
+  if (!bar || !bar.parentNode) return;
+
+  var nameStr = ((match.last || '') + ', ' + (match.first || '')).replace(/^,\s*|,\s*$/g, '');
+  var discharged = (typeof isDischarged === 'function') ? isDischarged(match) : !!match.discharged;
+
+  var div = document.createElement('div');
+  div.id = 'existing-pt-banner';
+  div.style.cssText = 'margin-top:6px;padding:10px;border-radius:8px;' +
+    'background:var(--surface2);border:1px solid var(--border2)';
+
+  if (discharged) {
+    var detail = esc(nameStr) + (match.phn ? ' · ' + esc(String(match.phn)) : '') + ' · discharged';
+    div.innerHTML =
+      '<div style="font-weight:600;margin-bottom:4px">Patient already exists in Database</div>' +
+      '<div style="font-size:12px;color:var(--text2);margin-bottom:8px">' + detail + '</div>' +
+      '<button class="btn btn-p" style="margin:0" data-pid="' + esc(match.id) + '" ' +
+        'onclick="dismissExistingPatientBanner();restorePatient(this.getAttribute(\'data-pid\'))">' +
+        '↩ Restore to list</button>';
+  } else {
+    var wardStr = match.ward ? ((typeof wardLabel === 'function' && wardLabel(match.ward)) || match.ward) : '';
+    div.innerHTML =
+      '<div style="font-weight:600;margin-bottom:4px">Patient already on the list</div>' +
+      '<div style="font-size:12px;color:var(--text2);margin-bottom:8px">' +
+        esc(nameStr) + (wardStr ? ' — ' + esc(wardStr) : '') + '</div>' +
+      '<button class="btn btn-p" style="margin:0" data-pid="' + esc(match.id) + '" ' +
+        'onclick="dismissExistingPatientBanner();goToExistingPatient(this.getAttribute(\'data-pid\'))">' +
+        'Go to patient</button>';
+  }
+  bar.parentNode.insertBefore(div, bar.nextSibling);
+}
+
+function dismissExistingPatientBanner() {
+  var el = document.getElementById('existing-pt-banner');
+  if (el && el.parentNode) el.parentNode.removeChild(el);
+}
+
+function goToExistingPatient(pid) {
+  if (typeof openPatientSummary === 'function') openPatientSummary(pid);
 }
 
 // ─── OCR corrections diff ──────────────────────────────────────────

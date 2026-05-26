@@ -165,7 +165,6 @@ function wardHtml(ward) {
   var h = '<div class="ward-block ' + wardCls + '">' +
     '<div class="ward-hdr">' +
       '<div class="ward-lbl">' + wdef.label + '</div>' +
-      '<button class="ward-add" onclick="openAddWard(this)" data-ward="' + ward + '">+ Add</button>' +
     '</div>';
 
   // Sort beds in ascending order.
@@ -271,8 +270,7 @@ function renderOff() {
   var off = st.patients.filter(function(p) { return p.list === 'off' && !p.discharged; });
 
   var h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">' +
-    '<div class="ward-lbl">Off Service</div>' +
-    '<button class="ward-add" onclick="openAddOff()">+ Add</button></div>';
+    '<div class="ward-lbl">Off Service</div></div>';
 
   // View toggle — named functions avoid inline quote issues
   var onAlpha = _offView === 'alpha'    ? ' on' : '';
