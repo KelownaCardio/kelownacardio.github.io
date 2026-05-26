@@ -216,6 +216,14 @@ v1.14 2026-05-14  ICD9_LOCAL rebuilt from the iClinic xlsx (385 codes,
                   is the single source of truth for the full 7,000+
                   iClinic codes.
 
+v1.25 2026-05-26  Victoria Day fix: monBefore() now starts the search at
+                  day-1, so a year where 25 May is itself a Monday (2026)
+                  rolls back to the true Victoria Day (18 May) instead of
+                  returning 25 May. isBCStat/isWeekendOrStat already had the
+                  T12:00:00 local-parse fix. Matches index.html v3.94.
+                  (Note: the previous v1.24 was an audit-trail change; a
+                  separate Victoria-Day v1.24 from another chat never
+                  shipped — this v1.25 is the one that carries the fix.)
 v1.24 2026-05-25  Audit trail: buildPatientsFromClaims now stamps
                   createdBy='Upload', createdAt, addedVia='upload' on
                   every patient row built from imported claims, so
@@ -528,7 +536,7 @@ summary{font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;padding
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:8px">
     <div class="hdr-title">KGH Historical Billing</div>
-    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.24</div>
+    <div style="font-size:10px;color:var(--text3);font-family:ui-monospace,monospace">v1.25</div>
   </div>
   <div class="hdr-sub" id="hdr-sub">Single card mode</div>
 </div>
@@ -1672,7 +1680,7 @@ function easterDate(y) {
 function bcStatHolidays(year) {
   var y = year;
   function nthMon(n, m) { var d=new Date(y,m,1); d.setDate(1+(8-d.getDay())%7+(n-1)*7); return d; }
-  function monBefore(m, day) { var d=new Date(y,m,day); while(d.getDay()!==1) d.setDate(d.getDate()-1); return d; }
+  function monBefore(m, day) { var d=new Date(y,m,day-1); while(d.getDay()!==1) d.setDate(d.getDate()-1); return d; }
   var easter = easterDate(y);
   var goodFri = new Date(easter); goodFri.setDate(easter.getDate()-2);
   var easterMon = new Date(easter); easterMon.setDate(easter.getDate()+1);
