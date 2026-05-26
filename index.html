@@ -2130,7 +2130,7 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.92-2026-05-26-textmonth-dob-norm-no-false-wifi-banner';
+var BUILD_ID    = 'v3.92-2026-05-26-victoria-day-ward-add-sticker-match';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
@@ -2664,10 +2664,7 @@ async function push(action, body) {
         delete window._pendingPush[body.id];
       }
       console.warn('push rejected by server — ' + action + ': ' + window._lastPushError);
-      // Connection is fine — we got a clean 200 + JSON. This is a data
-      // rejection, not a connectivity failure, so do NOT raise the wifi
-      // banner; the caller surfaces the specific error to the user.
-      setSyncState('synced');
+      setSyncState('error');
       return false;
     }
     window._lastPushError = null;
@@ -2701,9 +2698,9 @@ function easterDate(y) {
 function bcStatHolidays(year) {
   var y = year;
   function nthMon(n, m) { var d=new Date(y,m,1); d.setDate(1+(8-d.getDay())%7+(n-1)*7); return d; }
-  // Victoria Day = the Monday STRICTLY BEFORE May 25. Start the search at
-  // day-1 so a year where May 25 itself is a Monday (e.g. 2026) correctly
-  // rolls back to the prior Monday instead of returning May 25.
+  // Victoria Day = the Monday STRICTLY BEFORE May 25. Search starts at
+  // day-1 so a year where May 25 is itself a Monday (e.g. 2026) rolls
+  // back to the prior Monday instead of returning May 25 itself.
   function monBefore(m, day) { var d=new Date(y,m,day-1); while(d.getDay()!==1) d.setDate(d.getDate()-1); return d; }
   var easter = easterDate(y);
   var goodFri = new Date(easter); goodFri.setDate(easter.getDate()-2);
@@ -2728,9 +2725,9 @@ function bcStatHolidays(year) {
 }
 
 function isBCStat(dateStr) {
-  // 'T12:00:00' forces LOCAL-time parsing — a bare ISO date string
-  // (YYYY-MM-DD) is otherwise parsed as UTC midnight, which lands on the
-  // previous calendar day in Vancouver and shifts the weekday by one.
+  // 'T12:00:00' forces LOCAL-time parsing — a bare YYYY-MM-DD string is
+  // otherwise parsed as UTC midnight, which in Vancouver lands on the
+  // previous calendar day and shifts the weekday by one.
   var d = new Date(dateStr + 'T12:00:00');
   var key = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
   return bcStatHolidays(d.getFullYear()).indexOf(key) !== -1;
@@ -2738,7 +2735,6 @@ function isBCStat(dateStr) {
 
 function isWeekendOrStat(dateStr) {
   if (!dateStr) return false;
-  // 'T12:00:00' forces LOCAL-time parsing — see isBCStat note above.
   var d = new Date(dateStr + 'T12:00:00'); var dow = d.getDay();
   return dow === 0 || dow === 6 || isBCStat(dateStr);
 }
@@ -3335,7 +3331,6 @@ function wardHtml(ward) {
   var h = '<div class="ward-block ' + wardCls + '">' +
     '<div class="ward-hdr">' +
       '<div class="ward-lbl">' + wdef.label + '</div>' +
-      '<button class="ward-add" onclick="openAddWard(this)" data-ward="' + ward + '">+ Add</button>' +
     '</div>';
 
   // Sort beds in ascending order.
@@ -3441,8 +3436,7 @@ function renderOff() {
   var off = st.patients.filter(function(p) { return p.list === 'off' && !p.discharged; });
 
   var h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">' +
-    '<div class="ward-lbl">Off Service</div>' +
-    '<button class="ward-add" onclick="openAddOff()">+ Add</button></div>';
+    '<div class="ward-lbl">Off Service</div></div>';
 
   // View toggle — named functions avoid inline quote issues
   var onAlpha = _offView === 'alpha'    ? ' on' : '';
@@ -5350,18 +5344,6 @@ function fmtClaimDate(d) {
   if (d instanceof Date && !isNaN(d)) {
     return pad(d.getDate()) + '/' + pad(d.getMonth()+1) + '/' + d.getFullYear();
   }
-  // v3.92: named-month dates — "18 Jan 1944", "18/Jan/1944", "18-January-1944".
-  // The month is spelled out, so this is unambiguous (no day/month inference) —
-  // safe to normalise to DD/MM/YYYY. Both OCR display formatting and manual
-  // entry following the "DD/MMM/YYYY" field hint produce this shape.
-  if (typeof d === 'string') {
-    var _tm = d.trim().match(/^(\d{1,2})[\s\/.\-]+([A-Za-z]{3,9})[\s\/.\-]+(\d{4})$/);
-    if (_tm) {
-      var _mon = _tm[2].charAt(0).toUpperCase() + _tm[2].slice(1,3).toLowerCase();
-      var _mi  = _MONTHS.indexOf(_mon);
-      if (_mi !== -1) return pad(parseInt(_tm[1],10)) + '/' + pad(_mi+1) + '/' + _tm[3];
-    }
-  }
   // Unknown format — return as-is rather than risk MM/DD mis-parse via new Date(string)
   return String(d);
 }
@@ -7091,7 +7073,7 @@ async function apSubmit(addToList, _skipDupCheck) {
   var p = {
     id: 'p' + Date.now(), fac: 'OA040', roundedToday: null,
     last: fmtName(last), first: fmtName(gv('f-first')),
-    phn: phn, dob: fmtClaimDate(gv('f-dob')), sex: gv('f-sex'),
+    phn: phn, dob: gv('f-dob'), sex: gv('f-sex'),
     refby:     gv('cb-refby') || gv('oc-refby'),
     refbyName: gv('cb-refby-name') || gv('oc-refby-name'),
     icd: icd,
@@ -7213,6 +7195,7 @@ function clearAddForm() {
 }
 
 function resetPhotoZone() {
+  dismissExistingPatientBanner();
   document.getElementById('photo-zone').innerHTML =
     '<svg style="width:26px;height:26px;stroke:var(--text3);fill:none;stroke-width:1.5" viewBox="0 0 24 24">' +
       '<path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>' +
@@ -7328,6 +7311,7 @@ function handleStickerPhoto(inp) {
 }
 
 function processStickerOCR(croppedDataUrl, bar) {
+  dismissExistingPatientBanner();
   var pz = document.getElementById('photo-zone');
   if (pz) {
     pz.innerHTML = '<img src="' + croppedDataUrl + '" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;display:block">';
@@ -7777,6 +7761,65 @@ function handleOCRResult(data, bar) {
     else if (p._engine === 'mlkit')     engineTag = '📱 ';
     bar.textContent = engineTag + '✓ Extracted: ' + (p.last||'?') + ', ' + (p.first||'?') + (p.phn ? ' · ' + p.phn : '');
   }
+
+  // ── Existing-patient fast-path ──────────────────────────────────
+  // If the sticker PHN already matches a patient in the database, show a
+  // banner offering Restore / Go-to-patient so the doctor can skip
+  // re-entering the whole form.
+  var _ocrPhn = String(p.phn || '').replace(/\D/g, '').slice(0, 10);
+  if (_ocrPhn.length === 10 && typeof st !== 'undefined' && st.patients) {
+    var _existing = st.patients.filter(function(x) {
+      return x && String(x.phn || '').replace(/\D/g, '').slice(0, 10) === _ocrPhn;
+    })[0];
+    if (_existing) showExistingPatientBanner(_existing);
+  }
+}
+
+// ── Existing-patient banner (sticker fast-path) ─────────────────────
+// Rendered into the Add Patient pane when an OCR'd sticker PHN matches a
+// patient already in st.patients. Discharged → offer Restore (reuses the
+// On/Off Service chooser). Still on a list → offer to jump to them.
+function showExistingPatientBanner(match) {
+  dismissExistingPatientBanner();
+  var bar = document.getElementById('ocr-bar');
+  if (!bar || !bar.parentNode) return;
+
+  var nameStr = ((match.last || '') + ', ' + (match.first || '')).replace(/^,\s*|,\s*$/g, '');
+  var discharged = (typeof isDischarged === 'function') ? isDischarged(match) : !!match.discharged;
+
+  var div = document.createElement('div');
+  div.id = 'existing-pt-banner';
+  div.style.cssText = 'margin-top:6px;padding:10px;border-radius:8px;' +
+    'background:var(--surface2);border:1px solid var(--border2)';
+
+  if (discharged) {
+    var detail = esc(nameStr) + (match.phn ? ' · ' + esc(String(match.phn)) : '') + ' · discharged';
+    div.innerHTML =
+      '<div style="font-weight:600;margin-bottom:4px">Patient already exists in Database</div>' +
+      '<div style="font-size:12px;color:var(--text2);margin-bottom:8px">' + detail + '</div>' +
+      '<button class="btn btn-p" style="margin:0" data-pid="' + esc(match.id) + '" ' +
+        'onclick="dismissExistingPatientBanner();restorePatient(this.getAttribute(\'data-pid\'))">' +
+        '↩ Restore to list</button>';
+  } else {
+    var wardStr = match.ward ? ((typeof wardLabel === 'function' && wardLabel(match.ward)) || match.ward) : '';
+    div.innerHTML =
+      '<div style="font-weight:600;margin-bottom:4px">Patient already on the list</div>' +
+      '<div style="font-size:12px;color:var(--text2);margin-bottom:8px">' +
+        esc(nameStr) + (wardStr ? ' — ' + esc(wardStr) : '') + '</div>' +
+      '<button class="btn btn-p" style="margin:0" data-pid="' + esc(match.id) + '" ' +
+        'onclick="dismissExistingPatientBanner();goToExistingPatient(this.getAttribute(\'data-pid\'))">' +
+        'Go to patient</button>';
+  }
+  bar.parentNode.insertBefore(div, bar.nextSibling);
+}
+
+function dismissExistingPatientBanner() {
+  var el = document.getElementById('existing-pt-banner');
+  if (el && el.parentNode) el.parentNode.removeChild(el);
+}
+
+function goToExistingPatient(pid) {
+  if (typeof openPatientSummary === 'function') openPatientSummary(pid);
 }
 
 // ─── OCR corrections diff ──────────────────────────────────────────
@@ -8773,78 +8816,34 @@ document.addEventListener('click', function(e) {
 // 13_meditech.js — Meditech rounds list bulk photo import
 // ═══════════════════════════════════════════════════════
 
-// ── KGH location decoder ───────────────────────────────────────────
-// SINGLE SOURCE OF TRUTH — this block is identical in index.html,
-// 13_meditech.js and import.html. Keep all three copies in sync.
-//
-//   locCode : Meditech unit code (e.g. "KELKGHS2S", "KELKGHICSI") or a
-//             worded unit name (e.g. "KGH Emergency Department").
-//   roomBed : the room-bed token (e.g. "KGHS0221-A", "KGHI2607-A").
-//
-// Returns { ward, room, suspect }:
-//   ward    — a key in WARDS, or 'OTHER' if the code is unrecognised.
-//   room    — matches the WARDS room presets: full room number for ward
-//             beds ("221A"); bed number only for CCU/CSICU ("7").
-//   suspect — true when a CCU bed decodes outside 1-8 (needs review).
-var LOC_MAP = {
-  SCCU:'CCU',    CCU:'CCU',
-  S2W:'2W',      S2S:'2S',
-  CSICU:'CSICU', ICSI:'CSICU',
-  ICUA:'ICUA',   ICUB:'ICUB',   ICUD:'ICUD',
-  R4A:'4A',      R4B:'4B',
-  R5A:'5A',      R5B:'5B',
-  C6W:'6W',
-  S3E:'3E',      S3W:'3W',       S3MU:'3MU',
-  S4E:'4E',      S4W:'4W',
-  CEOF:'ED',     CMT:'ED',       EMERG:'ED',
-  AREH:'REHAB',
-  C1C:'C1C',     SHAH:'HAH'
-};
-
-var CCU_MAX_BED = 8;   // KGH CCU has 8 beds
-
+// Decode Meditech location code + room-bed string into ward and room
 function parseLocCode(locCode, roomBed) {
-  var ward    = 'OTHER';
-  var room    = '';
-  var suspect = false;
-  var loc     = (locCode || '').toUpperCase();
+  var ward = 'OTHER';
+  var room = '';
+  var loc  = (locCode || '').toUpperCase();
 
-  for (var key in LOC_MAP) {
-    if (loc.indexOf(key) !== -1) { ward = LOC_MAP[key]; break; }
-  }
+  // CCU: KELKGHSCCU — must check before S2W/S2S since it contains neither
+  if      (loc.indexOf('SCCU') !== -1 || loc.indexOf('CCU') !== -1)  ward = 'CCU';
+  else if (loc.indexOf('S2W')  !== -1)                               ward = '2W';
+  else if (loc.indexOf('S2S')  !== -1)                               ward = '2S';
+  else if (loc.indexOf('CSICU')!== -1)                               ward = 'CSICU';
+  else if (loc.indexOf('ICUA') !== -1)                               ward = 'ICUA';
+  else if (loc.indexOf('ICUB') !== -1)                               ward = 'ICUB';
+  else if (loc.indexOf('ED')   !== -1 || loc.indexOf('EMERG') !== -1) ward = 'ED';
 
-  // Strip dashes / whitespace, then the building-wing prefix — KGHS
-  // (south tower / CCU), KGHI (ICU / CSICU), KGHR, KGHC, KGHAC — leaving
-  // the room-bed digits. (Chart headers print the token as "KGHS0221 -A".)
-  var rb = (roomBed || '').replace(/[\s-]/g, '').toUpperCase()
-                          .replace(/^KGH(AC|S|I|R|C)/, '');
-
-  if (ward === 'CCU' || ward === 'CSICU') {
-    // Critical-care beds — the last two digits are the bed number.
-    //   CCU   KGHS2502 -> 02 -> "2"      CSICU KGHI2607 -> 07 -> "7"
-    var n = parseInt(rb, 10);
-    if (!isNaN(n)) {
-      var bed = n % 100 || n;
-      room = String(bed);
-      if (ward === 'CCU' && (bed < 1 || bed > CCU_MAX_BED)) suspect = true;
-    }
-  } else if (ward === '2W' || ward === '2S') {
-    // Hallway beds: KGHSH2W-A/B -> rb "H2WA"/"H2WB"; KGHSH2S-A -> "H2SA"
-    var hall = rb.match(/^H\d[WS]([AB])$/);
-    if (hall) {
-      room = 'Hallway ' + hall[1];
-    } else {
-      // Standard rooms keep their full number so they match the WARDS
-      // room presets, e.g. KGHS0221-A -> "221A", KGHS0225-B -> "225B".
-      var m = rb.match(/^0*(\d+)([A-Z]?)$/);
-      if (m) room = m[1] + m[2];
-    }
+  // Parse room number
+  // CCU:  KGHS2502-A → bed = parseInt("2502") % 100 = 2
+  // Ward: KGHS0201-A → strip leading zeros → "201A"
+  var rb = (roomBed || '').replace(/-/g, '').toUpperCase().replace(/^KGHS/, '');
+  if (ward === 'CCU') {
+    var num = parseInt(rb, 10);
+    if (!isNaN(num)) room = String(num % 100);
   } else {
-    var m2 = rb.match(/^0*(\d+)([A-Z]?)$/);
-    if (m2) room = m2[1] + m2[2];
+    var m = rb.match(/^0*(\d+)([A-Z]?)$/);
+    if (m) room = m[1] + m[2];
   }
 
-  return { ward: ward, room: room, suspect: suspect };
+  return { ward:ward, room:room };
 }
 
 // ── Cardiology / Cardiac Surgery matcher constants ────
@@ -8953,7 +8952,6 @@ async function extractMediteachAI(dataUrl) {
             '  CCU  = KELKGHSCCU, rooms KGHS2502-A (2502 = Bed 2, 2506 = Bed 6 etc.)\n' +
             '  2W   = KELKGHS2W,  rooms KGHS0201-A to KGHS0213-A\n' +
             '  2S   = KELKGHS2S,  rooms KGHS0217-A to KGHS0234-B (225 and 226 have A and B)\n' +
-            '  CSICU= KELKGHICSI, rooms KGHI2607-A (2607 = Bed 7 etc.)\n' +
             '  Other location codes = off-service ward\n\n' +
             'Return ONLY a JSON array, no markdown, no explanation.'
           }
@@ -9373,10 +9371,7 @@ function confirmMediteachImport() {
       role:        p._role || 'consultant',
       icd:         p._icd,
       roundedToday:null,
-      mrp:         p._mrp || 'Other',
-      createdBy:   'Meditech import',
-      createdAt:   new Date().toISOString(),
-      addedVia:    'meditech'
+      mrp:         p._mrp || 'Other'
     };
     st.patients.push(newPt);
     if (SHEETS_URL) push('savePatient', newPt);
