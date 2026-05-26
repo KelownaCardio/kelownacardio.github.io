@@ -2132,11 +2132,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.95-2026-05-26-appscript-ocr-retry-each-scan-with-timeout';
+var BUILD_ID    = 'v3.96-2026-05-26-claim-edit-full-fee-picker';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.95';
+var APP_VERSION = 'v3.96';
 var APP_BUILT   = '2026-05-26';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -5478,6 +5478,101 @@ function parseDMYsafe(s) {
   return new Date(parseInt(p[2]), parseInt(p[1])-1, parseInt(p[0])).getTime();
 }
 
+// ── Edit-claim fee-code picker ──────────────────────────
+// A full search-as-you-type picker over the entire FEES catalogue, plus the
+// CCU_DAILY placeholder. Unlike the Other-claim card it imposes NO category
+// restrictions — consult, CCU and modifier codes are all selectable, because
+// editing a claim must be able to reach any code the claim could legitimately
+// carry. Replaces the old hard-coded 10-option <select>, which had no entry
+// for unlisted fees (e.g. 00751) and so let the browser default the <select>
+// to its first option (33010) — silently overwriting the real fee on save.
+//
+// Elements built into the Edit-claim modal by openClaimEdit():
+//   ce-fee          hidden input — selected fee code (read by saveClaimEdit)
+//   ce-fee-search   visible search input
+//   ce-fee-dd       results dropdown
+//   ce-fee-display  small confirmation line
+var CE_FEE_EXTRA = [
+  { code:'CCU_DAILY',
+    desc:'CCU day (placeholder — export bands to 1411/1421/1431)',
+    amount:'', cat:'CCU' }
+];
+
+// Whole searchable pool: every catalogued fee plus the CCU_DAILY placeholder.
+function ceFeePool() { return FEES.concat(CE_FEE_EXTRA); }
+
+// Resolve a stored fee code to display info. Falls back to LEGACY_FEE_LABELS,
+// then to the bare code — so a claim's current code is ALWAYS shown and can
+// never be dropped just because it is not in the active catalogue.
+function ceFeeInfo(code) {
+  var c = String(code || '').trim();
+  if (!c) return null;
+  var hit = ceFeePool().find(function(f) { return f.code === c; });
+  if (hit) return { code:c, desc:hit.desc || '', amount:hit.amount || '', cat:hit.cat || '' };
+  var legacy = (typeof LEGACY_FEE_LABELS !== 'undefined' && LEGACY_FEE_LABELS) ? LEGACY_FEE_LABELS[c] : '';
+  return { code:c, desc:legacy || ('Fee code ' + c), amount:'', cat:'' };
+}
+
+// Build the picker markup, pre-filled with the claim's current fee.
+function ceFeePickerHTML(currentCode) {
+  var info = ceFeeInfo(currentCode);
+  var searchVal = info ? (info.desc + ' (' + info.code + ')') : '';
+  return '<input id="ce-fee" type="hidden" value="' + esc(currentCode || '') + '">' +
+         '<input id="ce-fee-search" autocorrect="off" autocomplete="off" ' +
+           'placeholder="Search fee code or description…" value="' + esc(searchVal) + '" ' +
+           'oninput="ceFeeSearch(this.value)" onfocus="this.select();ceFeeSearch(\'\')">' +
+         '<div class="ref-dd" id="ce-fee-dd"></div>' +
+         '<div id="ce-fee-display" style="font-size:11px;color:var(--text2);margin-top:-4px;margin-bottom:6px"></div>';
+}
+
+var CE_FEE_CAT_COLORS = {
+  'Consult':'var(--blue-t)',   'Daily':'var(--blue-t)',     'Directive':'var(--amber-t)',
+  'Procedure':'var(--red-t)',  'Discharge':'var(--green-t)','CCU':'var(--red-t)',
+  'Modifier':'var(--text3)',   'Other':'var(--teal-t)'
+};
+
+// Populate the dropdown. Empty query => the full list, no truncation.
+function ceFeeSearch(query) {
+  var dd = document.getElementById('ce-fee-dd');
+  if (!dd) return;
+  var q = (query || '').toLowerCase().trim();
+  var pool = ceFeePool();
+  var matches = q.length === 0
+    ? pool.slice()
+    : pool.filter(function(f) {
+        return f.code.toLowerCase().indexOf(q) !== -1 ||
+               (f.desc || '').toLowerCase().indexOf(q) !== -1;
+      });
+  if (!matches.length) {
+    dd.innerHTML = '<div style="padding:8px 10px;font-size:12px;color:var(--text2)">No matching fee codes</div>';
+    dd.style.display = 'block';
+    return;
+  }
+  dd.innerHTML = matches.map(function(f) {
+    var col = CE_FEE_CAT_COLORS[f.cat] || 'var(--text2)';
+    var amt = f.amount ? '<span style="font-size:11px;font-weight:700;color:var(--text2);margin-left:auto;padding-left:8px">' + esc(f.amount) + '</span>' : '';
+    return '<div class="ref-dd-row" data-code="' + esc(f.code) + '" data-desc="' + esc(f.desc || '') + '" ' +
+      'onclick="ceFeeSelect(this.getAttribute(\'data-code\'),this.getAttribute(\'data-desc\'))" ' +
+      'style="display:flex;align-items:center;gap:4px">' +
+      '<span style="font-weight:700;color:' + col + ';margin-right:6px;min-width:62px">' + esc(f.code) + '</span>' +
+      '<span style="flex:1;min-width:0">' + esc(f.desc || '') + '</span>' +
+      (f.cat ? '<span style="font-size:10px;color:var(--text3);margin-left:6px">' + esc(f.cat) + '</span>' : '') +
+      amt +
+      '</div>';
+  }).join('');
+  dd.style.display = 'block';
+}
+
+// Commit a selection into the hidden input + search box.
+function ceFeeSelect(code, desc) {
+  var inp = document.getElementById('ce-fee');
+  if (inp) inp.value = code;
+  var search = document.getElementById('ce-fee-search');
+  if (search) search.value = (desc ? desc + ' ' : '') + '(' + code + ')';
+  var dd = document.getElementById('ce-fee-dd');
+  if (dd) { dd.innerHTML = ''; dd.style.display = 'none'; }
+}
+
 function openClaimEdit(btn) {
   var cid = btn.getAttribute('data-cid');
   var pid = btn.getAttribute('data-pid');
@@ -5485,24 +5580,7 @@ function openClaimEdit(btn) {
   var p   = getP(pid);
   if (!c) return;
 
-  var feeOptions = [
-    { code:'33010', label:'Full consultation (33010)' },
-    { code:'33012', label:'Limited consultation (33012)' },
-    { code:'33008', label:'Daily rounds / MRP (33008)' },
-    { code:'33006', label:'Directive visit (33006)' },
-    // v3.60: CCU daily placeholder restored — export consolidates to 1411/1421/1431.
-    { code:'CCU_DAILY', label:'CCU day (placeholder, export bands)' },
-    { code:'1411',  label:'CCU day 1 (1411)' },
-    { code:'1421',  label:'CCU days 2–7 (1421)' },
-    { code:'1431',  label:'CCU days 8–30 (1431)' },
-    { code:'78717', label:'Complex discharge (78717)' },
-    { code:'78720', label:'MOST advance care (78720)' },
-  ];
-
-  var feeSelect = '<select id="ce-fee">' +
-    feeOptions.map(function(f) {
-      return '<option value="' + f.code + '"' + (String(c.fee).trim() === f.code ? ' selected' : '') + '>' + f.label + '</option>';
-    }).join('') + '</select>';
+  var feePicker = ceFeePickerHTML(c.fee);
 
   var curDx = DIAGNOSES.find(function(d) { return d.code === c.icd; });
 
@@ -5536,7 +5614,7 @@ function openClaimEdit(btn) {
       '</div>' +
       '<label style="margin-top:7px">Performing physician</label>' +
       '<select id="ce-alias" style="margin-bottom:7px">' + docOptions + '</select>' +
-      '<label>Fee code</label>' + feeSelect +
+      '<label>Fee code</label>' + feePicker +
       '<label style="margin-top:10px">Referring MD</label>' +
       '<div style="position:relative">' +
       '<input id="ce-ref-search" value="' + esc(refLabel) + '" style="padding-right:32px" ' +
@@ -5578,7 +5656,9 @@ function saveClaimEdit(btn) {
   var p   = getP(pid);
   if (!c) return;
 
-  var newFee   = document.getElementById('ce-fee').value;
+  // Non-coercive: if the picker value is somehow blank, keep the claim's
+  // existing fee rather than overwriting it (never silently drop a fee).
+  var newFee   = ((document.getElementById('ce-fee') || {}).value || '').trim() || c.fee;
   var newIcd   = document.getElementById('ce-icd').value || c.icd;
   var newAlias = document.getElementById('ce-alias').value;
   var newDateISO = (document.getElementById('ce-date') || {}).value || '';
