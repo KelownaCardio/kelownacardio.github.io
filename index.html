@@ -2698,7 +2698,10 @@ function easterDate(y) {
 function bcStatHolidays(year) {
   var y = year;
   function nthMon(n, m) { var d=new Date(y,m,1); d.setDate(1+(8-d.getDay())%7+(n-1)*7); return d; }
-  function monBefore(m, day) { var d=new Date(y,m,day); while(d.getDay()!==1) d.setDate(d.getDate()-1); return d; }
+  // Victoria Day = the Monday STRICTLY BEFORE May 25. Start the search at
+  // day-1 so a year where May 25 itself is a Monday (e.g. 2026) correctly
+  // rolls back to the prior Monday instead of returning May 25.
+  function monBefore(m, day) { var d=new Date(y,m,day-1); while(d.getDay()!==1) d.setDate(d.getDate()-1); return d; }
   var easter = easterDate(y);
   var goodFri = new Date(easter); goodFri.setDate(easter.getDate()-2);
   var easterMon = new Date(easter); easterMon.setDate(easter.getDate()+1);
@@ -2722,14 +2725,18 @@ function bcStatHolidays(year) {
 }
 
 function isBCStat(dateStr) {
-  var d = new Date(dateStr);
+  // 'T12:00:00' forces LOCAL-time parsing — a bare ISO date string
+  // (YYYY-MM-DD) is otherwise parsed as UTC midnight, which lands on the
+  // previous calendar day in Vancouver and shifts the weekday by one.
+  var d = new Date(dateStr + 'T12:00:00');
   var key = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
   return bcStatHolidays(d.getFullYear()).indexOf(key) !== -1;
 }
 
 function isWeekendOrStat(dateStr) {
   if (!dateStr) return false;
-  var d = new Date(dateStr); var dow = d.getDay();
+  // 'T12:00:00' forces LOCAL-time parsing — see isBCStat note above.
+  var d = new Date(dateStr + 'T12:00:00'); var dow = d.getDay();
   return dow === 0 || dow === 6 || isBCStat(dateStr);
 }
 
@@ -9306,7 +9313,10 @@ function confirmMediteachImport() {
       role:        p._role || 'consultant',
       icd:         p._icd,
       roundedToday:null,
-      mrp:         p._mrp || 'Other'
+      mrp:         p._mrp || 'Other',
+      createdBy:   'Meditech import',
+      createdAt:   new Date().toISOString(),
+      addedVia:    'meditech'
     };
     st.patients.push(newPt);
     if (SHEETS_URL) push('savePatient', newPt);
