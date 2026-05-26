@@ -197,7 +197,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="KGH Cards">
 <meta name="theme-color" content="#1a5fa8">
-<link rel="apple-touch-icon" href="icon.png">
+<link rel="apple-touch-icon" href="icon-192.svg">
 <style>
 :root {
   --bg:#f5f4f7; --surface:#fff; --surface2:#f0eff5;
@@ -1250,8 +1250,6 @@ var WARDS = {
   REHAB:{ label:'Rehab',       list:'off', care:'directive', role:'consultant', rooms:[] },
   '6W': { label:'6W',          list:'off', care:'directive', role:'consultant', rooms:[] },
   PAR:  { label:'Centennial PAR', list:'off', care:'directive', role:'consultant', rooms:[] },
-  C1C:  { label:'C1C',         list:'off', care:'directive', role:'consultant', rooms:[] },
-  HAH:  { label:'HAH',         list:'off', care:'directive', role:'consultant', rooms:[] },
   OTHER:{ label:'Other',       list:'off', care:'directive', role:'consultant', rooms:[] }
 };
 
@@ -2132,7 +2130,7 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.92-2026-05-26-meditech-location-decoder';
+var BUILD_ID    = 'v3.92-2026-05-26-textmonth-dob-norm-no-false-wifi-banner';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
@@ -2666,7 +2664,10 @@ async function push(action, body) {
         delete window._pendingPush[body.id];
       }
       console.warn('push rejected by server — ' + action + ': ' + window._lastPushError);
-      setSyncState('error');
+      // Connection is fine — we got a clean 200 + JSON. This is a data
+      // rejection, not a connectivity failure, so do NOT raise the wifi
+      // banner; the caller surfaces the specific error to the user.
+      setSyncState('synced');
       return false;
     }
     window._lastPushError = null;
@@ -2700,7 +2701,10 @@ function easterDate(y) {
 function bcStatHolidays(year) {
   var y = year;
   function nthMon(n, m) { var d=new Date(y,m,1); d.setDate(1+(8-d.getDay())%7+(n-1)*7); return d; }
-  function monBefore(m, day) { var d=new Date(y,m,day); while(d.getDay()!==1) d.setDate(d.getDate()-1); return d; }
+  // Victoria Day = the Monday STRICTLY BEFORE May 25. Start the search at
+  // day-1 so a year where May 25 itself is a Monday (e.g. 2026) correctly
+  // rolls back to the prior Monday instead of returning May 25.
+  function monBefore(m, day) { var d=new Date(y,m,day-1); while(d.getDay()!==1) d.setDate(d.getDate()-1); return d; }
   var easter = easterDate(y);
   var goodFri = new Date(easter); goodFri.setDate(easter.getDate()-2);
   var easterMon = new Date(easter); easterMon.setDate(easter.getDate()+1);
@@ -2724,14 +2728,18 @@ function bcStatHolidays(year) {
 }
 
 function isBCStat(dateStr) {
-  var d = new Date(dateStr);
+  // 'T12:00:00' forces LOCAL-time parsing — a bare ISO date string
+  // (YYYY-MM-DD) is otherwise parsed as UTC midnight, which lands on the
+  // previous calendar day in Vancouver and shifts the weekday by one.
+  var d = new Date(dateStr + 'T12:00:00');
   var key = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
   return bcStatHolidays(d.getFullYear()).indexOf(key) !== -1;
 }
 
 function isWeekendOrStat(dateStr) {
   if (!dateStr) return false;
-  var d = new Date(dateStr); var dow = d.getDay();
+  // 'T12:00:00' forces LOCAL-time parsing — see isBCStat note above.
+  var d = new Date(dateStr + 'T12:00:00'); var dow = d.getDay();
   return dow === 0 || dow === 6 || isBCStat(dateStr);
 }
 
@@ -5342,6 +5350,18 @@ function fmtClaimDate(d) {
   if (d instanceof Date && !isNaN(d)) {
     return pad(d.getDate()) + '/' + pad(d.getMonth()+1) + '/' + d.getFullYear();
   }
+  // v3.92: named-month dates — "18 Jan 1944", "18/Jan/1944", "18-January-1944".
+  // The month is spelled out, so this is unambiguous (no day/month inference) —
+  // safe to normalise to DD/MM/YYYY. Both OCR display formatting and manual
+  // entry following the "DD/MMM/YYYY" field hint produce this shape.
+  if (typeof d === 'string') {
+    var _tm = d.trim().match(/^(\d{1,2})[\s\/.\-]+([A-Za-z]{3,9})[\s\/.\-]+(\d{4})$/);
+    if (_tm) {
+      var _mon = _tm[2].charAt(0).toUpperCase() + _tm[2].slice(1,3).toLowerCase();
+      var _mi  = _MONTHS.indexOf(_mon);
+      if (_mi !== -1) return pad(parseInt(_tm[1],10)) + '/' + pad(_mi+1) + '/' + _tm[3];
+    }
+  }
   // Unknown format — return as-is rather than risk MM/DD mis-parse via new Date(string)
   return String(d);
 }
@@ -7071,7 +7091,7 @@ async function apSubmit(addToList, _skipDupCheck) {
   var p = {
     id: 'p' + Date.now(), fac: 'OA040', roundedToday: null,
     last: fmtName(last), first: fmtName(gv('f-first')),
-    phn: phn, dob: gv('f-dob'), sex: gv('f-sex'),
+    phn: phn, dob: fmtClaimDate(gv('f-dob')), sex: gv('f-sex'),
     refby:     gv('cb-refby') || gv('oc-refby'),
     refbyName: gv('cb-refby-name') || gv('oc-refby-name'),
     icd: icd,
@@ -7374,26 +7394,17 @@ function sendToAppsScriptOCR(b64, mediaType, bar) {
   if (bar) bar.textContent = 'Extracting (via Apps Script)…';
 
   var STICKER_PROMPT =
-    'Hospital patient sticker or Meditech chart header from Kelowna ' +
-    'General Hospital (KGH). Extract the printed fields ONLY — ignore ' +
-    'any handwriting.\n\n' +
+    'Hospital patient sticker from Kelowna General Hospital (KGH). ' +
+    'Extract the printed fields from the sticker ONLY — ignore any handwriting.\n\n' +
     'Return a single JSON object with exactly these fields:\n' +
-    '  last, first, phn, dob, sex, mrp, admitDate, locationCode, roomBed\n\n' +
+    '  last, first, phn, dob, sex, mrp, admitDate\n\n' +
     'Rules:\n' +
     '  last / first  — from "Last,First" name line\n' +
     '  phn           — the HCN number (10 digits after "HCN")\n' +
     '  dob           — date after "DOB", format DD Mon YYYY e.g. "26 Oct 1958"\n' +
     '  sex           — M or F (from "L:M" or "L:F" field, or "Sex: M/F")\n' +
     '  mrp           — text after "MRP" e.g. "CardiologyMRP,KGH Kelowna"\n' +
-    '  admitDate     — date after "ADM", same format as dob\n' +
-    '  locationCode  — ward / unit on the admission line, e.g. "KELKGHS2S",\n' +
-    '                  "KELKGHICSI", or worded forms like\n' +
-    '                  "KGH Emergency Department". Blank if not shown.\n' +
-    '  roomBed       — room-bed token beside it, e.g. "KGHS0221-A",\n' +
-    '                  "KGHI2607-A", "KGH-Main-7". Blank if not shown.\n\n' +
-    'On a Meditech chart header the location is one line, e.g.\n' +
-    '  "ADM ACIN, KELKGHS2S  KGHS0221 -A"\n' +
-    '  → locationCode "KELKGHS2S", roomBed "KGHS0221-A".\n' +
+    '  admitDate     — date after "ADM", same format as dob\n\n' +
     'Return ONLY valid JSON, no markdown, no explanation.';
 
   // Step 1: get API key from Apps Script
@@ -7704,16 +7715,6 @@ function handleOCRResult(data, bar) {
     if (!match) { if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'No data in response'; } return; }
     try { p = JSON.parse(match[0]); }
     catch (e) { if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'Bad JSON in response'; } return; }
-  }
-
-  // Meditech chart headers carry a location line ("ADM …, <unit> <room-bed>")
-  // that single-photo OCR now returns as locationCode + roomBed. Decode it
-  // with the shared parseLocCode() — fill ward/room only when OCR did not
-  // already supply them and the decode is meaningful.
-  if ((p.locationCode || p.roomBed) && typeof parseLocCode === 'function') {
-    var _loc = parseLocCode(p.locationCode || '', p.roomBed || '');
-    if (!p.ward && _loc.ward && _loc.ward !== 'OTHER') p.ward = _loc.ward;
-    if (!p.room && _loc.room) p.room = _loc.room;
   }
 
   // Persist the full OCR result for two purposes:
@@ -9372,7 +9373,10 @@ function confirmMediteachImport() {
       role:        p._role || 'consultant',
       icd:         p._icd,
       roundedToday:null,
-      mrp:         p._mrp || 'Other'
+      mrp:         p._mrp || 'Other',
+      createdBy:   'Meditech import',
+      createdAt:   new Date().toISOString(),
+      addedVia:    'meditech'
     };
     st.patients.push(newPt);
     if (SHEETS_URL) push('savePatient', newPt);
