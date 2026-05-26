@@ -721,36 +721,29 @@ function processStickerOCR(croppedDataUrl, bar) {
 }
 
 // ── OCR routing ────────────────────────────────────────────────────
-// Priority:
+// Priority (cascades on failure, in this order):
 //   1. Apps Script → Anthropic  (works on hospital WiFi — no Cloudflare needed)
 //   2. Cloudflare Worker        (works off hospital WiFi)
 //   3. Tesseract / ML Kit       (last resort, offline)
 //
-// Session cache: _appsScriptOCRReachable, _cloudOCRReachable
-// Both reset to null on page load; set false on first failure so
-// subsequent scans skip straight to the next tier without probing.
+// Apps Script (Tier 1) is attempted on EVERY scan — there is no sticky
+// demotion for it. A transient blip on one scan no longer disables the
+// preferred path for the rest of the session. To keep that retry cheap,
+// sendToAppsScriptOCR bounds each step with a short timeout (see below).
+// _appsScriptOCRReachable is now only a status flag (last attempt
+// ok/failed) for the debug panel — it is not consulted for routing.
+//
+// _cloudOCRReachable retains its session-cache behaviour inside
+// sendToCloudflareOCR (Tier 2 unchanged).
 
 function sendToOCR(b64, mediaType, bar) {
   if (bar) bar.textContent = 'Extracting (' + Math.round(b64.length / 1024) + ' KB)…';
 
-  if (typeof window._appsScriptOCRReachable === 'undefined') window._appsScriptOCRReachable = null;
-  if (typeof window._cloudOCRReachable      === 'undefined') window._cloudOCRReachable      = null;
+  if (typeof window._cloudOCRReachable === 'undefined') window._cloudOCRReachable = null;
 
-  // Tier 1 — Apps Script → Anthropic
-  if (window._appsScriptOCRReachable !== false) {
-    sendToAppsScriptOCR(b64, mediaType, bar);
-    return;
-  }
-
-  // Tier 2 — Cloudflare Worker
-  if (window._cloudOCRReachable !== false) {
-    sendToCloudflareOCR(b64, mediaType, bar);
-    return;
-  }
-
-  // Tier 3 — Offline (Tesseract / ML Kit)
-  if (bar) bar.textContent = 'Extracting (offline)…';
-  runOfflineOCR(b64, mediaType, bar);
+  // Always start at Tier 1. On failure it cascades internally:
+  // Apps Script → Cloudflare → offline.
+  sendToAppsScriptOCR(b64, mediaType, bar);
 }
 
 // Tier 1: fetch API key from Apps Script, then call Anthropic directly.
@@ -781,8 +774,37 @@ function sendToAppsScriptOCR(b64, mediaType, bar) {
     '  → locationCode "KELKGHS2S", roomBed "KGHS0221-A".\n' +
     'Return ONLY valid JSON, no markdown, no explanation.';
 
-  // Step 1: get API key from Apps Script
-  fetch(SHEETS_URL + '?action=getAnthropicKey&key=' + SHARED_KEY, { redirect: 'follow' })
+  // Per-step timeouts. The Apps Script key fetch is bounded tight — if the
+  // network is bad it bails fast to Cloudflare. The Vision call gets a
+  // generous limit because a healthy scan legitimately takes several seconds.
+  var KEY_FETCH_TIMEOUT_MS = 5000;
+  var VISION_TIMEOUT_MS    = 15000;
+
+  // fetch() has no native timeout — bound each call with an AbortController.
+  function fetchWithTimeout(url, opts, ms, label) {
+    var ctrl  = new AbortController();
+    var timer = setTimeout(function() { ctrl.abort(); }, ms);
+    var o = opts || {};
+    o.signal = ctrl.signal;
+    return fetch(url, o).then(function(r) {
+      clearTimeout(timer);
+      return r;
+    }, function(err) {
+      clearTimeout(timer);
+      if (err && err.name === 'AbortError') {
+        throw new Error((label || 'request') + ' timed out after ' + ms + 'ms');
+      }
+      throw err;
+    });
+  }
+
+  // Step 1: get API key from Apps Script (short timeout)
+  fetchWithTimeout(
+    SHEETS_URL + '?action=getAnthropicKey&key=' + SHARED_KEY,
+    { redirect: 'follow' },
+    KEY_FETCH_TIMEOUT_MS,
+    'Apps Script key fetch'
+  )
     .then(function(r) {
       if (!r.ok) throw new Error('Apps Script key fetch: HTTP ' + r.status);
       return r.json();
@@ -792,8 +814,9 @@ function sendToAppsScriptOCR(b64, mediaType, bar) {
       var apiKey = j.key || '';
       if (!apiKey) throw new Error('No API key returned');
 
-      // Step 2: call Anthropic directly
-      return fetch('https://api.anthropic.com/v1/messages', {
+      // Step 2: call Anthropic directly (generous timeout — Vision is
+      // legitimately slow; a healthy scan can take several seconds).
+      return fetchWithTimeout('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -809,7 +832,7 @@ function sendToAppsScriptOCR(b64, mediaType, bar) {
             { type: 'text', text: STICKER_PROMPT }
           ]}]
         })
-      });
+      }, VISION_TIMEOUT_MS, 'Anthropic Vision call');
     })
     .then(function(r) {
       if (!r.ok) throw new Error('Anthropic HTTP ' + r.status);
