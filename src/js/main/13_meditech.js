@@ -3,34 +3,78 @@
 // 13_meditech.js — Meditech rounds list bulk photo import
 // ═══════════════════════════════════════════════════════
 
-// Decode Meditech location code + room-bed string into ward and room
+// ── KGH location decoder ───────────────────────────────────────────
+// SINGLE SOURCE OF TRUTH — this block is identical in index.html,
+// 13_meditech.js and import.html. Keep all three copies in sync.
+//
+//   locCode : Meditech unit code (e.g. "KELKGHS2S", "KELKGHICSI") or a
+//             worded unit name (e.g. "KGH Emergency Department").
+//   roomBed : the room-bed token (e.g. "KGHS0221-A", "KGHI2607-A").
+//
+// Returns { ward, room, suspect }:
+//   ward    — a key in WARDS, or 'OTHER' if the code is unrecognised.
+//   room    — matches the WARDS room presets: full room number for ward
+//             beds ("221A"); bed number only for CCU/CSICU ("7").
+//   suspect — true when a CCU bed decodes outside 1-8 (needs review).
+var LOC_MAP = {
+  SCCU:'CCU',    CCU:'CCU',
+  S2W:'2W',      S2S:'2S',
+  CSICU:'CSICU', ICSI:'CSICU',
+  ICUA:'ICUA',   ICUB:'ICUB',   ICUD:'ICUD',
+  R4A:'4A',      R4B:'4B',
+  R5A:'5A',      R5B:'5B',
+  C6W:'6W',
+  S3E:'3E',      S3W:'3W',       S3MU:'3MU',
+  S4E:'4E',      S4W:'4W',
+  CEOF:'ED',     CMT:'ED',       EMERG:'ED',
+  AREH:'REHAB',
+  C1C:'C1C',     SHAH:'HAH'
+};
+
+var CCU_MAX_BED = 8;   // KGH CCU has 8 beds
+
 function parseLocCode(locCode, roomBed) {
-  var ward = 'OTHER';
-  var room = '';
-  var loc  = (locCode || '').toUpperCase();
+  var ward    = 'OTHER';
+  var room    = '';
+  var suspect = false;
+  var loc     = (locCode || '').toUpperCase();
 
-  // CCU: KELKGHSCCU — must check before S2W/S2S since it contains neither
-  if      (loc.indexOf('SCCU') !== -1 || loc.indexOf('CCU') !== -1)  ward = 'CCU';
-  else if (loc.indexOf('S2W')  !== -1)                               ward = '2W';
-  else if (loc.indexOf('S2S')  !== -1)                               ward = '2S';
-  else if (loc.indexOf('CSICU')!== -1)                               ward = 'CSICU';
-  else if (loc.indexOf('ICUA') !== -1)                               ward = 'ICUA';
-  else if (loc.indexOf('ICUB') !== -1)                               ward = 'ICUB';
-  else if (loc.indexOf('ED')   !== -1 || loc.indexOf('EMERG') !== -1) ward = 'ED';
-
-  // Parse room number
-  // CCU:  KGHS2502-A → bed = parseInt("2502") % 100 = 2
-  // Ward: KGHS0201-A → strip leading zeros → "201A"
-  var rb = (roomBed || '').replace(/-/g, '').toUpperCase().replace(/^KGHS/, '');
-  if (ward === 'CCU') {
-    var num = parseInt(rb, 10);
-    if (!isNaN(num)) room = String(num % 100);
-  } else {
-    var m = rb.match(/^0*(\d+)([A-Z]?)$/);
-    if (m) room = m[1] + m[2];
+  for (var key in LOC_MAP) {
+    if (loc.indexOf(key) !== -1) { ward = LOC_MAP[key]; break; }
   }
 
-  return { ward:ward, room:room };
+  // Strip dashes / whitespace, then the building-wing prefix — KGHS
+  // (south tower / CCU), KGHI (ICU / CSICU), KGHR, KGHC, KGHAC — leaving
+  // the room-bed digits. (Chart headers print the token as "KGHS0221 -A".)
+  var rb = (roomBed || '').replace(/[\s-]/g, '').toUpperCase()
+                          .replace(/^KGH(AC|S|I|R|C)/, '');
+
+  if (ward === 'CCU' || ward === 'CSICU') {
+    // Critical-care beds — the last two digits are the bed number.
+    //   CCU   KGHS2502 -> 02 -> "2"      CSICU KGHI2607 -> 07 -> "7"
+    var n = parseInt(rb, 10);
+    if (!isNaN(n)) {
+      var bed = n % 100 || n;
+      room = String(bed);
+      if (ward === 'CCU' && (bed < 1 || bed > CCU_MAX_BED)) suspect = true;
+    }
+  } else if (ward === '2W' || ward === '2S') {
+    // Hallway beds: KGHSH2W-A/B -> rb "H2WA"/"H2WB"; KGHSH2S-A -> "H2SA"
+    var hall = rb.match(/^H\d[WS]([AB])$/);
+    if (hall) {
+      room = 'Hallway ' + hall[1];
+    } else {
+      // Standard rooms keep their full number so they match the WARDS
+      // room presets, e.g. KGHS0221-A -> "221A", KGHS0225-B -> "225B".
+      var m = rb.match(/^0*(\d+)([A-Z]?)$/);
+      if (m) room = m[1] + m[2];
+    }
+  } else {
+    var m2 = rb.match(/^0*(\d+)([A-Z]?)$/);
+    if (m2) room = m2[1] + m2[2];
+  }
+
+  return { ward: ward, room: room, suspect: suspect };
 }
 
 // ── Cardiology / Cardiac Surgery matcher constants ────
@@ -139,6 +183,7 @@ async function extractMediteachAI(dataUrl) {
             '  CCU  = KELKGHSCCU, rooms KGHS2502-A (2502 = Bed 2, 2506 = Bed 6 etc.)\n' +
             '  2W   = KELKGHS2W,  rooms KGHS0201-A to KGHS0213-A\n' +
             '  2S   = KELKGHS2S,  rooms KGHS0217-A to KGHS0234-B (225 and 226 have A and B)\n' +
+            '  CSICU= KELKGHICSI, rooms KGHI2607-A (2607 = Bed 7 etc.)\n' +
             '  Other location codes = off-service ward\n\n' +
             'Return ONLY a JSON array, no markdown, no explanation.'
           }
