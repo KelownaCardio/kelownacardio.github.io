@@ -758,6 +758,18 @@ function fmtClaimDate(d) {
   if (d instanceof Date && !isNaN(d)) {
     return pad(d.getDate()) + '/' + pad(d.getMonth()+1) + '/' + d.getFullYear();
   }
+  // v3.92: named-month dates — "18 Jan 1944", "18/Jan/1944", "18-January-1944".
+  // The month is spelled out, so this is unambiguous (no day/month inference) —
+  // safe to normalise to DD/MM/YYYY. Both OCR display formatting and manual
+  // entry following the "DD/MMM/YYYY" field hint produce this shape.
+  if (typeof d === 'string') {
+    var _tm = d.trim().match(/^(\d{1,2})[\s\/.\-]+([A-Za-z]{3,9})[\s\/.\-]+(\d{4})$/);
+    if (_tm) {
+      var _mon = _tm[2].charAt(0).toUpperCase() + _tm[2].slice(1,3).toLowerCase();
+      var _mi  = _MONTHS.indexOf(_mon);
+      if (_mi !== -1) return pad(parseInt(_tm[1],10)) + '/' + pad(_mi+1) + '/' + _tm[3];
+    }
+  }
   // Unknown format — return as-is rather than risk MM/DD mis-parse via new Date(string)
   return String(d);
 }

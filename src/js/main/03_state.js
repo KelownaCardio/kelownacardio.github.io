@@ -46,11 +46,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.91-2026-05-26-dob-format-push-reject-orphan-tag';
+var BUILD_ID    = 'v3.92-2026-05-26-textmonth-dob-norm-no-false-wifi-banner';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.91';
+var APP_VERSION = 'v3.92';
 var APP_BUILT   = '2026-05-26';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -580,7 +580,10 @@ async function push(action, body) {
         delete window._pendingPush[body.id];
       }
       console.warn('push rejected by server — ' + action + ': ' + window._lastPushError);
-      setSyncState('error');
+      // Connection is fine — we got a clean 200 + JSON. This is a data
+      // rejection, not a connectivity failure, so do NOT raise the wifi
+      // banner; the caller surfaces the specific error to the user.
+      setSyncState('synced');
       return false;
     }
     window._lastPushError = null;

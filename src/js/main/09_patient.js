@@ -454,7 +454,7 @@ async function apSubmit(addToList, _skipDupCheck) {
   var p = {
     id: 'p' + Date.now(), fac: 'OA040', roundedToday: null,
     last: fmtName(last), first: fmtName(gv('f-first')),
-    phn: phn, dob: gv('f-dob'), sex: gv('f-sex'),
+    phn: phn, dob: fmtClaimDate(gv('f-dob')), sex: gv('f-sex'),
     refby:     gv('cb-refby') || gv('oc-refby'),
     refbyName: gv('cb-refby-name') || gv('oc-refby-name'),
     icd: icd,
