@@ -459,8 +459,7 @@ async function apSubmit(addToList, _skipDupCheck) {
     refbyName: gv('cb-refby-name') || gv('oc-refby-name'),
     icd: icd,
     createdBy: (st.doc && st.doc.alias) || '',
-    createdAt: Date.now(),
-    addedVia:  'app'
+    createdAt: Date.now()
   };
 
   if (addToList) {
@@ -490,7 +489,10 @@ async function apSubmit(addToList, _skipDupCheck) {
     var ok = await push('savePatient', p);
     if (!ok) {
       st.patients = st.patients.filter(function(x) { return x.id !== p.id; });
-      showToast('Could not save patient — check wifi and try again');
+      sv('patients', st.patients);
+      showToast(window._lastPushError
+        ? 'Not saved: ' + window._lastPushError
+        : 'Could not save patient — check wifi and try again');
       return;
     }
   }
@@ -1100,7 +1102,7 @@ function handleOCRResult(data, bar) {
   if (p.last)  document.getElementById('f-last').value  = p.last;
   if (p.first) document.getElementById('f-first').value = p.first;
   if (p.phn)   document.getElementById('f-phn').value   = (p.phn + '').replace(/\D/g,'').slice(0,10);
-  if (p.dob)   document.getElementById('f-dob').value   = dispDate(fmtClaimDate(p.dob));
+  if (p.dob)   document.getElementById('f-dob').value   = fmtClaimDate(p.dob);
   if (p.sex)   { apSexPill(p.sex); }
   if (p.ward && WARDS[p.ward]) { document.getElementById('f-ward').value = p.ward; wardChange(); }
   if (p.mrp) {

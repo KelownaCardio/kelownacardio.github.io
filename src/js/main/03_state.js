@@ -46,12 +46,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.92-2026-05-25-victoria-day-fix';
+var BUILD_ID    = 'v3.91-2026-05-26-dob-format-push-reject-orphan-tag';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.92';
-var APP_BUILT   = '2026-05-25';
+var APP_VERSION = 'v3.91';
+var APP_BUILT   = '2026-05-26';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -466,7 +466,13 @@ async function syncFromSheets() {
           care:         'directive',
           icd:          src.icd || '3062',
           admitDate:    src.date || '',
-          roundedToday: null
+          roundedToday: null,
+          // v3.91: tag healer-built stubs so their blank demographics surface
+          // for review instead of masquerading as a complete patient record.
+          addedVia:     'app-orphan-healer',
+          needsReview:  true,
+          createdBy:    '',
+          createdAt:    Date.now()
         };
         st.patients.push(stub);
         if (SHEETS_URL) push('savePatient', stub);
@@ -560,9 +566,30 @@ async function push(action, body) {
       method: 'POST', body: JSON.stringify(body)
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    // v3.91: inspect the response BODY, not just the HTTP status. Apps Script
+    // returns HTTP 200 even when saveRow rejects a record ({ok:false,error}).
+    // Treating that as success let rejected patient saves pass silently — the
+    // row never landed, and the orphan-claim healer then rebuilt it blank.
+    var data = null;
+    try { data = await resp.json(); } catch (_) { data = null; }
+    if (data && data.ok === false) {
+      // Permanent server-side rejection (validation failure). It will never
+      // succeed on retry, so drop it from the pending-retry queue and report.
+      window._lastPushError = data.error || 'Server rejected the save';
+      if (action === 'savePatient' || action === 'saveClaim') {
+        delete window._pendingPush[body.id];
+      }
+      console.warn('push rejected by server — ' + action + ': ' + window._lastPushError);
+      setSyncState('error');
+      return false;
+    }
+    window._lastPushError = null;
     setSyncState('synced');
     return true;
   } catch(e) {
+    // Network / transport failure — transient. Leave it in _pendingPush so
+    // the next sync retries it.
+    window._lastPushError = e.message || String(e);
     setSyncState('error');
     return false;
   }
