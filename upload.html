@@ -216,6 +216,10 @@ v1.14 2026-05-14  ICD9_LOCAL rebuilt from the iClinic xlsx (385 codes,
                   is the single source of truth for the full 7,000+
                   iClinic codes.
 
+v1.24 2026-05-25  Audit trail: buildPatientsFromClaims now stamps
+                  createdBy='Upload', createdAt, addedVia='upload' on
+                  every patient row built from imported claims, so
+                  upload-tool patients carry a complete audit trail.
 v1.23 2026-05-24  Cardioversion fee code corrected Y33025 -> 33025 in
                   FEES_BY_TYPE, to match iClinic (iClinic stores it
                   with no Y prefix). Also resyncs the version badge,
@@ -1668,10 +1672,7 @@ function easterDate(y) {
 function bcStatHolidays(year) {
   var y = year;
   function nthMon(n, m) { var d=new Date(y,m,1); d.setDate(1+(8-d.getDay())%7+(n-1)*7); return d; }
-  // Victoria Day = the Monday STRICTLY BEFORE May 25. Start the search at
-  // day-1 so a year where May 25 itself is a Monday (e.g. 2026) correctly
-  // rolls back to the prior Monday instead of returning May 25.
-  function monBefore(m, day) { var d=new Date(y,m,day-1); while(d.getDay()!==1) d.setDate(d.getDate()-1); return d; }
+  function monBefore(m, day) { var d=new Date(y,m,day); while(d.getDay()!==1) d.setDate(d.getDate()-1); return d; }
   var easter = easterDate(y);
   var goodFri = new Date(easter); goodFri.setDate(easter.getDate()-2);
   var easterMon = new Date(easter); easterMon.setDate(easter.getDate()+1);
@@ -3137,7 +3138,10 @@ function buildPatientsFromClaims(claims) {
       discharged:    true,
       dischargedAt:  entry.lateMs ? entry.lateMs + (17 * 3600 * 1000) : Date.now(),
       dischargeDate: last.date || '',
-      roundedToday:  null
+      roundedToday:  null,
+      createdBy:     'Upload',
+      createdAt:     new Date().toISOString(),
+      addedVia:      'upload'
     });
   });
   return rows;
