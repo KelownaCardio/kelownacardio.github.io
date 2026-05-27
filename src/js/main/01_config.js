@@ -36,7 +36,7 @@ var WARDS = {
   ICUA: { label:'ICU A',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
   ICUB: { label:'ICU B',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
   ICUD: { label:'ICU D',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
-  ED:   { label:'ED',       list:'off', care:'directive', role:'consultant', rooms:['Resus 1','Resus 2','Bay 1','Bay 2','Bay 3','Bay 4','Other'] },
+  ED:   { label:'ED',       list:'off', care:'directive', role:'consultant', rooms:[] },
   '3E': { label:'3E',       list:'off', care:'directive', role:'consultant', rooms:[] },
   '3W': { label:'3W',       list:'off', care:'directive', role:'consultant', rooms:[] },
   '3MU':{ label:'3MU',      list:'off', care:'directive', role:'consultant', rooms:[] },

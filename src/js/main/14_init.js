@@ -229,35 +229,6 @@ function selectDoc(alias, num, name) {
   showToast('Signed in as ' + name);
 }
 
-function addDoctor() {
-  var alias = gv('new-alias');
-  var num   = gv('new-num');
-  var name  = gv('new-name');
-  if (!alias) { showToast('Need alias'); return; }
-  var mapped = ALIAS_MAP[alias] || alias;
-  // Update existing doctor if alias matches (e.g. adding MSP number)
-  var existing = st.doctors.find(function(d) { return d.alias === mapped; });
-  if (existing) {
-    if (num)  existing.num  = num;
-    if (name) existing.name = name;
-    sv('doctors', st.doctors);
-    if (SHEETS_URL) push('saveDoctor', existing);
-    document.getElementById('new-alias').value = '';
-    document.getElementById('new-num').value   = '';
-    document.getElementById('new-name').value  = '';
-    selectDoc(existing.alias, existing.num, existing.name);
-    return;
-  }
-  var d = { alias:mapped, num:num || '', name:name || 'Dr. ' + alias };
-  st.doctors.push(d);
-  sv('doctors', st.doctors);
-  if (SHEETS_URL) push('saveDoctor', d);
-  document.getElementById('new-alias').value = '';
-  document.getElementById('new-num').value   = '';
-  document.getElementById('new-name').value  = '';
-  selectDoc(mapped, num, name || 'Dr. ' + alias);
-}
-
 // ── Utility functions ──────────────────────────────────
 function getP(pid) {
   return st.patients.find(function(p) { return p.id === pid; }) || {};
