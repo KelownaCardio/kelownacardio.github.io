@@ -496,20 +496,26 @@ async function apSubmit(addToList, _skipDupCheck) {
   var phn  = gv('f-phn');
   if (!last) { showToast('Enter patient last name'); return; }
 
-  // v4.09: Sticker-OCR sometimes misreads adjacent numbers (most often the
-  // patient's age — Deborah Malone, 57, became last="57") as the surname.
-  // Pre-v4.09 the form happily submitted "57" as a last name, the patient
-  // was saved as "57" / blank-first, and every claim row written by that
-  // submission was permanently stamped with "57". Guard against the three
-  // shapes that 99% of misreads take: all-digits, too short, and "matches
-  // the patient's age from DOB". Each gives a specific toast so the doctor
-  // knows what to look at on the sticker.
+  // v4.09/v4.10: Sticker-OCR sometimes misreads adjacent characters as the
+  // surname. The most common misreads we've seen:
+  //   v4.09: a printed number ends up in the last-name slot. Deborah
+  //          Malone, age 57, was saved as last="57" because the Vision
+  //          model picked her age off the sticker. Blocked by the all-
+  //          digits / too-short / age-match checks below.
+  //   v4.10: punctuation from an adjacent field (most often a location
+  //          token like "KGHS0221-A" or "KGH/Bed/12") bleeds into the
+  //          last-name slot. Slashes never appear in real surnames.
+  // Each check has a specific toast so the doctor knows what to look at
+  // on the sticker. Real legitimate-but-numeric-looking surnames like
+  // "Smith the 3" (mixed letters + digits) are intentionally still allowed.
   var _lastTrim = String(last).trim();
   var _lastErr  = null;
   if (/^\d+$/.test(_lastTrim)) {
     _lastErr = 'Last name "' + _lastTrim + '" is all digits \u2014 OCR likely misread the sticker. Tap Last name and correct it.';
   } else if (_lastTrim.length < 2) {
     _lastErr = 'Last name "' + _lastTrim + '" is too short \u2014 check the sticker and re-enter.';
+  } else if (/[\/\\]/.test(_lastTrim)) {
+    _lastErr = 'Last name "' + _lastTrim + '" contains a slash \u2014 OCR likely picked up an adjacent field. Correct the last name.';
   } else {
     // Age match check — only fires when DOB is filled and parses cleanly.
     var _dobRaw = gv('f-dob');
