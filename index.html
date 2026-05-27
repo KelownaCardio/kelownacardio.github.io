@@ -2132,11 +2132,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.99-2026-05-26-calendar-claim-return-doc-picker-sort';
+var BUILD_ID    = 'v4.00-2026-05-26-calendar-two-claim-diagonal-split';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.99';
+var APP_VERSION = 'v4.00';
 var APP_BUILT   = '2026-05-26';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -4821,10 +4821,18 @@ function _cvAdmitSpan(p) {
   return { startMs: startMs, endMs: endMs };
 }
 
-// Map a DD/MM/YYYY date to the dominant cell-colour key.
-// Priority: consult > ccu > daily > directive > combined
-function _cvDominantType(dayClaims) {
-  if (!dayClaims || !dayClaims.length) return null;
+// Cell-colour background per claim type — MUST match the .cv-day.cv-<type>
+// CSS rules exactly, so a 2-claim diagonal split aligns with the solid cells.
+var CV_TYPE_BG = {
+  consult:'#ffcf73', ccu:'#f08585', daily:'#3fa658',
+  directive:'#8eb5fa', combined:'#b8e6c4'
+};
+
+// All distinct claim-colour types present on a day, in priority order
+// (consult > ccu > daily > directive > combined). Single classification
+// used for both the dominant cell colour and the 2-claim diagonal split.
+function _cvDayTypes(dayClaims) {
+  if (!dayClaims || !dayClaims.length) return [];
   var has = { consult:false, ccu:false, daily:false, directive:false, combined:false };
   var hasAny = false;
   dayClaims.forEach(function(c) {
@@ -4841,22 +4849,20 @@ function _cvDominantType(dayClaims) {
       if (c.notes && String(c.notes).trim()) has.combined = true;
       else has.daily = true;
     }
-    // Bedside procedures (cardioversion, pericardiocentesis) — flag as consult-coloured
-    // since they typically accompany a consult/visit event the same day
+    // Bedside procedures (cardioversion, pericardiocentesis) — consult-coloured.
     else if (c.fee === 'Y33025' || c.fee === '00751') has.consult = true;
     // 78717 (complex discharge) / 78720 (MOST) are extras that piggyback on a
-    // regular visit. Fall through; if a 33008/33010 is also billed today, that
-    // wins. If those are the ONLY claims, the hasAny fallback at the end paints
-    // the day with consult colour so it isn't invisible.
+    // regular visit — they fall through to the hasAny fallback below.
   });
-  if (has.consult)   return 'consult';
-  if (has.ccu)       return 'ccu';
-  if (has.daily)     return 'daily';
-  if (has.directive) return 'directive';
-  if (has.combined)  return 'combined';
+  var out = ['consult','ccu','daily','directive','combined'].filter(function(t) { return has[t]; });
   // Fallback — any claim on the day deserves *some* colour so the doctor sees it
-  if (hasAny) return 'consult';
-  return null;
+  if (!out.length && hasAny) out.push('consult');
+  return out;
+}
+
+// Single dominant cell-colour key, or null. Priority order per _cvDayTypes.
+function _cvDominantType(dayClaims) {
+  return _cvDayTypes(dayClaims)[0] || null;
 }
 
 // Build the list of gap days (DD/MM/YYYY strings) for a patient
@@ -4992,14 +4998,28 @@ function _ptSummaryCalendarHTML(p, claims) {
   for (var d = 1; d <= daysIn; d++) {
     var dateStr = pad(d) + '/' + pad(month.getMonth()+1) + '/' + year;
     var dayClaims = byDate[dateStr] || [];
-    var dominant = _cvDominantType(dayClaims);
+    var dayTypes = _cvDayTypes(dayClaims);
+    var dominant = dayTypes[0] || null;
     var dayMs = new Date(year, month.getMonth(), d).getTime();
     var inSpan = span && dayMs >= span.startMs && dayMs <= span.endMs;
     var isGap = inSpan && rule && !dayClaims.length && dateStr !== todayKey;
 
     var cls = 'cv-day';
-    if (dominant) cls += ' cv-' + dominant;
-    else if (isGap) cls += ' cv-gap';
+    var styleAttr = '';
+    if (dayTypes.length >= 2) {
+      // Two (or more) claim types on this day — split the cell diagonally so
+      // both colours show. Top-left triangle = highest-priority type; only
+      // the top two are shown (a diagonal has two halves). A thin white seam
+      // keeps the split clear even between the two similar greens.
+      var cA = CV_TYPE_BG[dayTypes[0]], cB = CV_TYPE_BG[dayTypes[1]];
+      styleAttr = ' style="background:linear-gradient(135deg,' +
+                  cA + ' 0%,' + cA + ' 49.4%,#ffffff 49.4%,#ffffff 50.6%,' +
+                  cB + ' 50.6%,' + cB + ' 100%);color:#1a1128"';
+    } else if (dominant) {
+      cls += ' cv-' + dominant;
+    } else if (isGap) {
+      cls += ' cv-gap';
+    }
     if (dateStr === todayKey) cls += ' cv-today';
     if (p.discharged && p.dischargeDate === dateStr) cls += ' cv-discharged';
 
@@ -5014,7 +5034,7 @@ function _ptSummaryCalendarHTML(p, claims) {
 
     var tappable = true;  // all in-month days tappable — active pill mode needs this
     var onclick = ' onclick="tapCalDay(\'' + dateStr + '\')"';
-    html += '<div class="' + cls + '"' + onclick + '>' +
+    html += '<div class="' + cls + '"' + styleAttr + onclick + '>' +
               '<div class="cv-num">' + d + '</div>' +
               (tag ? '<div class="cv-tag">' + tag + '</div>' : '') +
             '</div>';
