@@ -1,7 +1,7 @@
 {
-  "name": "KGH Cardiology Billing",
-  "short_name": "KGH Billing",
-  "description": "KGH Cardiology inpatient billing",
+  "name": "KCA Billing",
+  "short_name": "KCA Billing",
+  "description": "KCA inpatient billing",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
