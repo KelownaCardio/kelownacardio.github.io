@@ -2132,11 +2132,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v3.98-2026-05-26-calendar-consult-pill-combined-reason';
+var BUILD_ID    = 'v3.95-2026-05-26-calendar-claim-return-doc-picker-sort';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v3.98';
+var APP_VERSION = 'v3.95';
 var APP_BUILT   = '2026-05-26';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -4006,6 +4006,9 @@ function _openClaimScreen(pid) {
   _claimPid = pid;
   _incUnits = 1;
   _mostOn   = true;
+  // Default: opened directly from a list — do not reopen the summary.
+  // ptSummaryAddClaim sets this flag again *after* calling us.
+  _claimReturnSummaryPid = null;
 
   var p = getP(pid);
 
@@ -4362,6 +4365,12 @@ function selCT(type) {
 var _claimOriginPane  = 'p0';
 var _claimOriginNavIdx = 0;
 
+// When the claim screen was opened from the patient-summary calendar
+// ("+ Add claim"), this holds that patient's id so a successful submit
+// returns to the calendar instead of the rounds list. Null = normal flow
+// (claim screen opened directly from a list — return to that list).
+var _claimReturnSummaryPid = null;
+
 function openClaimScreen(pid) {
   // Record which pane we came from so back button returns there
   ALL_PANES.forEach(function(id) {
@@ -4377,12 +4386,25 @@ function openClaimScreen(pid) {
 
 function closeClaimScreen() {
   document.getElementById('p-claim').classList.remove('on');
+  // Capture and clear the return-to-summary flag before restoring panes.
+  var returnPid = _claimReturnSummaryPid;
+  _claimReturnSummaryPid = null;
   showPane(_claimOriginPane);
   document.querySelectorAll('.nb').forEach(function(b, i) {
     b.classList.toggle('on', i === _claimOriginNavIdx);
   });
   if (_claimOriginPane === 'p0') render();
   if (_claimOriginPane === 'p-discharged') renderDischarged(document.getElementById('discharged-search').value || '');
+  // Opened from the patient-summary calendar — reopen it so the user lands
+  // back on the calendar (the summary always opens on the calendar view).
+  if (returnPid) openPatientSummary(returnPid);
+}
+
+// Explicit "← Back to rounds" exit: cancelling a claim should always return
+// to the list, never reopen the patient summary — so clear the flag first.
+function backToRoundsFromClaim() {
+  _claimReturnSummaryPid = null;
+  closeClaimScreen();
 }
 
 // ── 06b_discharged.js ──
@@ -4601,6 +4623,7 @@ function openPatientSummary(pid) {
   var p = getP(pid);
   if (!p || !p.id) return;
   _cvActiveType = null;  // reset legend pill selection for fresh open
+  _cvDocAlias   = null;  // reset calendar performing-doctor to signed-in default
 
   // All claims for this patient, sorted oldest → newest
   var claims = st.claims
@@ -4910,14 +4933,13 @@ function _ptSummaryCalendarHTML(p, claims) {
 
   var html = '';
 
-  // Legend — Gap is view-only; Consult opens the consult card; CCU/Daily/
-  // Directive/Combined daily are sticky type-selector pills.
+  // Legend — Consult and Gap are view-only; CCU/Daily/Directive/Combined are clickable type-selector pills
   html += '<div class="cv-legend">' +
-            '<button class="cv-lg-pill cv-lgp-consult"  id="cv-lgp-consult"  onclick="_cvOpenConsultCard()"><div class="cv-sw" style="background:#ffcf73"></div>Consult</button>' +
+            '<div class="cv-lg"><div class="cv-sw" style="background:#ffcf73"></div>Consult</div>' +
             '<button class="cv-lg-pill cv-lgp-ccu"       id="cv-lgp-ccu"       onclick="_cvSelectLegend(\'ccu\',this)"><div class="cv-sw" style="background:#f08585"></div>CCU</button>' +
             '<button class="cv-lg-pill cv-lgp-daily"     id="cv-lgp-daily"     onclick="_cvSelectLegend(\'daily\',this)"><div class="cv-sw" style="background:#3fa658"></div>Daily</button>' +
             '<button class="cv-lg-pill cv-lgp-directive" id="cv-lgp-directive" onclick="_cvSelectLegend(\'directive\',this)"><div class="cv-sw" style="background:#8eb5fa"></div>Directive</button>' +
-            '<button class="cv-lg-pill cv-lgp-combined"  id="cv-lgp-combined"  onclick="_cvSelectLegend(\'combined\',this)"><div class="cv-sw" style="background:#b8e6c4"></div>Combined daily</button>' +
+            '<button class="cv-lg-pill cv-lgp-combined"  id="cv-lgp-combined"  onclick="_cvSelectLegend(\'combined\',this)"><div class="cv-sw" style="background:#b8e6c4"></div>Combined</button>' +
             (rule ? '<div class="cv-lg"><div class="cv-sw" style="background:#d4d4d8;border:1px dashed #8a8a92"></div>Gap</div>' : '') +
           '</div>' +
           '<div class="cv-tap-hint" id="cv-tap-hint"></div>';
@@ -4929,6 +4951,26 @@ function _ptSummaryCalendarHTML(p, claims) {
 
   // Month nav
   html += '<div style="max-width:420px;margin:0 auto">';  // desktop width cap
+
+  // Performing-doctor selector — applies to claims added by tapping a day
+  // (legend-pill quick-add or the gap-fill picker). Defaults to the
+  // signed-in doctor; change it when back-populating another doctor's days.
+  var _cvCurDoc  = _cvDocAlias || (st.doc ? st.doc.alias : '');
+  var _cvDocOpts = doctorsSorted().map(function(d) {
+    return '<option value="' + esc(d.alias) + '"' + (d.alias === _cvCurDoc ? ' selected' : '') + '>' +
+           esc(d.name || d.alias) + '</option>';
+  }).join('');
+  if (_cvDocOpts) {
+    html += '<div style="display:flex;align-items:center;gap:8px;margin:2px 0 10px">' +
+              '<span style="font-size:11px;font-weight:600;color:var(--text2);white-space:nowrap">Performing doctor</span>' +
+              '<select id="cv-legend-doc" onchange="_cvSetDoc(this.value)" ' +
+                'style="flex:1;padding:6px 9px;border:.5px solid var(--border2);border-radius:8px;' +
+                'font-size:12px;font-family:inherit;background:var(--surface2);color:var(--text)">' +
+                _cvDocOpts +
+              '</select>' +
+            '</div>';
+  }
+
   html += '<div class="cv-nav">' +
             '<button onclick="_cvChangeMonth(-1)">‹</button>' +
             '<div class="cv-month">' + monthName + ' ' + year + '</div>' +
@@ -5023,6 +5065,22 @@ function _cvChangeMonth(delta) {
 // Legend pill selection — sticky type mode
 var _cvActiveType = null;
 
+// Calendar performing-doctor — sticky across month navigation within a
+// single summary open. Null means "use the signed-in doctor". Reset on
+// every openPatientSummary() so it always starts at the logged-in user.
+var _cvDocAlias = null;
+
+// Record the calendar performing-doctor dropdown choice.
+function _cvSetDoc(alias) { _cvDocAlias = alias || null; }
+
+// Resolve the performing doctor for a calendar quick-add: live dropdown
+// value first, then the remembered choice, then the signed-in doctor.
+function _cvCurrentDocAlias() {
+  var sel = document.getElementById('cv-legend-doc');
+  if (sel && sel.value) return sel.value;
+  return _cvDocAlias || (st.doc ? st.doc.alias : '');
+}
+
 function _cvSelectLegend(type, btn) {
   var wasActive = _cvActiveType === type;
   _cvActiveType = wasActive ? null : type;
@@ -5050,21 +5108,6 @@ function _cvRestoreActivePill() {
   }
 }
 
-// Consult legend pill — opens the full consult card for the current patient.
-// A consult is not a one-tap day add (it needs start/end times, MOST, CCFPP),
-// so unlike the CCU/Daily/Directive pills it opens the consult form directly
-// rather than arming a sticky day-tap mode.
-function _cvOpenConsultCard() {
-  var pid = window._cvPid;
-  if (!pid) return;
-  var p = getP(pid);
-  if (!p) return;
-  hideModal('pt-summary-modal');
-  if (p.discharged) openClaimFromDischarged(pid);
-  else              openClaimScreen(pid);
-  selCT('consult');
-}
-
 // Tap a day — open details or the gap-fill picker
 function tapCalDay(dateStr) {
   var pid = window._cvPid;
@@ -5074,13 +5117,9 @@ function tapCalDay(dateStr) {
 
   // Active legend pill mode — add that type directly without opening picker
   if (_cvActiveType) {
-    var alias = st.doc ? st.doc.alias : '';
+    var alias = _cvCurrentDocAlias();
     if (_cvActiveType === 'combined') {
-      // Combined daily: reuse this patient's reason if one is already on file;
-      // only prompt the first time (see _cvPriorCombinedReason).
-      var prc = _cvPriorCombinedReason(p);
-      if (prc) _cvFillClaim(pid, dateStr, 'combined', prc.note, prc.icd, alias);
-      else     _cvShowCombinedForm(pid, dateStr, alias);
+      _cvShowCombinedForm(pid, dateStr, alias);
     } else {
       _cvFillClaim(pid, dateStr, _cvActiveType, '', null, alias);
     }
@@ -5093,7 +5132,7 @@ function tapCalDay(dateStr) {
   if (dayClaims.length) {
     _cvShowDayDetails(pid, dateStr, dayClaims);
   } else {
-    _cvShowPicker(pid, dateStr);
+    _cvShowPicker(pid, dateStr, _cvCurrentDocAlias());
   }
 }
 
@@ -5196,7 +5235,7 @@ function _cvShowPicker(pid, dateStr, preselectedAlias) {
 
   // Build performing doctor dropdown (unique id cv-performing-doc to avoid conflict with claim builder)
   var curAlias = preselectedAlias || (st.doc ? st.doc.alias : '');
-  var docOpts = (st.doctors || []).map(function(d) {
+  var docOpts = doctorsSorted().map(function(d) {
     return '<option value="' + esc(d.alias) + '"' + (d.alias === curAlias ? ' selected' : '') + '>' +
            esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
   }).join('');
@@ -5225,39 +5264,11 @@ function _cvPickType(btn) {
   var type    = btn.getAttribute('data-type');
   var sel = document.getElementById('cv-performing-doc');
   var alias = (sel && sel.value) ? sel.value : (st.doc ? st.doc.alias : '');
-  if (type === 'combined') {
-    // Combined daily: reuse this patient's reason if already on file; only
-    // prompt the first time.
-    var prc = _cvPriorCombinedReason(getP(pid));
-    if (prc) return _cvFillClaim(pid, dateStr, 'combined', prc.note, prc.icd, alias);
-    return _cvShowCombinedForm(pid, dateStr, alias);
-  }
+  if (type === 'combined') return _cvShowCombinedForm(pid, dateStr, alias);
   _cvFillClaim(pid, dateStr, type, '', null, alias);
 }
 
-// Combined daily — the reason is entered ONCE per patient, then reused.
-// Returns { note, icd } from the most recent combined-daily claim (a 33008
-// row carrying a note) on file for this patient, or null if there is none
-// yet. Derived from claim history, so it needs no extra storage and works no
-// matter which screen the first combined daily was entered on. To change the
-// reason later, edit the note on any combined-daily claim — the most recent
-// one wins.
-function _cvPriorCombinedReason(p) {
-  if (!p || !p.phn) return null;
-  var best = null;
-  st.claims.forEach(function(c) {
-    if (c.fee !== '33008') return;
-    if (!c.notes || !String(c.notes).trim()) return;   // note-less 33008 = plain daily
-    if (!c.phn || !samePhn(c.phn, p.phn)) return;
-    if (!best || parseDMY(c.date) >= parseDMY(best.date)) best = c;
-  });
-  return best
-    ? { note: String(best.notes).trim(), icd: String(best.icd || p.icd || '').trim() }
-    : null;
-}
-
-// Combined daily sub-form — ICD + reason. Shown only the FIRST time a combined
-// daily is added for a patient; after that _cvPriorCombinedReason reuses it.
+// Combined daily sub-form — ICD + reason
 function _cvShowCombinedForm(pid, dateStr, alias) {
   var p = getP(pid);
   if (!p) return;
@@ -5265,13 +5276,13 @@ function _cvShowCombinedForm(pid, dateStr, alias) {
   var safeAlias = alias || (st.doc ? st.doc.alias : '');
   var html =
     '<div style="font-size:14px;font-weight:700;color:var(--teal-t);margin-bottom:2px">Combined daily — ' + dispDate(dateStr) + '</div>' +
-    '<div style="font-size:11px;color:var(--text2);margin-bottom:12px">Entered once — this reason is reused for every future combined daily on this patient.</div>' +
+    '<div style="font-size:11px;color:var(--text2);margin-bottom:12px">Combined daily requires documentation. Both fields attach to the claim note.</div>' +
 
     '<label style="display:block;font-size:11px;font-weight:600;color:var(--text2);margin:0 0 4px">ICD-9 diagnostic code</label>' +
     '<input id="cv-cb-icd" type="text" value="' + esc(defaultIcd) + '" placeholder="e.g. 428.0" autocomplete="off" ' +
     'style="width:100%;padding:11px;border:.5px solid var(--border2);border-radius:8px;font-size:14px;font-family:inherit;background:var(--surface2)">' +
 
-    '<label style="display:block;font-size:11px;font-weight:600;color:var(--text2);margin:12px 0 4px">Reason for combined daily care</label>' +
+    '<label style="display:block;font-size:11px;font-weight:600;color:var(--text2);margin:12px 0 4px">Why combined daily care was needed</label>' +
     '<textarea id="cv-cb-reason" rows="3" autocomplete="off" placeholder="e.g. CHF — co-managed with hospitalist for renal optimization" ' +
     'style="width:100%;padding:11px;border:.5px solid var(--border2);border-radius:8px;font-size:14px;font-family:inherit;background:var(--surface2);resize:vertical"></textarea>' +
 
@@ -5484,6 +5495,9 @@ function ptSummaryAddClaim(btn) {
   hideModal('pt-summary-modal');
   if (fn === 'openClaimFromDischarged') openClaimFromDischarged(pid);
   else openClaimScreen(pid);
+  // Set AFTER the open call (which clears the flag) so a successful submit
+  // returns to this patient's calendar instead of the rounds list.
+  _claimReturnSummaryPid = pid;
 }
 
 function ptSummaryEdit(btn) {
@@ -5526,101 +5540,6 @@ function parseDMYsafe(s) {
   return new Date(parseInt(p[2]), parseInt(p[1])-1, parseInt(p[0])).getTime();
 }
 
-// ── Edit-claim fee-code picker ──────────────────────────
-// A full search-as-you-type picker over the entire FEES catalogue, plus the
-// CCU_DAILY placeholder. Unlike the Other-claim card it imposes NO category
-// restrictions — consult, CCU and modifier codes are all selectable, because
-// editing a claim must be able to reach any code the claim could legitimately
-// carry. Replaces the old hard-coded 10-option <select>, which had no entry
-// for unlisted fees (e.g. 00751) and so let the browser default the <select>
-// to its first option (33010) — silently overwriting the real fee on save.
-//
-// Elements built into the Edit-claim modal by openClaimEdit():
-//   ce-fee          hidden input — selected fee code (read by saveClaimEdit)
-//   ce-fee-search   visible search input
-//   ce-fee-dd       results dropdown
-//   ce-fee-display  small confirmation line
-var CE_FEE_EXTRA = [
-  { code:'CCU_DAILY',
-    desc:'CCU day (placeholder — export bands to 1411/1421/1431)',
-    amount:'', cat:'CCU' }
-];
-
-// Whole searchable pool: every catalogued fee plus the CCU_DAILY placeholder.
-function ceFeePool() { return FEES.concat(CE_FEE_EXTRA); }
-
-// Resolve a stored fee code to display info. Falls back to LEGACY_FEE_LABELS,
-// then to the bare code — so a claim's current code is ALWAYS shown and can
-// never be dropped just because it is not in the active catalogue.
-function ceFeeInfo(code) {
-  var c = String(code || '').trim();
-  if (!c) return null;
-  var hit = ceFeePool().find(function(f) { return f.code === c; });
-  if (hit) return { code:c, desc:hit.desc || '', amount:hit.amount || '', cat:hit.cat || '' };
-  var legacy = (typeof LEGACY_FEE_LABELS !== 'undefined' && LEGACY_FEE_LABELS) ? LEGACY_FEE_LABELS[c] : '';
-  return { code:c, desc:legacy || ('Fee code ' + c), amount:'', cat:'' };
-}
-
-// Build the picker markup, pre-filled with the claim's current fee.
-function ceFeePickerHTML(currentCode) {
-  var info = ceFeeInfo(currentCode);
-  var searchVal = info ? (info.desc + ' (' + info.code + ')') : '';
-  return '<input id="ce-fee" type="hidden" value="' + esc(currentCode || '') + '">' +
-         '<input id="ce-fee-search" autocorrect="off" autocomplete="off" ' +
-           'placeholder="Search fee code or description…" value="' + esc(searchVal) + '" ' +
-           'oninput="ceFeeSearch(this.value)" onfocus="this.select();ceFeeSearch(\'\')">' +
-         '<div class="ref-dd" id="ce-fee-dd"></div>' +
-         '<div id="ce-fee-display" style="font-size:11px;color:var(--text2);margin-top:-4px;margin-bottom:6px"></div>';
-}
-
-var CE_FEE_CAT_COLORS = {
-  'Consult':'var(--blue-t)',   'Daily':'var(--blue-t)',     'Directive':'var(--amber-t)',
-  'Procedure':'var(--red-t)',  'Discharge':'var(--green-t)','CCU':'var(--red-t)',
-  'Modifier':'var(--text3)',   'Other':'var(--teal-t)'
-};
-
-// Populate the dropdown. Empty query => the full list, no truncation.
-function ceFeeSearch(query) {
-  var dd = document.getElementById('ce-fee-dd');
-  if (!dd) return;
-  var q = (query || '').toLowerCase().trim();
-  var pool = ceFeePool();
-  var matches = q.length === 0
-    ? pool.slice()
-    : pool.filter(function(f) {
-        return f.code.toLowerCase().indexOf(q) !== -1 ||
-               (f.desc || '').toLowerCase().indexOf(q) !== -1;
-      });
-  if (!matches.length) {
-    dd.innerHTML = '<div style="padding:8px 10px;font-size:12px;color:var(--text2)">No matching fee codes</div>';
-    dd.style.display = 'block';
-    return;
-  }
-  dd.innerHTML = matches.map(function(f) {
-    var col = CE_FEE_CAT_COLORS[f.cat] || 'var(--text2)';
-    var amt = f.amount ? '<span style="font-size:11px;font-weight:700;color:var(--text2);margin-left:auto;padding-left:8px">' + esc(f.amount) + '</span>' : '';
-    return '<div class="ref-dd-row" data-code="' + esc(f.code) + '" data-desc="' + esc(f.desc || '') + '" ' +
-      'onclick="ceFeeSelect(this.getAttribute(\'data-code\'),this.getAttribute(\'data-desc\'))" ' +
-      'style="display:flex;align-items:center;gap:4px">' +
-      '<span style="font-weight:700;color:' + col + ';margin-right:6px;min-width:62px">' + esc(f.code) + '</span>' +
-      '<span style="flex:1;min-width:0">' + esc(f.desc || '') + '</span>' +
-      (f.cat ? '<span style="font-size:10px;color:var(--text3);margin-left:6px">' + esc(f.cat) + '</span>' : '') +
-      amt +
-      '</div>';
-  }).join('');
-  dd.style.display = 'block';
-}
-
-// Commit a selection into the hidden input + search box.
-function ceFeeSelect(code, desc) {
-  var inp = document.getElementById('ce-fee');
-  if (inp) inp.value = code;
-  var search = document.getElementById('ce-fee-search');
-  if (search) search.value = (desc ? desc + ' ' : '') + '(' + code + ')';
-  var dd = document.getElementById('ce-fee-dd');
-  if (dd) { dd.innerHTML = ''; dd.style.display = 'none'; }
-}
-
 function openClaimEdit(btn) {
   var cid = btn.getAttribute('data-cid');
   var pid = btn.getAttribute('data-pid');
@@ -5628,12 +5547,29 @@ function openClaimEdit(btn) {
   var p   = getP(pid);
   if (!c) return;
 
-  var feePicker = ceFeePickerHTML(c.fee);
+  var feeOptions = [
+    { code:'33010', label:'Full consultation (33010)' },
+    { code:'33012', label:'Limited consultation (33012)' },
+    { code:'33008', label:'Daily rounds / MRP (33008)' },
+    { code:'33006', label:'Directive visit (33006)' },
+    // v3.60: CCU daily placeholder restored — export consolidates to 1411/1421/1431.
+    { code:'CCU_DAILY', label:'CCU day (placeholder, export bands)' },
+    { code:'1411',  label:'CCU day 1 (1411)' },
+    { code:'1421',  label:'CCU days 2–7 (1421)' },
+    { code:'1431',  label:'CCU days 8–30 (1431)' },
+    { code:'78717', label:'Complex discharge (78717)' },
+    { code:'78720', label:'MOST advance care (78720)' },
+  ];
+
+  var feeSelect = '<select id="ce-fee">' +
+    feeOptions.map(function(f) {
+      return '<option value="' + f.code + '"' + (String(c.fee).trim() === f.code ? ' selected' : '') + '>' + f.label + '</option>';
+    }).join('') + '</select>';
 
   var curDx = DIAGNOSES.find(function(d) { return d.code === c.icd; });
 
   // Build doctor options for performing physician selector
-  var docOptions = st.doctors.map(function(d) {
+  var docOptions = doctorsSorted().map(function(d) {
     return '<option value="' + esc(d.alias) + '"' + (c.alias === d.alias ? ' selected' : '') + '>' +
            esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
   }).join('');
@@ -5662,7 +5598,7 @@ function openClaimEdit(btn) {
       '</div>' +
       '<label style="margin-top:7px">Performing physician</label>' +
       '<select id="ce-alias" style="margin-bottom:7px">' + docOptions + '</select>' +
-      '<label>Fee code</label>' + feePicker +
+      '<label>Fee code</label>' + feeSelect +
       '<label style="margin-top:10px">Referring MD</label>' +
       '<div style="position:relative">' +
       '<input id="ce-ref-search" value="' + esc(refLabel) + '" style="padding-right:32px" ' +
@@ -5704,9 +5640,7 @@ function saveClaimEdit(btn) {
   var p   = getP(pid);
   if (!c) return;
 
-  // Non-coercive: if the picker value is somehow blank, keep the claim's
-  // existing fee rather than overwriting it (never silently drop a fee).
-  var newFee   = ((document.getElementById('ce-fee') || {}).value || '').trim() || c.fee;
+  var newFee   = document.getElementById('ce-fee').value;
   var newIcd   = document.getElementById('ce-icd').value || c.icd;
   var newAlias = document.getElementById('ce-alias').value;
   var newDateISO = (document.getElementById('ce-date') || {}).value || '';
@@ -6608,7 +6542,7 @@ function buildIcdRefCard(p) {
 function buildPerformingPhysSelector() {
   if (!st.doctors || !st.doctors.length) return '';
   var curAlias = st.doc ? st.doc.alias : '';
-  var opts = st.doctors.map(function(d) {
+  var opts = doctorsSorted().map(function(d) {
     return '<option value="' + esc(d.alias) + '"' + (d.alias === curAlias ? ' selected' : '') + '>' +
            esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
   }).join('');
@@ -9843,7 +9777,7 @@ function hideModal(id) {
 
 function renderDocOpts() {
   document.getElementById('doc-opts').innerHTML = st.doctors.length
-    ? st.doctors.map(function(d) {
+    ? doctorsSorted().map(function(d) {
         var ini = d.name.replace('Dr. ','').split(' ').map(function(w){return w[0]||''}).join('').slice(0,2).toUpperCase();
         var numLine = d.alias;
         return '<div class="doc-opt" data-alias="' + d.alias + '" data-num="' + d.num + '" data-name="' + esc(d.name) + '" onclick="selectDocEl(this)">' +
@@ -9909,6 +9843,30 @@ function getP(pid) {
 function checkDoc() {
   if (!st.doc) { showToast('Sign in first'); showModal('doc-modal'); return false; }
   return true;
+}
+
+// ── Doctor list ordering ───────────────────────────────
+// Surname used for sorting — the last whitespace-delimited token of the
+// doctor's name, with any leading "Dr." stripped; falls back to the alias
+// if no name is on file (e.g. a profile added with alias only).
+function doctorSurname(d) {
+  var n = String((d && d.name) || (d && d.alias) || '').replace(/^\s*Dr\.?\s+/i, '').trim();
+  var parts = n.split(/\s+/).filter(Boolean);
+  return (parts.length ? parts[parts.length - 1] : n).toLowerCase();
+}
+
+// st.doctors sorted alphabetically by surname (then full name as tie-break).
+// Used by the sign-in list and every performing-physician selector so all
+// doctor lists in the app share one consistent order. Returns a shallow
+// copy — never mutates st.doctors.
+function doctorsSorted() {
+  return (st.doctors || []).slice().sort(function(a, b) {
+    var sa = doctorSurname(a), sb = doctorSurname(b);
+    if (sa !== sb) return sa < sb ? -1 : 1;
+    var na = String((a && a.name) || '').toLowerCase();
+    var nb = String((b && b.name) || '').toLowerCase();
+    return na < nb ? -1 : (na > nb ? 1 : 0);
+  });
 }
 
 function gv(id) {
