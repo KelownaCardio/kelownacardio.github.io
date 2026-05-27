@@ -6,6 +6,14 @@
 
 // ── Init ──────────────────────────────────────────────
 async function init() {
+  // Build the Add Patient "Location & list" card from the shared
+  // component before anything references f-ward (custom-ward restore,
+  // wardChange, prefill all need it present).
+  var apLocHost = document.getElementById('ap-loc-host');
+  if (apLocHost) {
+    apLocHost.innerHTML = buildLocationCard('f',
+      { ward:'CCU', bed:'', role:'mrp', mrp:'Cardiology', list:'on', care:'ccu' });
+  }
   updateDailyTotal();
   await loadLocal();
   purgeOldPatients(); // remove patients discharged > 21 days ago
@@ -29,7 +37,7 @@ async function init() {
     savedWards.forEach(function(w) {
       if (!WARDS[w.key]) {
         WARDS[w.key] = { label:w.name, list:'off', care:'directive', role:'consultant', rooms:[] };
-        ['f-ward','pe-ward'].forEach(function(selId) {
+        ['f-ward','pe-ward','le-ward'].forEach(function(selId) {
           var sel = document.getElementById(selId);
           if (!sel) return;
           var otherOpt = sel.querySelector('option[value="OTHER"]');

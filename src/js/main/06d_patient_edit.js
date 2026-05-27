@@ -39,55 +39,8 @@ function openPatientEdit(pid) {
   html += '</div>';
   html += '</div>'; // end demographics card
 
-  // ── Location & service ───────────────────────────────
-  html += '<div class="card card-location">';
-  html += '<div class="card-title">Location &amp; service</div>';
-
-  // Row 1: Ward + Bed
-  html += '<div class="fl">';
-  html += '<div class="f1"><label>Ward</label><select id="pe-ward" onchange="peWardChange()">';
-  Object.keys(WARDS).forEach(function(k) {
-    html += '<option value="' + k + '"' + (p.ward === k ? ' selected' : '') + '>' + WARDS[k].label + '</option>';
-  });
-  html += '</select></div>';
-  html += '<div class="f1"><label id="pe-bed-lbl">Bed / room</label>' +
-          '<div style="position:relative">' +
-          '<input id="pe-bed" autocorrect="off" autocomplete="off" placeholder="Select or type…" style="margin-bottom:0"' +
-          ' oninput="bedSearchEl(this,\'pe-bed-dd\')" onfocus="bedSearchEl(this,\'pe-bed-dd\')"' +
-          ' onblur="setTimeout(function(){hideBedDd(\'pe-bed-dd\')},200)">' +
-          '<div class="bed-dd" id="pe-bed-dd"></div>' +
-          '</div></div>';
-  html += '</div>';
-
-  // Row 2: Cardiology role pills
-  var peCurRole = p.role === 'mrp' ? 'mrp' : 'consultant';
-  html += '<label style="margin-top:8px">Cardiology role</label>';
-  html += '<div class="fl" style="gap:8px;margin-top:4px">';
-  html += '<button class="ap-list-pill' + (peCurRole==='mrp'?' on':'') + '" id="pe-role-mrp" onclick="peRolePill(\'mrp\')">MRP</button>';
-  html += '<button class="ap-list-pill' + (peCurRole==='consultant'?' on':'') + '" id="pe-role-con" onclick="peRolePill(\'consultant\')">Consulting</button>';
-  html += '</div>';
-  html += '<input id="pe-role" type="hidden" value="' + peCurRole + '">';
-  // Row 3: MRP service dropdown
-  html += '<label style="margin-top:8px">MRP service</label>';
-  html += '<select id="pe-mrp" onchange="peMrpChange()">' +
-          ['Cardiology','Other','Hospitalist','CTU','ICU','CSICU',
-           'Cardiac Surgery','General Surgery','Orthopedics','Neurology','Nephrology']
-          .map(function(s) {
-            return '<option value="' + s + '"' + ((p.mrp||'Other') === s ? ' selected' : '') + '>' + s + '</option>';
-          }).join('') +
-          '</select>';
-
-  // Row 3: On/Off service pills
-  var peList = p.list === 'on' ? 'on' : 'off';
-  html += '<label style="margin-top:8px">On / Off service</label>';
-  html += '<div class="fl" style="gap:8px;margin-top:4px">';
-  html += '<button class="ap-list-pill' + (peList==='on'?' on':'') + '" id="pe-pill-on" onclick="pePill(\'on\')">On service</button>';
-  html += '<button class="ap-list-pill tone-amber' + (peList==='off'?' on':'') + '" id="pe-pill-off" onclick="pePill(\'off\')">Off service</button>';
-  html += '</div>';
-  html += '<input id="pe-list" type="hidden" value="' + peList + '">';
-
-  html += '<input id="pe-care" type="hidden" value="' + esc(p.care||'daily') + '">';
-  html += '</div>'; // end location card
+  // ── Location & list (shared component) ───────────────
+  html += buildLocationCard('pe', p);
 
   // ── Audit footer (who added the patient) ─────────────
   if (p.createdBy || p.createdAt) {
@@ -107,48 +60,12 @@ function openPatientEdit(pid) {
   document.getElementById('pt-edit-content').innerHTML = html;
   showModal('pt-edit-modal');
 
-  // Populate bed options after render
+  // Render the ward's room pills after the card is in the DOM. Ward,
+  // role, MRP, list, care and bed are all baked into the card by
+  // buildLocationCard, so nothing else needs restoring here.
   setTimeout(function() {
-    // Preserve the patient's saved list / role / mrp / care — opening
-    // edit must never clobber values with ward defaults. Only manual
-    // ward changes inside the modal will reset them.
-    peWardChange({preserveAll:true});
-    // Restore current bed value into the input
-    var bedInp = document.getElementById('pe-bed');
-    if (bedInp && p.bed) bedInp.value = p.bed;
-    // (No peRoleChange() here — preserveAll already kept role/mrp/care.
-    //  Calling peRoleChange would overwrite the saved care value based
-    //  on role, losing 'combined' on CSICU/ICU patients etc.)
+    renderRoomPills(p.ward, 'pe-bed', 'pe-room-pills');
   }, 50);
-}
-
-// Dynamic ward change in edit form
-function pePill(val) {
-  var el = document.getElementById('pe-list'); if (el) el.value = val;
-  var on  = document.getElementById('pe-pill-on');
-  var off = document.getElementById('pe-pill-off');
-  if (on)  on.className  = 'ap-list-pill' + (val === 'on'  ? ' on' : '');
-  if (off) off.className = 'ap-list-pill tone-amber' + (val === 'off' ? ' on' : '');
-}
-
-function peWardChange(opts) {
-  var ward = (document.getElementById('pe-ward') || {}).value || 'CCU';
-  var bedLbl = document.getElementById('pe-bed-lbl');
-  if (bedLbl) bedLbl.textContent = ward === 'CCU' ? 'Bed #' : 'Room';
-
-  // Apply ward defaults to list / role / mrp / care unless this call is
-  // the edit-modal init (opts.preserveAll=true) — we don't want opening
-  // edit on an existing patient to clobber their saved values.
-  if (!opts || !opts.preserveAll) {
-    applyWardDefaults(ward, { list:'pe-list', role:'pe-role', mrp:'pe-mrp', care:'pe-care' });
-    // Sync pe pills (list + role)
-    var peListVal = (document.getElementById('pe-list') || {}).value || 'on';
-    var peOn  = document.getElementById('pe-pill-on');
-    var peOff = document.getElementById('pe-pill-off');
-    if (peOn)  peOn.className  = 'ap-list-pill' + (peListVal === 'on'  ? ' on' : '');
-    if (peOff) peOff.className = 'ap-list-pill' + (peListVal === 'off' ? ' on' : '');
-    syncPeRolePills();
-  }
 }
 
 // Clear a search field and its hidden value fields
@@ -182,49 +99,6 @@ function peRoleChange() {
     if (mrpSel.value === 'Cardiology') mrpSel.value = 'Other';
     if (careFld) careFld.value = 'directive';
   }
-}
-
-function peMrpChange() {
-  // Same rules as mrpChange() — list is NOT touched.
-  var mrpSel  = document.getElementById('pe-mrp');
-  var roleSel = document.getElementById('pe-role');
-  var careFld = document.getElementById('pe-care');
-  var ward    = (document.getElementById('pe-ward') || {}).value || '';
-  if (!mrpSel || !roleSel) return;
-  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
-  if (mrpSel.value === 'Cardiology') {
-    roleSel.value = 'mrp';
-    if (careFld) careFld.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
-  } else {
-    roleSel.value = 'consultant';
-    if (careFld) careFld.value = 'directive';
-  }
-  syncPeRolePills();
-}
-
-function peRolePill(val) {
-  var roleEl = document.getElementById('pe-role');
-  if (roleEl) roleEl.value = val;
-  syncPeRolePills();
-  var mrpEl  = document.getElementById('pe-mrp');
-  var careEl = document.getElementById('pe-care');
-  var ward   = (document.getElementById('pe-ward') || {}).value || '';
-  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
-  if (val === 'mrp') {
-    if (mrpEl)  mrpEl.value  = 'Cardiology';
-    if (careEl) careEl.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
-  } else {
-    if (mrpEl && mrpEl.value === 'Cardiology') mrpEl.value = 'Other';
-    if (careEl) careEl.value = 'directive';
-  }
-}
-
-function syncPeRolePills() {
-  var val = (document.getElementById('pe-role') || {}).value || 'consultant';
-  var mrp = document.getElementById('pe-role-mrp');
-  var con = document.getElementById('pe-role-con');
-  if (mrp) mrp.className = 'ap-list-pill' + (val === 'mrp'        ? ' on' : '');
-  if (con) con.className = 'ap-list-pill' + (val === 'consultant' ? ' on' : '');
 }
 
 function savePatientEdit(pid) {
@@ -267,61 +141,21 @@ function openLocationEditEl(el) {
   if (pid) openLocationEdit(pid);
 }
 
+var _leEditP = null;
+
 function openLocationEdit(pid) {
   var p = getP(pid);
   if (!p || !p.id) return;
+  _leEditP = p;
 
   var html = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:13px">' +
     '<div style="font-size:15px;font-weight:800;letter-spacing:-.3px">' + esc(p.last) + ', ' + esc(p.first) + '</div>' +
     '<span style="font-size:10px;color:var(--text3)">Location</span>' +
     '</div>';
 
-  html += '<div class="card card-location" style="margin-bottom:10px">';
-
-  // Row 1: Ward + Bed
-  html += '<div class="fl">';
-  html += '<div class="f1"><label>Ward</label><select id="le-ward" onchange="leWardChange()">';
-  Object.keys(WARDS).forEach(function(k) {
-    html += '<option value="' + k + '"' + (p.ward === k ? ' selected' : '') + '>' + WARDS[k].label + '</option>';
-  });
-  html += '</select></div>';
-  html += '<div class="f1"><label id="le-bed-lbl">' + (p.ward === 'CCU' ? 'Bed #' : 'Room') + '</label>' +
-          '<div style="position:relative">' +
-          '<input id="le-bed" autocorrect="off" autocomplete="off" placeholder="Select or type…" style="margin-bottom:0"' +
-          ' value="' + esc(p.bed || '') + '"' +
-          ' oninput="bedSearchEl(this,\'le-bed-dd\')" onfocus="bedSearchEl(this,\'le-bed-dd\')"' +
-          ' onblur="setTimeout(function(){hideBedDd(\'le-bed-dd\')},200)">' +
-          '<div class="bed-dd" id="le-bed-dd"></div>' +
-          '</div></div>';
-  html += '</div>';
-
-  // Row 2: Cardiology role pills
-  var curRole = p.role === 'mrp' ? 'mrp' : 'consultant';
-  html += '<label style="margin-top:8px">Cardiology role</label>';
-  html += '<div class="fl" style="gap:8px;margin-top:4px">';
-  html += '<button class="ap-list-pill' + (curRole==='mrp'?' on':'') + '" id="le-role-mrp" onclick="leRolePill(\'mrp\')">MRP</button>';
-  html += '<button class="ap-list-pill' + (curRole==='consultant'?' on':'') + '" id="le-role-con" onclick="leRolePill(\'consultant\')">Consulting</button>';
-  html += '</div>';
-  html += '<input id="le-role" type="hidden" value="' + curRole + '">';
-  // Row 3: MRP service dropdown
-  var mrpOpts = ['Cardiology','Other','Hospitalist','CTU','ICU','CSICU','Cardiac Surgery','General Surgery','Orthopedics','Neurology','Nephrology'];
-  html += '<label style="margin-top:8px">MRP service</label>';
-  html += '<select id="le-mrp" onchange="leMrpChange()">' +
-          mrpOpts.map(function(s) { return '<option value="' + s + '"' + ((p.mrp||'Other')===s?' selected':'') + '>' + s + '</option>'; }).join('') +
-          '</select>';
-
-  // Row 3: On/Off service pills
-  var curList = p.list === 'on' ? 'on' : 'off';
-  html += '<label style="margin-top:8px">On / Off service</label>';
-  html += '<div class="fl" style="gap:8px;margin-top:4px">';
-  html += '<button class="ap-list-pill' + (curList==='on'?' on':'') + '" id="le-pill-on" onclick="lePill(\'on\')">On service</button>';
-  html += '<button class="ap-list-pill tone-amber' + (curList==='off'?' on':'') + '" id="le-pill-off" onclick="lePill(\'off\')">Off service</button>';
-  html += '</div>';
-  html += '<input id="le-list" type="hidden" value="' + curList + '">';
-  html += '<input id="le-care" type="hidden" value="' + esc(p.care||'directive') + '">';
-  html += '</div>';
-
-  html += '<div id="le-rule-hint" style="font-size:11px;color:var(--text3);line-height:1.4;margin-bottom:12px;padding:0 4px"></div>';
+  // Shared "Location & list" card — same component as Add Patient.
+  html += buildLocationCard('le', p);
+  html += '<div id="le-rule-hint" style="font-size:11px;color:var(--text3);line-height:1.4;margin:8px 0 12px;padding:0 4px"></div>';
 
   html += '<div class="fl" style="gap:8px">';
   html += '<button class="btn btn-p" style="margin:0;flex:1" data-pid="' + pid + '" onclick="saveLocationEdit(this.getAttribute(\'data-pid\'))">Save</button>';
@@ -332,95 +166,24 @@ function openLocationEdit(pid) {
   showModal('loc-edit-modal');
 
   setTimeout(function() {
-    var bedInp = document.getElementById('le-bed');
-    if (bedInp && p.bed) bedInp.value = p.bed;
-    leUpdateRuleHint(p);
+    renderRoomPills(p.ward, 'le-bed', 'le-room-pills');
+    leUpdateRuleHint();
   }, 50);
 }
 
-function lePill(val) {
-  var el = document.getElementById('le-list'); if (el) el.value = val;
-  var on  = document.getElementById('le-pill-on');
-  var off = document.getElementById('le-pill-off');
-  if (on)  on.className  = 'ap-list-pill' + (val === 'on'  ? ' on' : '');
-  if (off) off.className = 'ap-list-pill tone-amber' + (val === 'off' ? ' on' : '');
-}
 
-function leMrpChange() {
-  var mrp  = (document.getElementById('le-mrp')  || {}).value || '';
-  var role = document.getElementById('le-role');
-  var care = document.getElementById('le-care');
-  var ward = (document.getElementById('le-ward') || {}).value || '';
-  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
-  if (mrp === 'Cardiology') {
-    if (role) role.value = 'mrp';
-    if (care) care.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
-    lePill('on');
-  } else {
-    if (role) role.value = 'consultant';
-    if (care) care.value = 'directive';
-  }
-  syncLeRolePills();
-  leUpdateRuleHint(null);
-}
-
-function leRolePill(val) {
-  var roleEl = document.getElementById('le-role');
-  if (roleEl) roleEl.value = val;
-  syncLeRolePills();
-  var mrpEl = document.getElementById('le-mrp');
-  var careEl = document.getElementById('le-care');
-  var ward = (document.getElementById('le-ward') || {}).value || '';
-  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
-  if (val === 'mrp') {
-    if (mrpEl)  mrpEl.value  = 'Cardiology';
-    if (careEl) careEl.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
-  } else {
-    if (mrpEl && mrpEl.value === 'Cardiology') mrpEl.value = 'Other';
-    if (careEl) careEl.value = 'directive';
-  }
-  leUpdateRuleHint(null);
-}
-
-function syncLeRolePills() {
-  var val = (document.getElementById('le-role') || {}).value || 'consultant';
-  var mrp = document.getElementById('le-role-mrp');
-  var con = document.getElementById('le-role-con');
-  if (mrp) mrp.className = 'ap-list-pill' + (val === 'mrp'        ? ' on' : '');
-  if (con) con.className = 'ap-list-pill' + (val === 'consultant' ? ' on' : '');
-}
-
-// Whether a ward is a Cardiology MRP ward where this group is primary
+// Whether a ward is a Cardiology MRP ward where this group is primary.
+// Used by saveLocationEdit and leUpdateRuleHint.
 function _isCardiologyMRPWard(ward) {
   return ward === 'CCU' || ward === '2S' || ward === '2W';
 }
 
-function leWardChange() {
-  var ward   = (document.getElementById('le-ward') || {}).value || '';
-  var bedLbl = document.getElementById('le-bed-lbl');
-  if (bedLbl) bedLbl.textContent = ward === 'CCU' ? 'Bed #' : 'Room';
-  var bedInp = document.getElementById('le-bed');
-  if (bedInp) bedInp.value = '';
-  // Apply defaults for new ward
-  var isMRP = _isCardiologyMRPWard(ward);
-  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
-  var mrpEl  = document.getElementById('le-mrp');
-  var roleEl = document.getElementById('le-role');
-  var careEl = document.getElementById('le-care');
-  if (mrpEl)  mrpEl.value  = isMRP ? 'Cardiology' : 'Other';
-  if (roleEl) roleEl.value = isMRP ? 'mrp' : 'consultant';
-  if (careEl) careEl.value = isMRP ? (icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily') : 'directive';
-  lePill(isMRP ? 'on' : 'off');
-  syncLeRolePills();
-  leUpdateRuleHint(null);
-}
-
-function leUpdateRuleHint(p) {
+function leUpdateRuleHint() {
   var hint = document.getElementById('le-rule-hint');
   if (!hint) return;
   var newWard = (document.getElementById('le-ward') || {}).value || '';
   var newList = (document.getElementById('le-list') || {}).value || 'on';
-  var oldList = p ? p.list : null;
+  var oldList = _leEditP ? _leEditP.list : null;
 
   var movedOff       = oldList === 'on' && newList === 'off';
   var leftCardiology = !_isCardiologyMRPWard(newWard);
