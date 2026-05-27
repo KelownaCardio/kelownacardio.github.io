@@ -48,7 +48,7 @@ function buildIcdRefCard(p) {
 function buildPerformingPhysSelector() {
   if (!st.doctors || !st.doctors.length) return '';
   var curAlias = st.doc ? st.doc.alias : '';
-  var opts = st.doctors.map(function(d) {
+  var opts = doctorsSorted().map(function(d) {
     return '<option value="' + esc(d.alias) + '"' + (d.alias === curAlias ? ' selected' : '') + '>' +
            esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
   }).join('');

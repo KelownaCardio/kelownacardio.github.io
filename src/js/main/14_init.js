@@ -192,7 +192,7 @@ function hideModal(id) {
 
 function renderDocOpts() {
   document.getElementById('doc-opts').innerHTML = st.doctors.length
-    ? st.doctors.map(function(d) {
+    ? doctorsSorted().map(function(d) {
         var ini = d.name.replace('Dr. ','').split(' ').map(function(w){return w[0]||''}).join('').slice(0,2).toUpperCase();
         var numLine = d.alias;
         return '<div class="doc-opt" data-alias="' + d.alias + '" data-num="' + d.num + '" data-name="' + esc(d.name) + '" onclick="selectDocEl(this)">' +
@@ -258,6 +258,30 @@ function getP(pid) {
 function checkDoc() {
   if (!st.doc) { showToast('Sign in first'); showModal('doc-modal'); return false; }
   return true;
+}
+
+// ── Doctor list ordering ───────────────────────────────
+// Surname used for sorting — the last whitespace-delimited token of the
+// doctor's name, with any leading "Dr." stripped; falls back to the alias
+// if no name is on file (e.g. a profile added with alias only).
+function doctorSurname(d) {
+  var n = String((d && d.name) || (d && d.alias) || '').replace(/^\s*Dr\.?\s+/i, '').trim();
+  var parts = n.split(/\s+/).filter(Boolean);
+  return (parts.length ? parts[parts.length - 1] : n).toLowerCase();
+}
+
+// st.doctors sorted alphabetically by surname (then full name as tie-break).
+// Used by the sign-in list and every performing-physician selector so all
+// doctor lists in the app share one consistent order. Returns a shallow
+// copy — never mutates st.doctors.
+function doctorsSorted() {
+  return (st.doctors || []).slice().sort(function(a, b) {
+    var sa = doctorSurname(a), sb = doctorSurname(b);
+    if (sa !== sb) return sa < sb ? -1 : 1;
+    var na = String((a && a.name) || '').toLowerCase();
+    var nb = String((b && b.name) || '').toLowerCase();
+    return na < nb ? -1 : (na > nb ? 1 : 0);
+  });
 }
 
 function gv(id) {

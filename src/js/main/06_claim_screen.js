@@ -7,6 +7,9 @@ function _openClaimScreen(pid) {
   _claimPid = pid;
   _incUnits = 1;
   _mostOn   = true;
+  // Default: opened directly from a list — do not reopen the summary.
+  // ptSummaryAddClaim sets this flag again *after* calling us.
+  _claimReturnSummaryPid = null;
 
   var p = getP(pid);
 
@@ -363,6 +366,12 @@ function selCT(type) {
 var _claimOriginPane  = 'p0';
 var _claimOriginNavIdx = 0;
 
+// When the claim screen was opened from the patient-summary calendar
+// ("+ Add claim"), this holds that patient's id so a successful submit
+// returns to the calendar instead of the rounds list. Null = normal flow
+// (claim screen opened directly from a list — return to that list).
+var _claimReturnSummaryPid = null;
+
 function openClaimScreen(pid) {
   // Record which pane we came from so back button returns there
   ALL_PANES.forEach(function(id) {
@@ -378,11 +387,24 @@ function openClaimScreen(pid) {
 
 function closeClaimScreen() {
   document.getElementById('p-claim').classList.remove('on');
+  // Capture and clear the return-to-summary flag before restoring panes.
+  var returnPid = _claimReturnSummaryPid;
+  _claimReturnSummaryPid = null;
   showPane(_claimOriginPane);
   document.querySelectorAll('.nb').forEach(function(b, i) {
     b.classList.toggle('on', i === _claimOriginNavIdx);
   });
   if (_claimOriginPane === 'p0') render();
   if (_claimOriginPane === 'p-discharged') renderDischarged(document.getElementById('discharged-search').value || '');
+  // Opened from the patient-summary calendar — reopen it so the user lands
+  // back on the calendar (the summary always opens on the calendar view).
+  if (returnPid) openPatientSummary(returnPid);
+}
+
+// Explicit "← Back to rounds" exit: cancelling a claim should always return
+// to the list, never reopen the patient summary — so clear the flag first.
+function backToRoundsFromClaim() {
+  _claimReturnSummaryPid = null;
+  closeClaimScreen();
 }
 
