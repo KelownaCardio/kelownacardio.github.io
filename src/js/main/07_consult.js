@@ -16,6 +16,31 @@ var _mostOn = true;
 // Patient) so the live CCFPP field can resolve the right patient context.
 var _consultCtx = 'claim';
 
+// ── Element scoping (v3.97) ────────────────────────────────────────
+// buildConsultForm renders FIXED ids (cb-33010, cb-33012, cb-date,
+// cb-start, …) and is instantiated in TWO screens that both stay in the
+// DOM at once — the +Claim screen (#claim-body) and the Add Patient
+// screen (#ap-claim-area). So document.getElementById('cb-…') is
+// AMBIGUOUS: it returns whichever form is first in document order, not
+// the one the user is actually filling in.
+//
+// That was the consult-corruption bug: a consult entered on the +Claim
+// screen was submitted by reading the OTHER screen's stale form — whose
+// date input still held its default (today) and whose 33010 button had
+// been stripped of its selected class — so the claim wrote out as
+// 33012 + today regardless of what was typed.
+//
+// Fix: every cb-* lookup is scoped to the active form's container,
+// chosen by _consultCtx (set to 'claim' by selCT, 'addpatient' by
+// initAddPatientConsult). Use cEl / cVal for EVERY cb-* element — never
+// document.getElementById or the global gv() for a cb-* id.
+function consultRoot() {
+  var id = (_consultCtx === 'addpatient') ? 'ap-claim-area' : 'claim-body';
+  return document.getElementById(id) || document;
+}
+function cEl(id)  { return consultRoot().querySelector('#' + id); }
+function cVal(id) { var e = cEl(id); return e ? e.value : ''; }
+
 // The patient the consult form is currently for.
 function currentConsultPatient() {
   if (_consultCtx === 'addpatient') {
@@ -101,35 +126,35 @@ function buildConsultForm(p, opts) {
 }
 
 function toggleConsultCode(code) {
-  document.getElementById('cb-33010').className = 'ct-btn' + (code === '33010' ? ' ct-on-consult' : '');
-  document.getElementById('cb-33012').className = 'ct-btn' + (code === '33012' ? ' ct-on-consult' : '');
+  cEl('cb-33010').className = 'ct-btn' + (code === '33010' ? ' ct-on-consult' : '');
+  cEl('cb-33012').className = 'ct-btn' + (code === '33012' ? ' ct-on-consult' : '');
   updateConsultUI();
 }
 
 function toggleMost() {
   _mostOn = !_mostOn;
-  document.getElementById('cb-most').className = 'most-btn' + (_mostOn ? ' on' : '');
+  cEl('cb-most').className = 'most-btn' + (_mostOn ? ' on' : '');
 }
 
 function updateConsultUI() {
-  var start   = gv('cb-start');
-  var end     = gv('cb-end');
-  var dateISO = gv('cb-date');
-  if (!document.getElementById('cb-mod')) return; // form not on screen
+  var start   = cVal('cb-start');
+  var end     = cVal('cb-end');
+  var dateISO = cVal('cb-date');
+  if (!cEl('cb-mod')) return; // form not on screen
 
   // End follows start (start + 50 min) unless the doctor edited end directly.
-  var endEl   = document.getElementById('cb-end');
+  var endEl   = cEl('cb-end');
   var changed = (typeof event !== 'undefined' && event && event.target) ? event.target.id : '';
   if (start && (changed === 'cb-start' || !end)) {
     if (endEl) endEl.value = minsToTime(t2m(start) + 50);
-    end = gv('cb-end');
+    end = cVal('cb-end');
   }
 
   var modBase  = getModifier(start, dateISO);
   var hasInc   = consultHasIncrement(start, end);
   var modInc   = hasInc ? getModifierForIncrement(start, dateISO) : null;
   var incUnits = consultIncUnits(start, end);
-  var modEl    = document.getElementById('cb-mod');
+  var modEl    = cEl('cb-mod');
 
   if (modBase) {
     var banner = '<div class="mod-box ' + modBase.cls + '" style="margin-bottom:0;border-radius:var(--rsm) var(--rsm) 0 0">' +
@@ -158,8 +183,8 @@ function updateConsultUI() {
   //   1. no call-out window     → "Modifiers don't apply"
   //   2. window, no overlap     → "No overlapping consult"
   //   3. window + overlap       → "CCFPP: Last, First (PHN)"  (blue highlight)
-  var ccEl  = document.getElementById('cb-ccfpp');
-  var ccVal = document.getElementById('cb-ccfpp-val');
+  var ccEl  = cEl('cb-ccfpp');
+  var ccVal = cEl('cb-ccfpp-val');
   if (ccEl && ccVal) {
     var ccText, ccMatch = false;
     if (!modBase) {
@@ -219,10 +244,10 @@ function claimSubmitOnce(fn) {
 // rows as a per-claim override — they do NOT modify the patient record.
 // CCFPP detection runs here, so it now fires from BOTH entry points.
 function submitConsultClaims(p, alias) {
-  var code    = document.getElementById('cb-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
-  var dateISO = gv('cb-date');
-  var start   = gv('cb-start');
-  var end     = gv('cb-end');
+  var code    = cEl('cb-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
+  var dateISO = cVal('cb-date');
+  var start   = cVal('cb-start');
+  var end     = cVal('cb-end');
   if (!dateISO) { showToast('Enter consult date'); return false; }
   if (!start)   { showToast('Start time required for ' + code); return false; }
   if (!end)     { showToast('End time required for ' + code); return false; }
@@ -234,11 +259,11 @@ function submitConsultClaims(p, alias) {
   // editable on the form. Rides on the claim rows only (override object).
   var ov = {
     icd:       getClaimIcd(p),
-    refby:     gv('cb-refby')      || p.refby     || '',
-    refbyName: gv('cb-refby-name') || p.refbyName || ''
+    refby:     cVal('cb-refby')      || p.refby     || '',
+    refbyName: cVal('cb-refby-name') || p.refbyName || ''
   };
 
-  var userNote  = (gv('cb-notes') || '').trim();
+  var userNote  = (cVal('cb-notes') || '').trim();
   // CCFPP — one-directional detection. Note belongs on the 120x modifier
   // claims only, never on the consult row.
   var ccfppNote = ccfppDetectAndUpdate(p, alias, dateISO, dateFmt, start, end);
