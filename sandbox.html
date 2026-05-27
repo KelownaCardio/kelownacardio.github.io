@@ -1,194 +1,20 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology Billing — main app
-  Version:    v3.77
-  Built:      2026-05-23 UTC
 
-  Changes in this build (v3.77) — Calendar legend clickable + desktop size fix:
-    - Legend pills (CCU / Daily / Directive / Combined) are now clickable
-      type selectors. Tap a pill to enter sticky-add mode; tap any calendar
-      day to add that claim type directly (no picker modal). Tap the pill
-      again to cancel. Active pill highlights in its claim colour.
-    - A hint line below the legend confirms the active mode:
-      "Tap any day to add CCU — tap pill again to cancel".
-    - Consult and Gap legend items remain view-only (not addable via calendar).
-    - Combined daily still opens its ICD + reason sub-form.
-    - Active pill is restored after calendar re-render (month change, claim add).
-    - _cvActiveType resets to null whenever a new patient summary is opened.
-    - All in-month calendar days are now tappable (previously only days with
-      claims or in-span days responded to tap).
-    - Picker modal buttons enlarged: padding 18px, label font 16px.
-    - Calendar grid capped at max-width:420px to prevent oversizing on desktop.
+  This file (index.html) is GENERATED. Do NOT hand-edit.
+  Edit src/js/main/*.js and src/index.template.html, then commit;
+  CI rebuilds index.html via build.js. See PROJECT-HANDBOOK.md.
 
-  Changes in this build (v3.76) — CCU Admission/Transfer pill:
-    - Added "CCU Admit" pill to the Add Patient claim card, between
-      Consult and Other Claim.
-    - Selecting CCU Admit shows a minimal claim area: date + optional
-      notes + diagnosis + referring MD + performing physician.
-      No time fields, no MOST toggle, no call-out modifier banner.
-    - On submit, writes a single 1411 (CCU Day 1) claim with the
-      selected date. Location follows ward (E if ED, else I).
-    - CCU Admit pill highlights in red (ct-on-ccu) when active.
-    - Validation requires: PHN, referring MD, diagnosis, date.
-    - clearAddForm and pill-reset loop updated to include 'ccu-admit'
-      so state clears correctly on form reset.
-
-  Changes in this build (v3.75) — Remove direct CSV export from app:
-    - Removed exportCSV(), reexportSubmitted(), _buildAndDownloadCSV(),
-      and ccuConsolidate() — all CSV generation is handled exclusively
-      by the Google Sheets Apps Script (ccuConsolidateForExport()).
-    - No UI changes; these functions were already unreachable from any
-      button in the app.
-  Repo:       github.com/KelownaCardio/kelownacardio.github.io
-
-  Changes in this build (v3.67) — CCU export: one row per day:
-    - ccuConsolidate() now emits one row per calendar day for 1421 and
-      1431 (units:1 each) instead of a single batched row with N units.
-    - Each row uses that day's actual tap (ep[d]) so date and performing
-      alias are correct per day, not copied from episode day 1.
-    - 1411 (day 1) behaviour unchanged.
-
-  Changes in this build (v3.66) — Meditech import MRP transition detection:
-    - Detect when a matched existing patient's MRP has changed between the
-      stored record and the imported Meditech list:
-        · left-cardiology  → patient was Cardiology MRP, attending is no
-                              longer a cardiologist (e.g. moved to CSICU
-                              for surgery, became Hospitalist primary).
-                              Row is auto-UNCHECKED — doctor must
-                              explicitly confirm before billing changes.
-        · joined-cardiology → patient was not on our service, attending
-                              now a cardiologist. Row is auto-checked.
-    - Transition rows render at the top of the import modal with a red /
-      amber tinted background and a chip showing "oldMRP → newMRP".
-    - On confirm, transition rows mutate the existing patient: writes new
-      mrp + flips list/role/care to match the new service designation
-      (off/consultant/directive for left-cardiology; on/mrp/daily-or-ccu
-      for joined-cardiology). Ward/bed also updated. Logged via
-      logChange("MRP transition via Meditech import", oldVals → newVals).
-    - Only fires when there is exactly 1 local name match — multi-match
-      duplicates continue to flow through the existing demographic-conflict
-      banner so a single row never triggers both warnings at once.
-
-  Changes in this build (v3.65) — Meditech import discharge note:
-    - Discharge reason for missing patients changed from
-      "Not on Meditech list" to "No longer on Meditech Import List".
-    - `dischargeNote` field added to patient record before savePatient
-      push so the reason persists to the Patients tab in Sheets
-      (non-billing note only).
-
-  Changes in this build (v3.61) — Add Patient claim card cleanup:
-    - Removed redundant "Lmtd Consult" tab from Add Patient claim card.
-      Full / Limited consult selection is handled by the 33010/33012
-      buttons already present inside the consult area.
-    - Added live modifier banner (night / evening / weekend / daytime)
-      below the MOST pill in the Add Patient consult area, mirroring
-      the behaviour of the standalone consult screen. Updates on date
-      and start time changes. Shows increment tier if consult > 45 min.
-    - End time hint text changed to "Defaults to 50min, adjust as needed".
-    - Start time change now auto-updates end time to start + 50 min
-      (same as standalone consult screen).
-    - Removed all _apClaimType === 'lmtd' branches; lmtd is now
-      handled entirely by the 33012 toggle inside the consult area.
-    - REVERTS v3.59. CCU_DAILY is now the canonical placeholder fee for
-      every CCU day. The Apps Script ccuConsolidateForExport() rolls
-      groups of CCU_DAILY taps into properly-banded 1411/1421/1431 rows
-      with units at export time. This eliminates the band-at-rest
-      correctness problem and matches the BC MSP standard form
-      (one row per band with units, not one row per day).
-    - All CCU write paths reverted: batchRound (ward sweep),
-      quickCCUBtn, claim-screen CCU button, calendar gap-fill picker,
-      discharge modal CCU Daily buttons (both branches). They all
-      write 'CCU_DAILY' and addClaim no longer intercepts it.
-    - CCU_DAILY restored in the claim edit fee dropdown as
-      "CCU day (placeholder, export bands)".
-    - The ccuFeeForDate(p, dateStr) and ccuFeeForToday(p) helpers
-      remain in the file but are no longer called from billing paths.
-      Kept in case future work needs them (e.g. showing the projected
-      band on a confirmation screen before submit). Effectively dead
-      code for now.
-    - User-facing label simplified: quickCCUBtn shows "CCU day" toast
-      instead of the per-band label ("CCU day 1 (1411)" etc), since
-      the per-day band is meaningless until export.
-
-  Changes in this build (v3.59) — CCU_DAILY elimination [REVERTED in v3.60]:
-    - Briefly switched to band-on-write (compute 1411/1421/1431 at tap
-      time). Created band-at-rest correctness issues after manual
-      edits and mid-episode backfills. Reverted by user request in
-      favour of the placeholder + export-consolidation approach.
-
-  Changes in this build (v3.58) — Patient card style improvements:
-    - DOB removed from patient card meta line (age+sex already shown).
-    - Dx (ICD description + code) added after MRP on all card views
-      (ward list, alphabetical, off-service). Format: "Dx: Description (code)".
-    - Quick-tap action buttons (Directive / Combined daily / + Claim) now
-      share a single full-width row using flex:1 on each button (nowrap).
-    - CCU/CSICU/ICU consulting patients now correctly show Directive +
-      Combined daily quick-tap buttons (not CCU daily — we only claim CCU
-      daily when Cardiology is MRP). showsCCUDaily() now checks role===mrp
-      exclusively (dropped legacy care===ccu fallback).
-    - Ward room-number circle centered vertically in card (align-items:center
-      on .wp). Room number font reduced 10px→8px for clearer name hierarchy.
-      Removed margin-top offsets on .wp-pos and .wp-pos-wrap.
-
-  Changes in this build (v3.33) — Meditech import auto-discharge:
-    - Cardiologist matchers (inferMRP, inferCare) replaced with the
-      actual app users + 'CardiologyMRP' group label. Surnames wan/
-      soon removed — those are cardiac SURGEONS, not cardiologists.
-    - New helpers isCardiologistAttending() and isCardiacSurgeonAttending()
-      with explicit CARDIOLOGIST_SURNAMES and CARDIAC_SURGEON_SURNAMES
-      constants at the top of 13_meditech.js.
-    - Meditech import now also flags discharge candidates: active
-      on-service patients who are (a) not on the imported list, or
-      (b) on the list with a cardiac surgeon as attending. Shown in
-      a pre-checked red section at the top of the import modal; MD
-      can uncheck any that should stay. Confirm processes discharges
-      first (logChange "Discharged via Meditech import"), then imports.
-
-  Changes in this build (v3.32) — toast + ward defaults:
-    - showToast no longer stacks. Each call removes any previous toast
-      div immediately (the v3.31 code cleared the removal timer but left
-      the orphan div in the DOM until its own timer fired, so rapid
-      rounding taps left several banners visible). Duration shortened
-      from 2400ms to 1600ms. Any visible toast is also dismissed when
-      the user navigates to a different pane via showPane.
-    - wardChange / peWardChange now snap role + MRP + care to the ward's
-      defaults (in addition to list, which v3.31 added). CCU/2S/2W set
-      role=MRP, mrp=Cardiology; everything else sets role=Consulting,
-      mrp=Other. Care is set to ccu for CCU/CSICU/ICUA/B/D, daily for
-      2S/2W, directive elsewhere. This fixes the case where adding a
-      patient to a non-cardiac ward via the form left them with
-      role=MRP+mrp=Cardiology (defaults from clearAddForm), causing the
-      wrong quick-tap buttons (+ Daily instead of + Directive / + Combined
-      daily). User can still manually override after.
-    - Edit modal: preserveList renamed to preserveAll and now also
-      preserves the saved role / mrp / care, so opening edit on an
-      existing patient never clobbers their saved values.
-    - clearAddForm now defers to wardChange() to pick role/mrp/list/care
-      based on the current ward, instead of hard-coding mrp+on+daily.
-
-  v3.31: Location & service rule tightening — list (on/off) ward-driven;
-         role ↔ MRP bidirectional binding kept but list-snapping removed;
-         edit-modal preserves saved list; Meditech import writes role and
-         defaults unrecognised MRPs to 'Other'.
-
-  v3.29: FEES trimmed from 56 to 20 codes (group's actual usage).
-  v3.28: FEES audited against MSC 2026; 13 mis-labels fixed; 3 invalid
-         codes removed (14101/14105/14113); $ amounts added; getFeeLabel
-         refactored.
-  v3.27: Calendar view default in patient summary; gap detection for CCU
-         + MRP daily wards; tap-to-add picker; discharge gap check.
-  v3.25: ocr_offline.js v1.2 (Meditech parser fixes).
-  v3.24: Multi-pass Tesseract (paper + screen preprocessing).
-  v3.23: Meditech-aware empty-OCR ward/room corrections with rawText.
-  v3.22: Debug panel minimizable.
-  v3.21: Debug panel + version-aware Service Worker.
-  v3.20: OCR corrections capture.
+  Runtime version constants:  src/js/main/03_state.js
+    (BUILD_ID, APP_VERSION, APP_BUILT — the source of truth)
+  Change history:             CHANGELOG-*.md (Claude Project)
 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>KGH Cardiology Billing — Sandbox</title>
+<title>KGH Cardiology Billing</title>
 
 <!-- PWA -->
 <link rel="manifest" href="manifest.json">
@@ -197,7 +23,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="KGH Cards">
 <meta name="theme-color" content="#1a5fa8">
-<link rel="apple-touch-icon" href="icon-192.svg">
+<link rel="apple-touch-icon" href="icon-180.png">
 <style>
 :root {
   --bg:#f5f4f7; --surface:#fff; --surface2:#f0eff5;
@@ -316,7 +142,7 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 .wp { display:flex; align-items:center; gap:8px; padding:8px 10px; border:.5px solid var(--border); border-radius:var(--r); background:var(--surface); cursor:pointer; }
 .wp.done      { border-color:#7ec49a; background:var(--green-bg); }
 .wp.directive { border-color:#d4a84a; }
-.wp-pos { min-width:24px; height:22px; padding:0 6px; border-radius:11px; background:var(--surface2); display:flex; align-items:center; justify-content:center; font-size:8px; font-weight:700; color:var(--text2); flex-shrink:0; margin-top:0; letter-spacing:-.2px; }
+.wp-pos { min-width:32px; height:28px; padding:0 8px; border-radius:14px; background:var(--surface2); display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:var(--text2); flex-shrink:0; margin-top:0; letter-spacing:-.2px; }
 .wp-pos.done { background:#7ec49a; color:#fff; }
 /* Card tints — persist across screens for visual continuity */
 .card-patient  { background:#f4f2f9; border-color:rgba(46,26,110,.10); }
@@ -349,7 +175,7 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 
 /* ALPHA LIST */
 .alpha-sec { font-size:10px; font-weight:700; color:var(--text3); text-transform:uppercase; letter-spacing:.5px; margin:11px 0 5px; }
-.alpha-row { display:flex; align-items:flex-start; gap:9px; padding:9px 10px; border:.5px solid var(--border); border-radius:var(--r); background:var(--surface); cursor:pointer; margin-bottom:5px; }
+.alpha-row { display:flex; align-items:center; gap:9px; padding:9px 10px; border:.5px solid var(--border); border-radius:var(--r); background:var(--surface); cursor:pointer; margin-bottom:5px; }
 .alpha-row.done { border-color:#7ec49a; background:var(--green-bg); }
 .alpha-av { width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0; }
 .av-on  { background:var(--blue-bg);  color:var(--blue-t); }
@@ -444,6 +270,15 @@ input[type=file] { display:none; }
 .ref-dd-row { padding:8px 10px; font-size:12px; cursor:pointer; border-bottom:.5px solid var(--border); }
 .ref-dd-row:hover { background:var(--surface2); }
 .ref-dd-row:last-child { border-bottom:none; }
+
+/* ROOM PILLS — preset 2S/2W/CCU rooms as tap targets */
+.room-pills { display:flex; flex-wrap:wrap; gap:6px; }
+.room-pill { padding:7px 10px; min-width:40px; text-align:center; font-size:13px; font-weight:600;
+  border:.5px solid var(--border2); border-radius:8px; background:var(--surface2); color:var(--text2);
+  cursor:pointer; user-select:none; font-family:inherit; line-height:1; }
+.room-pill:active { transform:scale(.95); }
+.room-pill.selected { background:var(--blue-bg); border-color:var(--blue-t); color:var(--blue-t); }
+.room-pill-other { font-style:italic; font-weight:500; }
 
 /* LOCATION SCREEN */
 .loc-grid { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-bottom:11px; }
@@ -817,6 +652,7 @@ input[type=file] { display:none; }
 .cv-pick-btn.cv-pk-rec.cv-pk-directive { border-color:#003478; }
 .cv-pick-btn.cv-pk-rec.cv-pk-combined  { border-color:#34804a; }
 
+
 /* ══════════════════════════════════════════════════════
    SANDBOX / TRAINING UI — professional, restrained.
    All ids/classes are sb- prefixed to avoid app collisions.
@@ -1010,7 +846,6 @@ input[type=file] { display:none; }
 }
 .sb-coach-btn.primary { background:#2e1a6e; color:#fff; border-color:#2e1a6e; }
 .sb-coach-btn:active  { transform:scale(.97); }
-
 </style>
 </head>
 <body>
@@ -1026,7 +861,7 @@ input[type=file] { display:none; }
   <button class="sb-fab2-body" onclick="sbFabBody('tour')">
     <svg class="sb-fab2-ico" viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
     <span class="sb-fab2-label">Walkthrough</span>
-    <span id="sb-tour-count" class="sb-fab2-count">0/9</span>
+    <span id="sb-tour-count" class="sb-fab2-count">0/10</span>
   </button>
   <button class="sb-fab2-min" onclick="sbFabMin('tour')" aria-label="Minimize walkthrough" title="Minimize">
     <svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -1164,11 +999,6 @@ input[type=file] { display:none; }
 <!-- ═══ ADD PATIENT PANE ═══ -->
 <div class="pane" id="p1">
 
-  <div class="sb-pane-hint">
-    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-    <span>Training mode &mdash; the camera is simulated. Photographing anything fills the form with a sample patient so you can practise the full flow. No image leaves this device.</span>
-  </div>
-
   <!-- Scan sticker -->
   <div class="card">
     <div class="card-title">Scan sticker or Meditech chart</div>
@@ -1213,79 +1043,11 @@ input[type=file] { display:none; }
     <div id="ap-claim-area"></div>
   </div>
 
-  <!-- Location card (always visible — default path is add to list) -->
+  <!-- Location card (always visible — default path is add to list).
+       Markup is generated by the shared buildLocationCard('f') component
+       at init; the pencil-edit and bed-circle modals use the same builder. -->
   <div id="ap-loc-section">
-    <div class="card card-location">
-      <div class="card-title">Location &amp; list</div>
-      <div class="fl">
-        <div class="f1"><label>Ward</label>
-          <select id="f-ward" onchange="wardChange()">
-            <option value="CCU">CICU</option>
-            <option value="2S">2S</option>
-            <option value="2W">2W</option>
-            <option value="CSICU">CSICU</option>
-            <option value="ICUA">ICU A</option>
-            <option value="ICUB">ICU B</option>
-            <option value="ICUD">ICU D</option>
-            <option value="ED">ED</option>
-            <option value="3E">3E</option>
-            <option value="3W">3W</option>
-            <option value="3MU">3MU</option>
-            <option value="4A">4A</option>
-            <option value="4B">4B</option>
-            <option value="4E">4E</option>
-            <option value="4W">4W</option>
-            <option value="5A">5A</option>
-            <option value="5B">5B</option>
-            <option value="REHAB">Rehab</option>
-            <option value="6W">6W</option>
-            <option value="PAR">Centennial PAR</option>
-            <option value="OTHER">Other</option>
-          </select>
-          <div id="f-ward-other-wrap" style="display:none;margin-top:-3px">
-            <input id="f-ward-other" placeholder="Enter ward name…" autocorrect="off" autocapitalize="words" style="margin-bottom:4px">
-            <button type="button" onclick="saveCustomWard()" style="padding:5px 12px;font-size:11px;font-weight:700;border:.5px solid var(--border2);border-radius:var(--rpill);background:var(--blue-bg);color:var(--blue-t);cursor:pointer;font-family:inherit">Save to list</button>
-          </div>
-        </div>
-        <div class="f1">
-          <label id="bed-lbl">Bed / room</label>
-          <div style="position:relative">
-            <input id="f-bed" autocorrect="off" autocomplete="off" placeholder="Select or type…" style="margin-bottom:0"
-              oninput="bedSearchEl(this,'f-bed-dd')"
-              onfocus="bedSearchEl(this,'f-bed-dd')"
-              onblur="setTimeout(function(){hideBedDd('f-bed-dd')},200)">
-            <div class="bed-dd" id="f-bed-dd"></div>
-          </div>
-        </div>
-      </div>
-      <label style="margin-top:8px">Cardiology role</label>
-      <div class="fl" style="gap:8px;margin-top:4px">
-        <button class="ap-list-pill" id="ap-role-mrp"  onclick="apRolePill('mrp')">MRP</button>
-        <button class="ap-list-pill on" id="ap-role-con" onclick="apRolePill('consultant')">Consulting</button>
-      </div>
-      <input id="f-role" type="hidden" value="consultant">
-      <label style="margin-top:8px">MRP service</label>
-      <select id="f-mrp" onchange="mrpChange()">
-        <option value="Cardiology">Cardiology</option>
-        <option value="Other">Other</option>
-        <option value="Hospitalist">Hospitalist</option>
-        <option value="CTU">CTU</option>
-        <option value="ICU">ICU</option>
-        <option value="CSICU">CSICU</option>
-        <option value="Cardiac Surgery">Cardiac Surgery</option>
-        <option value="General Surgery">General Surgery</option>
-        <option value="Orthopedics">Orthopedics</option>
-        <option value="Neurology">Neurology</option>
-        <option value="Nephrology">Nephrology</option>
-      </select>
-      <label style="margin-top:8px">On / Off service</label>
-      <div class="fl" style="gap:8px;margin-top:4px">
-        <button class="ap-list-pill on" id="ap-pill-on" onclick="apListPill('on')">On service</button>
-        <button class="ap-list-pill tone-amber" id="ap-pill-off" onclick="apListPill('off')">Off service</button>
-      </div>
-      <input id="f-list" type="hidden" value="on">
-      <input id="f-care" type="hidden" value="daily">
-    </div>
+    <div id="ap-loc-host"></div>
   </div>
 
   <!-- Submit buttons — primary path first (add to list), exception below -->
@@ -1310,7 +1072,7 @@ input[type=file] { display:none; }
   <div class="claim-type-sel" id="claim-type-sel"></div>
   <div id="claim-body"></div>
   <div id="claim-pt-actions" style="display:flex;gap:7px;margin-top:4px"></div>
-  <button class="btn btn-s" onclick="closeClaimScreen()" style="margin-top:7px">← Back to rounds</button>
+  <button class="btn btn-s" onclick="backToRoundsFromClaim()" style="margin-top:7px">← Back to rounds</button>
 </div>
 
 <!-- ═══ LOCATION CHANGE SCREEN ═══ -->
@@ -1320,7 +1082,8 @@ input[type=file] { display:none; }
   <div class="loc-grid" id="loc-grid"></div>
   <div id="loc-room-wrap">
     <label>Room / bed</label>
-    <select id="loc-room" style="margin-bottom:9px"></select>
+    <input id="loc-room" type="text" autocorrect="off" autocomplete="off" placeholder="Type room…" style="margin-bottom:9px;display:none">
+    <div id="loc-room-pills" class="room-pills" style="margin-bottom:9px"></div>
   </div>
   <div class="fl" style="margin-bottom:9px">
     <div class="f1"><label>On / Off service</label>
@@ -1346,16 +1109,7 @@ input[type=file] { display:none; }
     <div style="font-size:12px;color:var(--text2);margin-top:-8px;margin-bottom:10px">Tap your name to sign in</div>
     <div id="doc-opts"></div>
     <div class="divider"></div>
-    <div class="divider"></div>
-    <div class="card-title" style="margin-bottom:4px">Add or update MSP number</div>
-    <div style="font-size:11px;color:var(--text2);margin-bottom:8px">Enter your alias and MSP billing # to update your profile</div>
-    <div class="fl" style="gap:6px;margin-bottom:6px">
-      <input id="new-alias" placeholder="Alias (SB)" style="margin:0" maxlength="8" autocorrect="off" autocapitalize="characters">
-      <input id="new-num" placeholder="Doctor #" style="margin:0" inputmode="numeric" autocorrect="off">
-    </div>
-    <input id="new-name" placeholder="Dr. Full Name" style="margin-bottom:8px" autocorrect="off" autocapitalize="words">
-    <button class="btn btn-p" onclick="addDoctor()">Add and sign in</button>
-    <button class="btn btn-s" onclick="hideModal('doc-modal')">Cancel</button>
+    <button class="btn btn-s" onclick="hideModal('doc-modal')" style="margin-top:4px">Cancel</button>
     <div class="divider" style="margin-top:14px"></div>
     <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Clear all local data and re-sync from Sheets. Use if your device is showing stale or test patients.</div>
     <button class="btn" style="background:var(--red-bg);color:var(--red-t);border:.5px solid var(--red-t);width:100%;margin:0" onclick="resetLocalData()">⚠ Reset local data &amp; re-sync</button>
@@ -1503,7 +1257,7 @@ var WARDS = {
   ICUA: { label:'ICU A',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
   ICUB: { label:'ICU B',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
   ICUD: { label:'ICU D',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
-  ED:   { label:'ED',       list:'off', care:'directive', role:'consultant', rooms:['Resus 1','Resus 2','Bay 1','Bay 2','Bay 3','Bay 4','Other'] },
+  ED:   { label:'ED',       list:'off', care:'directive', role:'consultant', rooms:[] },
   '3E': { label:'3E',       list:'off', care:'directive', role:'consultant', rooms:[] },
   '3W': { label:'3W',       list:'off', care:'directive', role:'consultant', rooms:[] },
   '3MU':{ label:'3MU',      list:'off', care:'directive', role:'consultant', rooms:[] },
@@ -1516,6 +1270,8 @@ var WARDS = {
   REHAB:{ label:'Rehab',       list:'off', care:'directive', role:'consultant', rooms:[] },
   '6W': { label:'6W',          list:'off', care:'directive', role:'consultant', rooms:[] },
   PAR:  { label:'Centennial PAR', list:'off', care:'directive', role:'consultant', rooms:[] },
+  C1C:  { label:'C1C',         list:'off', care:'directive', role:'consultant', rooms:[] },
+  HAH:  { label:'HAH',         list:'off', care:'directive', role:'consultant', rooms:[] },
   OTHER:{ label:'Other',       list:'off', care:'directive', role:'consultant', rooms:[] }
 };
 
@@ -1532,25 +1288,16 @@ var OCR_WORKER_URL = 'https://kgh-ocr.kathrynb77.workers.dev';
 // ── BC MSP 2025 Fee Values (cardiology) ──────────────
 // Used only for motivational daily total display — not for billing submission
 // Rates from BC MSC Payment Schedule effective January 31, 2026.
-var FEE_RATES = {
-  '33010':   186.14,  // Cardiology consultation — full
-  '33012':    93.08,  // Cardiology consultation — repeat/limited (within 6mo)
-  '33008':    63.95,  // Subsequent hospital visit
-  '33006':    82.42,  // Directive care
-  '33005':    97.15,  // Emergency visit when specially called
-  '78717':    82.19,  // G78717 Specialist Discharge Care Plan for Complex Patients
-  '78720':    43.82,  // G78720 Specialist Advance Care Planning Discussion (MOST)
-  '1411':    347.74,  // CCU critical care — day 1
-  '1421':    174.38,  // CCU critical care — days 2–7 (per diem)
-  '1431':    133.01,  // CCU critical care — days 8–30
-  'CCU_DAILY': 0,     // synthetic raw tap — excluded from daily total (consolidated at export)
-  '1200':     79.08,  // Evening call-out base (1800–2300)
-  '1205':     72.69,  // Evening continuing care surcharge — per half hour
-  '1201':    111.05,  // Night call-out base (2300–0800)
-  '1206':     99.40,  // Night continuing care surcharge — per half hour
-  '1202':     79.08,  // Saturday/Sunday/Stat call-out base
-  '1207':     72.69,  // Saturday/Sunday/Stat continuing care surcharge — per half hour
-};
+// FEE_RATES — numeric rate lookup ($ amount) keyed by MSP fee code, used
+// by the daily-total math and the daily-claims modal.
+//
+// SINGLE SOURCE OF TRUTH: this table is DERIVED from the FEES catalogue
+// (see buildFeeRates() just below the FEES definition). Do NOT hand-edit
+// rates here — add or change a fee in FEES only, and FEE_RATES updates
+// automatically. The declaration is left empty on purpose; it is filled
+// once at load time, after FEES is defined. All reads happen inside
+// functions that run later, so the empty stub is never observed.
+var FEE_RATES = {};
 
 function calcDailyTotal() {
   if (!st.doc || !st.claims) return null;
@@ -1740,6 +1487,28 @@ var FEES = [
   { code:'1206',   desc:'Night call — increment per 30 min',                              amount:'$99.40',  cat:'Modifier',  clr:'chip-blue' },
   { code:'1207',   desc:'Weekend/stat call — increment per 30 min',                       amount:'$72.69',  cat:'Modifier',  clr:'chip-blue' }
 ];
+
+// ── Derive FEE_RATES from the FEES catalogue ───────────────────────────
+// FEES (above) is the single source of truth for fee amounts. This builds
+// the numeric FEE_RATES lookup by parsing each catalogue '$' amount once,
+// so adding or repricing a fee means editing FEES only — the daily-total
+// math stays in sync automatically. (Before v4.05 these were two separate
+// hand-maintained tables; codes added to FEES but not FEE_RATES showed a
+// dash and were dropped from the daily total.)
+//
+// CCU_DAILY is a synthetic pre-rollup tap with no catalogue entry — it is
+// added explicitly with rate 0 and is excluded from the daily total
+// (consolidated into 1411/1421/1431/1441 at export time).
+function buildFeeRates() {
+  var rates = { 'CCU_DAILY': 0 };
+  FEES.forEach(function(f) {
+    if (!f || !f.code) return;
+    var n = parseFloat(String(f.amount || '').replace(/[^0-9.]/g, ''));
+    if (!isNaN(n)) rates[f.code] = n;
+  });
+  return rates;
+}
+FEE_RATES = buildFeeRates();
 
 // Legacy fee codes that appeared in older versions of this app but were
 // invalid in MSC 2026 (14101/14105/14113). Kept so that historical claims
@@ -2396,12 +2165,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'sandbox-v3.90-training';
+var BUILD_ID    = 'sandbox-v4.08-training';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
 var APP_VERSION = 'SANDBOX';
-var APP_BUILT   = '2026-05-25';
+var APP_BUILT   = '2026-05-27';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -2816,7 +2585,13 @@ async function syncFromSheets() {
           care:         'directive',
           icd:          src.icd || '3062',
           admitDate:    src.date || '',
-          roundedToday: null
+          roundedToday: null,
+          // v3.91: tag healer-built stubs so their blank demographics surface
+          // for review instead of masquerading as a complete patient record.
+          addedVia:     'app-orphan-healer',
+          needsReview:  true,
+          createdBy:    '',
+          createdAt:    Date.now()
         };
         st.patients.push(stub);
         if (SHEETS_URL) push('savePatient', stub);
@@ -2910,9 +2685,33 @@ async function push(action, body) {
       method: 'POST', body: JSON.stringify(body)
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    // v3.91: inspect the response BODY, not just the HTTP status. Apps Script
+    // returns HTTP 200 even when saveRow rejects a record ({ok:false,error}).
+    // Treating that as success let rejected patient saves pass silently — the
+    // row never landed, and the orphan-claim healer then rebuilt it blank.
+    var data = null;
+    try { data = await resp.json(); } catch (_) { data = null; }
+    if (data && data.ok === false) {
+      // Permanent server-side rejection (validation failure). It will never
+      // succeed on retry, so drop it from the pending-retry queue and report.
+      window._lastPushError = data.error || 'Server rejected the save';
+      if (action === 'savePatient' || action === 'saveClaim') {
+        delete window._pendingPush[body.id];
+      }
+      console.warn('push rejected by server — ' + action + ': ' + window._lastPushError);
+      // Connection is fine — we got a clean 200 + JSON. This is a data
+      // rejection, not a connectivity failure, so do NOT raise the wifi
+      // banner; the caller surfaces the specific error to the user.
+      setSyncState('synced');
+      return false;
+    }
+    window._lastPushError = null;
     setSyncState('synced');
     return true;
   } catch(e) {
+    // Network / transport failure — transient. Leave it in _pendingPush so
+    // the next sync retries it.
+    window._lastPushError = e.message || String(e);
     setSyncState('error');
     return false;
   }
@@ -2937,7 +2736,10 @@ function easterDate(y) {
 function bcStatHolidays(year) {
   var y = year;
   function nthMon(n, m) { var d=new Date(y,m,1); d.setDate(1+(8-d.getDay())%7+(n-1)*7); return d; }
-  function monBefore(m, day) { var d=new Date(y,m,day); while(d.getDay()!==1) d.setDate(d.getDate()-1); return d; }
+  // Victoria Day = the Monday STRICTLY BEFORE May 25. Start the search at
+  // day-1 so a year where May 25 itself is a Monday (e.g. 2026) correctly
+  // rolls back to the prior Monday instead of returning May 25.
+  function monBefore(m, day) { var d=new Date(y,m,day-1); while(d.getDay()!==1) d.setDate(d.getDate()-1); return d; }
   var easter = easterDate(y);
   var goodFri = new Date(easter); goodFri.setDate(easter.getDate()-2);
   var easterMon = new Date(easter); easterMon.setDate(easter.getDate()+1);
@@ -2961,14 +2763,18 @@ function bcStatHolidays(year) {
 }
 
 function isBCStat(dateStr) {
-  var d = new Date(dateStr);
+  // 'T12:00:00' forces LOCAL-time parsing — a bare ISO date string
+  // (YYYY-MM-DD) is otherwise parsed as UTC midnight, which lands on the
+  // previous calendar day in Vancouver and shifts the weekday by one.
+  var d = new Date(dateStr + 'T12:00:00');
   var key = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
   return bcStatHolidays(d.getFullYear()).indexOf(key) !== -1;
 }
 
 function isWeekendOrStat(dateStr) {
   if (!dateStr) return false;
-  var d = new Date(dateStr); var dow = d.getDay();
+  // 'T12:00:00' forces LOCAL-time parsing — see isBCStat note above.
+  var d = new Date(dateStr + 'T12:00:00'); var dow = d.getDay();
   return dow === 0 || dow === 6 || isBCStat(dateStr);
 }
 
@@ -3564,7 +3370,6 @@ function wardHtml(ward) {
   var h = '<div class="ward-block ' + wardCls + '">' +
     '<div class="ward-hdr">' +
       '<div class="ward-lbl">' + wdef.label + '</div>' +
-      '<button class="ward-add" onclick="openAddWard(this)" data-ward="' + ward + '">+ Add</button>' +
     '</div>';
 
   // Sort beds in ascending order.
@@ -3670,8 +3475,7 @@ function renderOff() {
   var off = st.patients.filter(function(p) { return p.list === 'off' && !p.discharged; });
 
   var h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">' +
-    '<div class="ward-lbl">Off Service</div>' +
-    '<button class="ward-add" onclick="openAddOff()">+ Add</button></div>';
+    '<div class="ward-lbl">Off Service</div></div>';
 
   // View toggle — named functions avoid inline quote issues
   var onAlpha = _offView === 'alpha'    ? ' on' : '';
@@ -4235,6 +4039,9 @@ function _openClaimScreen(pid) {
   _claimPid = pid;
   _incUnits = 1;
   _mostOn   = true;
+  // Default: opened directly from a list — do not reopen the summary.
+  // ptSummaryAddClaim sets this flag again *after* calling us.
+  _claimReturnSummaryPid = null;
 
   var p = getP(pid);
 
@@ -4591,6 +4398,12 @@ function selCT(type) {
 var _claimOriginPane  = 'p0';
 var _claimOriginNavIdx = 0;
 
+// When the claim screen was opened from the patient-summary calendar
+// ("+ Add claim"), this holds that patient's id so a successful submit
+// returns to the calendar instead of the rounds list. Null = normal flow
+// (claim screen opened directly from a list — return to that list).
+var _claimReturnSummaryPid = null;
+
 function openClaimScreen(pid) {
   // Record which pane we came from so back button returns there
   ALL_PANES.forEach(function(id) {
@@ -4606,12 +4419,25 @@ function openClaimScreen(pid) {
 
 function closeClaimScreen() {
   document.getElementById('p-claim').classList.remove('on');
+  // Capture and clear the return-to-summary flag before restoring panes.
+  var returnPid = _claimReturnSummaryPid;
+  _claimReturnSummaryPid = null;
   showPane(_claimOriginPane);
   document.querySelectorAll('.nb').forEach(function(b, i) {
     b.classList.toggle('on', i === _claimOriginNavIdx);
   });
   if (_claimOriginPane === 'p0') render();
   if (_claimOriginPane === 'p-discharged') renderDischarged(document.getElementById('discharged-search').value || '');
+  // Opened from the patient-summary calendar — reopen it so the user lands
+  // back on the calendar (the summary always opens on the calendar view).
+  if (returnPid) openPatientSummary(returnPid);
+}
+
+// Explicit "← Back to rounds" exit: cancelling a claim should always return
+// to the list, never reopen the patient summary — so clear the flag first.
+function backToRoundsFromClaim() {
+  _claimReturnSummaryPid = null;
+  closeClaimScreen();
 }
 
 // ── 06b_discharged.js ──
@@ -4830,6 +4656,7 @@ function openPatientSummary(pid) {
   var p = getP(pid);
   if (!p || !p.id) return;
   _cvActiveType = null;  // reset legend pill selection for fresh open
+  _cvDocAlias   = null;  // reset calendar performing-doctor to signed-in default
 
   // All claims for this patient, sorted oldest → newest
   var claims = st.claims
@@ -5027,10 +4854,18 @@ function _cvAdmitSpan(p) {
   return { startMs: startMs, endMs: endMs };
 }
 
-// Map a DD/MM/YYYY date to the dominant cell-colour key.
-// Priority: consult > ccu > daily > directive > combined
-function _cvDominantType(dayClaims) {
-  if (!dayClaims || !dayClaims.length) return null;
+// Cell-colour background per claim type — MUST match the .cv-day.cv-<type>
+// CSS rules exactly, so a 2-claim diagonal split aligns with the solid cells.
+var CV_TYPE_BG = {
+  consult:'#ffcf73', ccu:'#f08585', daily:'#3fa658',
+  directive:'#8eb5fa', combined:'#b8e6c4'
+};
+
+// All distinct claim-colour types present on a day, in priority order
+// (consult > ccu > daily > directive > combined). Single classification
+// used for both the dominant cell colour and the 2-claim diagonal split.
+function _cvDayTypes(dayClaims) {
+  if (!dayClaims || !dayClaims.length) return [];
   var has = { consult:false, ccu:false, daily:false, directive:false, combined:false };
   var hasAny = false;
   dayClaims.forEach(function(c) {
@@ -5047,22 +4882,20 @@ function _cvDominantType(dayClaims) {
       if (c.notes && String(c.notes).trim()) has.combined = true;
       else has.daily = true;
     }
-    // Bedside procedures (cardioversion, pericardiocentesis) — flag as consult-coloured
-    // since they typically accompany a consult/visit event the same day
+    // Bedside procedures (cardioversion, pericardiocentesis) — consult-coloured.
     else if (c.fee === 'Y33025' || c.fee === '00751') has.consult = true;
     // 78717 (complex discharge) / 78720 (MOST) are extras that piggyback on a
-    // regular visit. Fall through; if a 33008/33010 is also billed today, that
-    // wins. If those are the ONLY claims, the hasAny fallback at the end paints
-    // the day with consult colour so it isn't invisible.
+    // regular visit — they fall through to the hasAny fallback below.
   });
-  if (has.consult)   return 'consult';
-  if (has.ccu)       return 'ccu';
-  if (has.daily)     return 'daily';
-  if (has.directive) return 'directive';
-  if (has.combined)  return 'combined';
+  var out = ['consult','ccu','daily','directive','combined'].filter(function(t) { return has[t]; });
   // Fallback — any claim on the day deserves *some* colour so the doctor sees it
-  if (hasAny) return 'consult';
-  return null;
+  if (!out.length && hasAny) out.push('consult');
+  return out;
+}
+
+// Single dominant cell-colour key, or null. Priority order per _cvDayTypes.
+function _cvDominantType(dayClaims) {
+  return _cvDayTypes(dayClaims)[0] || null;
 }
 
 // Build the list of gap days (DD/MM/YYYY strings) for a patient
@@ -5139,13 +4972,14 @@ function _ptSummaryCalendarHTML(p, claims) {
 
   var html = '';
 
-  // Legend — Consult and Gap are view-only; CCU/Daily/Directive/Combined are clickable type-selector pills
+  // Legend — Gap is view-only; Consult opens the consult card; CCU/Daily/
+  // Directive/Combined daily are sticky type-selector pills.
   html += '<div class="cv-legend">' +
-            '<div class="cv-lg"><div class="cv-sw" style="background:#ffcf73"></div>Consult</div>' +
+            '<button class="cv-lg-pill cv-lgp-consult"  id="cv-lgp-consult"  onclick="_cvOpenConsultCard()"><div class="cv-sw" style="background:#ffcf73"></div>Consult</button>' +
             '<button class="cv-lg-pill cv-lgp-ccu"       id="cv-lgp-ccu"       onclick="_cvSelectLegend(\'ccu\',this)"><div class="cv-sw" style="background:#f08585"></div>CCU</button>' +
             '<button class="cv-lg-pill cv-lgp-daily"     id="cv-lgp-daily"     onclick="_cvSelectLegend(\'daily\',this)"><div class="cv-sw" style="background:#3fa658"></div>Daily</button>' +
             '<button class="cv-lg-pill cv-lgp-directive" id="cv-lgp-directive" onclick="_cvSelectLegend(\'directive\',this)"><div class="cv-sw" style="background:#8eb5fa"></div>Directive</button>' +
-            '<button class="cv-lg-pill cv-lgp-combined"  id="cv-lgp-combined"  onclick="_cvSelectLegend(\'combined\',this)"><div class="cv-sw" style="background:#b8e6c4"></div>Combined</button>' +
+            '<button class="cv-lg-pill cv-lgp-combined"  id="cv-lgp-combined"  onclick="_cvSelectLegend(\'combined\',this)"><div class="cv-sw" style="background:#b8e6c4"></div>Combined daily</button>' +
             (rule ? '<div class="cv-lg"><div class="cv-sw" style="background:#d4d4d8;border:1px dashed #8a8a92"></div>Gap</div>' : '') +
           '</div>' +
           '<div class="cv-tap-hint" id="cv-tap-hint"></div>';
@@ -5157,6 +4991,26 @@ function _ptSummaryCalendarHTML(p, claims) {
 
   // Month nav
   html += '<div style="max-width:420px;margin:0 auto">';  // desktop width cap
+
+  // Performing-doctor selector — applies to claims added by tapping a day
+  // (legend-pill quick-add or the gap-fill picker). Defaults to the
+  // signed-in doctor; change it when back-populating another doctor's days.
+  var _cvCurDoc  = _cvDocAlias || (st.doc ? st.doc.alias : '');
+  var _cvDocOpts = doctorsSorted().map(function(d) {
+    return '<option value="' + esc(d.alias) + '"' + (d.alias === _cvCurDoc ? ' selected' : '') + '>' +
+           esc(d.name || d.alias) + '</option>';
+  }).join('');
+  if (_cvDocOpts) {
+    html += '<div style="display:flex;align-items:center;gap:8px;margin:2px 0 10px">' +
+              '<span style="font-size:11px;font-weight:600;color:var(--text2);white-space:nowrap">Performing doctor</span>' +
+              '<select id="cv-legend-doc" onchange="_cvSetDoc(this.value)" ' +
+                'style="flex:1;padding:6px 9px;border:.5px solid var(--border2);border-radius:8px;' +
+                'font-size:12px;font-family:inherit;background:var(--surface2);color:var(--text)">' +
+                _cvDocOpts +
+              '</select>' +
+            '</div>';
+  }
+
   html += '<div class="cv-nav">' +
             '<button onclick="_cvChangeMonth(-1)">‹</button>' +
             '<div class="cv-month">' + monthName + ' ' + year + '</div>' +
@@ -5177,14 +5031,28 @@ function _ptSummaryCalendarHTML(p, claims) {
   for (var d = 1; d <= daysIn; d++) {
     var dateStr = pad(d) + '/' + pad(month.getMonth()+1) + '/' + year;
     var dayClaims = byDate[dateStr] || [];
-    var dominant = _cvDominantType(dayClaims);
+    var dayTypes = _cvDayTypes(dayClaims);
+    var dominant = dayTypes[0] || null;
     var dayMs = new Date(year, month.getMonth(), d).getTime();
     var inSpan = span && dayMs >= span.startMs && dayMs <= span.endMs;
     var isGap = inSpan && rule && !dayClaims.length && dateStr !== todayKey;
 
     var cls = 'cv-day';
-    if (dominant) cls += ' cv-' + dominant;
-    else if (isGap) cls += ' cv-gap';
+    var styleAttr = '';
+    if (dayTypes.length >= 2) {
+      // Two (or more) claim types on this day — split the cell diagonally so
+      // both colours show. Top-left triangle = highest-priority type; only
+      // the top two are shown (a diagonal has two halves). A thin white seam
+      // keeps the split clear even between the two similar greens.
+      var cA = CV_TYPE_BG[dayTypes[0]], cB = CV_TYPE_BG[dayTypes[1]];
+      styleAttr = ' style="background:linear-gradient(135deg,' +
+                  cA + ' 0%,' + cA + ' 49.4%,#ffffff 49.4%,#ffffff 50.6%,' +
+                  cB + ' 50.6%,' + cB + ' 100%);color:#1a1128"';
+    } else if (dominant) {
+      cls += ' cv-' + dominant;
+    } else if (isGap) {
+      cls += ' cv-gap';
+    }
     if (dateStr === todayKey) cls += ' cv-today';
     if (p.discharged && p.dischargeDate === dateStr) cls += ' cv-discharged';
 
@@ -5199,7 +5067,7 @@ function _ptSummaryCalendarHTML(p, claims) {
 
     var tappable = true;  // all in-month days tappable — active pill mode needs this
     var onclick = ' onclick="tapCalDay(\'' + dateStr + '\')"';
-    html += '<div class="' + cls + '"' + onclick + '>' +
+    html += '<div class="' + cls + '"' + styleAttr + onclick + '>' +
               '<div class="cv-num">' + d + '</div>' +
               (tag ? '<div class="cv-tag">' + tag + '</div>' : '') +
             '</div>';
@@ -5251,6 +5119,22 @@ function _cvChangeMonth(delta) {
 // Legend pill selection — sticky type mode
 var _cvActiveType = null;
 
+// Calendar performing-doctor — sticky across month navigation within a
+// single summary open. Null means "use the signed-in doctor". Reset on
+// every openPatientSummary() so it always starts at the logged-in user.
+var _cvDocAlias = null;
+
+// Record the calendar performing-doctor dropdown choice.
+function _cvSetDoc(alias) { _cvDocAlias = alias || null; }
+
+// Resolve the performing doctor for a calendar quick-add: live dropdown
+// value first, then the remembered choice, then the signed-in doctor.
+function _cvCurrentDocAlias() {
+  var sel = document.getElementById('cv-legend-doc');
+  if (sel && sel.value) return sel.value;
+  return _cvDocAlias || (st.doc ? st.doc.alias : '');
+}
+
 function _cvSelectLegend(type, btn) {
   var wasActive = _cvActiveType === type;
   _cvActiveType = wasActive ? null : type;
@@ -5278,6 +5162,21 @@ function _cvRestoreActivePill() {
   }
 }
 
+// Consult legend pill — opens the full consult card for the current patient.
+// A consult is not a one-tap day add (it needs start/end times, MOST, CCFPP),
+// so unlike the CCU/Daily/Directive pills it opens the consult form directly
+// rather than arming a sticky day-tap mode.
+function _cvOpenConsultCard() {
+  var pid = window._cvPid;
+  if (!pid) return;
+  var p = getP(pid);
+  if (!p) return;
+  hideModal('pt-summary-modal');
+  if (p.discharged) openClaimFromDischarged(pid);
+  else              openClaimScreen(pid);
+  selCT('consult');
+}
+
 // Tap a day — open details or the gap-fill picker
 function tapCalDay(dateStr) {
   var pid = window._cvPid;
@@ -5287,9 +5186,13 @@ function tapCalDay(dateStr) {
 
   // Active legend pill mode — add that type directly without opening picker
   if (_cvActiveType) {
-    var alias = st.doc ? st.doc.alias : '';
+    var alias = _cvCurrentDocAlias();
     if (_cvActiveType === 'combined') {
-      _cvShowCombinedForm(pid, dateStr, alias);
+      // Combined daily: reuse this patient's reason if one is already on file;
+      // only prompt the first time (see _cvPriorCombinedReason).
+      var prc = _cvPriorCombinedReason(p);
+      if (prc) _cvFillClaim(pid, dateStr, 'combined', prc.note, prc.icd, alias);
+      else     _cvShowCombinedForm(pid, dateStr, alias);
     } else {
       _cvFillClaim(pid, dateStr, _cvActiveType, '', null, alias);
     }
@@ -5302,7 +5205,7 @@ function tapCalDay(dateStr) {
   if (dayClaims.length) {
     _cvShowDayDetails(pid, dateStr, dayClaims);
   } else {
-    _cvShowPicker(pid, dateStr);
+    _cvShowPicker(pid, dateStr, _cvCurrentDocAlias());
   }
 }
 
@@ -5405,7 +5308,7 @@ function _cvShowPicker(pid, dateStr, preselectedAlias) {
 
   // Build performing doctor dropdown (unique id cv-performing-doc to avoid conflict with claim builder)
   var curAlias = preselectedAlias || (st.doc ? st.doc.alias : '');
-  var docOpts = (st.doctors || []).map(function(d) {
+  var docOpts = doctorsSorted().map(function(d) {
     return '<option value="' + esc(d.alias) + '"' + (d.alias === curAlias ? ' selected' : '') + '>' +
            esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
   }).join('');
@@ -5434,11 +5337,39 @@ function _cvPickType(btn) {
   var type    = btn.getAttribute('data-type');
   var sel = document.getElementById('cv-performing-doc');
   var alias = (sel && sel.value) ? sel.value : (st.doc ? st.doc.alias : '');
-  if (type === 'combined') return _cvShowCombinedForm(pid, dateStr, alias);
+  if (type === 'combined') {
+    // Combined daily: reuse this patient's reason if already on file; only
+    // prompt the first time.
+    var prc = _cvPriorCombinedReason(getP(pid));
+    if (prc) return _cvFillClaim(pid, dateStr, 'combined', prc.note, prc.icd, alias);
+    return _cvShowCombinedForm(pid, dateStr, alias);
+  }
   _cvFillClaim(pid, dateStr, type, '', null, alias);
 }
 
-// Combined daily sub-form — ICD + reason
+// Combined daily — the reason is entered ONCE per patient, then reused.
+// Returns { note, icd } from the most recent combined-daily claim (a 33008
+// row carrying a note) on file for this patient, or null if there is none
+// yet. Derived from claim history, so it needs no extra storage and works no
+// matter which screen the first combined daily was entered on. To change the
+// reason later, edit the note on any combined-daily claim — the most recent
+// one wins.
+function _cvPriorCombinedReason(p) {
+  if (!p || !p.phn) return null;
+  var best = null;
+  st.claims.forEach(function(c) {
+    if (c.fee !== '33008') return;
+    if (!c.notes || !String(c.notes).trim()) return;   // note-less 33008 = plain daily
+    if (!c.phn || !samePhn(c.phn, p.phn)) return;
+    if (!best || parseDMY(c.date) >= parseDMY(best.date)) best = c;
+  });
+  return best
+    ? { note: String(best.notes).trim(), icd: String(best.icd || p.icd || '').trim() }
+    : null;
+}
+
+// Combined daily sub-form — ICD + reason. Shown only the FIRST time a combined
+// daily is added for a patient; after that _cvPriorCombinedReason reuses it.
 function _cvShowCombinedForm(pid, dateStr, alias) {
   var p = getP(pid);
   if (!p) return;
@@ -5446,13 +5377,13 @@ function _cvShowCombinedForm(pid, dateStr, alias) {
   var safeAlias = alias || (st.doc ? st.doc.alias : '');
   var html =
     '<div style="font-size:14px;font-weight:700;color:var(--teal-t);margin-bottom:2px">Combined daily — ' + dispDate(dateStr) + '</div>' +
-    '<div style="font-size:11px;color:var(--text2);margin-bottom:12px">Combined daily requires documentation. Both fields attach to the claim note.</div>' +
+    '<div style="font-size:11px;color:var(--text2);margin-bottom:12px">Entered once — this reason is reused for every future combined daily on this patient.</div>' +
 
     '<label style="display:block;font-size:11px;font-weight:600;color:var(--text2);margin:0 0 4px">ICD-9 diagnostic code</label>' +
     '<input id="cv-cb-icd" type="text" value="' + esc(defaultIcd) + '" placeholder="e.g. 428.0" autocomplete="off" ' +
     'style="width:100%;padding:11px;border:.5px solid var(--border2);border-radius:8px;font-size:14px;font-family:inherit;background:var(--surface2)">' +
 
-    '<label style="display:block;font-size:11px;font-weight:600;color:var(--text2);margin:12px 0 4px">Why combined daily care was needed</label>' +
+    '<label style="display:block;font-size:11px;font-weight:600;color:var(--text2);margin:12px 0 4px">Reason for combined daily care</label>' +
     '<textarea id="cv-cb-reason" rows="3" autocomplete="off" placeholder="e.g. CHF — co-managed with hospitalist for renal optimization" ' +
     'style="width:100%;padding:11px;border:.5px solid var(--border2);border-radius:8px;font-size:14px;font-family:inherit;background:var(--surface2);resize:vertical"></textarea>' +
 
@@ -5579,6 +5510,18 @@ function fmtClaimDate(d) {
   if (d instanceof Date && !isNaN(d)) {
     return pad(d.getDate()) + '/' + pad(d.getMonth()+1) + '/' + d.getFullYear();
   }
+  // v3.92: named-month dates — "18 Jan 1944", "18/Jan/1944", "18-January-1944".
+  // The month is spelled out, so this is unambiguous (no day/month inference) —
+  // safe to normalise to DD/MM/YYYY. Both OCR display formatting and manual
+  // entry following the "DD/MMM/YYYY" field hint produce this shape.
+  if (typeof d === 'string') {
+    var _tm = d.trim().match(/^(\d{1,2})[\s\/.\-]+([A-Za-z]{3,9})[\s\/.\-]+(\d{4})$/);
+    if (_tm) {
+      var _mon = _tm[2].charAt(0).toUpperCase() + _tm[2].slice(1,3).toLowerCase();
+      var _mi  = _MONTHS.indexOf(_mon);
+      if (_mi !== -1) return pad(parseInt(_tm[1],10)) + '/' + pad(_mi+1) + '/' + _tm[3];
+    }
+  }
   // Unknown format — return as-is rather than risk MM/DD mis-parse via new Date(string)
   return String(d);
 }
@@ -5653,6 +5596,9 @@ function ptSummaryAddClaim(btn) {
   hideModal('pt-summary-modal');
   if (fn === 'openClaimFromDischarged') openClaimFromDischarged(pid);
   else openClaimScreen(pid);
+  // Set AFTER the open call (which clears the flag) so a successful submit
+  // returns to this patient's calendar instead of the rounds list.
+  _claimReturnSummaryPid = pid;
 }
 
 function ptSummaryEdit(btn) {
@@ -5695,6 +5641,101 @@ function parseDMYsafe(s) {
   return new Date(parseInt(p[2]), parseInt(p[1])-1, parseInt(p[0])).getTime();
 }
 
+// ── Edit-claim fee-code picker ──────────────────────────
+// A full search-as-you-type picker over the entire FEES catalogue, plus the
+// CCU_DAILY placeholder. Unlike the Other-claim card it imposes NO category
+// restrictions — consult, CCU and modifier codes are all selectable, because
+// editing a claim must be able to reach any code the claim could legitimately
+// carry. Replaces the old hard-coded 10-option <select>, which had no entry
+// for unlisted fees (e.g. 00751) and so let the browser default the <select>
+// to its first option (33010) — silently overwriting the real fee on save.
+//
+// Elements built into the Edit-claim modal by openClaimEdit():
+//   ce-fee          hidden input — selected fee code (read by saveClaimEdit)
+//   ce-fee-search   visible search input
+//   ce-fee-dd       results dropdown
+//   ce-fee-display  small confirmation line
+var CE_FEE_EXTRA = [
+  { code:'CCU_DAILY',
+    desc:'CCU day (placeholder — export bands to 1411/1421/1431)',
+    amount:'', cat:'CCU' }
+];
+
+// Whole searchable pool: every catalogued fee plus the CCU_DAILY placeholder.
+function ceFeePool() { return FEES.concat(CE_FEE_EXTRA); }
+
+// Resolve a stored fee code to display info. Falls back to LEGACY_FEE_LABELS,
+// then to the bare code — so a claim's current code is ALWAYS shown and can
+// never be dropped just because it is not in the active catalogue.
+function ceFeeInfo(code) {
+  var c = String(code || '').trim();
+  if (!c) return null;
+  var hit = ceFeePool().find(function(f) { return f.code === c; });
+  if (hit) return { code:c, desc:hit.desc || '', amount:hit.amount || '', cat:hit.cat || '' };
+  var legacy = (typeof LEGACY_FEE_LABELS !== 'undefined' && LEGACY_FEE_LABELS) ? LEGACY_FEE_LABELS[c] : '';
+  return { code:c, desc:legacy || ('Fee code ' + c), amount:'', cat:'' };
+}
+
+// Build the picker markup, pre-filled with the claim's current fee.
+function ceFeePickerHTML(currentCode) {
+  var info = ceFeeInfo(currentCode);
+  var searchVal = info ? (info.desc + ' (' + info.code + ')') : '';
+  return '<input id="ce-fee" type="hidden" value="' + esc(currentCode || '') + '">' +
+         '<input id="ce-fee-search" autocorrect="off" autocomplete="off" ' +
+           'placeholder="Search fee code or description…" value="' + esc(searchVal) + '" ' +
+           'oninput="ceFeeSearch(this.value)" onfocus="this.select();ceFeeSearch(\'\')">' +
+         '<div class="ref-dd" id="ce-fee-dd"></div>' +
+         '<div id="ce-fee-display" style="font-size:11px;color:var(--text2);margin-top:-4px;margin-bottom:6px"></div>';
+}
+
+var CE_FEE_CAT_COLORS = {
+  'Consult':'var(--blue-t)',   'Daily':'var(--blue-t)',     'Directive':'var(--amber-t)',
+  'Procedure':'var(--red-t)',  'Discharge':'var(--green-t)','CCU':'var(--red-t)',
+  'Modifier':'var(--text3)',   'Other':'var(--teal-t)'
+};
+
+// Populate the dropdown. Empty query => the full list, no truncation.
+function ceFeeSearch(query) {
+  var dd = document.getElementById('ce-fee-dd');
+  if (!dd) return;
+  var q = (query || '').toLowerCase().trim();
+  var pool = ceFeePool();
+  var matches = q.length === 0
+    ? pool.slice()
+    : pool.filter(function(f) {
+        return f.code.toLowerCase().indexOf(q) !== -1 ||
+               (f.desc || '').toLowerCase().indexOf(q) !== -1;
+      });
+  if (!matches.length) {
+    dd.innerHTML = '<div style="padding:8px 10px;font-size:12px;color:var(--text2)">No matching fee codes</div>';
+    dd.style.display = 'block';
+    return;
+  }
+  dd.innerHTML = matches.map(function(f) {
+    var col = CE_FEE_CAT_COLORS[f.cat] || 'var(--text2)';
+    var amt = f.amount ? '<span style="font-size:11px;font-weight:700;color:var(--text2);margin-left:auto;padding-left:8px">' + esc(f.amount) + '</span>' : '';
+    return '<div class="ref-dd-row" data-code="' + esc(f.code) + '" data-desc="' + esc(f.desc || '') + '" ' +
+      'onclick="ceFeeSelect(this.getAttribute(\'data-code\'),this.getAttribute(\'data-desc\'))" ' +
+      'style="display:flex;align-items:center;gap:4px">' +
+      '<span style="font-weight:700;color:' + col + ';margin-right:6px;min-width:62px">' + esc(f.code) + '</span>' +
+      '<span style="flex:1;min-width:0">' + esc(f.desc || '') + '</span>' +
+      (f.cat ? '<span style="font-size:10px;color:var(--text3);margin-left:6px">' + esc(f.cat) + '</span>' : '') +
+      amt +
+      '</div>';
+  }).join('');
+  dd.style.display = 'block';
+}
+
+// Commit a selection into the hidden input + search box.
+function ceFeeSelect(code, desc) {
+  var inp = document.getElementById('ce-fee');
+  if (inp) inp.value = code;
+  var search = document.getElementById('ce-fee-search');
+  if (search) search.value = (desc ? desc + ' ' : '') + '(' + code + ')';
+  var dd = document.getElementById('ce-fee-dd');
+  if (dd) { dd.innerHTML = ''; dd.style.display = 'none'; }
+}
+
 function openClaimEdit(btn) {
   var cid = btn.getAttribute('data-cid');
   var pid = btn.getAttribute('data-pid');
@@ -5702,29 +5743,12 @@ function openClaimEdit(btn) {
   var p   = getP(pid);
   if (!c) return;
 
-  var feeOptions = [
-    { code:'33010', label:'Full consultation (33010)' },
-    { code:'33012', label:'Limited consultation (33012)' },
-    { code:'33008', label:'Daily rounds / MRP (33008)' },
-    { code:'33006', label:'Directive visit (33006)' },
-    // v3.60: CCU daily placeholder restored — export consolidates to 1411/1421/1431.
-    { code:'CCU_DAILY', label:'CCU day (placeholder, export bands)' },
-    { code:'1411',  label:'CCU day 1 (1411)' },
-    { code:'1421',  label:'CCU days 2–7 (1421)' },
-    { code:'1431',  label:'CCU days 8–30 (1431)' },
-    { code:'78717', label:'Complex discharge (78717)' },
-    { code:'78720', label:'MOST advance care (78720)' },
-  ];
-
-  var feeSelect = '<select id="ce-fee">' +
-    feeOptions.map(function(f) {
-      return '<option value="' + f.code + '"' + (String(c.fee).trim() === f.code ? ' selected' : '') + '>' + f.label + '</option>';
-    }).join('') + '</select>';
+  var feePicker = ceFeePickerHTML(c.fee);
 
   var curDx = DIAGNOSES.find(function(d) { return d.code === c.icd; });
 
   // Build doctor options for performing physician selector
-  var docOptions = st.doctors.map(function(d) {
+  var docOptions = doctorsSorted().map(function(d) {
     return '<option value="' + esc(d.alias) + '"' + (c.alias === d.alias ? ' selected' : '') + '>' +
            esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
   }).join('');
@@ -5753,7 +5777,7 @@ function openClaimEdit(btn) {
       '</div>' +
       '<label style="margin-top:7px">Performing physician</label>' +
       '<select id="ce-alias" style="margin-bottom:7px">' + docOptions + '</select>' +
-      '<label>Fee code</label>' + feeSelect +
+      '<label>Fee code</label>' + feePicker +
       '<label style="margin-top:10px">Referring MD</label>' +
       '<div style="position:relative">' +
       '<input id="ce-ref-search" value="' + esc(refLabel) + '" style="padding-right:32px" ' +
@@ -5795,7 +5819,9 @@ function saveClaimEdit(btn) {
   var p   = getP(pid);
   if (!c) return;
 
-  var newFee   = document.getElementById('ce-fee').value;
+  // Non-coercive: if the picker value is somehow blank, keep the claim's
+  // existing fee rather than overwriting it (never silently drop a fee).
+  var newFee   = ((document.getElementById('ce-fee') || {}).value || '').trim() || c.fee;
   var newIcd   = document.getElementById('ce-icd').value || c.icd;
   var newAlias = document.getElementById('ce-alias').value;
   var newDateISO = (document.getElementById('ce-date') || {}).value || '';
@@ -5897,55 +5923,8 @@ function openPatientEdit(pid) {
   html += '</div>';
   html += '</div>'; // end demographics card
 
-  // ── Location & service ───────────────────────────────
-  html += '<div class="card card-location">';
-  html += '<div class="card-title">Location &amp; service</div>';
-
-  // Row 1: Ward + Bed
-  html += '<div class="fl">';
-  html += '<div class="f1"><label>Ward</label><select id="pe-ward" onchange="peWardChange()">';
-  Object.keys(WARDS).forEach(function(k) {
-    html += '<option value="' + k + '"' + (p.ward === k ? ' selected' : '') + '>' + WARDS[k].label + '</option>';
-  });
-  html += '</select></div>';
-  html += '<div class="f1"><label id="pe-bed-lbl">Bed / room</label>' +
-          '<div style="position:relative">' +
-          '<input id="pe-bed" autocorrect="off" autocomplete="off" placeholder="Select or type…" style="margin-bottom:0"' +
-          ' oninput="bedSearchEl(this,\'pe-bed-dd\')" onfocus="bedSearchEl(this,\'pe-bed-dd\')"' +
-          ' onblur="setTimeout(function(){hideBedDd(\'pe-bed-dd\')},200)">' +
-          '<div class="bed-dd" id="pe-bed-dd"></div>' +
-          '</div></div>';
-  html += '</div>';
-
-  // Row 2: Cardiology role pills
-  var peCurRole = p.role === 'mrp' ? 'mrp' : 'consultant';
-  html += '<label style="margin-top:8px">Cardiology role</label>';
-  html += '<div class="fl" style="gap:8px;margin-top:4px">';
-  html += '<button class="ap-list-pill' + (peCurRole==='mrp'?' on':'') + '" id="pe-role-mrp" onclick="peRolePill(\'mrp\')">MRP</button>';
-  html += '<button class="ap-list-pill' + (peCurRole==='consultant'?' on':'') + '" id="pe-role-con" onclick="peRolePill(\'consultant\')">Consulting</button>';
-  html += '</div>';
-  html += '<input id="pe-role" type="hidden" value="' + peCurRole + '">';
-  // Row 3: MRP service dropdown
-  html += '<label style="margin-top:8px">MRP service</label>';
-  html += '<select id="pe-mrp" onchange="peMrpChange()">' +
-          ['Cardiology','Other','Hospitalist','CTU','ICU','CSICU',
-           'Cardiac Surgery','General Surgery','Orthopedics','Neurology','Nephrology']
-          .map(function(s) {
-            return '<option value="' + s + '"' + ((p.mrp||'Other') === s ? ' selected' : '') + '>' + s + '</option>';
-          }).join('') +
-          '</select>';
-
-  // Row 3: On/Off service pills
-  var peList = p.list === 'on' ? 'on' : 'off';
-  html += '<label style="margin-top:8px">On / Off service</label>';
-  html += '<div class="fl" style="gap:8px;margin-top:4px">';
-  html += '<button class="ap-list-pill' + (peList==='on'?' on':'') + '" id="pe-pill-on" onclick="pePill(\'on\')">On service</button>';
-  html += '<button class="ap-list-pill tone-amber' + (peList==='off'?' on':'') + '" id="pe-pill-off" onclick="pePill(\'off\')">Off service</button>';
-  html += '</div>';
-  html += '<input id="pe-list" type="hidden" value="' + peList + '">';
-
-  html += '<input id="pe-care" type="hidden" value="' + esc(p.care||'daily') + '">';
-  html += '</div>'; // end location card
+  // ── Location & list (shared component) ───────────────
+  html += buildLocationCard('pe', p);
 
   // ── Audit footer (who added the patient) ─────────────
   if (p.createdBy || p.createdAt) {
@@ -5965,48 +5944,12 @@ function openPatientEdit(pid) {
   document.getElementById('pt-edit-content').innerHTML = html;
   showModal('pt-edit-modal');
 
-  // Populate bed options after render
+  // Render the ward's room pills after the card is in the DOM. Ward,
+  // role, MRP, list, care and bed are all baked into the card by
+  // buildLocationCard, so nothing else needs restoring here.
   setTimeout(function() {
-    // Preserve the patient's saved list / role / mrp / care — opening
-    // edit must never clobber values with ward defaults. Only manual
-    // ward changes inside the modal will reset them.
-    peWardChange({preserveAll:true});
-    // Restore current bed value into the input
-    var bedInp = document.getElementById('pe-bed');
-    if (bedInp && p.bed) bedInp.value = p.bed;
-    // (No peRoleChange() here — preserveAll already kept role/mrp/care.
-    //  Calling peRoleChange would overwrite the saved care value based
-    //  on role, losing 'combined' on CSICU/ICU patients etc.)
+    renderRoomPills(p.ward, 'pe-bed', 'pe-room-pills');
   }, 50);
-}
-
-// Dynamic ward change in edit form
-function pePill(val) {
-  var el = document.getElementById('pe-list'); if (el) el.value = val;
-  var on  = document.getElementById('pe-pill-on');
-  var off = document.getElementById('pe-pill-off');
-  if (on)  on.className  = 'ap-list-pill' + (val === 'on'  ? ' on' : '');
-  if (off) off.className = 'ap-list-pill tone-amber' + (val === 'off' ? ' on' : '');
-}
-
-function peWardChange(opts) {
-  var ward = (document.getElementById('pe-ward') || {}).value || 'CCU';
-  var bedLbl = document.getElementById('pe-bed-lbl');
-  if (bedLbl) bedLbl.textContent = ward === 'CCU' ? 'Bed #' : 'Room';
-
-  // Apply ward defaults to list / role / mrp / care unless this call is
-  // the edit-modal init (opts.preserveAll=true) — we don't want opening
-  // edit on an existing patient to clobber their saved values.
-  if (!opts || !opts.preserveAll) {
-    applyWardDefaults(ward, { list:'pe-list', role:'pe-role', mrp:'pe-mrp', care:'pe-care' });
-    // Sync pe pills (list + role)
-    var peListVal = (document.getElementById('pe-list') || {}).value || 'on';
-    var peOn  = document.getElementById('pe-pill-on');
-    var peOff = document.getElementById('pe-pill-off');
-    if (peOn)  peOn.className  = 'ap-list-pill' + (peListVal === 'on'  ? ' on' : '');
-    if (peOff) peOff.className = 'ap-list-pill' + (peListVal === 'off' ? ' on' : '');
-    syncPeRolePills();
-  }
 }
 
 // Clear a search field and its hidden value fields
@@ -6040,49 +5983,6 @@ function peRoleChange() {
     if (mrpSel.value === 'Cardiology') mrpSel.value = 'Other';
     if (careFld) careFld.value = 'directive';
   }
-}
-
-function peMrpChange() {
-  // Same rules as mrpChange() — list is NOT touched.
-  var mrpSel  = document.getElementById('pe-mrp');
-  var roleSel = document.getElementById('pe-role');
-  var careFld = document.getElementById('pe-care');
-  var ward    = (document.getElementById('pe-ward') || {}).value || '';
-  if (!mrpSel || !roleSel) return;
-  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
-  if (mrpSel.value === 'Cardiology') {
-    roleSel.value = 'mrp';
-    if (careFld) careFld.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
-  } else {
-    roleSel.value = 'consultant';
-    if (careFld) careFld.value = 'directive';
-  }
-  syncPeRolePills();
-}
-
-function peRolePill(val) {
-  var roleEl = document.getElementById('pe-role');
-  if (roleEl) roleEl.value = val;
-  syncPeRolePills();
-  var mrpEl  = document.getElementById('pe-mrp');
-  var careEl = document.getElementById('pe-care');
-  var ward   = (document.getElementById('pe-ward') || {}).value || '';
-  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
-  if (val === 'mrp') {
-    if (mrpEl)  mrpEl.value  = 'Cardiology';
-    if (careEl) careEl.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
-  } else {
-    if (mrpEl && mrpEl.value === 'Cardiology') mrpEl.value = 'Other';
-    if (careEl) careEl.value = 'directive';
-  }
-}
-
-function syncPeRolePills() {
-  var val = (document.getElementById('pe-role') || {}).value || 'consultant';
-  var mrp = document.getElementById('pe-role-mrp');
-  var con = document.getElementById('pe-role-con');
-  if (mrp) mrp.className = 'ap-list-pill' + (val === 'mrp'        ? ' on' : '');
-  if (con) con.className = 'ap-list-pill' + (val === 'consultant' ? ' on' : '');
 }
 
 function savePatientEdit(pid) {
@@ -6125,61 +6025,21 @@ function openLocationEditEl(el) {
   if (pid) openLocationEdit(pid);
 }
 
+var _leEditP = null;
+
 function openLocationEdit(pid) {
   var p = getP(pid);
   if (!p || !p.id) return;
+  _leEditP = p;
 
   var html = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:13px">' +
     '<div style="font-size:15px;font-weight:800;letter-spacing:-.3px">' + esc(p.last) + ', ' + esc(p.first) + '</div>' +
     '<span style="font-size:10px;color:var(--text3)">Location</span>' +
     '</div>';
 
-  html += '<div class="card card-location" style="margin-bottom:10px">';
-
-  // Row 1: Ward + Bed
-  html += '<div class="fl">';
-  html += '<div class="f1"><label>Ward</label><select id="le-ward" onchange="leWardChange()">';
-  Object.keys(WARDS).forEach(function(k) {
-    html += '<option value="' + k + '"' + (p.ward === k ? ' selected' : '') + '>' + WARDS[k].label + '</option>';
-  });
-  html += '</select></div>';
-  html += '<div class="f1"><label id="le-bed-lbl">' + (p.ward === 'CCU' ? 'Bed #' : 'Room') + '</label>' +
-          '<div style="position:relative">' +
-          '<input id="le-bed" autocorrect="off" autocomplete="off" placeholder="Select or type…" style="margin-bottom:0"' +
-          ' value="' + esc(p.bed || '') + '"' +
-          ' oninput="bedSearchEl(this,\'le-bed-dd\')" onfocus="bedSearchEl(this,\'le-bed-dd\')"' +
-          ' onblur="setTimeout(function(){hideBedDd(\'le-bed-dd\')},200)">' +
-          '<div class="bed-dd" id="le-bed-dd"></div>' +
-          '</div></div>';
-  html += '</div>';
-
-  // Row 2: Cardiology role pills
-  var curRole = p.role === 'mrp' ? 'mrp' : 'consultant';
-  html += '<label style="margin-top:8px">Cardiology role</label>';
-  html += '<div class="fl" style="gap:8px;margin-top:4px">';
-  html += '<button class="ap-list-pill' + (curRole==='mrp'?' on':'') + '" id="le-role-mrp" onclick="leRolePill(\'mrp\')">MRP</button>';
-  html += '<button class="ap-list-pill' + (curRole==='consultant'?' on':'') + '" id="le-role-con" onclick="leRolePill(\'consultant\')">Consulting</button>';
-  html += '</div>';
-  html += '<input id="le-role" type="hidden" value="' + curRole + '">';
-  // Row 3: MRP service dropdown
-  var mrpOpts = ['Cardiology','Other','Hospitalist','CTU','ICU','CSICU','Cardiac Surgery','General Surgery','Orthopedics','Neurology','Nephrology'];
-  html += '<label style="margin-top:8px">MRP service</label>';
-  html += '<select id="le-mrp" onchange="leMrpChange()">' +
-          mrpOpts.map(function(s) { return '<option value="' + s + '"' + ((p.mrp||'Other')===s?' selected':'') + '>' + s + '</option>'; }).join('') +
-          '</select>';
-
-  // Row 3: On/Off service pills
-  var curList = p.list === 'on' ? 'on' : 'off';
-  html += '<label style="margin-top:8px">On / Off service</label>';
-  html += '<div class="fl" style="gap:8px;margin-top:4px">';
-  html += '<button class="ap-list-pill' + (curList==='on'?' on':'') + '" id="le-pill-on" onclick="lePill(\'on\')">On service</button>';
-  html += '<button class="ap-list-pill tone-amber' + (curList==='off'?' on':'') + '" id="le-pill-off" onclick="lePill(\'off\')">Off service</button>';
-  html += '</div>';
-  html += '<input id="le-list" type="hidden" value="' + curList + '">';
-  html += '<input id="le-care" type="hidden" value="' + esc(p.care||'directive') + '">';
-  html += '</div>';
-
-  html += '<div id="le-rule-hint" style="font-size:11px;color:var(--text3);line-height:1.4;margin-bottom:12px;padding:0 4px"></div>';
+  // Shared "Location & list" card — same component as Add Patient.
+  html += buildLocationCard('le', p);
+  html += '<div id="le-rule-hint" style="font-size:11px;color:var(--text3);line-height:1.4;margin:8px 0 12px;padding:0 4px"></div>';
 
   html += '<div class="fl" style="gap:8px">';
   html += '<button class="btn btn-p" style="margin:0;flex:1" data-pid="' + pid + '" onclick="saveLocationEdit(this.getAttribute(\'data-pid\'))">Save</button>';
@@ -6190,95 +6050,24 @@ function openLocationEdit(pid) {
   showModal('loc-edit-modal');
 
   setTimeout(function() {
-    var bedInp = document.getElementById('le-bed');
-    if (bedInp && p.bed) bedInp.value = p.bed;
-    leUpdateRuleHint(p);
+    renderRoomPills(p.ward, 'le-bed', 'le-room-pills');
+    leUpdateRuleHint();
   }, 50);
 }
 
-function lePill(val) {
-  var el = document.getElementById('le-list'); if (el) el.value = val;
-  var on  = document.getElementById('le-pill-on');
-  var off = document.getElementById('le-pill-off');
-  if (on)  on.className  = 'ap-list-pill' + (val === 'on'  ? ' on' : '');
-  if (off) off.className = 'ap-list-pill tone-amber' + (val === 'off' ? ' on' : '');
-}
 
-function leMrpChange() {
-  var mrp  = (document.getElementById('le-mrp')  || {}).value || '';
-  var role = document.getElementById('le-role');
-  var care = document.getElementById('le-care');
-  var ward = (document.getElementById('le-ward') || {}).value || '';
-  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
-  if (mrp === 'Cardiology') {
-    if (role) role.value = 'mrp';
-    if (care) care.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
-    lePill('on');
-  } else {
-    if (role) role.value = 'consultant';
-    if (care) care.value = 'directive';
-  }
-  syncLeRolePills();
-  leUpdateRuleHint(null);
-}
-
-function leRolePill(val) {
-  var roleEl = document.getElementById('le-role');
-  if (roleEl) roleEl.value = val;
-  syncLeRolePills();
-  var mrpEl = document.getElementById('le-mrp');
-  var careEl = document.getElementById('le-care');
-  var ward = (document.getElementById('le-ward') || {}).value || '';
-  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
-  if (val === 'mrp') {
-    if (mrpEl)  mrpEl.value  = 'Cardiology';
-    if (careEl) careEl.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
-  } else {
-    if (mrpEl && mrpEl.value === 'Cardiology') mrpEl.value = 'Other';
-    if (careEl) careEl.value = 'directive';
-  }
-  leUpdateRuleHint(null);
-}
-
-function syncLeRolePills() {
-  var val = (document.getElementById('le-role') || {}).value || 'consultant';
-  var mrp = document.getElementById('le-role-mrp');
-  var con = document.getElementById('le-role-con');
-  if (mrp) mrp.className = 'ap-list-pill' + (val === 'mrp'        ? ' on' : '');
-  if (con) con.className = 'ap-list-pill' + (val === 'consultant' ? ' on' : '');
-}
-
-// Whether a ward is a Cardiology MRP ward where this group is primary
+// Whether a ward is a Cardiology MRP ward where this group is primary.
+// Used by saveLocationEdit and leUpdateRuleHint.
 function _isCardiologyMRPWard(ward) {
   return ward === 'CCU' || ward === '2S' || ward === '2W';
 }
 
-function leWardChange() {
-  var ward   = (document.getElementById('le-ward') || {}).value || '';
-  var bedLbl = document.getElementById('le-bed-lbl');
-  if (bedLbl) bedLbl.textContent = ward === 'CCU' ? 'Bed #' : 'Room';
-  var bedInp = document.getElementById('le-bed');
-  if (bedInp) bedInp.value = '';
-  // Apply defaults for new ward
-  var isMRP = _isCardiologyMRPWard(ward);
-  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
-  var mrpEl  = document.getElementById('le-mrp');
-  var roleEl = document.getElementById('le-role');
-  var careEl = document.getElementById('le-care');
-  if (mrpEl)  mrpEl.value  = isMRP ? 'Cardiology' : 'Other';
-  if (roleEl) roleEl.value = isMRP ? 'mrp' : 'consultant';
-  if (careEl) careEl.value = isMRP ? (icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily') : 'directive';
-  lePill(isMRP ? 'on' : 'off');
-  syncLeRolePills();
-  leUpdateRuleHint(null);
-}
-
-function leUpdateRuleHint(p) {
+function leUpdateRuleHint() {
   var hint = document.getElementById('le-rule-hint');
   if (!hint) return;
   var newWard = (document.getElementById('le-ward') || {}).value || '';
   var newList = (document.getElementById('le-list') || {}).value || 'on';
-  var oldList = p ? p.list : null;
+  var oldList = _leEditP ? _leEditP.list : null;
 
   var movedOff       = oldList === 'on' && newList === 'off';
   var leftCardiology = !_isCardiologyMRPWard(newWard);
@@ -6361,6 +6150,31 @@ var _mostOn = true;
 // Which screen the consult form is on — set by the caller (+Claim vs Add
 // Patient) so the live CCFPP field can resolve the right patient context.
 var _consultCtx = 'claim';
+
+// ── Element scoping (v3.97) ────────────────────────────────────────
+// buildConsultForm renders FIXED ids (cb-33010, cb-33012, cb-date,
+// cb-start, …) and is instantiated in TWO screens that both stay in the
+// DOM at once — the +Claim screen (#claim-body) and the Add Patient
+// screen (#ap-claim-area). So document.getElementById('cb-…') is
+// AMBIGUOUS: it returns whichever form is first in document order, not
+// the one the user is actually filling in.
+//
+// That was the consult-corruption bug: a consult entered on the +Claim
+// screen was submitted by reading the OTHER screen's stale form — whose
+// date input still held its default (today) and whose 33010 button had
+// been stripped of its selected class — so the claim wrote out as
+// 33012 + today regardless of what was typed.
+//
+// Fix: every cb-* lookup is scoped to the active form's container,
+// chosen by _consultCtx (set to 'claim' by selCT, 'addpatient' by
+// initAddPatientConsult). Use cEl / cVal for EVERY cb-* element — never
+// document.getElementById or the global gv() for a cb-* id.
+function consultRoot() {
+  var id = (_consultCtx === 'addpatient') ? 'ap-claim-area' : 'claim-body';
+  return document.getElementById(id) || document;
+}
+function cEl(id)  { return consultRoot().querySelector('#' + id); }
+function cVal(id) { var e = cEl(id); return e ? e.value : ''; }
 
 // The patient the consult form is currently for.
 function currentConsultPatient() {
@@ -6447,35 +6261,35 @@ function buildConsultForm(p, opts) {
 }
 
 function toggleConsultCode(code) {
-  document.getElementById('cb-33010').className = 'ct-btn' + (code === '33010' ? ' ct-on-consult' : '');
-  document.getElementById('cb-33012').className = 'ct-btn' + (code === '33012' ? ' ct-on-consult' : '');
+  cEl('cb-33010').className = 'ct-btn' + (code === '33010' ? ' ct-on-consult' : '');
+  cEl('cb-33012').className = 'ct-btn' + (code === '33012' ? ' ct-on-consult' : '');
   updateConsultUI();
 }
 
 function toggleMost() {
   _mostOn = !_mostOn;
-  document.getElementById('cb-most').className = 'most-btn' + (_mostOn ? ' on' : '');
+  cEl('cb-most').className = 'most-btn' + (_mostOn ? ' on' : '');
 }
 
 function updateConsultUI() {
-  var start   = gv('cb-start');
-  var end     = gv('cb-end');
-  var dateISO = gv('cb-date');
-  if (!document.getElementById('cb-mod')) return; // form not on screen
+  var start   = cVal('cb-start');
+  var end     = cVal('cb-end');
+  var dateISO = cVal('cb-date');
+  if (!cEl('cb-mod')) return; // form not on screen
 
   // End follows start (start + 50 min) unless the doctor edited end directly.
-  var endEl   = document.getElementById('cb-end');
+  var endEl   = cEl('cb-end');
   var changed = (typeof event !== 'undefined' && event && event.target) ? event.target.id : '';
   if (start && (changed === 'cb-start' || !end)) {
     if (endEl) endEl.value = minsToTime(t2m(start) + 50);
-    end = gv('cb-end');
+    end = cVal('cb-end');
   }
 
   var modBase  = getModifier(start, dateISO);
   var hasInc   = consultHasIncrement(start, end);
   var modInc   = hasInc ? getModifierForIncrement(start, dateISO) : null;
   var incUnits = consultIncUnits(start, end);
-  var modEl    = document.getElementById('cb-mod');
+  var modEl    = cEl('cb-mod');
 
   if (modBase) {
     var banner = '<div class="mod-box ' + modBase.cls + '" style="margin-bottom:0;border-radius:var(--rsm) var(--rsm) 0 0">' +
@@ -6504,8 +6318,8 @@ function updateConsultUI() {
   //   1. no call-out window     → "Modifiers don't apply"
   //   2. window, no overlap     → "No overlapping consult"
   //   3. window + overlap       → "CCFPP: Last, First (PHN)"  (blue highlight)
-  var ccEl  = document.getElementById('cb-ccfpp');
-  var ccVal = document.getElementById('cb-ccfpp-val');
+  var ccEl  = cEl('cb-ccfpp');
+  var ccVal = cEl('cb-ccfpp-val');
   if (ccEl && ccVal) {
     var ccText, ccMatch = false;
     if (!modBase) {
@@ -6565,10 +6379,10 @@ function claimSubmitOnce(fn) {
 // rows as a per-claim override — they do NOT modify the patient record.
 // CCFPP detection runs here, so it now fires from BOTH entry points.
 function submitConsultClaims(p, alias) {
-  var code    = document.getElementById('cb-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
-  var dateISO = gv('cb-date');
-  var start   = gv('cb-start');
-  var end     = gv('cb-end');
+  var code    = cEl('cb-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
+  var dateISO = cVal('cb-date');
+  var start   = cVal('cb-start');
+  var end     = cVal('cb-end');
   if (!dateISO) { showToast('Enter consult date'); return false; }
   if (!start)   { showToast('Start time required for ' + code); return false; }
   if (!end)     { showToast('End time required for ' + code); return false; }
@@ -6580,11 +6394,11 @@ function submitConsultClaims(p, alias) {
   // editable on the form. Rides on the claim rows only (override object).
   var ov = {
     icd:       getClaimIcd(p),
-    refby:     gv('cb-refby')      || p.refby     || '',
-    refbyName: gv('cb-refby-name') || p.refbyName || ''
+    refby:     cVal('cb-refby')      || p.refby     || '',
+    refbyName: cVal('cb-refby-name') || p.refbyName || ''
   };
 
-  var userNote  = (gv('cb-notes') || '').trim();
+  var userNote  = (cVal('cb-notes') || '').trim();
   // CCFPP — one-directional detection. Note belongs on the 120x modifier
   // claims only, never on the consult row.
   var ccfppNote = ccfppDetectAndUpdate(p, alias, dateISO, dateFmt, start, end);
@@ -6672,7 +6486,7 @@ function buildIcdRefCard(p) {
 function buildPerformingPhysSelector() {
   if (!st.doctors || !st.doctors.length) return '';
   var curAlias = st.doc ? st.doc.alias : '';
-  var opts = st.doctors.map(function(d) {
+  var opts = doctorsSorted().map(function(d) {
     return '<option value="' + esc(d.alias) + '"' + (d.alias === curAlias ? ' selected' : '') + '>' +
            esc(d.name || d.alias) + ' (' + esc(d.alias) + ')</option>';
   }).join('');
@@ -6897,7 +6711,10 @@ function openDuplicateBlockModal(existing, matchedFields) {
 function openAdd(ward, bed) {
   document.getElementById('f-ward').value = ward;
   wardChange();
-  if (bed) document.getElementById('f-bed').value = String(bed);
+  if (bed) {
+    document.getElementById('f-bed').value = String(bed);
+    renderRoomPills(ward, 'f-bed', 'f-room-pills');
+  }
   var w = WARDS[ward] || {};
   if (w.list) document.getElementById('f-list').value = w.list;
   if (w.care) document.getElementById('f-care').value = w.care;
@@ -6911,16 +6728,102 @@ function openAdd(ward, bed) {
 // On/Off service auto-snaps when role/MRP changes, but is independent
 // once the user manually toggles it.
 
-function mrpChange() {
-  // Bidirectional rule:
-  //   MRP = Cardiology       → role = MRP
-  //   MRP = anything else    → role = Consulting
-  // `list` (on/off service) is NOT touched here — it is ward-driven
-  // (see wardChange) and may be manually overridden by the user.
-  var mrpSel  = document.getElementById('f-mrp');
-  var roleSel = document.getElementById('f-role');
-  var careFld = document.getElementById('f-care');
-  var ward    = gv('f-ward');
+// ═══════════════════════════════════════════════════════
+// SHARED "Location & list" card  (v4.03)
+// ───────────────────────────────────────────────────────
+// One builder + one set of handlers for the ward / room / role /
+// MRP service / on-off card. Used by THREE entry points, each with
+// its own element-id prefix so the instances never collide:
+//   'f'  → Add Patient   (always in the page)
+//   'pe' → pencil edit   (pt-edit modal)
+//   'le' → bed-circle    (loc-edit modal)
+// Every save/read function reads {prefix}-ward, {prefix}-bed, etc.
+// The Add Patient legacy names (wardChange, mrpChange, apRolePill, …)
+// are kept below as thin wrappers so existing callers keep working.
+// ═══════════════════════════════════════════════════════
+function buildLocationCard(prefix, p) {
+  p = p || {};
+  var X    = prefix;
+  var ward = p.ward || 'CCU';
+  var bed  = p.bed  || '';
+  var role = p.role === 'mrp' ? 'mrp' : 'consultant';
+  var mrp  = p.mrp  || 'Other';
+  var list = p.list === 'on' ? 'on' : 'off';
+  var care = p.care || 'directive';
+
+  var wardOpts = Object.keys(WARDS).map(function(k) {
+    return '<option value="' + k + '"' + (ward === k ? ' selected' : '') + '>' + WARDS[k].label + '</option>';
+  }).join('');
+  var mrpOpts = ['Cardiology','Other','Hospitalist','CTU','ICU','CSICU',
+                 'Cardiac Surgery','General Surgery','Orthopedics','Neurology','Nephrology']
+    .map(function(s) { return '<option value="' + s + '"' + (mrp === s ? ' selected' : '') + '>' + s + '</option>'; })
+    .join('');
+
+  var h = '<div class="card card-location">';
+  h += '<div class="card-title">Location &amp; list</div>';
+  // Row 1 — Ward + Bed/room
+  h += '<div class="fl">';
+  h += '<div class="f1"><label>Ward</label>';
+  h += '<select id="' + X + '-ward" onchange="locWardChange(\'' + X + '\')">' + wardOpts + '</select>';
+  h += '<div id="' + X + '-ward-other-wrap" style="display:' + (ward === 'OTHER' ? 'block' : 'none') + ';margin-top:-3px">';
+  h += '<input id="' + X + '-ward-other" placeholder="Enter ward name…" autocorrect="off" autocapitalize="words" style="margin-bottom:4px">';
+  h += '<button type="button" onclick="locSaveCustomWard(\'' + X + '\')" style="padding:5px 12px;font-size:11px;font-weight:700;border:.5px solid var(--border2);border-radius:var(--rpill);background:var(--blue-bg);color:var(--blue-t);cursor:pointer;font-family:inherit">Save to list</button>';
+  h += '</div></div>';
+  h += '<div class="f1"><label id="' + X + '-bed-lbl">' + (ward === 'CCU' ? 'Bed #' : 'Room') + '</label>';
+  h += '<input id="' + X + '-bed" type="text" autocorrect="off" autocomplete="off" placeholder="Type room…" style="margin-bottom:0;display:none" value="' + esc(bed) + '">';
+  h += '<div id="' + X + '-room-pills" class="room-pills"></div>';
+  h += '</div></div>';
+  // Row 2 — Cardiology role
+  h += '<label style="margin-top:8px">Cardiology role</label>';
+  h += '<div class="fl" style="gap:8px;margin-top:4px">';
+  h += '<button type="button" class="ap-list-pill' + (role === 'mrp' ? ' on' : '') + '" id="' + X + '-role-mrp" onclick="locRolePill(\'' + X + '\',\'mrp\')">MRP</button>';
+  h += '<button type="button" class="ap-list-pill' + (role === 'consultant' ? ' on' : '') + '" id="' + X + '-role-con" onclick="locRolePill(\'' + X + '\',\'consultant\')">Consulting</button>';
+  h += '</div>';
+  h += '<input id="' + X + '-role" type="hidden" value="' + role + '">';
+  // Row 3 — MRP service
+  h += '<label style="margin-top:8px">MRP service</label>';
+  h += '<select id="' + X + '-mrp" onchange="locMrpChange(\'' + X + '\')">' + mrpOpts + '</select>';
+  // Row 4 — On / Off service
+  h += '<label style="margin-top:8px">On / Off service</label>';
+  h += '<div class="fl" style="gap:8px;margin-top:4px">';
+  h += '<button type="button" class="ap-list-pill' + (list === 'on' ? ' on' : '') + '" id="' + X + '-pill-on" onclick="locListPill(\'' + X + '\',\'on\')">On service</button>';
+  h += '<button type="button" class="ap-list-pill tone-amber' + (list === 'off' ? ' on' : '') + '" id="' + X + '-pill-off" onclick="locListPill(\'' + X + '\',\'off\')">Off service</button>';
+  h += '</div>';
+  h += '<input id="' + X + '-list" type="hidden" value="' + list + '">';
+  h += '<input id="' + X + '-care" type="hidden" value="' + esc(care) + '">';
+  h += '</div>';
+  return h;
+}
+
+// Ward change — set bed label, toggle custom-ward input, render room
+// pills. On a real change (not preserveAll modal-open) clear the bed and
+// snap role/mrp/list/care to ward defaults.
+function locWardChange(prefix, opts) {
+  var X = prefix;
+  var w = (document.getElementById(X + '-ward') || {}).value || '';
+  var bedLbl = document.getElementById(X + '-bed-lbl');
+  if (bedLbl) bedLbl.textContent = w === 'CCU' ? 'Bed #' : 'Room';
+  var otherWrap = document.getElementById(X + '-ward-other-wrap');
+  if (otherWrap) otherWrap.style.display = w === 'OTHER' ? 'block' : 'none';
+  if (!opts || !opts.preserveAll) {
+    var bedInp = document.getElementById(X + '-bed');
+    if (bedInp) bedInp.value = '';
+    applyWardDefaults(w, { list:X + '-list', role:X + '-role', mrp:X + '-mrp', care:X + '-care' });
+  }
+  renderRoomPills(w, X + '-bed', X + '-room-pills');
+  locSyncListPills(X);
+  locSyncRolePills(X);
+  leUpdateRuleHint();
+}
+
+// MRP service ↔ role bidirectional lock. `list` is NOT touched — it is
+// ward-driven and may be manually overridden by the user.
+function locMrpChange(prefix) {
+  var X = prefix;
+  var mrpSel  = document.getElementById(X + '-mrp');
+  var roleSel = document.getElementById(X + '-role');
+  var careFld = document.getElementById(X + '-care');
+  var ward    = (document.getElementById(X + '-ward') || {}).value || '';
   if (!mrpSel || !roleSel) return;
   var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
   if (mrpSel.value === 'Cardiology') {
@@ -6930,8 +6833,88 @@ function mrpChange() {
     roleSel.value = 'consultant';
     if (careFld) careFld.value = 'directive';
   }
-  syncApRolePills();
+  locSyncRolePills(X);
 }
+
+// Role pill — toggling auto-fills MRP service (MRP→Cardiology;
+// Consulting→keep a non-Cardiology value, else Other).
+function locRolePill(prefix, val) {
+  var X = prefix;
+  var roleEl = document.getElementById(X + '-role');
+  if (roleEl) roleEl.value = val;
+  locSyncRolePills(X);
+  var mrpEl  = document.getElementById(X + '-mrp');
+  var careEl = document.getElementById(X + '-care');
+  var ward   = (document.getElementById(X + '-ward') || {}).value || '';
+  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
+  if (val === 'mrp') {
+    if (mrpEl)  mrpEl.value  = 'Cardiology';
+    if (careEl) careEl.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
+  } else {
+    if (mrpEl && mrpEl.value === 'Cardiology') mrpEl.value = 'Other';
+    if (careEl) careEl.value = 'directive';
+  }
+}
+
+function locListPill(prefix, val) {
+  var X = prefix;
+  var listEl = document.getElementById(X + '-list');
+  if (listEl) listEl.value = val;
+  var pillOn  = document.getElementById(X + '-pill-on');
+  var pillOff = document.getElementById(X + '-pill-off');
+  if (pillOn)  pillOn.className  = 'ap-list-pill' + (val === 'on'  ? ' on' : '');
+  if (pillOff) pillOff.className = 'ap-list-pill tone-amber' + (val === 'off' ? ' on' : '');
+  leUpdateRuleHint();
+}
+
+function locSyncRolePills(prefix) {
+  var X = prefix;
+  var val = (document.getElementById(X + '-role') || {}).value || 'consultant';
+  var mrp = document.getElementById(X + '-role-mrp');
+  var con = document.getElementById(X + '-role-con');
+  if (mrp) mrp.className = 'ap-list-pill' + (val === 'mrp'        ? ' on' : '');
+  if (con) con.className = 'ap-list-pill' + (val === 'consultant' ? ' on' : '');
+}
+
+function locSyncListPills(prefix) {
+  locListPill(prefix, (document.getElementById(prefix + '-list') || {}).value || 'on');
+}
+
+// Add a user-typed ward to WARDS + localStorage + every ward select on
+// the page, then select it in the calling card.
+function locSaveCustomWard(prefix) {
+  var X = prefix;
+  var name = ((document.getElementById(X + '-ward-other') || {}).value || '').trim();
+  if (!name) { showToast('Enter a ward name'); return; }
+  var key = name.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8) || 'CUSTOM';
+  if (WARDS[key]) key = key + '2';
+  if (!WARDS[key]) {
+    WARDS[key] = { label:name, list:'off', care:'directive', role:'consultant', rooms:[] };
+    try {
+      var cw = JSON.parse(localStorage.getItem('kgh5:customWards') || '[]');
+      cw.push({ key:key, name:name });
+      localStorage.setItem('kgh5:customWards', JSON.stringify(cw));
+    } catch(e) {}
+    ['f-ward','pe-ward','le-ward'].forEach(function(selId) {
+      var sel = document.getElementById(selId);
+      if (!sel) return;
+      var otherOpt = sel.querySelector('option[value="OTHER"]');
+      var newOpt = document.createElement('option');
+      newOpt.value = key; newOpt.text = name;
+      if (otherOpt) sel.insertBefore(newOpt, otherOpt);
+      else sel.appendChild(newOpt);
+    });
+    showToast(name + ' added to ward list');
+  }
+  var wardSel = document.getElementById(X + '-ward');
+  if (wardSel) { wardSel.value = key; locWardChange(X); }
+  var otherWrap = document.getElementById(X + '-ward-other-wrap');
+  if (otherWrap) otherWrap.style.display = 'none';
+}
+
+// ── Legacy name wrappers (Add Patient, prefix 'f') ─────
+// Bidirectional MRP↔role rule; `list` is ward-driven (not touched here).
+function mrpChange() { return locMrpChange('f'); }
 
 function roleChange() {
   // Bidirectional rule:
@@ -7018,10 +7001,64 @@ function selectBed(row) {
   if (row.parentElement) row.parentElement.style.display = 'none';
 }
 
+// ── Room pills ─────────────────────────────────────────
+// Renders a ward's preset (+ saved custom) rooms as tap pills, so the
+// fixed 2S / 2W / CCU rooms are one tap. Wards with no preset rooms fall
+// back to the plain text input. An "Other…" pill reveals the input for an
+// off-list room. Shared by Add Patient (f-bed) and the location-change
+// screen (loc-room). The text input always holds the value, so existing
+// submit code (gv('f-bed') / gv('loc-room')) is unchanged.
+function renderRoomPills(ward, inputId, containerId) {
+  var box = document.getElementById(containerId);
+  var inp = document.getElementById(inputId);
+  if (!box || !inp) return;
+  var rooms = getBedRooms(ward);
+  // Ward with no preset rooms — plain free-text entry, no pills.
+  if (!rooms.length) {
+    box.innerHTML = '';
+    box.style.display = 'none';
+    inp.style.display = '';
+    return;
+  }
+  box.style.display = 'flex';
+  var cur     = String(inp.value || '').trim();
+  var onList  = rooms.indexOf(cur) !== -1;
+  var otherOn = !!cur && !onList;   // a value that isn't a preset/saved room
+  var html = rooms.map(function(r) {
+    return '<button type="button" class="room-pill' + (r === cur ? ' selected' : '') + '" ' +
+           'data-room="' + esc(r) + '" ' +
+           'onclick="pickRoomPill(this,\'' + inputId + '\',\'' + containerId + '\')">' +
+           esc(r) + '</button>';
+  }).join('');
+  html += '<button type="button" class="room-pill room-pill-other' + (otherOn ? ' selected' : '') + '" ' +
+          'onclick="pickRoomOther(\'' + inputId + '\',\'' + containerId + '\')">Other…</button>';
+  box.innerHTML = html;
+  // Text input is shown only in "Other" mode; otherwise the pills are the UI.
+  inp.style.display = otherOn ? '' : 'none';
+}
+
+function pickRoomPill(btn, inputId, containerId) {
+  var inp = document.getElementById(inputId);
+  if (inp) { inp.value = btn.getAttribute('data-room'); inp.style.display = 'none'; }
+  var box = document.getElementById(containerId);
+  if (box) box.querySelectorAll('.room-pill').forEach(function(b) {
+    b.classList.toggle('selected', b === btn);
+  });
+}
+
+function pickRoomOther(inputId, containerId) {
+  var box = document.getElementById(containerId);
+  if (box) box.querySelectorAll('.room-pill').forEach(function(b) {
+    b.classList.toggle('selected', b.classList.contains('room-pill-other'));
+  });
+  var inp = document.getElementById(inputId);
+  if (inp) { inp.value = ''; inp.style.display = ''; inp.focus(); }
+}
+
 // Apply ward-default role / mrp / care / list to a set of form selects.
 // CCU/2S/2W → MRP role, Cardiology, on-service, ccu-or-daily care.
 // Everything else → Consulting role, Other mrp, off-service, directive care.
-// Used by both wardChange (Add Patient) and peWardChange (Edit Patient).
+// Used by locWardChange for every card instance (Add Patient, edit, location).
 // Caller passes the four element IDs; missing IDs are skipped.
 function applyWardDefaults(ward, ids) {
   var wdef = WARDS[ward] || {};
@@ -7042,63 +7079,8 @@ function applyWardDefaults(ward, ids) {
   }
 }
 
-function wardChange(opts) {
-  // Set bed label, show/hide custom-ward input, clear bed, and (unless
-  // preserveAll) snap list + role + mrp + care to ward defaults.
-  // CCU/2S/2W → MRP/Cardiology/on; everything else → Consulting/Other/off.
-  // User can manually override any field after; the next ward change
-  // will reset them again.
-  var w = gv('f-ward');
-  var bedLbl = document.getElementById('bed-lbl');
-  if (bedLbl) bedLbl.textContent = w === 'CCU' ? 'Bed #' : 'Room';
-
-  // Show/hide Other ward text field
-  var otherWrap = document.getElementById('f-ward-other-wrap');
-  if (otherWrap) otherWrap.style.display = w === 'OTHER' ? 'block' : 'none';
-
-  // Clear bed input when ward changes
-  var bedInp = document.getElementById('f-bed');
-  if (bedInp) bedInp.value = '';
-
-  // Apply ward defaults unless explicitly suppressed
-  if (!opts || !opts.preserveAll) {
-    applyWardDefaults(w, { list:'f-list', role:'f-role', mrp:'f-mrp', care:'f-care' });
-  }
-  // Keep On/Off pills in sync with f-list
-  syncApListPills();
-}
-
-function saveCustomWard() {
-  var name = (document.getElementById('f-ward-other') || {}).value || '';
-  name = name.trim();
-  if (!name) { showToast('Enter a ward name'); return; }
-  var key = name.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8) || 'CUSTOM';
-  if (WARDS[key]) key = key + '2';
-  if (!WARDS[key]) {
-    WARDS[key] = { label:name, list:'off', care:'directive', role:'consultant', rooms:[] };
-    // Persist custom ward name to localStorage
-    try {
-      var cw = JSON.parse(localStorage.getItem('kgh5:customWards') || '[]');
-      cw.push({ key:key, name:name });
-      localStorage.setItem('kgh5:customWards', JSON.stringify(cw));
-    } catch(e) {}
-    // Add to all ward selects on the page
-    ['f-ward','pe-ward'].forEach(function(selId) {
-      var sel = document.getElementById(selId);
-      if (!sel) return;
-      var otherOpt = sel.querySelector('option[value="OTHER"]');
-      var newOpt = document.createElement('option');
-      newOpt.value = key; newOpt.text = name;
-      if (otherOpt) sel.insertBefore(newOpt, otherOpt);
-      else sel.appendChild(newOpt);
-    });
-    showToast(name + ' added to ward list');
-  }
-  var fWard = document.getElementById('f-ward');
-  if (fWard) { fWard.value = key; wardChange(); }
-  var otherWrap = document.getElementById('f-ward-other-wrap');
-  if (otherWrap) otherWrap.style.display = 'none';
-}
+function wardChange(opts) { return locWardChange('f', opts); }
+function saveCustomWard()  { return locSaveCustomWard('f'); }
 
 
 // ── Add-patient inline consult claim ─────────────────────
@@ -7170,55 +7152,11 @@ function peSexPill(val) {
   if (f) f.className = 'ap-list-pill' + (val === 'F' ? ' on' : '');
 }
 
-function apListPill(val) {
-  var listEl = document.getElementById('f-list');
-  if (listEl) listEl.value = val;
-  var pillOn  = document.getElementById('ap-pill-on');
-  var pillOff = document.getElementById('ap-pill-off');
-  if (pillOn)  pillOn.className  = 'ap-list-pill' + (val === 'on'  ? ' on' : '');
-  if (pillOff) pillOff.className = 'ap-list-pill tone-amber' + (val === 'off' ? ' on' : '');
-}
-
-// Role pills — toggling auto-fills MRP service:
-//   MRP        → Cardiology
-//   Consulting → preserve current non-Cardiology mrp (from Meditech import etc.) else Other
-function apRolePill(val) {
-  var roleEl = document.getElementById('f-role');
-  if (roleEl) roleEl.value = val;
-  var mrpRole = document.getElementById('ap-role-mrp');
-  var conRole = document.getElementById('ap-role-con');
-  if (mrpRole) mrpRole.className = 'ap-list-pill' + (val === 'mrp'        ? ' on' : '');
-  if (conRole) conRole.className = 'ap-list-pill' + (val === 'consultant' ? ' on' : '');
-  // Auto-fill MRP service
-  var mrpEl  = document.getElementById('f-mrp');
-  var careEl = document.getElementById('f-care');
-  var ward   = gv('f-ward');
-  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
-  if (val === 'mrp') {
-    if (mrpEl)  mrpEl.value  = 'Cardiology';
-    if (careEl) careEl.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
-  } else {
-    if (mrpEl && mrpEl.value === 'Cardiology') mrpEl.value = 'Other';
-    // else leave existing non-Cardiology value (Meditech import preserved)
-    if (careEl) careEl.value = 'directive';
-  }
-}
-
-// Sync role pills with current f-role value (for ward changes etc.)
-function syncApRolePills() {
-  var val = gv('f-role') || 'consultant';
-  var mrpRole = document.getElementById('ap-role-mrp');
-  var conRole = document.getElementById('ap-role-con');
-  if (mrpRole) mrpRole.className = 'ap-list-pill' + (val === 'mrp'        ? ' on' : '');
-  if (conRole) conRole.className = 'ap-list-pill' + (val === 'consultant' ? ' on' : '');
-}
-
-// Sync pills after ward defaults applied
-function syncApListPills() {
-  var val = gv('f-list') || 'on';
-  apListPill(val);
-  syncApRolePills();
-}
+// ── Legacy pill wrappers (Add Patient, prefix 'f') ─────
+function apListPill(val)    { return locListPill('f', val); }
+function apRolePill(val)    { return locRolePill('f', val); }
+function syncApRolePills()  { return locSyncRolePills('f'); }
+function syncApListPills()  { locSyncListPills('f'); locSyncRolePills('f'); }
 
 async function apSubmit(addToList, _skipDupCheck) {
   window._apPendingAddToList = addToList;
@@ -7308,7 +7246,7 @@ async function apSubmit(addToList, _skipDupCheck) {
   var p = {
     id: 'p' + Date.now(), fac: 'OA040', roundedToday: null,
     last: fmtName(last), first: fmtName(gv('f-first')),
-    phn: phn, dob: gv('f-dob'), sex: gv('f-sex'),
+    phn: phn, dob: fmtClaimDate(gv('f-dob')), sex: gv('f-sex'),
     refby:     gv('cb-refby') || gv('oc-refby'),
     refbyName: gv('cb-refby-name') || gv('oc-refby-name'),
     icd: icd,
@@ -7343,7 +7281,10 @@ async function apSubmit(addToList, _skipDupCheck) {
     var ok = await push('savePatient', p);
     if (!ok) {
       st.patients = st.patients.filter(function(x) { return x.id !== p.id; });
-      showToast('Could not save patient — check wifi and try again');
+      sv('patients', st.patients);
+      showToast(window._lastPushError
+        ? 'Not saved: ' + window._lastPushError
+        : 'Could not save patient — check wifi and try again');
       return;
     }
   }
@@ -7427,6 +7368,7 @@ function clearAddForm() {
 }
 
 function resetPhotoZone() {
+  dismissExistingPatientBanner();
   document.getElementById('photo-zone').innerHTML =
     '<svg style="width:26px;height:26px;stroke:var(--text3);fill:none;stroke-width:1.5" viewBox="0 0 24 24">' +
       '<path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>' +
@@ -7542,6 +7484,7 @@ function handleStickerPhoto(inp) {
 }
 
 function processStickerOCR(croppedDataUrl, bar) {
+  dismissExistingPatientBanner();
   var pz = document.getElementById('photo-zone');
   if (pz) {
     pz.innerHTML = '<img src="' + croppedDataUrl + '" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;display:block">';
@@ -7570,36 +7513,29 @@ function processStickerOCR(croppedDataUrl, bar) {
 }
 
 // ── OCR routing ────────────────────────────────────────────────────
-// Priority:
+// Priority (cascades on failure, in this order):
 //   1. Apps Script → Anthropic  (works on hospital WiFi — no Cloudflare needed)
 //   2. Cloudflare Worker        (works off hospital WiFi)
 //   3. Tesseract / ML Kit       (last resort, offline)
 //
-// Session cache: _appsScriptOCRReachable, _cloudOCRReachable
-// Both reset to null on page load; set false on first failure so
-// subsequent scans skip straight to the next tier without probing.
+// Apps Script (Tier 1) is attempted on EVERY scan — there is no sticky
+// demotion for it. A transient blip on one scan no longer disables the
+// preferred path for the rest of the session. To keep that retry cheap,
+// sendToAppsScriptOCR bounds each step with a short timeout (see below).
+// _appsScriptOCRReachable is now only a status flag (last attempt
+// ok/failed) for the debug panel — it is not consulted for routing.
+//
+// _cloudOCRReachable retains its session-cache behaviour inside
+// sendToCloudflareOCR (Tier 2 unchanged).
 
 function sendToOCR(b64, mediaType, bar) {
   if (bar) bar.textContent = 'Extracting (' + Math.round(b64.length / 1024) + ' KB)…';
 
-  if (typeof window._appsScriptOCRReachable === 'undefined') window._appsScriptOCRReachable = null;
-  if (typeof window._cloudOCRReachable      === 'undefined') window._cloudOCRReachable      = null;
+  if (typeof window._cloudOCRReachable === 'undefined') window._cloudOCRReachable = null;
 
-  // Tier 1 — Apps Script → Anthropic
-  if (window._appsScriptOCRReachable !== false) {
-    sendToAppsScriptOCR(b64, mediaType, bar);
-    return;
-  }
-
-  // Tier 2 — Cloudflare Worker
-  if (window._cloudOCRReachable !== false) {
-    sendToCloudflareOCR(b64, mediaType, bar);
-    return;
-  }
-
-  // Tier 3 — Offline (Tesseract / ML Kit)
-  if (bar) bar.textContent = 'Extracting (offline)…';
-  runOfflineOCR(b64, mediaType, bar);
+  // Always start at Tier 1. On failure it cascades internally:
+  // Apps Script → Cloudflare → offline.
+  sendToAppsScriptOCR(b64, mediaType, bar);
 }
 
 // Tier 1: fetch API key from Apps Script, then call Anthropic directly.
@@ -7608,21 +7544,59 @@ function sendToAppsScriptOCR(b64, mediaType, bar) {
   if (bar) bar.textContent = 'Extracting (via Apps Script)…';
 
   var STICKER_PROMPT =
-    'Hospital patient sticker from Kelowna General Hospital (KGH). ' +
-    'Extract the printed fields from the sticker ONLY — ignore any handwriting.\n\n' +
+    'Hospital patient sticker or Meditech chart header from Kelowna ' +
+    'General Hospital (KGH). Extract the printed fields ONLY — ignore ' +
+    'any handwriting.\n\n' +
     'Return a single JSON object with exactly these fields:\n' +
-    '  last, first, phn, dob, sex, mrp, admitDate\n\n' +
+    '  last, first, phn, dob, sex, mrp, admitDate, locationCode, roomBed\n\n' +
     'Rules:\n' +
     '  last / first  — from "Last,First" name line\n' +
     '  phn           — the HCN number (10 digits after "HCN")\n' +
     '  dob           — date after "DOB", format DD Mon YYYY e.g. "26 Oct 1958"\n' +
     '  sex           — M or F (from "L:M" or "L:F" field, or "Sex: M/F")\n' +
     '  mrp           — text after "MRP" e.g. "CardiologyMRP,KGH Kelowna"\n' +
-    '  admitDate     — date after "ADM", same format as dob\n\n' +
+    '  admitDate     — date after "ADM", same format as dob\n' +
+    '  locationCode  — ward / unit on the admission line, e.g. "KELKGHS2S",\n' +
+    '                  "KELKGHICSI", or worded forms like\n' +
+    '                  "KGH Emergency Department". Blank if not shown.\n' +
+    '  roomBed       — room-bed token beside it, e.g. "KGHS0221-A",\n' +
+    '                  "KGHI2607-A", "KGH-Main-7". Blank if not shown.\n\n' +
+    'On a Meditech chart header the location is one line, e.g.\n' +
+    '  "ADM ACIN, KELKGHS2S  KGHS0221 -A"\n' +
+    '  → locationCode "KELKGHS2S", roomBed "KGHS0221-A".\n' +
     'Return ONLY valid JSON, no markdown, no explanation.';
 
-  // Step 1: get API key from Apps Script
-  fetch(SHEETS_URL + '?action=getAnthropicKey&key=' + SHARED_KEY, { redirect: 'follow' })
+  // Per-step timeouts. The Apps Script key fetch is bounded tight — if the
+  // network is bad it bails fast to Cloudflare. The Vision call gets a
+  // generous limit because a healthy scan legitimately takes several seconds.
+  var KEY_FETCH_TIMEOUT_MS = 5000;
+  var VISION_TIMEOUT_MS    = 15000;
+
+  // fetch() has no native timeout — bound each call with an AbortController.
+  function fetchWithTimeout(url, opts, ms, label) {
+    var ctrl  = new AbortController();
+    var timer = setTimeout(function() { ctrl.abort(); }, ms);
+    var o = opts || {};
+    o.signal = ctrl.signal;
+    return fetch(url, o).then(function(r) {
+      clearTimeout(timer);
+      return r;
+    }, function(err) {
+      clearTimeout(timer);
+      if (err && err.name === 'AbortError') {
+        throw new Error((label || 'request') + ' timed out after ' + ms + 'ms');
+      }
+      throw err;
+    });
+  }
+
+  // Step 1: get API key from Apps Script (short timeout)
+  fetchWithTimeout(
+    SHEETS_URL + '?action=getAnthropicKey&key=' + SHARED_KEY,
+    { redirect: 'follow' },
+    KEY_FETCH_TIMEOUT_MS,
+    'Apps Script key fetch'
+  )
     .then(function(r) {
       if (!r.ok) throw new Error('Apps Script key fetch: HTTP ' + r.status);
       return r.json();
@@ -7632,8 +7606,9 @@ function sendToAppsScriptOCR(b64, mediaType, bar) {
       var apiKey = j.key || '';
       if (!apiKey) throw new Error('No API key returned');
 
-      // Step 2: call Anthropic directly
-      return fetch('https://api.anthropic.com/v1/messages', {
+      // Step 2: call Anthropic directly (generous timeout — Vision is
+      // legitimately slow; a healthy scan can take several seconds).
+      return fetchWithTimeout('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -7649,7 +7624,7 @@ function sendToAppsScriptOCR(b64, mediaType, bar) {
             { type: 'text', text: STICKER_PROMPT }
           ]}]
         })
-      });
+      }, VISION_TIMEOUT_MS, 'Anthropic Vision call');
     })
     .then(function(r) {
       if (!r.ok) throw new Error('Anthropic HTTP ' + r.status);
@@ -7931,6 +7906,16 @@ function handleOCRResult(data, bar) {
     catch (e) { if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'Bad JSON in response'; } return; }
   }
 
+  // Meditech chart headers carry a location line ("ADM …, <unit> <room-bed>")
+  // that single-photo OCR now returns as locationCode + roomBed. Decode it
+  // with the shared parseLocCode() — fill ward/room only when OCR did not
+  // already supply them and the decode is meaningful.
+  if ((p.locationCode || p.roomBed) && typeof parseLocCode === 'function') {
+    var _loc = parseLocCode(p.locationCode || '', p.roomBed || '');
+    if (!p.ward && _loc.ward && _loc.ward !== 'OTHER') p.ward = _loc.ward;
+    if (!p.room && _loc.room) p.room = _loc.room;
+  }
+
   // Persist the full OCR result for two purposes:
   //   1. window._lastOCR — debug from console: console.log(window._lastOCR._meta)
   //   2. window._ocrOriginal — snapshot of what OCR produced, used by
@@ -7953,7 +7938,7 @@ function handleOCRResult(data, bar) {
   if (p.last)  document.getElementById('f-last').value  = p.last;
   if (p.first) document.getElementById('f-first').value = p.first;
   if (p.phn)   document.getElementById('f-phn').value   = (p.phn + '').replace(/\D/g,'').slice(0,10);
-  if (p.dob)   document.getElementById('f-dob').value   = dispDate(fmtClaimDate(p.dob));
+  if (p.dob)   document.getElementById('f-dob').value   = fmtClaimDate(p.dob);
   if (p.sex)   { apSexPill(p.sex); }
   if (p.ward && WARDS[p.ward]) { document.getElementById('f-ward').value = p.ward; wardChange(); }
   if (p.mrp) {
@@ -7981,6 +7966,9 @@ function handleOCRResult(data, bar) {
     var bedInp = document.getElementById('f-bed');
     if (bedInp) bedInp.value = roomClean;
     saveCustomRoom(gv('f-ward'), roomClean);
+    // Reflect the prefilled room in the pills (it's now saved, so it shows
+    // as a pill — or as "Other" if it didn't normalise to a known room).
+    renderRoomPills(gv('f-ward'), 'f-bed', 'f-room-pills');
   }
   if (bar) {
     bar.className = 'ocr-bar ocr-ok';
@@ -7991,6 +7979,65 @@ function handleOCRResult(data, bar) {
     else if (p._engine === 'mlkit')     engineTag = '📱 ';
     bar.textContent = engineTag + '✓ Extracted: ' + (p.last||'?') + ', ' + (p.first||'?') + (p.phn ? ' · ' + p.phn : '');
   }
+
+  // ── Existing-patient fast-path ──────────────────────────────────
+  // If the sticker PHN already matches a patient in the database, show a
+  // banner offering Restore / Go-to-patient so the doctor can skip
+  // re-entering the whole form.
+  var _ocrPhn = String(p.phn || '').replace(/\D/g, '').slice(0, 10);
+  if (_ocrPhn.length === 10 && typeof st !== 'undefined' && st.patients) {
+    var _existing = st.patients.filter(function(x) {
+      return x && String(x.phn || '').replace(/\D/g, '').slice(0, 10) === _ocrPhn;
+    })[0];
+    if (_existing) showExistingPatientBanner(_existing);
+  }
+}
+
+// ── Existing-patient banner (sticker fast-path) ─────────────────────
+// Rendered into the Add Patient pane when an OCR'd sticker PHN matches a
+// patient already in st.patients. Discharged → offer Restore (reuses the
+// On/Off Service chooser). Still on a list → offer to jump to them.
+function showExistingPatientBanner(match) {
+  dismissExistingPatientBanner();
+  var bar = document.getElementById('ocr-bar');
+  if (!bar || !bar.parentNode) return;
+
+  var nameStr = ((match.last || '') + ', ' + (match.first || '')).replace(/^,\s*|,\s*$/g, '');
+  var discharged = (typeof isDischarged === 'function') ? isDischarged(match) : !!match.discharged;
+
+  var div = document.createElement('div');
+  div.id = 'existing-pt-banner';
+  div.style.cssText = 'margin-top:6px;padding:10px;border-radius:8px;' +
+    'background:var(--surface2);border:1px solid var(--border2)';
+
+  if (discharged) {
+    var detail = esc(nameStr) + (match.phn ? ' · ' + esc(String(match.phn)) : '') + ' · discharged';
+    div.innerHTML =
+      '<div style="font-weight:600;margin-bottom:4px">Patient already exists in Database</div>' +
+      '<div style="font-size:12px;color:var(--text2);margin-bottom:8px">' + detail + '</div>' +
+      '<button class="btn btn-p" style="margin:0" data-pid="' + esc(match.id) + '" ' +
+        'onclick="dismissExistingPatientBanner();restorePatient(this.getAttribute(\'data-pid\'))">' +
+        '↩ Restore to list</button>';
+  } else {
+    var wardStr = match.ward ? ((typeof wardLabel === 'function' && wardLabel(match.ward)) || match.ward) : '';
+    div.innerHTML =
+      '<div style="font-weight:600;margin-bottom:4px">Patient already on the list</div>' +
+      '<div style="font-size:12px;color:var(--text2);margin-bottom:8px">' +
+        esc(nameStr) + (wardStr ? ' — ' + esc(wardStr) : '') + '</div>' +
+      '<button class="btn btn-p" style="margin:0" data-pid="' + esc(match.id) + '" ' +
+        'onclick="dismissExistingPatientBanner();goToExistingPatient(this.getAttribute(\'data-pid\'))">' +
+        'Go to patient</button>';
+  }
+  bar.parentNode.insertBefore(div, bar.nextSibling);
+}
+
+function dismissExistingPatientBanner() {
+  var el = document.getElementById('existing-pt-banner');
+  if (el && el.parentNode) el.parentNode.removeChild(el);
+}
+
+function goToExistingPatient(pid) {
+  if (typeof openPatientSummary === 'function') openPatientSummary(pid);
 }
 
 // ─── OCR corrections diff ──────────────────────────────────────────
@@ -8141,8 +8188,11 @@ function openLocScreen(pid) {
            '</div>';
   }).join('');
 
-  // Pre-select current ward
+  // Pre-select current ward, then the patient's current room
   selectLocWard(p.ward);
+  var locRoomInp = document.getElementById('loc-room');
+  if (locRoomInp) locRoomInp.value = p.bed || '';
+  renderRoomPills(p.ward, 'loc-room', 'loc-room-pills');
   document.getElementById('loc-list').value = p.list || 'on';
   document.getElementById('loc-care').value = p.care || 'daily';
 
@@ -8169,11 +8219,11 @@ function selectLocWard(ward) {
     if (careSel) careSel.value = w.care || 'daily';
   }
 
-  // Populate room selector
-  var rooms = w.rooms || [];
-  document.getElementById('loc-room').innerHTML =
-    '<option value="">— select —</option>' +
-    rooms.map(function(r) { return '<option value="' + r + '">' + r + '</option>'; }).join('');
+  // Render the ward's preset rooms as tap pills. Changing ward clears the
+  // room — a room from the previous ward no longer applies.
+  var locRoomInp = document.getElementById('loc-room');
+  if (locRoomInp) locRoomInp.value = '';
+  renderRoomPills(ward, 'loc-room', 'loc-room-pills');
 }
 
 function confirmLocChange() {
@@ -8181,6 +8231,7 @@ function confirmLocChange() {
   var from = p.ward;
   p.ward   = _locWard;
   p.bed    = gv('loc-room');
+  saveCustomRoom(_locWard, p.bed);   // persist an off-list room so it becomes a pill next time
   p.care   = gv('loc-care');
 
   // Safety rule: any ward outside the geographic view (CCU/2S/2W)
@@ -8987,34 +9038,78 @@ document.addEventListener('click', function(e) {
 // 13_meditech.js — Meditech rounds list bulk photo import
 // ═══════════════════════════════════════════════════════
 
-// Decode Meditech location code + room-bed string into ward and room
+// ── KGH location decoder ───────────────────────────────────────────
+// SINGLE SOURCE OF TRUTH — this block is identical in index.html,
+// 13_meditech.js and import.html. Keep all three copies in sync.
+//
+//   locCode : Meditech unit code (e.g. "KELKGHS2S", "KELKGHICSI") or a
+//             worded unit name (e.g. "KGH Emergency Department").
+//   roomBed : the room-bed token (e.g. "KGHS0221-A", "KGHI2607-A").
+//
+// Returns { ward, room, suspect }:
+//   ward    — a key in WARDS, or 'OTHER' if the code is unrecognised.
+//   room    — matches the WARDS room presets: full room number for ward
+//             beds ("221A"); bed number only for CCU/CSICU ("7").
+//   suspect — true when a CCU bed decodes outside 1-8 (needs review).
+var LOC_MAP = {
+  SCCU:'CCU',    CCU:'CCU',
+  S2W:'2W',      S2S:'2S',
+  CSICU:'CSICU', ICSI:'CSICU',
+  ICUA:'ICUA',   ICUB:'ICUB',   ICUD:'ICUD',
+  R4A:'4A',      R4B:'4B',
+  R5A:'5A',      R5B:'5B',
+  C6W:'6W',
+  S3E:'3E',      S3W:'3W',       S3MU:'3MU',
+  S4E:'4E',      S4W:'4W',
+  CEOF:'ED',     CMT:'ED',       EMERG:'ED',
+  AREH:'REHAB',
+  C1C:'C1C',     SHAH:'HAH'
+};
+
+var CCU_MAX_BED = 8;   // KGH CCU has 8 beds
+
 function parseLocCode(locCode, roomBed) {
-  var ward = 'OTHER';
-  var room = '';
-  var loc  = (locCode || '').toUpperCase();
+  var ward    = 'OTHER';
+  var room    = '';
+  var suspect = false;
+  var loc     = (locCode || '').toUpperCase();
 
-  // CCU: KELKGHSCCU — must check before S2W/S2S since it contains neither
-  if      (loc.indexOf('SCCU') !== -1 || loc.indexOf('CCU') !== -1)  ward = 'CCU';
-  else if (loc.indexOf('S2W')  !== -1)                               ward = '2W';
-  else if (loc.indexOf('S2S')  !== -1)                               ward = '2S';
-  else if (loc.indexOf('CSICU')!== -1)                               ward = 'CSICU';
-  else if (loc.indexOf('ICUA') !== -1)                               ward = 'ICUA';
-  else if (loc.indexOf('ICUB') !== -1)                               ward = 'ICUB';
-  else if (loc.indexOf('ED')   !== -1 || loc.indexOf('EMERG') !== -1) ward = 'ED';
-
-  // Parse room number
-  // CCU:  KGHS2502-A → bed = parseInt("2502") % 100 = 2
-  // Ward: KGHS0201-A → strip leading zeros → "201A"
-  var rb = (roomBed || '').replace(/-/g, '').toUpperCase().replace(/^KGHS/, '');
-  if (ward === 'CCU') {
-    var num = parseInt(rb, 10);
-    if (!isNaN(num)) room = String(num % 100);
-  } else {
-    var m = rb.match(/^0*(\d+)([A-Z]?)$/);
-    if (m) room = m[1] + m[2];
+  for (var key in LOC_MAP) {
+    if (loc.indexOf(key) !== -1) { ward = LOC_MAP[key]; break; }
   }
 
-  return { ward:ward, room:room };
+  // Strip dashes / whitespace, then the building-wing prefix — KGHS
+  // (south tower / CCU), KGHI (ICU / CSICU), KGHR, KGHC, KGHAC — leaving
+  // the room-bed digits. (Chart headers print the token as "KGHS0221 -A".)
+  var rb = (roomBed || '').replace(/[\s-]/g, '').toUpperCase()
+                          .replace(/^KGH(AC|S|I|R|C)/, '');
+
+  if (ward === 'CCU' || ward === 'CSICU') {
+    // Critical-care beds — the last two digits are the bed number.
+    //   CCU   KGHS2502 -> 02 -> "2"      CSICU KGHI2607 -> 07 -> "7"
+    var n = parseInt(rb, 10);
+    if (!isNaN(n)) {
+      var bed = n % 100 || n;
+      room = String(bed);
+      if (ward === 'CCU' && (bed < 1 || bed > CCU_MAX_BED)) suspect = true;
+    }
+  } else if (ward === '2W' || ward === '2S') {
+    // Hallway beds: KGHSH2W-A/B -> rb "H2WA"/"H2WB"; KGHSH2S-A -> "H2SA"
+    var hall = rb.match(/^H\d[WS]([AB])$/);
+    if (hall) {
+      room = 'Hallway ' + hall[1];
+    } else {
+      // Standard rooms keep their full number so they match the WARDS
+      // room presets, e.g. KGHS0221-A -> "221A", KGHS0225-B -> "225B".
+      var m = rb.match(/^0*(\d+)([A-Z]?)$/);
+      if (m) room = m[1] + m[2];
+    }
+  } else {
+    var m2 = rb.match(/^0*(\d+)([A-Z]?)$/);
+    if (m2) room = m2[1] + m2[2];
+  }
+
+  return { ward: ward, room: room, suspect: suspect };
 }
 
 // ── Cardiology / Cardiac Surgery matcher constants ────
@@ -9123,6 +9218,7 @@ async function extractMediteachAI(dataUrl) {
             '  CCU  = KELKGHSCCU, rooms KGHS2502-A (2502 = Bed 2, 2506 = Bed 6 etc.)\n' +
             '  2W   = KELKGHS2W,  rooms KGHS0201-A to KGHS0213-A\n' +
             '  2S   = KELKGHS2S,  rooms KGHS0217-A to KGHS0234-B (225 and 226 have A and B)\n' +
+            '  CSICU= KELKGHICSI, rooms KGHI2607-A (2607 = Bed 7 etc.)\n' +
             '  Other location codes = off-service ward\n\n' +
             'Return ONLY a JSON array, no markdown, no explanation.'
           }
@@ -9570,6 +9666,14 @@ function confirmMediteachImport() {
 
 // ── Init ──────────────────────────────────────────────
 async function init() {
+  // Build the Add Patient "Location & list" card from the shared
+  // component before anything references f-ward (custom-ward restore,
+  // wardChange, prefill all need it present).
+  var apLocHost = document.getElementById('ap-loc-host');
+  if (apLocHost) {
+    apLocHost.innerHTML = buildLocationCard('f',
+      { ward:'CCU', bed:'', role:'mrp', mrp:'Cardiology', list:'on', care:'ccu' });
+  }
   updateDailyTotal();
   await loadLocal();
   purgeOldPatients(); // remove patients discharged > 21 days ago
@@ -9636,7 +9740,7 @@ async function init() {
     savedWards.forEach(function(w) {
       if (!WARDS[w.key]) {
         WARDS[w.key] = { label:w.name, list:'off', care:'directive', role:'consultant', rooms:[] };
-        ['f-ward','pe-ward'].forEach(function(selId) {
+        ['f-ward','pe-ward','le-ward'].forEach(function(selId) {
           var sel = document.getElementById(selId);
           if (!sel) return;
           var otherOpt = sel.querySelector('option[value="OTHER"]');
@@ -9799,7 +9903,7 @@ function hideModal(id) {
 
 function renderDocOpts() {
   document.getElementById('doc-opts').innerHTML = st.doctors.length
-    ? st.doctors.map(function(d) {
+    ? doctorsSorted().map(function(d) {
         var ini = d.name.replace('Dr. ','').split(' ').map(function(w){return w[0]||''}).join('').slice(0,2).toUpperCase();
         var numLine = d.alias;
         return '<div class="doc-opt" data-alias="' + d.alias + '" data-num="' + d.num + '" data-name="' + esc(d.name) + '" onclick="selectDocEl(this)">' +
@@ -9828,35 +9932,6 @@ function selectDoc(alias, num, name) {
   showToast('Signed in as ' + name);
 }
 
-function addDoctor() {
-  var alias = gv('new-alias');
-  var num   = gv('new-num');
-  var name  = gv('new-name');
-  if (!alias) { showToast('Need alias'); return; }
-  var mapped = ALIAS_MAP[alias] || alias;
-  // Update existing doctor if alias matches (e.g. adding MSP number)
-  var existing = st.doctors.find(function(d) { return d.alias === mapped; });
-  if (existing) {
-    if (num)  existing.num  = num;
-    if (name) existing.name = name;
-    sv('doctors', st.doctors);
-    if (SHEETS_URL) push('saveDoctor', existing);
-    document.getElementById('new-alias').value = '';
-    document.getElementById('new-num').value   = '';
-    document.getElementById('new-name').value  = '';
-    selectDoc(existing.alias, existing.num, existing.name);
-    return;
-  }
-  var d = { alias:mapped, num:num || '', name:name || 'Dr. ' + alias };
-  st.doctors.push(d);
-  sv('doctors', st.doctors);
-  if (SHEETS_URL) push('saveDoctor', d);
-  document.getElementById('new-alias').value = '';
-  document.getElementById('new-num').value   = '';
-  document.getElementById('new-name').value  = '';
-  selectDoc(mapped, num, name || 'Dr. ' + alias);
-}
-
 // ── Utility functions ──────────────────────────────────
 function getP(pid) {
   return st.patients.find(function(p) { return p.id === pid; }) || {};
@@ -9865,6 +9940,30 @@ function getP(pid) {
 function checkDoc() {
   if (!st.doc) { showToast('Sign in first'); showModal('doc-modal'); return false; }
   return true;
+}
+
+// ── Doctor list ordering ───────────────────────────────
+// Surname used for sorting — the last whitespace-delimited token of the
+// doctor's name, with any leading "Dr." stripped; falls back to the alias
+// if no name is on file (e.g. a profile added with alias only).
+function doctorSurname(d) {
+  var n = String((d && d.name) || (d && d.alias) || '').replace(/^\s*Dr\.?\s+/i, '').trim();
+  var parts = n.split(/\s+/).filter(Boolean);
+  return (parts.length ? parts[parts.length - 1] : n).toLowerCase();
+}
+
+// st.doctors sorted alphabetically by surname (then full name as tie-break).
+// Used by the sign-in list and every performing-physician selector so all
+// doctor lists in the app share one consistent order. Returns a shallow
+// copy — never mutates st.doctors.
+function doctorsSorted() {
+  return (st.doctors || []).slice().sort(function(a, b) {
+    var sa = doctorSurname(a), sb = doctorSurname(b);
+    if (sa !== sb) return sa < sb ? -1 : 1;
+    var na = String((a && a.name) || '').toLowerCase();
+    var nb = String((b && b.name) || '').toLowerCase();
+    return na < nb ? -1 : (na > nb ? 1 : 0);
+  });
 }
 
 function gv(id) {
@@ -10326,7 +10425,7 @@ function dbgCopyLast() {
 
 <!-- ══════════════════════════════════════════════════════
      SANDBOX OVERLAY — training layer (self-contained)
-     Built for the v3.90 app. Adds: simulated OCR ·
+     Built for the v4.08 app. Adds: simulated OCR ·
      collapsible launch buttons · first-launch layout tour ·
      context Guide · Guided Walkthrough with saved progress.
      This whole block, plus the sb- CSS, the banner, the
@@ -10410,9 +10509,18 @@ function dbgCopyLast() {
           { lead:'Daily total', t:'Once you bill anything, a green running total appears next to the date. Tap it to review every claim entered today.' }
         ]},
         { h:'Taking action on a patient', items:[
-          { lead:'Open a card', t:'Tap a patient\u2019s card to open their summary — claims history, the pencil to edit demographics, and the discharge action.' },
-          { lead:'Edit demographics', t:'The pencil icon opens the editable record: name, PHN, date of birth, ward and bed. This is also how you move a patient to a different ward.' },
+          { lead:'Open a card', t:'Tap a patient\u2019s card to open their summary — a billing calendar for the admission, the pencil to edit demographics, and the discharge action.' },
+          { lead:'Edit demographics', t:'The pencil icon opens the editable record. The <strong>Location &amp; list</strong> card is one shared form across Add Patient, this pencil, and the bed-circle quick-edit — ward, room, role, MRP service and On/Off all live together. On 2S, 2W and CCU the room appears as a tap pill grid; on other wards it\u2019s a free-text field. Changing the ward clears the room.' },
           { lead:'Discharging a patient', t:'The discharge action runs several checks: it flags any unbilled days in the admission, offers to add today\u2019s visit, and — for Cardiology MRP patients staying more than 4 days — asks whether the complex-discharge fee (78717) applies. You confirm the discharge date to finish.' }
+        ]},
+        { h:'Patient summary &amp; calendar', items:[
+          { lead:'The calendar view', t:'Opening a patient shows a month calendar with every billed day coloured by claim type — red for CCU, green for daily, blue for directive, light green for combined daily. Today\u2019s date is ringed; the discharge day (if any) is also ringed.' },
+          { lead:'Two claim types on one day', t:'When a day carries two different claim types (a consult plus a bedside procedure, a daily plus a directive), the cell splits diagonally so both colours are visible.' },
+          { lead:'Back-fill a missed day', t:'Tap a coloured <strong>legend pill</strong> (CCU, Daily, Directive, Combined daily) to arm that claim type, then tap a day on the calendar to record the visit on that date. Useful when you forgot to bill earlier in the week.' },
+          { lead:'Combined daily — entered once', t:'The first combined-daily claim for a patient prompts for the reason; every later combined daily reuses that reason automatically. To change it later, edit the note on any of the patient\u2019s combined-daily claims.' },
+          { lead:'Consult pill', t:'The Consult legend item is a button — tap it to open the consult form for this patient (consults need start/end times, so they can\u2019t be one-tap added from the calendar).' },
+          { lead:'Performing doctor', t:'The dropdown above the calendar defaults to whoever is signed in. Switch it to back-fill claims on behalf of a colleague — useful when covering for someone.' },
+          { lead:'Edit or delete a claim', t:'Tap the ✎ on a claim row to edit it. The fee-code picker is a searchable list of the full catalogue — type a few letters and pick. (In older builds this was a 10-option menu that could silently overwrite an unlisted fee — fixed in v3.96.)' }
         ]}
       ]
     },
@@ -10422,10 +10530,17 @@ function dbgCopyLast() {
         { h:'Capturing demographics', items:[
           { lead:'Photograph the label', t:'Tap the camera box and photograph the patient sticker or Meditech chart header. The app reads name, PHN, date of birth, ward and room. <strong>Training:</strong> the camera is simulated and fills sample data.' },
           { lead:'Always check the fields', t:'OCR is accurate but not infallible. Check every auto-filled field against the source before submitting — especially the PHN.' },
-          { lead:'PHN and name', t:'PHN must be exactly 10 digits. Last name is required. Date of birth, sex and ward can be completed later.' }
+          { lead:'PHN and name', t:'PHN must be exactly 10 digits — the field outlines red until it is. Last name is required. Date of birth, sex and ward can be completed later.' },
+          { lead:'Already on a list?', t:'If the scanned PHN matches a patient you\u2019re already following, a banner appears above the form: <strong>Go to patient</strong> opens their card. If the PHN matches a recently discharged patient, the banner offers <strong>Restore</strong> to re-add them to your list — no need to re-enter demographics.' }
+        ]},
+        { h:'Setting the location', items:[
+          { lead:'Location &amp; list card', t:'One shared card sets the ward, room, role (MRP / Consultant), MRP service and On / Off Service. The same card is used everywhere a location is edited — Add Patient, the pencil edit, and the bed-circle quick-edit.' },
+          { lead:'Ward & room pills', t:'Pick a ward; the room field updates. On <strong>2S, 2W and CCU</strong> the rooms appear as tap pills (one tap instead of typing). An <strong>Other…</strong> pill reveals a text field for any off-list room. Other wards show a plain text field.' },
+          { lead:'On / Off Service is ward-driven', t:'Choosing a Cardiology MRP ward (CICU, 2S, 2W) snaps the card to <strong>On Service · MRP</strong>. Choosing another ward or another MRP service snaps to <strong>Off Service · Consulting</strong>. You can override either, but the defaults usually match reality.' },
+          { lead:'Other ward not in the list', t:'Choose <strong>Other ward → Save to list</strong> and give it a name; it joins the ward dropdown for next time. Useful for wards your group occasionally covers.' }
         ]},
         { h:'Choosing the claim', items:[
-          { lead:'Claim types', t:'<strong>Consult</strong> records a new consultation (33010 full / 33012 limited). <strong>CCU Admit</strong> records a CICU admission day. <strong>Other</strong> lets you pick any fee code.' },
+          { lead:'Claim types', t:'<strong>Consult</strong> records a new consultation (33010 full / 33012 limited). <strong>CCU Admit</strong> records a CICU admission day. <strong>Other Claim</strong> opens a searchable picker over the full fee catalogue.' },
           { lead:'Consult times', t:'A consult needs a start and end time. End defaults to start + 50 minutes; adjust it if the consult was shorter.' }
         ]},
         { h:'What the app does for you', items:[
@@ -10503,18 +10618,22 @@ function dbgCopyLast() {
       desc:'On the Rounds list, find <b>Margaret Hollis</b> in CICU and tap her <b>+ CCU daily</b> button. The card turns green to show today\u2019s visit is billed.',
       check:function(){ return sbClaims().some(function(c){ return SB_VISIT_FEES.indexOf(sbClaimCode(c))>=0; }); } },
 
+    { id:'view_calendar', title:'Open a patient\u2019s calendar',
+      desc:'Tap <b>Margaret Hollis\u2019s</b> card to open her summary. The <b>calendar</b> shows every billed day for this admission, coloured by claim type — today\u2019s CCU daily is a red square. To back-fill a day you forgot to bill, tap a coloured <b>legend pill</b> at the top (CCU / Daily / Directive / Combined daily), then tap the day. Two claim types on one day show as a diagonal split.',
+      check:function(){ return window._sbSawSummary === true; } },
+
     { id:'fix_typo', title:'Correct a surname spelling',
       desc:'On 2S, <b>Eleanor Whitfeild</b> has a misspelled surname. Tap her card, tap the pencil icon, change the last name to <b>Whitfield</b> and save.',
       check:function(){ var pt=sbPatients().filter(function(p){return p&&p.first==='Eleanor';})[0];
         if(!pt) return true; return String(pt.last||'').toLowerCase()==='whitfield'; } },
 
     { id:'fix_phn', title:'Complete an incomplete PHN',
-      desc:'On Off Service, <b>Patricia Kowalski</b> in the ED has only a 9-digit PHN. Open her card, tap the pencil, and finish the PHN so it has all <b>10 digits</b>.',
+      desc:'On Off Service, <b>Patricia Kowalski</b> in the ED has only a 9-digit PHN — the PHN field outlines red until all <b>10 digits</b> are in. Open her card, tap the pencil, and finish the PHN.',
       check:function(){ var pt=sbPatients().filter(function(p){return p&&p.first==='Patricia'&&p.last==='Kowalski';})[0];
         if(!pt) return true; return String(pt.phn||'').replace(/\D/g,'').length===10; } },
 
     { id:'move_patient', title:'Move a patient to another ward',
-      desc:'Pick any patient, open their card and tap the pencil. Change the <b>Ward</b> to a different one and save — the patient moves in the Geographic view.',
+      desc:'Pick any patient, open their card and tap the pencil. In the <b>Location &amp; list</b> card, change the <b>Ward</b> — if you choose 2S, 2W or CCU the rooms appear as tap pills (one tap chooses one). Save, and the patient moves in the Geographic view.',
       check:function(){ if(!_sbSeedWardsReady) return false;
         return sbPatients().some(function(p){ return p && _sbSeedWards[p.id] && p.ward!==_sbSeedWards[p.id]; }); } },
 
@@ -10523,7 +10642,7 @@ function dbgCopyLast() {
       check:function(){ return sbPatients().some(function(p){ return p && p.discharged===true && /^sb-/.test(String(p.id||'')); }); } },
 
     { id:'photo_add', title:'Add a patient with the camera',
-      desc:'Go to <b>Add Patient</b> and tap the camera box. Photograph anything — the simulated camera fills in a sample patient. Check the name, PHN and date of birth it produced.',
+      desc:'Go to <b>Add Patient</b> and tap the camera box. Photograph anything — the simulated camera fills in a sample patient. Check the name, PHN and date of birth it produced. If the sample lands on 2S, 2W or CCU you\u2019ll see the room pre-selected as a room pill.',
       check:function(){ return window._sbOcrUsed===true; } },
 
     { id:'modifier', title:'See a call-out modifier',
@@ -10558,6 +10677,20 @@ function dbgCopyLast() {
     });
   }
 
+  /* Watch openPatientSummary so the calendar walkthrough step can complete.
+     Hook idempotently — sbCheckProgress polls every 1.8s, so this re-runs
+     until the app's main script has defined openPatientSummary. */
+  function sbHookSummary() {
+    if (typeof window.openPatientSummary !== 'function') return;
+    if (window.openPatientSummary._sbHooked) return;
+    var _orig = window.openPatientSummary;
+    window.openPatientSummary = function () {
+      window._sbSawSummary = true;
+      return _orig.apply(this, arguments);
+    };
+    window.openPatientSummary._sbHooked = true;
+  }
+
   function sbStepToast(title) {
     var t = document.getElementById('sb-step-toast');
     if (!t) return;
@@ -10573,6 +10706,7 @@ function dbgCopyLast() {
     if (typeof st === 'undefined' || !st.loaded) return;
     sbInitSeedWards();
     sbStampSeedClaim();
+    sbHookSummary();
     var changed = false;
     SB_STEPS.forEach(function (s) {
       if (_sbDone[s.id]) return;
