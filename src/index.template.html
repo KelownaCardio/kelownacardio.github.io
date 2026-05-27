@@ -445,6 +445,15 @@ input[type=file] { display:none; }
 .ref-dd-row:hover { background:var(--surface2); }
 .ref-dd-row:last-child { border-bottom:none; }
 
+/* ROOM PILLS — preset 2S/2W/CCU rooms as tap targets */
+.room-pills { display:flex; flex-wrap:wrap; gap:6px; }
+.room-pill { padding:7px 10px; min-width:40px; text-align:center; font-size:13px; font-weight:600;
+  border:.5px solid var(--border2); border-radius:8px; background:var(--surface2); color:var(--text2);
+  cursor:pointer; user-select:none; font-family:inherit; line-height:1; }
+.room-pill:active { transform:scale(.95); }
+.room-pill.selected { background:var(--blue-bg); border-color:var(--blue-t); color:var(--blue-t); }
+.room-pill-other { font-style:italic; font-weight:500; }
+
 /* LOCATION SCREEN */
 .loc-grid { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-bottom:11px; }
 .loc-opt { padding:12px 8px; border:.5px solid var(--border2); border-radius:var(--r); cursor:pointer; text-align:center; background:var(--surface); font-family:inherit; }
@@ -988,13 +997,8 @@ input[type=file] { display:none; }
         </div>
         <div class="f1">
           <label id="bed-lbl">Bed / room</label>
-          <div style="position:relative">
-            <input id="f-bed" autocorrect="off" autocomplete="off" placeholder="Select or type…" style="margin-bottom:0"
-              oninput="bedSearchEl(this,'f-bed-dd')"
-              onfocus="bedSearchEl(this,'f-bed-dd')"
-              onblur="setTimeout(function(){hideBedDd('f-bed-dd')},200)">
-            <div class="bed-dd" id="f-bed-dd"></div>
-          </div>
+          <input id="f-bed" type="text" autocorrect="off" autocomplete="off" placeholder="Type room…" style="margin-bottom:0;display:none">
+          <div id="f-room-pills" class="room-pills"></div>
         </div>
       </div>
       <label style="margin-top:8px">Cardiology role</label>
@@ -1059,7 +1063,8 @@ input[type=file] { display:none; }
   <div class="loc-grid" id="loc-grid"></div>
   <div id="loc-room-wrap">
     <label>Room / bed</label>
-    <select id="loc-room" style="margin-bottom:9px"></select>
+    <input id="loc-room" type="text" autocorrect="off" autocomplete="off" placeholder="Type room…" style="margin-bottom:9px;display:none">
+    <div id="loc-room-pills" class="room-pills" style="margin-bottom:9px"></div>
   </div>
   <div class="fl" style="margin-bottom:9px">
     <div class="f1"><label>On / Off service</label>
