@@ -1179,7 +1179,7 @@ var WARDS = {
   ICUA: { label:'ICU A',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
   ICUB: { label:'ICU B',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
   ICUD: { label:'ICU D',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
-  ED:   { label:'ED',       list:'off', care:'directive', role:'consultant', rooms:['Resus 1','Resus 2','Bay 1','Bay 2','Bay 3','Bay 4','Other'] },
+  ED:   { label:'ED',       list:'off', care:'directive', role:'consultant', rooms:[] },
   '3E': { label:'3E',       list:'off', care:'directive', role:'consultant', rooms:[] },
   '3W': { label:'3W',       list:'off', care:'directive', role:'consultant', rooms:[] },
   '3MU':{ label:'3MU',      list:'off', care:'directive', role:'consultant', rooms:[] },
@@ -2074,12 +2074,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v4.05-2026-05-27-fee-rates-derived';
+var BUILD_ID    = 'v4.06-2026-05-27-remove-msp-form-and-ed-pills';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v4.05';
-var APP_BUILT   = '2026-05-26';
+var APP_VERSION = 'v4.06';
+var APP_BUILT   = '2026-05-27';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -9796,35 +9796,6 @@ function selectDoc(alias, num, name) {
   document.getElementById('doc-dot').classList.add('on');
   hideModal('doc-modal');
   showToast('Signed in as ' + name);
-}
-
-function addDoctor() {
-  var alias = gv('new-alias');
-  var num   = gv('new-num');
-  var name  = gv('new-name');
-  if (!alias) { showToast('Need alias'); return; }
-  var mapped = ALIAS_MAP[alias] || alias;
-  // Update existing doctor if alias matches (e.g. adding MSP number)
-  var existing = st.doctors.find(function(d) { return d.alias === mapped; });
-  if (existing) {
-    if (num)  existing.num  = num;
-    if (name) existing.name = name;
-    sv('doctors', st.doctors);
-    if (SHEETS_URL) push('saveDoctor', existing);
-    document.getElementById('new-alias').value = '';
-    document.getElementById('new-num').value   = '';
-    document.getElementById('new-name').value  = '';
-    selectDoc(existing.alias, existing.num, existing.name);
-    return;
-  }
-  var d = { alias:mapped, num:num || '', name:name || 'Dr. ' + alias };
-  st.doctors.push(d);
-  sv('doctors', st.doctors);
-  if (SHEETS_URL) push('saveDoctor', d);
-  document.getElementById('new-alias').value = '';
-  document.getElementById('new-num').value   = '';
-  document.getElementById('new-name').value  = '';
-  selectDoc(mapped, num, name || 'Dr. ' + alias);
 }
 
 // ── Utility functions ──────────────────────────────────
