@@ -1,188 +1,14 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology Billing — main app
-  Version:    v3.77
-  Built:      2026-05-23 UTC
 
-  Changes in this build (v3.77) — Calendar legend clickable + desktop size fix:
-    - Legend pills (CCU / Daily / Directive / Combined) are now clickable
-      type selectors. Tap a pill to enter sticky-add mode; tap any calendar
-      day to add that claim type directly (no picker modal). Tap the pill
-      again to cancel. Active pill highlights in its claim colour.
-    - A hint line below the legend confirms the active mode:
-      "Tap any day to add CCU — tap pill again to cancel".
-    - Consult and Gap legend items remain view-only (not addable via calendar).
-    - Combined daily still opens its ICD + reason sub-form.
-    - Active pill is restored after calendar re-render (month change, claim add).
-    - _cvActiveType resets to null whenever a new patient summary is opened.
-    - All in-month calendar days are now tappable (previously only days with
-      claims or in-span days responded to tap).
-    - Picker modal buttons enlarged: padding 18px, label font 16px.
-    - Calendar grid capped at max-width:420px to prevent oversizing on desktop.
+  This file (index.html) is GENERATED. Do NOT hand-edit.
+  Edit src/js/main/*.js and src/index.template.html, then commit;
+  CI rebuilds index.html via build.js. See PROJECT-HANDBOOK.md.
 
-  Changes in this build (v3.76) — CCU Admission/Transfer pill:
-    - Added "CCU Admit" pill to the Add Patient claim card, between
-      Consult and Other Claim.
-    - Selecting CCU Admit shows a minimal claim area: date + optional
-      notes + diagnosis + referring MD + performing physician.
-      No time fields, no MOST toggle, no call-out modifier banner.
-    - On submit, writes a single 1411 (CCU Day 1) claim with the
-      selected date. Location follows ward (E if ED, else I).
-    - CCU Admit pill highlights in red (ct-on-ccu) when active.
-    - Validation requires: PHN, referring MD, diagnosis, date.
-    - clearAddForm and pill-reset loop updated to include 'ccu-admit'
-      so state clears correctly on form reset.
-
-  Changes in this build (v3.75) — Remove direct CSV export from app:
-    - Removed exportCSV(), reexportSubmitted(), _buildAndDownloadCSV(),
-      and ccuConsolidate() — all CSV generation is handled exclusively
-      by the Google Sheets Apps Script (ccuConsolidateForExport()).
-    - No UI changes; these functions were already unreachable from any
-      button in the app.
-  Repo:       github.com/KelownaCardio/kelownacardio.github.io
-
-  Changes in this build (v3.67) — CCU export: one row per day:
-    - ccuConsolidate() now emits one row per calendar day for 1421 and
-      1431 (units:1 each) instead of a single batched row with N units.
-    - Each row uses that day's actual tap (ep[d]) so date and performing
-      alias are correct per day, not copied from episode day 1.
-    - 1411 (day 1) behaviour unchanged.
-
-  Changes in this build (v3.66) — Meditech import MRP transition detection:
-    - Detect when a matched existing patient's MRP has changed between the
-      stored record and the imported Meditech list:
-        · left-cardiology  → patient was Cardiology MRP, attending is no
-                              longer a cardiologist (e.g. moved to CSICU
-                              for surgery, became Hospitalist primary).
-                              Row is auto-UNCHECKED — doctor must
-                              explicitly confirm before billing changes.
-        · joined-cardiology → patient was not on our service, attending
-                              now a cardiologist. Row is auto-checked.
-    - Transition rows render at the top of the import modal with a red /
-      amber tinted background and a chip showing "oldMRP → newMRP".
-    - On confirm, transition rows mutate the existing patient: writes new
-      mrp + flips list/role/care to match the new service designation
-      (off/consultant/directive for left-cardiology; on/mrp/daily-or-ccu
-      for joined-cardiology). Ward/bed also updated. Logged via
-      logChange("MRP transition via Meditech import", oldVals → newVals).
-    - Only fires when there is exactly 1 local name match — multi-match
-      duplicates continue to flow through the existing demographic-conflict
-      banner so a single row never triggers both warnings at once.
-
-  Changes in this build (v3.65) — Meditech import discharge note:
-    - Discharge reason for missing patients changed from
-      "Not on Meditech list" to "No longer on Meditech Import List".
-    - `dischargeNote` field added to patient record before savePatient
-      push so the reason persists to the Patients tab in Sheets
-      (non-billing note only).
-
-  Changes in this build (v3.61) — Add Patient claim card cleanup:
-    - Removed redundant "Lmtd Consult" tab from Add Patient claim card.
-      Full / Limited consult selection is handled by the 33010/33012
-      buttons already present inside the consult area.
-    - Added live modifier banner (night / evening / weekend / daytime)
-      below the MOST pill in the Add Patient consult area, mirroring
-      the behaviour of the standalone consult screen. Updates on date
-      and start time changes. Shows increment tier if consult > 45 min.
-    - End time hint text changed to "Defaults to 50min, adjust as needed".
-    - Start time change now auto-updates end time to start + 50 min
-      (same as standalone consult screen).
-    - Removed all _apClaimType === 'lmtd' branches; lmtd is now
-      handled entirely by the 33012 toggle inside the consult area.
-    - REVERTS v3.59. CCU_DAILY is now the canonical placeholder fee for
-      every CCU day. The Apps Script ccuConsolidateForExport() rolls
-      groups of CCU_DAILY taps into properly-banded 1411/1421/1431 rows
-      with units at export time. This eliminates the band-at-rest
-      correctness problem and matches the BC MSP standard form
-      (one row per band with units, not one row per day).
-    - All CCU write paths reverted: batchRound (ward sweep),
-      quickCCUBtn, claim-screen CCU button, calendar gap-fill picker,
-      discharge modal CCU Daily buttons (both branches). They all
-      write 'CCU_DAILY' and addClaim no longer intercepts it.
-    - CCU_DAILY restored in the claim edit fee dropdown as
-      "CCU day (placeholder, export bands)".
-    - The ccuFeeForDate(p, dateStr) and ccuFeeForToday(p) helpers
-      remain in the file but are no longer called from billing paths.
-      Kept in case future work needs them (e.g. showing the projected
-      band on a confirmation screen before submit). Effectively dead
-      code for now.
-    - User-facing label simplified: quickCCUBtn shows "CCU day" toast
-      instead of the per-band label ("CCU day 1 (1411)" etc), since
-      the per-day band is meaningless until export.
-
-  Changes in this build (v3.59) — CCU_DAILY elimination [REVERTED in v3.60]:
-    - Briefly switched to band-on-write (compute 1411/1421/1431 at tap
-      time). Created band-at-rest correctness issues after manual
-      edits and mid-episode backfills. Reverted by user request in
-      favour of the placeholder + export-consolidation approach.
-
-  Changes in this build (v3.58) — Patient card style improvements:
-    - DOB removed from patient card meta line (age+sex already shown).
-    - Dx (ICD description + code) added after MRP on all card views
-      (ward list, alphabetical, off-service). Format: "Dx: Description (code)".
-    - Quick-tap action buttons (Directive / Combined daily / + Claim) now
-      share a single full-width row using flex:1 on each button (nowrap).
-    - CCU/CSICU/ICU consulting patients now correctly show Directive +
-      Combined daily quick-tap buttons (not CCU daily — we only claim CCU
-      daily when Cardiology is MRP). showsCCUDaily() now checks role===mrp
-      exclusively (dropped legacy care===ccu fallback).
-    - Ward room-number circle centered vertically in card (align-items:center
-      on .wp). Room number font reduced 10px→8px for clearer name hierarchy.
-      Removed margin-top offsets on .wp-pos and .wp-pos-wrap.
-
-  Changes in this build (v3.33) — Meditech import auto-discharge:
-    - Cardiologist matchers (inferMRP, inferCare) replaced with the
-      actual app users + 'CardiologyMRP' group label. Surnames wan/
-      soon removed — those are cardiac SURGEONS, not cardiologists.
-    - New helpers isCardiologistAttending() and isCardiacSurgeonAttending()
-      with explicit CARDIOLOGIST_SURNAMES and CARDIAC_SURGEON_SURNAMES
-      constants at the top of 13_meditech.js.
-    - Meditech import now also flags discharge candidates: active
-      on-service patients who are (a) not on the imported list, or
-      (b) on the list with a cardiac surgeon as attending. Shown in
-      a pre-checked red section at the top of the import modal; MD
-      can uncheck any that should stay. Confirm processes discharges
-      first (logChange "Discharged via Meditech import"), then imports.
-
-  Changes in this build (v3.32) — toast + ward defaults:
-    - showToast no longer stacks. Each call removes any previous toast
-      div immediately (the v3.31 code cleared the removal timer but left
-      the orphan div in the DOM until its own timer fired, so rapid
-      rounding taps left several banners visible). Duration shortened
-      from 2400ms to 1600ms. Any visible toast is also dismissed when
-      the user navigates to a different pane via showPane.
-    - wardChange / peWardChange now snap role + MRP + care to the ward's
-      defaults (in addition to list, which v3.31 added). CCU/2S/2W set
-      role=MRP, mrp=Cardiology; everything else sets role=Consulting,
-      mrp=Other. Care is set to ccu for CCU/CSICU/ICUA/B/D, daily for
-      2S/2W, directive elsewhere. This fixes the case where adding a
-      patient to a non-cardiac ward via the form left them with
-      role=MRP+mrp=Cardiology (defaults from clearAddForm), causing the
-      wrong quick-tap buttons (+ Daily instead of + Directive / + Combined
-      daily). User can still manually override after.
-    - Edit modal: preserveList renamed to preserveAll and now also
-      preserves the saved role / mrp / care, so opening edit on an
-      existing patient never clobbers their saved values.
-    - clearAddForm now defers to wardChange() to pick role/mrp/list/care
-      based on the current ward, instead of hard-coding mrp+on+daily.
-
-  v3.31: Location & service rule tightening — list (on/off) ward-driven;
-         role ↔ MRP bidirectional binding kept but list-snapping removed;
-         edit-modal preserves saved list; Meditech import writes role and
-         defaults unrecognised MRPs to 'Other'.
-
-  v3.29: FEES trimmed from 56 to 20 codes (group's actual usage).
-  v3.28: FEES audited against MSC 2026; 13 mis-labels fixed; 3 invalid
-         codes removed (14101/14105/14113); $ amounts added; getFeeLabel
-         refactored.
-  v3.27: Calendar view default in patient summary; gap detection for CCU
-         + MRP daily wards; tap-to-add picker; discharge gap check.
-  v3.25: ocr_offline.js v1.2 (Meditech parser fixes).
-  v3.24: Multi-pass Tesseract (paper + screen preprocessing).
-  v3.23: Meditech-aware empty-OCR ward/room corrections with rawText.
-  v3.22: Debug panel minimizable.
-  v3.21: Debug panel + version-aware Service Worker.
-  v3.20: OCR corrections capture.
+  Runtime version constants:  src/js/main/03_state.js
+    (BUILD_ID, APP_VERSION, APP_BUILT — the source of truth)
+  Change history:             CHANGELOG-*.md (Claude Project)
 -->
 <html lang="en">
 <head>
@@ -197,7 +23,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="KGH Cards">
 <meta name="theme-color" content="#1a5fa8">
-<link rel="apple-touch-icon" href="icon-192.svg">
+<link rel="apple-touch-icon" href="icon-180.png">
 <style>
 :root {
   --bg:#f5f4f7; --surface:#fff; --surface2:#f0eff5;
@@ -2078,11 +1904,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v4.07-2026-05-27-restore-fee-rates-and-icon';
+var BUILD_ID    = 'v4.08-2026-05-27-icon-png-and-banner';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v4.07';
+var APP_VERSION = 'v4.08';
 var APP_BUILT   = '2026-05-27';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
