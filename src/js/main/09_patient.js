@@ -43,7 +43,10 @@ function openDuplicateBlockModal(existing, matchedFields) {
 function openAdd(ward, bed) {
   document.getElementById('f-ward').value = ward;
   wardChange();
-  if (bed) document.getElementById('f-bed').value = String(bed);
+  if (bed) {
+    document.getElementById('f-bed').value = String(bed);
+    renderRoomPills(ward, 'f-bed', 'f-room-pills');
+  }
   var w = WARDS[ward] || {};
   if (w.list) document.getElementById('f-list').value = w.list;
   if (w.care) document.getElementById('f-care').value = w.care;
@@ -164,6 +167,60 @@ function selectBed(row) {
   if (row.parentElement) row.parentElement.style.display = 'none';
 }
 
+// ── Room pills ─────────────────────────────────────────
+// Renders a ward's preset (+ saved custom) rooms as tap pills, so the
+// fixed 2S / 2W / CCU rooms are one tap. Wards with no preset rooms fall
+// back to the plain text input. An "Other…" pill reveals the input for an
+// off-list room. Shared by Add Patient (f-bed) and the location-change
+// screen (loc-room). The text input always holds the value, so existing
+// submit code (gv('f-bed') / gv('loc-room')) is unchanged.
+function renderRoomPills(ward, inputId, containerId) {
+  var box = document.getElementById(containerId);
+  var inp = document.getElementById(inputId);
+  if (!box || !inp) return;
+  var rooms = getBedRooms(ward);
+  // Ward with no preset rooms — plain free-text entry, no pills.
+  if (!rooms.length) {
+    box.innerHTML = '';
+    box.style.display = 'none';
+    inp.style.display = '';
+    return;
+  }
+  box.style.display = 'flex';
+  var cur     = String(inp.value || '').trim();
+  var onList  = rooms.indexOf(cur) !== -1;
+  var otherOn = !!cur && !onList;   // a value that isn't a preset/saved room
+  var html = rooms.map(function(r) {
+    return '<button type="button" class="room-pill' + (r === cur ? ' selected' : '') + '" ' +
+           'data-room="' + esc(r) + '" ' +
+           'onclick="pickRoomPill(this,\'' + inputId + '\',\'' + containerId + '\')">' +
+           esc(r) + '</button>';
+  }).join('');
+  html += '<button type="button" class="room-pill room-pill-other' + (otherOn ? ' selected' : '') + '" ' +
+          'onclick="pickRoomOther(\'' + inputId + '\',\'' + containerId + '\')">Other…</button>';
+  box.innerHTML = html;
+  // Text input is shown only in "Other" mode; otherwise the pills are the UI.
+  inp.style.display = otherOn ? '' : 'none';
+}
+
+function pickRoomPill(btn, inputId, containerId) {
+  var inp = document.getElementById(inputId);
+  if (inp) { inp.value = btn.getAttribute('data-room'); inp.style.display = 'none'; }
+  var box = document.getElementById(containerId);
+  if (box) box.querySelectorAll('.room-pill').forEach(function(b) {
+    b.classList.toggle('selected', b === btn);
+  });
+}
+
+function pickRoomOther(inputId, containerId) {
+  var box = document.getElementById(containerId);
+  if (box) box.querySelectorAll('.room-pill').forEach(function(b) {
+    b.classList.toggle('selected', b.classList.contains('room-pill-other'));
+  });
+  var inp = document.getElementById(inputId);
+  if (inp) { inp.value = ''; inp.style.display = ''; inp.focus(); }
+}
+
 // Apply ward-default role / mrp / care / list to a set of form selects.
 // CCU/2S/2W → MRP role, Cardiology, on-service, ccu-or-daily care.
 // Everything else → Consulting role, Other mrp, off-service, directive care.
@@ -205,6 +262,10 @@ function wardChange(opts) {
   // Clear bed input when ward changes
   var bedInp = document.getElementById('f-bed');
   if (bedInp) bedInp.value = '';
+
+  // Render the ward's preset rooms as tap pills (falls back to the plain
+  // text input for wards with no preset rooms).
+  renderRoomPills(w, 'f-bed', 'f-room-pills');
 
   // Apply ward defaults unless explicitly suppressed
   if (!opts || !opts.preserveAll) {
@@ -1174,6 +1235,9 @@ function handleOCRResult(data, bar) {
     var bedInp = document.getElementById('f-bed');
     if (bedInp) bedInp.value = roomClean;
     saveCustomRoom(gv('f-ward'), roomClean);
+    // Reflect the prefilled room in the pills (it's now saved, so it shows
+    // as a pill — or as "Other" if it didn't normalise to a known room).
+    renderRoomPills(gv('f-ward'), 'f-bed', 'f-room-pills');
   }
   if (bar) {
     bar.className = 'ocr-bar ocr-ok';

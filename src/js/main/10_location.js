@@ -51,8 +51,11 @@ function openLocScreen(pid) {
            '</div>';
   }).join('');
 
-  // Pre-select current ward
+  // Pre-select current ward, then the patient's current room
   selectLocWard(p.ward);
+  var locRoomInp = document.getElementById('loc-room');
+  if (locRoomInp) locRoomInp.value = p.bed || '';
+  renderRoomPills(p.ward, 'loc-room', 'loc-room-pills');
   document.getElementById('loc-list').value = p.list || 'on';
   document.getElementById('loc-care').value = p.care || 'daily';
 
@@ -79,11 +82,11 @@ function selectLocWard(ward) {
     if (careSel) careSel.value = w.care || 'daily';
   }
 
-  // Populate room selector
-  var rooms = w.rooms || [];
-  document.getElementById('loc-room').innerHTML =
-    '<option value="">— select —</option>' +
-    rooms.map(function(r) { return '<option value="' + r + '">' + r + '</option>'; }).join('');
+  // Render the ward's preset rooms as tap pills. Changing ward clears the
+  // room — a room from the previous ward no longer applies.
+  var locRoomInp = document.getElementById('loc-room');
+  if (locRoomInp) locRoomInp.value = '';
+  renderRoomPills(ward, 'loc-room', 'loc-room-pills');
 }
 
 function confirmLocChange() {
@@ -91,6 +94,7 @@ function confirmLocChange() {
   var from = p.ward;
   p.ward   = _locWard;
   p.bed    = gv('loc-room');
+  saveCustomRoom(_locWard, p.bed);   // persist an off-list room so it becomes a pill next time
   p.care   = gv('loc-care');
 
   // Safety rule: any ward outside the geographic view (CCU/2S/2W)
