@@ -105,6 +105,15 @@ function savePatientEdit(pid) {
   var p = getP(pid);
   if (!p || !p.id) return;
 
+  // v4.09: capture pre-edit name so we can propagate a rename to existing
+  // claim rows. Background: addClaim snapshots p.last/p.first onto each
+  // claim row at write time. Before v4.09 a rename here only updated the
+  // patient record, leaving historical claim rows stuck with the original
+  // (often OCR-misread) name — exactly the failure pattern that landed
+  // last="57" on Malone, Deborah's claims.
+  var _oldLast  = p.last  || '';
+  var _oldFirst = p.first || '';
+
   var role = (document.getElementById('pe-role') || {}).value || 'consultant';
   var ward = (document.getElementById('pe-ward') || {}).value || p.ward;
 
@@ -124,10 +133,37 @@ function savePatientEdit(pid) {
   saveCustomRoom(p.ward, p.bed);
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
-  logChange(p, 'Demographics edited', '');
+
+  // v4.09: propagate name change to ALL claim rows for this PHN. Each row
+  // is re-pushed via saveClaim so the Sheet is updated. The set of changed
+  // claims is also reported in the changelog detail and a separate toast
+  // so the doctor can see what was touched.
+  var _claimsTouched = 0;
+  if ((p.last !== _oldLast || p.first !== _oldFirst) && p.phn) {
+    st.claims.forEach(function(c) {
+      if (!samePhn(c.phn, p.phn)) return;
+      if (c.last === p.last && c.first === p.first) return;
+      c.last  = p.last;
+      c.first = p.first;
+      if (SHEETS_URL) push('saveClaim', c);
+      _claimsTouched++;
+    });
+    if (_claimsTouched > 0) {
+      sv('claims', st.claims);
+      try { console.log('[v4.09] Propagated name change to ' + _claimsTouched + ' claim row(s) for PHN ' + p.phn); } catch (e) {}
+    }
+  }
+
+  var _renameDetail = '';
+  if (p.last !== _oldLast || p.first !== _oldFirst) {
+    var _oldDisplay = _oldLast + (_oldFirst ? ', ' + _oldFirst : '');
+    _renameDetail = 'Renamed from "' + _oldDisplay + '"' +
+      (_claimsTouched > 0 ? ' \u2014 updated ' + _claimsTouched + ' claim row(s)' : '');
+  }
+  logChange(p, 'Demographics edited', _renameDetail);
   hideModal('pt-edit-modal');
   render();
-  showToast(p.last + ' updated');
+  showToast(p.last + ' updated' + (_claimsTouched > 0 ? ' (\u2713 ' + _claimsTouched + ' claim row(s) renamed)' : ''));
 }
 
 // ═══════════════════════════════════════════════════════

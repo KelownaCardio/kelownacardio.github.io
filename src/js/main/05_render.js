@@ -151,8 +151,36 @@ var _offView = 'alpha'; // 'alpha' | 'location' — off-service view toggle
 
 // ── Geographic view ────────────────────────────────────
 function renderGeo() {
-  var h = wardHtml('CCU') + wardHtml('2S') + wardHtml('2W');
+  var h = otherLocationsHtml() + wardHtml('CCU') + wardHtml('2S') + wardHtml('2W');
   document.getElementById('geo-view').innerHTML = h;
+}
+
+// v4.09: Safety net — on-service patients on wards outside CCU/2S/2W
+// were previously invisible. renderGeo only renders those three wards,
+// and the off-service list filters by p.list === 'off', so an on-service
+// patient on ED/3E/3W/ICU/CSICU/etc. fell into a blind spot — visible only
+// to whoever opened the alphabetical view or searched. This block lists
+// them above CCU when any exist and is suppressed when empty.
+function otherLocationsHtml() {
+  var pts = st.patients.filter(function(p) {
+    return p.list === 'on' && !p.discharged &&
+           p.ward !== 'CCU' && p.ward !== '2S' && p.ward !== '2W';
+  });
+  if (!pts.length) return '';
+  pts = pts.slice().sort(function(a, b) {
+    var wa = String(a.ward || ''), wb = String(b.ward || '');
+    if (wa !== wb) return wa.localeCompare(wb);
+    return String(a.last || '').localeCompare(String(b.last || ''));
+  });
+  return '<div class="ward-block" style="border-left:3px solid var(--amber-t)">' +
+    '<div class="ward-hdr">' +
+      '<div class="ward-lbl">\u26A0 Other Locations (' + pts.length + ')</div>' +
+    '</div>' +
+    '<div style="padding:0 12px 8px;font-size:11px;color:var(--text3);line-height:1.4">' +
+      'On-service patients outside CCU / 2S / 2W \u2014 verify each location is correct.' +
+    '</div>' +
+    safeRowMap(pts, alphaRow) +
+    '</div>';
 }
 
 function wardHtml(ward) {

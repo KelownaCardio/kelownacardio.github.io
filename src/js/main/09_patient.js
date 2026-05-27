@@ -495,6 +495,49 @@ async function apSubmit(addToList, _skipDupCheck) {
   var last = (document.getElementById('f-last') || {}).value || '';
   var phn  = gv('f-phn');
   if (!last) { showToast('Enter patient last name'); return; }
+
+  // v4.09: Sticker-OCR sometimes misreads adjacent numbers (most often the
+  // patient's age — Deborah Malone, 57, became last="57") as the surname.
+  // Pre-v4.09 the form happily submitted "57" as a last name, the patient
+  // was saved as "57" / blank-first, and every claim row written by that
+  // submission was permanently stamped with "57". Guard against the three
+  // shapes that 99% of misreads take: all-digits, too short, and "matches
+  // the patient's age from DOB". Each gives a specific toast so the doctor
+  // knows what to look at on the sticker.
+  var _lastTrim = String(last).trim();
+  var _lastErr  = null;
+  if (/^\d+$/.test(_lastTrim)) {
+    _lastErr = 'Last name "' + _lastTrim + '" is all digits \u2014 OCR likely misread the sticker. Tap Last name and correct it.';
+  } else if (_lastTrim.length < 2) {
+    _lastErr = 'Last name "' + _lastTrim + '" is too short \u2014 check the sticker and re-enter.';
+  } else {
+    // Age match check — only fires when DOB is filled and parses cleanly.
+    var _dobRaw = gv('f-dob');
+    if (_dobRaw) {
+      var _dobIso  = fmtClaimDate(_dobRaw); // DD/MM/YYYY
+      var _parts   = String(_dobIso).split('/');
+      if (_parts.length === 3) {
+        var _dobMs = new Date(parseInt(_parts[2], 10), parseInt(_parts[1], 10) - 1, parseInt(_parts[0], 10)).getTime();
+        if (_dobMs && !isNaN(_dobMs)) {
+          var _ageYears = Math.floor((Date.now() - _dobMs) / (1000 * 60 * 60 * 24 * 365.25));
+          if (_ageYears > 0 && _ageYears < 130 && String(_ageYears) === _lastTrim) {
+            _lastErr = 'Last name "' + _lastTrim + '" matches the patient\u2019s age \u2014 OCR likely picked the age off the sticker. Correct the last name.';
+          }
+        }
+      }
+    }
+  }
+  if (_lastErr) {
+    var _lastEl = document.getElementById('f-last');
+    if (_lastEl) {
+      _lastEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)';
+      _lastEl.focus();
+      _lastEl.select && _lastEl.select();
+    }
+    showToast(_lastErr);
+    return;
+  }
+
   // Diagnosis / referring MD — every claim form now uses the unified
   // cb-* / oc-* ids.
   var icd = gv('cb-icd') || gv('oc-icd') || '';
