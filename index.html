@@ -1904,11 +1904,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v4.08-2026-05-27-icon-png-and-banner';
+var BUILD_ID    = 'v4.09-2026-05-27-other-locations-rename-prop-and-last-name-guard';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v4.08';
+var APP_VERSION = 'v4.09';
 var APP_BUILT   = '2026-05-27';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -3095,8 +3095,36 @@ var _offView = 'alpha'; // 'alpha' | 'location' — off-service view toggle
 
 // ── Geographic view ────────────────────────────────────
 function renderGeo() {
-  var h = wardHtml('CCU') + wardHtml('2S') + wardHtml('2W');
+  var h = otherLocationsHtml() + wardHtml('CCU') + wardHtml('2S') + wardHtml('2W');
   document.getElementById('geo-view').innerHTML = h;
+}
+
+// v4.09: Safety net — on-service patients on wards outside CCU/2S/2W
+// were previously invisible. renderGeo only renders those three wards,
+// and the off-service list filters by p.list === 'off', so an on-service
+// patient on ED/3E/3W/ICU/CSICU/etc. fell into a blind spot — visible only
+// to whoever opened the alphabetical view or searched. This block lists
+// them above CCU when any exist and is suppressed when empty.
+function otherLocationsHtml() {
+  var pts = st.patients.filter(function(p) {
+    return p.list === 'on' && !p.discharged &&
+           p.ward !== 'CCU' && p.ward !== '2S' && p.ward !== '2W';
+  });
+  if (!pts.length) return '';
+  pts = pts.slice().sort(function(a, b) {
+    var wa = String(a.ward || ''), wb = String(b.ward || '');
+    if (wa !== wb) return wa.localeCompare(wb);
+    return String(a.last || '').localeCompare(String(b.last || ''));
+  });
+  return '<div class="ward-block" style="border-left:3px solid var(--amber-t)">' +
+    '<div class="ward-hdr">' +
+      '<div class="ward-lbl">\u26A0 Other Locations (' + pts.length + ')</div>' +
+    '</div>' +
+    '<div style="padding:0 12px 8px;font-size:11px;color:var(--text3);line-height:1.4">' +
+      'On-service patients outside CCU / 2S / 2W \u2014 verify each location is correct.' +
+    '</div>' +
+    safeRowMap(pts, alphaRow) +
+    '</div>';
 }
 
 function wardHtml(ward) {
@@ -5728,6 +5756,15 @@ function savePatientEdit(pid) {
   var p = getP(pid);
   if (!p || !p.id) return;
 
+  // v4.09: capture pre-edit name so we can propagate a rename to existing
+  // claim rows. Background: addClaim snapshots p.last/p.first onto each
+  // claim row at write time. Before v4.09 a rename here only updated the
+  // patient record, leaving historical claim rows stuck with the original
+  // (often OCR-misread) name — exactly the failure pattern that landed
+  // last="57" on Malone, Deborah's claims.
+  var _oldLast  = p.last  || '';
+  var _oldFirst = p.first || '';
+
   var role = (document.getElementById('pe-role') || {}).value || 'consultant';
   var ward = (document.getElementById('pe-ward') || {}).value || p.ward;
 
@@ -5747,10 +5784,37 @@ function savePatientEdit(pid) {
   saveCustomRoom(p.ward, p.bed);
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
-  logChange(p, 'Demographics edited', '');
+
+  // v4.09: propagate name change to ALL claim rows for this PHN. Each row
+  // is re-pushed via saveClaim so the Sheet is updated. The set of changed
+  // claims is also reported in the changelog detail and a separate toast
+  // so the doctor can see what was touched.
+  var _claimsTouched = 0;
+  if ((p.last !== _oldLast || p.first !== _oldFirst) && p.phn) {
+    st.claims.forEach(function(c) {
+      if (!samePhn(c.phn, p.phn)) return;
+      if (c.last === p.last && c.first === p.first) return;
+      c.last  = p.last;
+      c.first = p.first;
+      if (SHEETS_URL) push('saveClaim', c);
+      _claimsTouched++;
+    });
+    if (_claimsTouched > 0) {
+      sv('claims', st.claims);
+      try { console.log('[v4.09] Propagated name change to ' + _claimsTouched + ' claim row(s) for PHN ' + p.phn); } catch (e) {}
+    }
+  }
+
+  var _renameDetail = '';
+  if (p.last !== _oldLast || p.first !== _oldFirst) {
+    var _oldDisplay = _oldLast + (_oldFirst ? ', ' + _oldFirst : '');
+    _renameDetail = 'Renamed from "' + _oldDisplay + '"' +
+      (_claimsTouched > 0 ? ' \u2014 updated ' + _claimsTouched + ' claim row(s)' : '');
+  }
+  logChange(p, 'Demographics edited', _renameDetail);
   hideModal('pt-edit-modal');
   render();
-  showToast(p.last + ' updated');
+  showToast(p.last + ' updated' + (_claimsTouched > 0 ? ' (\u2713 ' + _claimsTouched + ' claim row(s) renamed)' : ''));
 }
 
 // ═══════════════════════════════════════════════════════
@@ -6902,6 +6966,49 @@ async function apSubmit(addToList, _skipDupCheck) {
   var last = (document.getElementById('f-last') || {}).value || '';
   var phn  = gv('f-phn');
   if (!last) { showToast('Enter patient last name'); return; }
+
+  // v4.09: Sticker-OCR sometimes misreads adjacent numbers (most often the
+  // patient's age — Deborah Malone, 57, became last="57") as the surname.
+  // Pre-v4.09 the form happily submitted "57" as a last name, the patient
+  // was saved as "57" / blank-first, and every claim row written by that
+  // submission was permanently stamped with "57". Guard against the three
+  // shapes that 99% of misreads take: all-digits, too short, and "matches
+  // the patient's age from DOB". Each gives a specific toast so the doctor
+  // knows what to look at on the sticker.
+  var _lastTrim = String(last).trim();
+  var _lastErr  = null;
+  if (/^\d+$/.test(_lastTrim)) {
+    _lastErr = 'Last name "' + _lastTrim + '" is all digits \u2014 OCR likely misread the sticker. Tap Last name and correct it.';
+  } else if (_lastTrim.length < 2) {
+    _lastErr = 'Last name "' + _lastTrim + '" is too short \u2014 check the sticker and re-enter.';
+  } else {
+    // Age match check — only fires when DOB is filled and parses cleanly.
+    var _dobRaw = gv('f-dob');
+    if (_dobRaw) {
+      var _dobIso  = fmtClaimDate(_dobRaw); // DD/MM/YYYY
+      var _parts   = String(_dobIso).split('/');
+      if (_parts.length === 3) {
+        var _dobMs = new Date(parseInt(_parts[2], 10), parseInt(_parts[1], 10) - 1, parseInt(_parts[0], 10)).getTime();
+        if (_dobMs && !isNaN(_dobMs)) {
+          var _ageYears = Math.floor((Date.now() - _dobMs) / (1000 * 60 * 60 * 24 * 365.25));
+          if (_ageYears > 0 && _ageYears < 130 && String(_ageYears) === _lastTrim) {
+            _lastErr = 'Last name "' + _lastTrim + '" matches the patient\u2019s age \u2014 OCR likely picked the age off the sticker. Correct the last name.';
+          }
+        }
+      }
+    }
+  }
+  if (_lastErr) {
+    var _lastEl = document.getElementById('f-last');
+    if (_lastEl) {
+      _lastEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)';
+      _lastEl.focus();
+      _lastEl.select && _lastEl.select();
+    }
+    showToast(_lastErr);
+    return;
+  }
+
   // Diagnosis / referring MD — every claim form now uses the unified
   // cb-* / oc-* ids.
   var icd = gv('cb-icd') || gv('oc-icd') || '';
