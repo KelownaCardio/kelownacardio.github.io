@@ -1201,25 +1201,16 @@ var OCR_WORKER_URL = 'https://kgh-ocr.kathrynb77.workers.dev';
 // ── BC MSP 2025 Fee Values (cardiology) ──────────────
 // Used only for motivational daily total display — not for billing submission
 // Rates from BC MSC Payment Schedule effective January 31, 2026.
-var FEE_RATES = {
-  '33010':   186.14,  // Cardiology consultation — full
-  '33012':    93.08,  // Cardiology consultation — repeat/limited (within 6mo)
-  '33008':    63.95,  // Subsequent hospital visit
-  '33006':    82.42,  // Directive care
-  '33005':    97.15,  // Emergency visit when specially called
-  '78717':    82.19,  // G78717 Specialist Discharge Care Plan for Complex Patients
-  '78720':    43.82,  // G78720 Specialist Advance Care Planning Discussion (MOST)
-  '1411':    347.74,  // CCU critical care — day 1
-  '1421':    174.38,  // CCU critical care — days 2–7 (per diem)
-  '1431':    133.01,  // CCU critical care — days 8–30
-  'CCU_DAILY': 0,     // synthetic raw tap — excluded from daily total (consolidated at export)
-  '1200':     79.08,  // Evening call-out base (1800–2300)
-  '1205':     72.69,  // Evening continuing care surcharge — per half hour
-  '1201':    111.05,  // Night call-out base (2300–0800)
-  '1206':     99.40,  // Night continuing care surcharge — per half hour
-  '1202':     79.08,  // Saturday/Sunday/Stat call-out base
-  '1207':     72.69,  // Saturday/Sunday/Stat continuing care surcharge — per half hour
-};
+// FEE_RATES — numeric rate lookup ($ amount) keyed by MSP fee code, used
+// by the daily-total math and the daily-claims modal.
+//
+// SINGLE SOURCE OF TRUTH: this table is DERIVED from the FEES catalogue
+// (see buildFeeRates() just below the FEES definition). Do NOT hand-edit
+// rates here — add or change a fee in FEES only, and FEE_RATES updates
+// automatically. The declaration is left empty on purpose; it is filled
+// once at load time, after FEES is defined. All reads happen inside
+// functions that run later, so the empty stub is never observed.
+var FEE_RATES = {};
 
 function calcDailyTotal() {
   if (!st.doc || !st.claims) return null;
@@ -1409,6 +1400,28 @@ var FEES = [
   { code:'1206',   desc:'Night call — increment per 30 min',                              amount:'$99.40',  cat:'Modifier',  clr:'chip-blue' },
   { code:'1207',   desc:'Weekend/stat call — increment per 30 min',                       amount:'$72.69',  cat:'Modifier',  clr:'chip-blue' }
 ];
+
+// ── Derive FEE_RATES from the FEES catalogue ───────────────────────────
+// FEES (above) is the single source of truth for fee amounts. This builds
+// the numeric FEE_RATES lookup by parsing each catalogue '$' amount once,
+// so adding or repricing a fee means editing FEES only — the daily-total
+// math stays in sync automatically. (Before v4.05 these were two separate
+// hand-maintained tables; codes added to FEES but not FEE_RATES showed a
+// dash and were dropped from the daily total.)
+//
+// CCU_DAILY is a synthetic pre-rollup tap with no catalogue entry — it is
+// added explicitly with rate 0 and is excluded from the daily total
+// (consolidated into 1411/1421/1431/1441 at export time).
+function buildFeeRates() {
+  var rates = { 'CCU_DAILY': 0 };
+  FEES.forEach(function(f) {
+    if (!f || !f.code) return;
+    var n = parseFloat(String(f.amount || '').replace(/[^0-9.]/g, ''));
+    if (!isNaN(n)) rates[f.code] = n;
+  });
+  return rates;
+}
+FEE_RATES = buildFeeRates();
 
 // Legacy fee codes that appeared in older versions of this app but were
 // invalid in MSC 2026 (14101/14105/14113). Kept so that historical claims
@@ -2065,11 +2078,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v4.06-2026-05-27-remove-msp-form-and-ed-pills';
+var BUILD_ID    = 'v4.07-2026-05-27-restore-fee-rates-and-icon';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v4.06';
+var APP_VERSION = 'v4.07';
 var APP_BUILT   = '2026-05-27';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
