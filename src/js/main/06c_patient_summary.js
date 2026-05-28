@@ -926,7 +926,7 @@ function icdDescOnly(code) {
 // Get short human label for a fee code
 function getFeeLabel(fee) {
   // CCU pre-rollup tap (not a real MSC code)
-  if (fee === 'CCU_DAILY') return 'CCU daily visit (band auto-assigned 1411/1421/1431)';
+  if (fee === 'CCU_DAILY') return 'CCU Daily Visit (App will assign 1411/21/31)';
   // Look up canonical FEES first
   var f = FEES.find(function(x) { return x.code === fee; });
   if (f) return f.desc;
