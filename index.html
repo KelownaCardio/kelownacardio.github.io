@@ -1904,11 +1904,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v4.12-2026-05-27-fix-validation-order-empty-last-no-longer-short-circuits';
+var BUILD_ID    = 'v4.13-2026-05-27-realtime-phn-and-lastname-ocr-flagging';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v4.12';
+var APP_VERSION = 'v4.13';
 var APP_BUILT   = '2026-05-27';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -7279,6 +7279,55 @@ function initAddPatientConsult() {
 
 
 
+// v4.13: Real-time OCR-error flagging for the PHN and Last name fields.
+// Fires on every keystroke (via oninput on the static inputs) and once
+// explicitly after OCR fills the fields. Red = a definite OCR error the
+// doctor should look at immediately, BEFORE submitting:
+//   - PHN with content but not exactly 10 digits (OCR truncated/dropped)
+//   - Last name that is all digits (age/room picked off the sticker)
+//   - Last name containing a slash (adjacent field bled in)
+// Empty fields are NOT flagged (nothing typed yet is not an error). The
+// flag clears itself the moment the field becomes valid. This is purely
+// visual; the apSubmit guards remain as the hard backstop.
+var _LIVE_RED = 'border:1.5px solid var(--red-t);background:var(--red-bg)';
+
+function _liveClear(el) {
+  // Only clear styling we applied — leave the field's default look.
+  if (el) el.style.cssText = '';
+}
+
+function validatePhnLive() {
+  var el = document.getElementById('f-phn');
+  if (!el) return;
+  var digits = String(el.value || '').replace(/\D/g,'');
+  if (digits.length > 0 && digits.length !== 10) {
+    el.style.cssText = _LIVE_RED;
+  } else {
+    _liveClear(el);
+  }
+}
+
+function validateLastLive() {
+  var el = document.getElementById('f-last');
+  if (!el) return;
+  var v = String(el.value || '').trim();
+  // Flag definite OCR errors: all-digits or contains a slash. A single
+  // stray character ("X") or generational suffix ("Smith the 3") is not
+  // flagged live — those are caught at submit if truly wrong.
+  if (v.length > 0 && (/^\d+$/.test(v) || /[\/\\]/.test(v))) {
+    el.style.cssText = _LIVE_RED;
+  } else {
+    _liveClear(el);
+  }
+}
+
+// Called by handleOCRResult after it sets field values (setting .value
+// programmatically does not fire the oninput handlers).
+function validatePatientFieldsLive() {
+  validatePhnLive();
+  validateLastLive();
+}
+
 function clearAddForm() {
   ['f-last','f-first','f-phn','f-dob'].forEach(function(id) {
     var el = document.getElementById(id);
@@ -7885,6 +7934,11 @@ function handleOCRResult(data, bar) {
   if (p.first) document.getElementById('f-first').value = p.first;
   if (p.phn)   document.getElementById('f-phn').value   = (p.phn + '').replace(/\D/g,'').slice(0,10);
   if (p.dob)   document.getElementById('f-dob').value   = fmtClaimDate(p.dob);
+  // v4.13: setting .value above does not fire the oninput handlers, so run
+  // the live OCR-error flag explicitly. If OCR truncated the PHN or pulled
+  // a number/slash into the last name, the field turns red immediately —
+  // the doctor sees it the moment the scan lands, not at submit.
+  validatePatientFieldsLive();
   if (p.sex)   { apSexPill(p.sex); }
   if (p.ward && WARDS[p.ward]) { document.getElementById('f-ward').value = p.ward; wardChange(); }
   if (p.mrp) {
