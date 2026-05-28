@@ -1904,11 +1904,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v4.10-2026-05-27-last-name-slash-backslash-guard';
+var BUILD_ID    = 'v4.11-2026-05-27-phn-red-flag-and-location-required-for-add-to-list';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v4.10';
+var APP_VERSION = 'v4.11';
 var APP_BUILT   = '2026-05-27';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -6544,17 +6544,31 @@ function openAdd(ward, bed) {
 // The Add Patient legacy names (wardChange, mrpChange, apRolePill, …)
 // are kept below as thin wrappers so existing callers keep working.
 // ═══════════════════════════════════════════════════════
-function buildLocationCard(prefix, p) {
+function buildLocationCard(prefix, p, requireChoice) {
   p = p || {};
   var X    = prefix;
-  var ward = p.ward || 'CCU';
+  // v4.11: when requireChoice is true (Add Patient fresh form), all three
+  // user-selectable fields start unselected — ward shows a "Select location…"
+  // placeholder, role pills are both off, list pills are both off. The
+  // submit validation in apSubmit then forces the doctor to make active
+  // choices before adding to the rounds list. Pencil-edit / location-edit
+  // callers don't pass requireChoice and keep the existing behaviour of
+  // pre-filling from the patient record.
+  var noWard = requireChoice && !p.ward;
+  var noRole = requireChoice && !p.role;
+  var noList = requireChoice && !p.list;
+
+  var ward = p.ward || (requireChoice ? '' : 'CCU');
   var bed  = p.bed  || '';
-  var role = p.role === 'mrp' ? 'mrp' : 'consultant';
+  var role = noRole ? '' : (p.role === 'mrp' ? 'mrp' : 'consultant');
   var mrp  = p.mrp  || 'Other';
-  var list = p.list === 'on' ? 'on' : 'off';
+  var list = noList ? '' : (p.list === 'on' ? 'on' : 'off');
   var care = p.care || 'directive';
 
-  var wardOpts = Object.keys(WARDS).map(function(k) {
+  var placeholder = noWard
+    ? '<option value="" selected disabled>Select location…</option>'
+    : '';
+  var wardOpts = placeholder + Object.keys(WARDS).map(function(k) {
     return '<option value="' + k + '"' + (ward === k ? ' selected' : '') + '>' + WARDS[k].label + '</option>';
   }).join('');
   var mrpOpts = ['Cardiology','Other','Hospitalist','CTU','ICU','CSICU',
@@ -6578,7 +6592,7 @@ function buildLocationCard(prefix, p) {
   h += '</div></div>';
   // Row 2 — Cardiology role
   h += '<label style="margin-top:8px">Cardiology role</label>';
-  h += '<div class="fl" style="gap:8px;margin-top:4px">';
+  h += '<div id="' + X + '-role-row" class="fl" style="gap:8px;margin-top:4px">';
   h += '<button type="button" class="ap-list-pill' + (role === 'mrp' ? ' on' : '') + '" id="' + X + '-role-mrp" onclick="locRolePill(\'' + X + '\',\'mrp\')">MRP</button>';
   h += '<button type="button" class="ap-list-pill' + (role === 'consultant' ? ' on' : '') + '" id="' + X + '-role-con" onclick="locRolePill(\'' + X + '\',\'consultant\')">Consulting</button>';
   h += '</div>';
@@ -6588,7 +6602,7 @@ function buildLocationCard(prefix, p) {
   h += '<select id="' + X + '-mrp" onchange="locMrpChange(\'' + X + '\')">' + mrpOpts + '</select>';
   // Row 4 — On / Off service
   h += '<label style="margin-top:8px">On / Off service</label>';
-  h += '<div class="fl" style="gap:8px;margin-top:4px">';
+  h += '<div id="' + X + '-list-row" class="fl" style="gap:8px;margin-top:4px">';
   h += '<button type="button" class="ap-list-pill' + (list === 'on' ? ' on' : '') + '" id="' + X + '-pill-on" onclick="locListPill(\'' + X + '\',\'on\')">On service</button>';
   h += '<button type="button" class="ap-list-pill tone-amber' + (list === 'off' ? ' on' : '') + '" id="' + X + '-pill-off" onclick="locListPill(\'' + X + '\',\'off\')">Off service</button>';
   h += '</div>';
@@ -7015,14 +7029,38 @@ async function apSubmit(addToList, _skipDupCheck) {
     return;
   }
 
+  // v4.11: PHN wrong-length guard with red treatment. A 10-digit PHN that
+  // came back N≠10 digits is almost always OCR truncating or dropping a
+  // digit — the user can't have typed exactly 9 by hand, but OCR returns
+  // that all the time. Distinct from blank PHN, which gets the amber
+  // missing-field treatment below alongside other blank-required fields.
+  // Red border + red toast + 3.5s dwell so the digit count is readable.
+  // Restores the red flag that lived in v3.75 and was downgraded to amber
+  // during the v4.x refactors.
+  if (phn) {
+    var _phnDigits = String(phn).replace(/\D/g,'').length;
+    if (_phnDigits !== 10) {
+      var _phnEl = document.getElementById('f-phn');
+      if (_phnEl) {
+        _phnEl.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)';
+        _phnEl.focus();
+        _phnEl.select && _phnEl.select();
+      }
+      showToast('PHN is ' + _phnDigits + ' digit' + (_phnDigits === 1 ? '' : 's') +
+                ' \u2014 must be 10. OCR likely misread \u2014 check the sticker.', 'error');
+      return;
+    }
+  }
+
   // Diagnosis / referring MD — every claim form now uses the unified
   // cb-* / oc-* ids.
   var icd = gv('cb-icd') || gv('oc-icd') || '';
 
-  // Validate required fields
+  // Validate required fields. PHN wrong-length is handled above as its own
+  // red-flag guard; here we only handle PHN missing (amber, alongside the
+  // other blank-required fields).
   var addMissing = [];
   if (!phn)                                    addMissing.push('phn');
-  else if (String(phn).replace(/\D/g,'').length !== 10) addMissing.push('phn-len');
   if (!gv('cb-refby') && !gv('oc-refby')) addMissing.push('refby');
   if (!icd)                                    addMissing.push('icd');
   if (_apClaimType === 'consult') {
@@ -7036,8 +7074,19 @@ async function apSubmit(addToList, _skipDupCheck) {
     if (!(document.getElementById('oc-date') || {}).value) addMissing.push('date');
   }
 
+  // v4.11 NEW: When adding to the rounds list, the location card must be
+  // fully filled in. Users have been skipping ward/role/list and landing on
+  // defaults — patients then end up on the wrong list or invisible. The
+  // submit-claim-only path is unaffected (those patients don't go on a
+  // rounds list at all).
+  if (addToList) {
+    if (!gv('f-ward')) addMissing.push('location');
+    if (!gv('f-role')) addMissing.push('role');
+    if (!gv('f-list')) addMissing.push('list');
+  }
+
   if (addMissing.length) {
-    if (addMissing.indexOf('phn') !== -1 || addMissing.indexOf('phn-len') !== -1) {
+    if (addMissing.indexOf('phn') !== -1) {
       var phnEl = document.getElementById('f-phn');
       if (phnEl) { phnEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; phnEl.focus(); }
     }
@@ -7049,15 +7098,30 @@ async function apSubmit(addToList, _skipDupCheck) {
       var icdEl2 = document.getElementById('cb-icd-search') || document.getElementById('oc-icd-search');
       if (icdEl2) { icdEl2.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; icdEl2.placeholder = 'Required — type diagnosis or code'; }
     }
+    // v4.11: highlight the location card fields when missing for add-to-list.
+    if (addMissing.indexOf('location') !== -1) {
+      var wardEl = document.getElementById('f-ward');
+      if (wardEl) { wardEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; wardEl.focus(); }
+    }
+    if (addMissing.indexOf('role') !== -1) {
+      var roleRow = document.getElementById('f-role-row');
+      if (roleRow) { roleRow.style.cssText = 'gap:8px;margin-top:4px;border:1.5px solid var(--amber-t);background:var(--amber-bg);border-radius:var(--r);padding:4px'; }
+    }
+    if (addMissing.indexOf('list') !== -1) {
+      var listRow = document.getElementById('f-list-row');
+      if (listRow) { listRow.style.cssText = 'gap:8px;margin-top:4px;border:1.5px solid var(--amber-t);background:var(--amber-bg);border-radius:var(--r);padding:4px'; }
+    }
     var msgs = [];
     if (addMissing.indexOf('phn')        !== -1) msgs.push('PHN');
-    if (addMissing.indexOf('phn-len')    !== -1) msgs.push('PHN must be 10 digits');
     if (addMissing.indexOf('refby')      !== -1) msgs.push('referring MD');
     if (addMissing.indexOf('icd')        !== -1) msgs.push('diagnosis');
     if (addMissing.indexOf('fee')        !== -1) msgs.push('fee code');
     if (addMissing.indexOf('date')       !== -1) msgs.push('date');
     if (addMissing.indexOf('start time') !== -1) msgs.push('start time');
     if (addMissing.indexOf('end time')   !== -1) msgs.push('end time');
+    if (addMissing.indexOf('location')   !== -1) msgs.push('location');
+    if (addMissing.indexOf('role')       !== -1) msgs.push('Cardiology role');
+    if (addMissing.indexOf('list')       !== -1) msgs.push('On/Off service');
     showToast('Required: ' + msgs.join(', '));
     return;
   }
@@ -7200,12 +7264,25 @@ function initAddPatientConsult() {
 
 function clearAddForm() {
   ['f-last','f-first','f-phn','f-dob'].forEach(function(id) {
-    var el = document.getElementById(id); if (el) el.value = '';
+    var el = document.getElementById(id);
+    if (el) {
+      el.value = '';
+      // v4.11: clear any leftover red/amber validation styling so the field
+      // returns to its normal appearance for the next patient.
+      el.style.cssText = '';
+    }
   });
   var sx = document.getElementById('f-sex'); if (sx) sx.value = '';
   var sxm = document.getElementById('f-sex-m'); if (sxm) sxm.className = 'ap-list-pill';
   var sxf = document.getElementById('f-sex-f'); if (sxf) sxf.className = 'ap-list-pill';
   var ocr = document.getElementById('ocr-bar'); if (ocr) ocr.style.display = 'none';
+  // v4.11: rebuild the Location & list card in fresh unselected state — no
+  // ward, no role, no list. Otherwise the next Add Patient inherits the last
+  // patient's location card values, defeating the add-to-list guard.
+  var apLocHost = document.getElementById('ap-loc-host');
+  if (apLocHost) {
+    apLocHost.innerHTML = buildLocationCard('f', null, true);
+  }
   // Reset claim type to consult and rebuild claim area
   _apClaimType = 'consult';
   ['consult','ccu-admit','other'].forEach(function(t) {
@@ -9523,8 +9600,11 @@ async function init() {
   // wardChange, prefill all need it present).
   var apLocHost = document.getElementById('ap-loc-host');
   if (apLocHost) {
-    apLocHost.innerHTML = buildLocationCard('f',
-      { ward:'CCU', bed:'', role:'mrp', mrp:'Cardiology', list:'on', care:'ccu' });
+    // v4.11: fresh Add Patient starts with NO ward / role / list pre-selected.
+    // Users were skipping the location card and inheriting the prior CCU/MRP/
+    // On-service defaults; apSubmit's new add-to-list guard requires an
+    // explicit choice before a patient can be added to a rounds list.
+    apLocHost.innerHTML = buildLocationCard('f', null, true);
   }
   updateDailyTotal();
   await loadLocal();
@@ -9908,24 +9988,30 @@ function chkIco10() {
 
 // Toast notification
 var _toastTimer;
-function showToast(msg) {
+function showToast(msg, kind) {
   // Remove any previous toast div BEFORE adding the new one — v3.31 only
   // cleared the removal timer, so rapid taps left orphan divs visible
   // until each one's individual timer fired. Tag with a class so showPane
   // can sweep any stragglers on navigation.
+  // v4.11: optional `kind` parameter. 'error' = red background + longer
+  // 3.5s dwell so OCR-misread warnings (e.g. PHN wrong length) have time
+  // to be read. Default call sites with no kind argument are unchanged
+  // (dark monochrome, 1.6s).
   clearTimeout(_toastTimer);
   var prev = document.querySelectorAll('.kgh-toast');
   for (var i = 0; i < prev.length; i++) { prev[i].remove(); }
 
+  var isError = (kind === 'error');
+  var bg = isError ? '#c42828' : '#1a1a18';
   var d = document.createElement('div');
-  d.className = 'kgh-toast';
+  d.className = 'kgh-toast' + (isError ? ' kgh-toast-error' : '');
   d.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);' +
-                    'background:#1a1a18;color:#fff;padding:8px 16px;border-radius:20px;' +
+                    'background:' + bg + ';color:#fff;padding:8px 16px;border-radius:20px;' +
                     'font-size:12px;font-weight:600;z-index:999;white-space:nowrap;' +
                     'pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.3)';
   d.textContent = msg;
   document.body.appendChild(d);
-  _toastTimer = setTimeout(function() { d.remove(); }, 1600);
+  _toastTimer = setTimeout(function() { d.remove(); }, isError ? 3500 : 1600);
 }
 
 // Re-sync whenever the user switches back to this tab/app
