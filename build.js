@@ -67,6 +67,25 @@ function build() {
   fs.writeFileSync(OUTPUT, html);
   console.log('Built index.html from ' + used.length + ' module(s):');
   used.forEach(function (n) { console.log('  - src/js/' + n); });
+
+  // ── Emit version.json ────────────────────────────────────────────
+  // The app fetches this tiny file when it returns to the foreground to
+  // detect a newer deploy and prompt a refresh. Single source of truth:
+  // APP_VERSION is read straight out of the just-built index.html, so the
+  // file can never drift from the running app.
+  var verMatch   = html.match(/var\s+APP_VERSION\s*=\s*'([^']+)'/);
+  var buildMatch = html.match(/var\s+BUILD_ID\s*=\s*'([^']+)'/);
+  if (!verMatch) {
+    throw new Error('build.js: APP_VERSION not found in built index.html — cannot write version.json');
+  }
+  var versionPayload = {
+    version: verMatch[1],
+    buildId: buildMatch ? buildMatch[1] : verMatch[1]
+  };
+  var VERSION_OUT = path.join(ROOT, 'version.json');
+  fs.writeFileSync(VERSION_OUT, JSON.stringify(versionPayload) + '\n');
+  console.log('Wrote version.json → ' + versionPayload.version +
+              ' (buildId ' + versionPayload.buildId + ')');
 }
 
 build();
