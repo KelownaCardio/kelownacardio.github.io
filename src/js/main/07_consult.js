@@ -170,8 +170,9 @@ function _cbTimeRow(which, v) {
          'value="' + ((v && v.disp) || '') + '" placeholder="2:30" ' +
          'style="flex:1;min-width:0;font-size:16px" ' +
          'onfocus="this.dataset.prev=this.value;this.value=\'\'" ' +
-         'oninput="updateConsultUI()" onblur="cbTimeBlur(\'' + which + '\')"></div>' +
-         pill('am', 'AM') + pill('pm', 'PM');
+         'oninput="updateConsultUI()" onblur="cbTimeBlur(\'' + which + '\')">' +
+         pill('am', 'AM') + pill('pm', 'PM') +
+         '</div>';
 }
 
 // Which meridiem pill is selected for this field — '' if neither (shouldn't
