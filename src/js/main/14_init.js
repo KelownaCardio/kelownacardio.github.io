@@ -11,8 +11,11 @@ async function init() {
   // wardChange, prefill all need it present).
   var apLocHost = document.getElementById('ap-loc-host');
   if (apLocHost) {
-    apLocHost.innerHTML = buildLocationCard('f',
-      { ward:'CCU', bed:'', role:'mrp', mrp:'Cardiology', list:'on', care:'ccu' });
+    // v4.11: fresh Add Patient starts with NO ward / role / list pre-selected.
+    // Users were skipping the location card and inheriting the prior CCU/MRP/
+    // On-service defaults; apSubmit's new add-to-list guard requires an
+    // explicit choice before a patient can be added to a rounds list.
+    apLocHost.innerHTML = buildLocationCard('f', null, true);
   }
   updateDailyTotal();
   await loadLocal();
@@ -396,24 +399,30 @@ function chkIco10() {
 
 // Toast notification
 var _toastTimer;
-function showToast(msg) {
+function showToast(msg, kind) {
   // Remove any previous toast div BEFORE adding the new one — v3.31 only
   // cleared the removal timer, so rapid taps left orphan divs visible
   // until each one's individual timer fired. Tag with a class so showPane
   // can sweep any stragglers on navigation.
+  // v4.11: optional `kind` parameter. 'error' = red background + longer
+  // 3.5s dwell so OCR-misread warnings (e.g. PHN wrong length) have time
+  // to be read. Default call sites with no kind argument are unchanged
+  // (dark monochrome, 1.6s).
   clearTimeout(_toastTimer);
   var prev = document.querySelectorAll('.kgh-toast');
   for (var i = 0; i < prev.length; i++) { prev[i].remove(); }
 
+  var isError = (kind === 'error');
+  var bg = isError ? '#c42828' : '#1a1a18';
   var d = document.createElement('div');
-  d.className = 'kgh-toast';
+  d.className = 'kgh-toast' + (isError ? ' kgh-toast-error' : '');
   d.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);' +
-                    'background:#1a1a18;color:#fff;padding:8px 16px;border-radius:20px;' +
+                    'background:' + bg + ';color:#fff;padding:8px 16px;border-radius:20px;' +
                     'font-size:12px;font-weight:600;z-index:999;white-space:nowrap;' +
                     'pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.3)';
   d.textContent = msg;
   document.body.appendChild(d);
-  _toastTimer = setTimeout(function() { d.remove(); }, 1600);
+  _toastTimer = setTimeout(function() { d.remove(); }, isError ? 3500 : 1600);
 }
 
 // Re-sync whenever the user switches back to this tab/app
