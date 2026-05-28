@@ -1902,11 +1902,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v4.16-2026-05-28-consult-time-ampm-pills';
+var BUILD_ID    = 'v4.17-2026-05-28-consult-ampm-pill-layout-fix';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v4.16';
+var APP_VERSION = 'v4.17';
 var APP_BUILT   = '2026-05-28';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -6108,8 +6108,9 @@ function _cbTimeRow(which, v) {
          'value="' + ((v && v.disp) || '') + '" placeholder="2:30" ' +
          'style="flex:1;min-width:0;font-size:16px" ' +
          'onfocus="this.dataset.prev=this.value;this.value=\'\'" ' +
-         'oninput="updateConsultUI()" onblur="cbTimeBlur(\'' + which + '\')"></div>' +
-         pill('am', 'AM') + pill('pm', 'PM');
+         'oninput="updateConsultUI()" onblur="cbTimeBlur(\'' + which + '\')">' +
+         pill('am', 'AM') + pill('pm', 'PM') +
+         '</div>';
 }
 
 // Which meridiem pill is selected for this field — '' if neither (shouldn't
