@@ -1856,8 +1856,6 @@ function selectIcd(code, label, dropdownId, hiddenId, inputId) {
 
 // (duplicate close-dropdown listener removed — safe version retained in 12_referrers.js)
 
-// ── 03_state.js ──
-// ═══════════════════════════════════════════════════════
 // 03_state.js — App state, local storage, Google Sheets sync
 // ═══════════════════════════════════════════════════════
 
@@ -1904,12 +1902,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v4.15-2026-05-27-version-check-banner-and-version-json';
+var BUILD_ID    = 'v4.16-2026-05-28-consult-time-ampm-pills';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v4.15';
-var APP_BUILT   = '2026-05-27';
+var APP_VERSION = 'v4.16';
+var APP_BUILT   = '2026-05-28';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -2456,6 +2454,8 @@ async function push(action, body) {
   }
 }
 
+// ── 04_billing.js ──
+// ═══════════════════════════════════════════════════════
 // ── 04_billing.js ──
 // ═══════════════════════════════════════════════════════
 // 04_billing.js — Modifier logic, BC stat holidays,
@@ -5936,8 +5936,6 @@ function saveLocationEdit(pid) {
   showToast(p.last + ' moved' + (toastBits.length ? ' → ' + toastBits.join(' ') : ''));
 }
 
-// ── 07_consult.js ──
-// ═══════════════════════════════════════════════════════
 // 07_consult.js — Unified consult form (33010/33012)
 //
 // ONE consult form, shared by the +Claim screen and the Add Patient
@@ -6004,6 +6002,9 @@ function buildConsultForm(p, opts) {
   var todayISO = localISODate(now);
   var nowTime  = pad(now.getHours()) + ':' + pad(now.getMinutes());
   var endTime  = minsToTime(now.getHours() * 60 + now.getMinutes() + 50);
+  // 12-hour clock display + AM/PM pill state for the prefilled now / now+50.
+  var sV = _cbTo12(nowTime);
+  var eV = _cbTo12(endTime);
 
   var h = '<div class="card">';
   h += '<div class="card-title">Consult</div>';
@@ -6019,19 +6020,26 @@ function buildConsultForm(p, opts) {
        '<svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>' +
        '+ MOST (78720)</button>';
 
-  // Date + Start time (pre-filled with now)
+  // Date + Start time (pre-filled with now).
+  // Time field: numeric keypad (inputmode), tap-to-clear on focus (the prior
+  // value is restored on a blank blur so a stray tap can't wipe it), and an
+  // AM / PM pill pair. Type 24h (e.g. 1430) and the PM pill locks itself and
+  // the field normalises to the 12h clock number; type an ambiguous clock
+  // number (e.g. 7) and the pill keeps the smart default — see _cbReadMeridiem.
   h += '<div class="fl">' +
        '<div class="f1"><label>Date</label>' +
        '<input type="date" id="cb-date" value="' + todayISO + '" oninput="updateConsultUI()"></div>' +
        '<div class="f1"><label>Start time</label>' +
-       '<input type="text" id="cb-start" value="' + nowTime + '" placeholder="14:30 or 2:30pm" oninput="updateConsultUI()" onblur="var v=parseTime24(this.value);if(v){this.value=v;updateConsultUI();}"></div>' +
+       _cbTimeRow('start', sV) +
+       '</div>' +
        '</div>';
 
   // End time — defaults to start + 50, doctor adjusts if shorter
   h += '<div class="fl" style="margin-bottom:9px">' +
        '<div class="f1"><label>End time' +
        '<span style="font-size:10px;color:var(--text3)"> — defaults to 50 min, adjust as needed</span></label>' +
-       '<input type="text" id="cb-end" value="' + endTime + '" placeholder="14:30 or 2:30pm" oninput="updateConsultUI()" onblur="var v=parseTime24(this.value);if(v){this.value=v;updateConsultUI();}"></div>' +
+       _cbTimeRow('end', eV) +
+       '</div>' +
        '</div>';
 
   // Modifier banner
@@ -6063,6 +6071,114 @@ function buildConsultForm(p, opts) {
   return h;
 }
 
+// ── Time field + AM/PM pill helpers ────────────────────────────────
+// The visible time field holds a 12-hour clock number ("2:30"); the AM/PM
+// pill carries the meridiem. The canonical 24-hour value the rest of the
+// app reads is always recomputed from field + pill by consultTime24().
+//
+// All element lookups are container-scoped via cEl (v3.97), so the +Claim
+// and Add Patient forms — both live in the DOM at once — never read each
+// other's pills. Pill ids: cb-{which}-am / cb-{which}-pm; the selected one
+// carries the ct-on-consult class (the existing blue "on" style).
+
+// Current half of the day — the smart default for an ambiguous clock number.
+function _cbCurrentHalf() { return (new Date()).getHours() >= 12 ? 'pm' : 'am'; }
+
+// 24h "HH:MM" → { disp:"h:mm" (12h clock), ap:"am"|"pm" }.
+function _cbTo12(t24) {
+  var p = String(t24 || '').split(':');
+  var h = parseInt(p[0], 10);
+  var m = p[1] || '00';
+  if (isNaN(h)) return { disp: '', ap: '' };
+  var ap = h >= 12 ? 'pm' : 'am';
+  var ch = h % 12; if (ch === 0) ch = 12;
+  return { disp: ch + ':' + m, ap: ap };
+}
+
+// Markup for one time field: numeric input + AM/PM pills, pill v pre-selected.
+function _cbTimeRow(which, v) {
+  function pill(ap, label) {
+    var on = (v && v.ap === ap) ? ' ct-on-consult' : '';
+    return '<button id="cb-' + which + '-' + ap + '" class="ct-btn' + on + '" ' +
+           'style="flex:0 0 42px;padding:10px 0;font-size:12px" ' +
+           'onclick="cbSetMeridiem(\'' + which + '\',\'' + ap + '\')">' + label + '</button>';
+  }
+  return '<div style="display:flex;gap:5px;align-items:stretch">' +
+         '<input type="text" id="cb-' + which + '" inputmode="numeric" autocorrect="off" ' +
+         'value="' + ((v && v.disp) || '') + '" placeholder="2:30" ' +
+         'style="flex:1;min-width:0;font-size:16px" ' +
+         'onfocus="this.dataset.prev=this.value;this.value=\'\'" ' +
+         'oninput="updateConsultUI()" onblur="cbTimeBlur(\'' + which + '\')"></div>' +
+         pill('am', 'AM') + pill('pm', 'PM');
+}
+
+// Which meridiem pill is selected for this field — '' if neither (shouldn't
+// happen after a blur, but consultTime24 falls back to the smart default).
+function cbMeridiem(which) {
+  var pm = cEl('cb-' + which + '-pm');
+  if (pm && pm.classList.contains('ct-on-consult')) return 'pm';
+  var am = cEl('cb-' + which + '-am');
+  if (am && am.classList.contains('ct-on-consult')) return 'am';
+  return '';
+}
+
+// Set the meridiem pill (and recolour the pair). silent=true skips the UI
+// refresh — used while building/normalising to avoid recursion.
+function cbSetMeridiem(which, ap, silent) {
+  var am = cEl('cb-' + which + '-am');
+  var pm = cEl('cb-' + which + '-pm');
+  if (am) am.className = 'ct-btn' + (ap === 'am' ? ' ct-on-consult' : '');
+  if (pm) pm.className = 'ct-btn' + (ap === 'pm' ? ' ct-on-consult' : '');
+  if (!silent) updateConsultUI();
+}
+
+// Ensure a pill is chosen for an ambiguous entry: smart default if none yet.
+function _cbEnsureMeridiem(which) {
+  if (!cbMeridiem(which)) cbSetMeridiem(which, _cbCurrentHalf(), true);
+}
+
+// Write a 24h value into the field as a 12h display + matching pill.
+function cbSetTime(which, t24) {
+  var v  = _cbTo12(t24);
+  var el = cEl('cb-' + which);
+  if (el) el.value = v.disp;
+  if (v.ap) cbSetMeridiem(which, v.ap, true);
+}
+
+// Canonical 24h "HH:MM" from field text + pill. '' if the field is blank or
+// unparseable. An explicit 24h hour (13–23, or 00) is honoured as typed; a
+// 1–12 clock number is combined with the pill (smart default if unset).
+function consultTime24(which) {
+  var t = parseTime24(cVal('cb-' + which));
+  if (!t) return '';
+  var p = t.split(':');
+  var h = parseInt(p[0], 10);
+  var m = p[1];
+  if (h >= 13) return t;                         // 1430 → 14:30, unambiguous PM
+  var ap = cbMeridiem(which) || _cbCurrentHalf();
+  var H  = h % 12;                               // 12 → 0
+  if (ap === 'pm') H += 12;                       // 7pm → 19, 12pm → 12 (noon)
+  return pad(H) + ':' + m;                        // 12am/0 → 00 (midnight)
+}
+
+// Blur handler: restore a stray-cleared field, then normalise the display.
+function cbTimeBlur(which) {
+  var el = cEl('cb-' + which);
+  if (!el) return;
+  if (el.value.trim() === '' && el.dataset.prev) el.value = el.dataset.prev; // undo accidental clear
+  var t = parseTime24(el.value);
+  if (!t) { updateConsultUI(); return; }          // blank/garbage: leave for validation
+  var h = parseInt(t.split(':')[0], 10);
+  if (h >= 13 || h === 0) {
+    cbSetTime(which, t);                          // unambiguous 24h → 12h + locked pill
+  } else {
+    _cbEnsureMeridiem(which);                     // ambiguous → keep/seed smart-default pill
+    el.value = h + ':' + t.split(':')[1];         // tidy to a clean clock number
+  }
+  updateConsultUI();
+}
+
+
 function toggleConsultCode(code) {
   cEl('cb-33010').className = 'ct-btn' + (code === '33010' ? ' ct-on-consult' : '');
   cEl('cb-33012').className = 'ct-btn' + (code === '33012' ? ' ct-on-consult' : '');
@@ -6075,17 +6191,17 @@ function toggleMost() {
 }
 
 function updateConsultUI() {
-  var start   = cVal('cb-start');
-  var end     = cVal('cb-end');
-  var dateISO = cVal('cb-date');
   if (!cEl('cb-mod')) return; // form not on screen
+  var start   = consultTime24('start');
+  var end     = consultTime24('end');
+  var dateISO = cVal('cb-date');
 
   // End follows start (start + 50 min) unless the doctor edited end directly.
-  var endEl   = cEl('cb-end');
   var changed = (typeof event !== 'undefined' && event && event.target) ? event.target.id : '';
-  if (start && (changed === 'cb-start' || !end)) {
-    if (endEl) endEl.value = minsToTime(t2m(start) + 50);
-    end = cVal('cb-end');
+  var startChanged = changed === 'cb-start' || changed === 'cb-start-am' || changed === 'cb-start-pm';
+  if (start && (startChanged || !end)) {
+    cbSetTime('end', minsToTime(t2m(start) + 50));
+    end = consultTime24('end');
   }
 
   var modBase  = getModifier(start, dateISO);
@@ -6184,8 +6300,8 @@ function claimSubmitOnce(fn) {
 function submitConsultClaims(p, alias) {
   var code    = cEl('cb-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
   var dateISO = cVal('cb-date');
-  var start   = cVal('cb-start');
-  var end     = cVal('cb-end');
+  var start   = consultTime24('start');
+  var end     = consultTime24('end');
   if (!dateISO) { showToast('Enter consult date'); return false; }
   if (!start)   { showToast('Start time required for ' + code); return false; }
   if (!end)     { showToast('End time required for ' + code); return false; }
@@ -6239,6 +6355,8 @@ function submitConsult() {
   showToast('Consult claims added for ' + p.last);
   closeClaimScreen();
 }
+// ── 08_daily.js ──
+// ═══════════════════════════════════════════════════════
 // ── 08_daily.js ──
 // ═══════════════════════════════════════════════════════
 // 08_daily.js — Daily, combined daily, directive, CCU forms
