@@ -1904,11 +1904,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v4.14-2026-05-27-ccu-daily-visit-label-cleanup';
+var BUILD_ID    = 'v4.15-2026-05-27-version-check-banner-and-version-json';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v4.14';
+var APP_VERSION = 'v4.15';
 var APP_BUILT   = '2026-05-27';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -10090,7 +10090,60 @@ document.addEventListener('visibilitychange', function() {
   if (document.visibilityState === 'visible' && st.loaded && SHEETS_URL) {
     syncFromSheets();
   }
+  // v4.15: when the app returns to the foreground, check whether a newer
+  // build has been deployed. Off the critical path (never runs on first
+  // load), fetches a ~40-byte version.json, fails silently on any error so
+  // a missing file or offline state never shows a false prompt.
+  if (document.visibilityState === 'visible' && st.loaded) {
+    checkForNewVersion();
+  }
 });
+
+// v4.15: version check + update banner. Fetches version.json (written by
+// build.js on every deploy) with a cache-buster so the device never reads a
+// stale cached copy of the version file itself. If the deployed version
+// differs from the running APP_VERSION, shows a dismissible banner that
+// reloads the page on tap. Reloading re-fetches index.html, whose new
+// BUILD_ID then triggers the existing localStorage purge — so one tap fully
+// updates the device. Fails silently: a 404 (version.json not yet deployed),
+// network error, or malformed payload never shows a prompt.
+var _versionCheckInFlight = false;
+function checkForNewVersion() {
+  if (_versionCheckInFlight) return;
+  _versionCheckInFlight = true;
+  fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(data) {
+      _versionCheckInFlight = false;
+      if (!data || !data.version) return;            // missing/malformed → silent
+      if (data.version === APP_VERSION) return;      // up to date → nothing
+      showUpdateBanner(data.version);
+    })
+    .catch(function() { _versionCheckInFlight = false; }); // offline/error → silent
+}
+
+function showUpdateBanner(newVersion) {
+  if (document.getElementById('kgh-update-banner')) return; // already showing
+  var b = document.createElement('div');
+  b.id = 'kgh-update-banner';
+  b.setAttribute('role', 'button');
+  b.style.cssText =
+    'position:fixed;left:50%;top:calc(env(safe-area-inset-top, 0px) + 12px);transform:translateX(-50%);' +
+    'background:var(--blue-t,#1a5fa8);color:#fff;padding:11px 18px;border-radius:22px;' +
+    'font-size:13px;font-weight:700;z-index:1000;cursor:pointer;white-space:nowrap;' +
+    'box-shadow:0 6px 18px rgba(0,0,0,.32);font-family:inherit;display:flex;align-items:center;gap:10px';
+  b.innerHTML =
+    '<span>New version (' + esc(newVersion) + ') \u2014 tap to update</span>' +
+    '<span id="kgh-update-dismiss" style="opacity:.7;font-weight:400;padding:0 4px">\u2715</span>';
+  b.onclick = function(e) {
+    if (e.target && e.target.id === 'kgh-update-dismiss') {
+      b.remove();          // dismiss only — they'll be prompted again on next focus
+      return;
+    }
+    location.reload(true); // full reload → fresh index.html → BUILD_ID purge fires
+  };
+  document.body.appendChild(b);
+}
 
 // iOS Safari BFCache: when the page is restored from cache (back/forward, sometimes refresh),
 // in-flight fetch promises are NOT resumed but the JS heap IS preserved — leading to stale
