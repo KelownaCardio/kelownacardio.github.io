@@ -1,6 +1,13 @@
-// ── 05_render.js ──
 // ═══════════════════════════════════════════════════════
 // 05_render.js — Render rounds list (geo + alpha + off service)
+//
+// v4.19 change: alphaRow (on-service alphabetical view) now places
+// the room/bed number on a dedicated second row — identical structure
+// to offRow — rather than appended inline to the patient name.
+// Also adds the lastSeenByGroup chip on that row (was absent from
+// alphaRow previously). No change to offRow, wardHtml, or any
+// billing/data logic.
+// ═══════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════
 
 // Returns a small chart/summary button for a patient id
@@ -477,17 +484,20 @@ function alphaRow(p) {
   var avCls   = wardAvCls(p.ward);
   // Circle shows ward abbreviation (same as off-service)
   var wardAbbr = String(wardLabel(p.ward) || '').replace('Ward ', '').replace('ICU ', 'IC').slice(0, 5);
+  // Row 2: room number (prominent) + last-seen chip — same structure as offRow.
+  // Room is on its own line so long names never push it off the card.
+  var roomStr  = p.bed ? esc(String(p.bed)) : '';
+  var lastSeen = lastSeenByGroup(p);
   return '<div class="alpha-row' + (dn ? ' done' : '') + '">' +
     '<div class="alpha-av ' + avCls + '" style="font-size:9px;font-weight:800;letter-spacing:-.3px" data-pid="' + p.id + '" onclick="openLocationEditEl(this)" title="Tap to move patient">' + esc(wardAbbr) + '</div>' +
     '<div class="wp-main">' +
       '<div class="wp-name-row">' +
-        '<span class="wp-name" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(String(p.last || '')) + ', ' + esc(String(p.first || '')) +
-          (p.bed ? ' <span style="font-size:10px;color:var(--text3)">Rm </span><span style="font-size:10px;font-weight:700;color:var(--text2)">' + esc(String(p.bed)) + '</span>' : '') +
-        '</span>' +
+        '<span class="wp-name" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(String(p.last || '')) + ', ' + esc(String(p.first || '')) + '</span>' +
         '<button class="row-pencil-btn" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'edit\')">' +
           '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
         '</button>' +
       '</div>' +
+      (roomStr ? '<div style="display:flex;align-items:baseline;gap:7px;margin-top:1px;margin-bottom:2px"><span style="font-size:11px;font-weight:700;color:var(--text2)">' + roomStr + '</span>' + lastSeen + '</div>' : '') +
       '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + lastBilledChip(p) + '</div>' +
       '<div class="wp-acts">' + quickActBtns(p) +
         '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
