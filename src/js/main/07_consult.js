@@ -360,7 +360,7 @@ function claimSubmitOnce(fn) {
 // Diagnosis / referring MD are read from the form and ride on the claim
 // rows as a per-claim override — they do NOT modify the patient record.
 // CCFPP detection runs here, so it now fires from BOTH entry points.
-function submitConsultClaims(p, alias) {
+function submitConsultClaims(p, alias, locOverride) {
   var code    = cEl('cb-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
   var dateISO = cVal('cb-date');
   var start   = consultTime24('start');
@@ -370,7 +370,7 @@ function submitConsultClaims(p, alias) {
   if (!end)     { showToast('End time required for ' + code); return false; }
 
   var dateFmt = fmtD(parseISODate(dateISO));
-  var loc     = p.ward === 'ED' ? 'E' : 'I';
+  var loc     = locOverride || (p.ward === 'ED' ? 'E' : 'I');
 
   // Per-claim diagnosis / referring MD — pre-filled from the patient but
   // editable on the form. Rides on the claim rows only (override object).

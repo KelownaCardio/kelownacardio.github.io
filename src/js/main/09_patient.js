@@ -1,5 +1,3 @@
-// ── 09_patient.js ──
-// ═══════════════════════════════════════════════════════
 // 09_patient.js — Add patient (Step 1), sticker/Meditech
 //                 chart photo OCR, ward/room selectors
 // ═══════════════════════════════════════════════════════
@@ -489,6 +487,20 @@ function apSexPill(val) {
   if (f) f.className = 'ap-list-pill' + (val === 'F' ? ' on' : '');
 }
 
+// ── Billing location pills (I/P/Q) ──────────────────────
+// Controls the MSP service-location code on all Add Patient claim types.
+// Default is 'I' (Inpatient). The pills live in the template HTML below
+// the submit buttons. The selected value is read in apSubmit() and passed
+// to each claim-creation function.
+function apBillingLocPill(code) {
+  var el = document.getElementById('f-billing-loc');
+  if (el) el.value = code;
+  ['I','P','Q'].forEach(function(c) {
+    var btn = document.getElementById('ap-bloc-' + c);
+    if (btn) btn.className = 'ap-list-pill' + (c === code ? ' on' : '');
+  });
+}
+
 function peSexPill(val) {
   var hid = document.getElementById('pe-sex');
   if (hid) hid.value = val;
@@ -766,20 +778,25 @@ async function apSubmit(addToList, _skipDupCheck) {
     var cPerf  = document.getElementById('cb-performing-doc');
     var cAlias = (cPerf && cPerf.value) ? cPerf.value : st.doc.alias;
 
+    // v4.19: billing location from the pills (I/P/Q), default 'I'.
+    var billingLoc = (document.getElementById('f-billing-loc') || {}).value || 'I';
+
     if (_apClaimType === 'consult') {
       // Unified shared submit — reads the cb-* consult form, runs CCFPP,
       // and creates the consult + MOST + modifier claims.
-      submitConsultClaims(p, cAlias);
+      submitConsultClaims(p, cAlias, billingLoc);
     } else if (_apClaimType === 'ccu-admit') {
       var caDateISO = (document.getElementById('ap-ca-date')  || {}).value || '';
       var caNotes   = (document.getElementById('ap-ca-notes') || {}).value || '';
       if (caDateISO) {
         var caDateFmt = fmtD(parseISODate(caDateISO));
-        var caLoc = p.ward === 'ED' ? 'E' : 'I';
-        addClaim(p, '1411', '1411', 1, caDateFmt, caLoc, null, caNotes, null, cAlias);
+        addClaim(p, '1411', '1411', 1, caDateFmt, billingLoc, null, caNotes, null, cAlias);
         sv('claims', st.claims);
       }
     } else if (_apClaimType === 'other') {
+      // Sync the Other Claim form's oc-loc to match the billing location pills.
+      var ocLocEl = document.getElementById('oc-loc');
+      if (ocLocEl) ocLocEl.value = billingLoc;
       // Unified shared submit — reads the oc-* form, validates 33005,
       // and creates the single claim.
       submitOtherClaimFor(p, cAlias);
@@ -870,6 +887,8 @@ function clearAddForm() {
   var sx = document.getElementById('f-sex'); if (sx) sx.value = '';
   var sxm = document.getElementById('f-sex-m'); if (sxm) sxm.className = 'ap-list-pill';
   var sxf = document.getElementById('f-sex-f'); if (sxf) sxf.className = 'ap-list-pill';
+  // v4.19: reset billing location pills to Inpatient default.
+  apBillingLocPill('I');
   var ocr = document.getElementById('ocr-bar'); if (ocr) ocr.style.display = 'none';
   // v4.11: rebuild the Location & list card in fresh unselected state — no
   // ward, no role, no list. Otherwise the next Add Patient inherits the last
