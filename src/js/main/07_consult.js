@@ -262,7 +262,7 @@ function updateConsultUI() {
   // End follows start (start + 50 min) unless the doctor edited end directly.
   var changed = (typeof event !== 'undefined' && event && event.target) ? event.target.id : '';
   var startChanged = changed === 'cb-start' || changed === 'cb-start-am' || changed === 'cb-start-pm';
-  if (start && (startChanged || !end)) {
+  if (start && startChanged) {
     cbSetTime('end', minsToTime(t2m(start) + 50));
     end = consultTime24('end');
   }
@@ -418,5 +418,7 @@ function submitConsult() {
   showToast('Consult claims added for ' + p.last);
   closeClaimScreen();
 }
+// ── 08_daily.js ──
+// ═══════════════════════════════════════════════════════
 // ── 08_daily.js ──
 // ═══════════════════════════════════════════════════════
