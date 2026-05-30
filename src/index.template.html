@@ -796,7 +796,6 @@ input[type=file] { display:none; }
 
   <!-- Submit buttons — primary path first (add to list), exception below -->
   <button class="btn btn-p" onclick="apSubmit(true)" style="margin-top:8px">Submit claim and add patient to list</button>
-  <button class="btn btn-s" onclick="apSubmit(false)" style="margin-top:6px">Submit claim only &mdash; not following</button>
 
   <!-- Billing location pills (I/P/Q) — applies to all claim types on Add Patient -->
   <div style="display:flex;gap:6px;margin-top:10px;align-items:center">
@@ -806,6 +805,8 @@ input[type=file] { display:none; }
     <button class="ap-list-pill" id="ap-bloc-Q" style="flex:1" onclick="apBillingLocPill('Q')">Office</button>
   </div>
   <input type="hidden" id="f-billing-loc" value="I">
+
+  <button class="btn btn-s" onclick="apSubmit(false)" style="margin-top:6px">Submit claim only &mdash; not following</button>
 
   <button class="btn btn-s" onclick="clearAddForm()" style="margin-top:14px">Clear</button>
 </div>
