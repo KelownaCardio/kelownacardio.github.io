@@ -1,5 +1,3 @@
-// ── 06_claim_screen.js ──
-// ═══════════════════════════════════════════════════════
 // 06_claim_screen.js — Tap-patient claim screen controller
 // ═══════════════════════════════════════════════════════
 
@@ -43,41 +41,14 @@ function _openClaimScreen(pid) {
   // Show claim pane, hide all others
   showPane('p-claim');
 
-  // Default claim type based on location
-  var defaultType = p.ward === 'CCU' ? 'ccu' : (p.care || 'daily');
-  selCT(defaultType);
+  // v4.20: +Claim screen only offers Consult and Other — always default to Consult.
+  selCT('consult');
 }
 
 function buildTypeButtons(p) {
-  var isCCU   = p.ward === 'CCU';
-  var isOff   = p.list === 'off';
-  var types   = [];
-
-  var isMRP = p.role === 'mrp' || p.care === 'daily' || p.care === 'ccu';
-  if (showsCCUDaily(p)) {
-    // CCU or ICU ward where we are MRP
-    types = [
-      { id:'ccu',     label:'CCU daily' },
-      { id:'consult', label:'Consult (33010/12)' }
-    ];
-  } else if (isMRP) {
-    // Ward MRP — daily rounds, no directive
-    types = [
-      { id:'daily',   label:'Daily rounds' },
-      { id:'consult', label:'Consult (33010/12)' }
-    ];
-  } else {
-    // Consultant role
-    types = [
-      { id:'consult',  label:'Consult (33010/12)' },
-      { id:'directive',label:'Directive visit' },
-      { id:'combined', label:'Combined daily' }
-    ];
-  }
-
-  var h = types.map(function(t) {
-    return '<button class="ct-btn" id="ctb-' + t.id + '" onclick="selCT(\'' + t.id + '\')">' + t.label + '</button>';
-  }).join('');
+  // v4.20: Daily/CCU/directive/combined are quick-tapped from the rounds
+  // card — the +Claim screen only needs Consult and Other.
+  var h = '<button class="ct-btn" id="ctb-consult" onclick="selCT(\'consult\')">Consult (33010/12)</button>';
 
   // Other claim spans full width
   h += '<button class="ct-btn" id="ctb-other" style="grid-column:1/-1;color:var(--blue-t);border-color:var(--blue-bg)" ' +
@@ -203,9 +174,9 @@ function buildOtherClaimForm(p, opts) {
   // Location
   h += '<label>Service location</label>';
   h += '<select id="oc-loc" style="margin-bottom:9px">' +
-       '<option value="I" selected>I — Inpatient</option>' +
-       '<option value="E">E — Emergency</option>' +
-       '<option value="O">O — Outpatient</option>' +
+       '<option value="I" selected>Inpatient</option>' +
+       '<option value="P">KGH Outpatient</option>' +
+       '<option value="Q">Office</option>' +
        '</select>';
 
   h += '</div>'; // end card
