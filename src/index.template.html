@@ -765,7 +765,7 @@ input[type=file] { display:none; }
       <div class="f1"><label>First name</label><input id="f-first" autocorrect="off" autocapitalize="words"></div>
     </div>
     <div class="fl">
-      <div class="f1"><label>DOB (DD/MM/YYYY)</label><input id="f-dob" autocorrect="off" placeholder="DD/MM/YYYY" inputmode="numeric" oninput="dobAutoSlash(this)"></div>
+      <div class="f1"><label>DOB (DD/MMM/YYYY)</label><input id="f-dob" autocorrect="off" placeholder="DD/MMM/YYYY"></div>
       <div class="f1"><label>Sex</label>
         <div class="fl" style="gap:6px">
           <button class="ap-list-pill" id="f-sex-m" onclick="apSexPill('M')">M</button>
@@ -926,9 +926,6 @@ input[type=file] { display:none; }
 <div class="overlay" id="pt-summary-modal">
   <div class="modal" style="border-radius:18px 18px 0 0;padding-bottom:env(safe-area-inset-bottom)">
     <div class="modal-handle"></div>
-    <div style="position:sticky;top:0;z-index:2;display:flex;justify-content:flex-end;margin:-8px -4px 0 0">
-      <button onclick="hideModal('pt-summary-modal')" style="width:32px;height:32px;border-radius:50%;border:none;background:var(--surface2);color:var(--text2);font-size:18px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.12)">✕</button>
-    </div>
     <div id="pt-summary-content"></div>
   </div>
 </div>
@@ -968,3 +965,78 @@ input[type=file] { display:none; }
 <!-- Offline OCR module (Tesseract.js + KGH parser) — used as silent fallback when Cloudflare worker is unreachable -->
 <script src="ocr_offline.js"></script>
 
+<!--KGHBUILDDIR:main-->
+
+<!-- Build stamp — visible footer for support/debugging -->
+<div id="kgh-build-stamp" style="
+    text-align:center; padding:12px 8px 18px;
+    font-size:10px; color:#8e8e93; font-family:ui-monospace,'SF Mono',monospace;
+    user-select:text; -webkit-user-select:text; opacity:.7;">
+  KGH Cardiology Billing · <span id="kgh-build-stamp-text"></span>
+</div>
+<!--KGHBUILD:app-buildstamp.js-->
+
+<!-- ═══════════════════════════════════════════════════════
+     DEBUG PANEL — visible only when URL has ?debug=1
+     ───────────────────────────────────────────────────
+     Starts MINIMIZED as a small pill in the corner so it
+     doesn't block interaction with the app. Tap pill to
+     expand into the full panel; tap the chevron to collapse.
+     State persists across reloads via localStorage.
+     ═══════════════════════════════════════════════════════ -->
+
+<!-- Minimized pill (default visible state) -->
+<div id="kgh-debug-pill"
+     onclick="dbgToggle(true)"
+     style="display:none; position:fixed; bottom:8px; right:8px; z-index:9999;
+            background:#1a1a1a; color:#7fd1ff; border:1px solid #2d4a6a;
+            border-radius:18px; padding:6px 12px; font-size:12px;
+            font-family:ui-monospace,'SF Mono',Menlo,monospace;
+            box-shadow:0 2px 8px rgba(0,0,0,.3); cursor:pointer; user-select:none;
+            display:none; align-items:center; gap:6px;">
+  <span>🔧</span>
+  <span id="dbg-pill-text">debug</span>
+</div>
+
+<!-- Full panel (hidden until pill is tapped) -->
+<div id="kgh-debug-panel" style="display:none; position:fixed; bottom:8px; right:8px; left:8px;
+     max-width:340px; margin-left:auto; z-index:9999;
+     background:#1a1a1a; color:#e5e5ea; border-radius:12px; padding:12px;
+     font-family:ui-monospace,'SF Mono',Menlo,monospace; font-size:13px;
+     box-shadow:0 4px 18px rgba(0,0,0,.4);">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+    <strong style="color:#7fd1ff;">🔧 OCR Debug</strong>
+    <div style="display:flex; align-items:center; gap:8px;">
+      <span id="dbg-engine-pill" style="font-size:11px; padding:3px 8px; border-radius:10px; background:#333;">probing…</span>
+      <button onclick="dbgToggle(false)" aria-label="Minimize"
+              style="background:transparent; border:none; color:#888;
+                     font-size:18px; cursor:pointer; padding:0 4px; line-height:1;">×</button>
+    </div>
+  </div>
+
+  <label style="display:flex; align-items:center; gap:10px; padding:8px 0; cursor:pointer;">
+    <input type="checkbox" id="dbg-force-offline" style="width:20px; height:20px; accent-color:#7fd1ff;">
+    <span>Force offline OCR (skip Cloudflare)</span>
+  </label>
+
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+    <button onclick="dbgShowLast()" style="padding:10px; border:none; border-radius:8px;
+            background:#2d4a6a; color:#fff; font-family:inherit; font-size:13px; cursor:pointer;">
+      Show last OCR
+    </button>
+    <button onclick="dbgCopyLast()" style="padding:10px; border:none; border-radius:8px;
+            background:#2d6a4a; color:#fff; font-family:inherit; font-size:13px; cursor:pointer;">
+      📋 Copy
+    </button>
+  </div>
+
+  <div id="dbg-status" style="margin-top:10px; padding:8px; background:#252525; border-radius:6px;
+       font-size:11px; color:#888; min-height:32px; word-break:break-word; cursor:pointer;">
+    No scan yet. Tap photograph in Add Patient.
+  </div>
+</div>
+
+<!--KGHBUILD:app-debugpanel.js-->
+
+</body>
+</html>
