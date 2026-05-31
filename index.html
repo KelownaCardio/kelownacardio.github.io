@@ -926,9 +926,6 @@ input[type=file] { display:none; }
 <div class="overlay" id="pt-summary-modal">
   <div class="modal" style="border-radius:18px 18px 0 0;padding-bottom:env(safe-area-inset-bottom)">
     <div class="modal-handle"></div>
-    <div style="position:sticky;top:0;z-index:2;display:flex;justify-content:flex-end;margin:-8px -4px 0 0">
-      <button onclick="hideModal('pt-summary-modal')" style="width:32px;height:32px;border-radius:50%;border:none;background:var(--surface2);color:var(--text2);font-size:18px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.12)">✕</button>
-    </div>
     <div id="pt-summary-content"></div>
   </div>
 </div>
@@ -2603,11 +2600,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v4.23-2026-05-31-fee-33030-tvp-33093-echo';
+var BUILD_ID    = 'v4.24-2026-05-31-oc-time-pills-dob-autoslash';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v4.23';
+var APP_VERSION = 'v4.24';
 var APP_BUILT   = '2026-05-31';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -4659,11 +4656,93 @@ function selectFeeCode(code, desc) {
   updateOtherPreview();
 }
 
+// ── Other Claim time-field + AM/PM pill helpers ───────────────────
+// Mirrors the consult _cbTimeRow pattern but uses document.getElementById
+// with oc- prefix (the OC form is not inside the consult container).
+
+function _ocTo12(t24) {
+  var p = String(t24 || '').split(':');
+  var h = parseInt(p[0], 10);
+  var m = p[1] || '00';
+  if (isNaN(h)) return { disp: '', ap: '' };
+  var ap = h >= 12 ? 'pm' : 'am';
+  var ch = h % 12; if (ch === 0) ch = 12;
+  return { disp: ch + ':' + m, ap: ap };
+}
+
+function _ocTimeRow(which, v) {
+  function pill(ap, label) {
+    var on = (v && v.ap === ap) ? ' ct-on-consult' : '';
+    return '<button type="button" id="oc-' + which + '-' + ap + '" class="ct-btn' + on + '" ' +
+           'style="flex:0 0 42px;padding:10px 0;font-size:12px" ' +
+           'onclick="ocSetMeridiem(\'' + which + '\',\'' + ap + '\')">' + label + '</button>';
+  }
+  return '<div style="display:flex;gap:5px;align-items:stretch">' +
+         '<input type="text" id="oc-' + which + '" inputmode="numeric" autocorrect="off" ' +
+         'value="' + ((v && v.disp) || '') + '" placeholder="2:30" ' +
+         'style="flex:1;min-width:0;font-size:16px" ' +
+         'onblur="ocTimeBlur(\'' + which + '\')">' +
+         pill('am', 'AM') + pill('pm', 'PM') +
+         '</div>';
+}
+
+function ocSetMeridiem(which, ap) {
+  var am = document.getElementById('oc-' + which + '-am');
+  var pm = document.getElementById('oc-' + which + '-pm');
+  if (am) am.className = 'ct-btn' + (ap === 'am' ? ' ct-on-consult' : '');
+  if (pm) pm.className = 'ct-btn' + (ap === 'pm' ? ' ct-on-consult' : '');
+}
+
+function ocMeridiem(which) {
+  var pm = document.getElementById('oc-' + which + '-pm');
+  if (pm && pm.classList.contains('ct-on-consult')) return 'pm';
+  var am = document.getElementById('oc-' + which + '-am');
+  if (am && am.classList.contains('ct-on-consult')) return 'am';
+  return '';
+}
+
+function ocTimeBlur(which) {
+  var el = document.getElementById('oc-' + which);
+  if (!el) return;
+  var t = parseTime24(el.value);
+  if (!t) return;
+  var h = parseInt(t.split(':')[0], 10);
+  if (h >= 13 || h === 0) {
+    // Unambiguous 24h → convert to 12h display + lock pill
+    var info = _ocTo12(t);
+    el.value = info.disp;
+    if (info.ap) ocSetMeridiem(which, info.ap);
+  } else {
+    // Ambiguous 1–12 → tidy display, ensure a pill is selected
+    el.value = h + ':' + t.split(':')[1];
+    if (!ocMeridiem(which)) {
+      ocSetMeridiem(which, (new Date()).getHours() >= 12 ? 'pm' : 'am');
+    }
+  }
+}
+
+// Canonical 24h "HH:MM" from OC field text + pill.
+function ocTime24(which) {
+  var el = document.getElementById('oc-' + which);
+  var t = parseTime24(el ? el.value : '');
+  if (!t) return '';
+  var p = t.split(':');
+  var h = parseInt(p[0], 10);
+  var m = p[1];
+  if (h >= 13) return t;                         // unambiguous PM
+  if (h === 0) return '00:' + m;                 // midnight
+  var ap = ocMeridiem(which) || ((new Date()).getHours() >= 12 ? 'pm' : 'am');
+  var H  = h % 12;
+  if (ap === 'pm') H += 12;
+  return pad(H) + ':' + m;
+}
+
 function buildOtherClaimForm(p, opts) {
   var withSubmit = !opts || opts.withSubmit !== false;
   var now      = new Date();
   var todayISO = localISODate(now);
-  var nowTime  = pad(now.getHours()) + ':' + pad(now.getMinutes());
+  var nowT24   = pad(now.getHours()) + ':' + pad(now.getMinutes());
+  var nowV     = _ocTo12(nowT24);
 
   // Pre-fill ICD and referring MD from patient record
   var curDx  = DIAGNOSES.find(function(d) { return String(d.code) === String(p.icd || ''); });
@@ -4683,16 +4762,16 @@ function buildOtherClaimForm(p, opts) {
   h += '<input id="oc-fee" type="hidden">';
   h += '<div id="oc-fee-display" style="font-size:11px;color:var(--text2);margin-top:-4px;margin-bottom:6px"></div>';
 
-  // Date + start time
+  // Date + start time (with AM/PM pills matching consult pattern)
   h += '<div class="fl">';
   h +=   '<div class="f1"><label>Date</label>' +
          '<input type="date" id="oc-date" value="' + todayISO + '" oninput="updateOtherPreview()"></div>';
   h +=   '<div class="f1"><label id="oc-start-lbl">Start time <span style="font-size:10px;color:var(--text3)">(if required)</span></label>' +
-         '<input type="text" id="oc-start" value="' + nowTime + '" placeholder="14:30 or 2:30pm" onblur="var v=parseTime24(this.value);if(v)this.value=v;"></div>';
+         _ocTimeRow('start', nowV) + '</div>';
   h += '</div>';
   h += '<div id="oc-end-wrap" style="display:none;margin-bottom:6px">' +
        '<label>End time <span style="color:var(--red-t)">*</span></label>' +
-       '<input type="text" id="oc-end" placeholder="14:30 or 2:30pm" onblur="var v=parseTime24(this.value);if(v)this.value=v;" style="width:100%;padding:10px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px">' +
+       _ocTimeRow('end', null) +
        '</div>';
 
   // Location — hidden on Add Patient screen where billing-loc pills handle it
@@ -4777,8 +4856,8 @@ function updateOtherPreview() {
 function submitOtherClaimFor(p, alias) {
   var fee     = ((document.getElementById('oc-fee')   || {}).value || '').trim();
   var dateISO = (document.getElementById('oc-date')  || {}).value || '';
-  var start   = (document.getElementById('oc-start') || {}).value || '';
-  var endTime = (document.getElementById('oc-end')   || {}).value || '';
+  var start   = ocTime24('start');
+  var endTime = ocTime24('end');
   var loc     = (document.getElementById('oc-loc')   || {}).value || 'I';
   var notes   = (document.getElementById('oc-notes') || {}).value || '';
   var icd     = (document.getElementById('oc-icd')   || {}).value || p.icd || '3062';
@@ -4904,211 +4983,6 @@ function closeClaimScreen() {
 function backToRoundsFromClaim() {
   _claimReturnSummaryPid = null;
   closeClaimScreen();
-}
-
-// ── 06b_discharged.js ──
-// ═══════════════════════════════════════════════════════
-// Recently Discharged pane + rounds search filter
-// Pane shows discharged patients (last 21 days, or all when searching)
-// Each row offers: tap to add a missed claim, restore (to On/Off Service)
-// ═══════════════════════════════════════════════════════
-
-function roundsSearch(query) {
-  _roundsQuery = (query || '').toLowerCase().trim();
-  var clearBtn = document.getElementById('rounds-search-clear');
-  if (clearBtn) clearBtn.classList.toggle('on', !!_roundsQuery);
-  // Hide geo/alpha toggle when searching (search shows unified flat list)
-  var vtBar = document.getElementById('view-tog-bar');
-  if (vtBar) vtBar.style.display = (!_roundsQuery && _listView === 'on') ? 'flex' : 'none';
-  render();
-}
-
-function clearRoundsSearch() {
-  var input = document.getElementById('rounds-search');
-  if (input) { input.value = ''; input.focus(); }
-  roundsSearch('');
-}
-
-// ═══════════════════════════════════════════════════════
-// 06b — Recently Discharged pane
-// Single-purpose tab. Reads st.patients (populated by syncFromSheets).
-// Shows: discharged && trueDischarge==irrelevant && < 21 days (or all if searching)
-// Each row: tap to bill missed claim, or restore to On/Off Service.
-// ═══════════════════════════════════════════════════════
-
-function initDischarged() {
-  var input = document.getElementById('discharged-search');
-  if (input) input.value = '';
-  renderDischarged('');
-}
-
-function dischargedSearch(query) {
-  renderDischarged(query);
-}
-
-// Render the discharged pane. Pure function over st.patients.
-// Defensive about field types — patients arrive from Sheets with mixed types
-// (phn could be string or number, dischargedAt could be number or string, etc.).
-function renderDischarged(query) {
-  var container = document.getElementById('discharged-results');
-  if (!container) return;
-  var q = String(query || '').toLowerCase().trim();
-
-  // Filter for discharged patients. Treat any truthy variant as discharged.
-  var pool = (st.patients || []).filter(function(p) {
-    return isDischarged(p);
-  });
-
-  // Sort newest-first by dischargedAt
-  pool.sort(function(a, b) {
-    return (toEpochMs(b.dischargedAt) || 0) - (toEpochMs(a.dischargedAt) || 0);
-  });
-
-  // Apply 21-day filter unless searching
-  var cutoff = Date.now() - (21 * 24 * 60 * 60 * 1000);
-  var visible = q ? pool : pool.filter(function(p) {
-    var ms = toEpochMs(p.dischargedAt);
-    return !ms || ms > cutoff;  // missing timestamps still show
-  });
-
-  // Apply search query
-  if (q) {
-    visible = visible.filter(function(p) {
-      var name = String((p.last || '') + ' ' + (p.first || '')).toLowerCase();
-      var phn  = String(p.phn || '');
-      return name.indexOf(q) !== -1 || phn.indexOf(q) !== -1;
-    });
-  }
-
-  if (!visible.length) {
-    container.innerHTML = q
-      ? '<div class="empty" style="padding:18px 0">No match for &ldquo;' + esc(query) + '&rdquo;</div>'
-      : '<div class="empty" style="padding:18px 0">No patients discharged in the last 21 days.</div>';
-    return;
-  }
-
-  // Render each row defensively — wrap in try so one bad row doesn't kill the whole list.
-  var rows = visible.map(function(p) {
-    try { return dischargedRow(p); }
-    catch (e) {
-      console.error('[discharged] row render failed for', p, e);
-      return '<div class="empty" style="padding:6px 10px;font-size:11px">⚠ Could not render ' + esc(p.last || '?') + ', ' + esc(p.first || '?') + '</div>';
-    }
-  });
-
-  container.innerHTML = rows.join('');
-}
-
-// Type-safe truthy check on the discharged flag.
-// Sheets returns variants: boolean true, "true", "TRUE", 1, "1", etc.
-function isDischarged(p) {
-  if (!p) return false;
-  var v = p.discharged;
-  if (v === true || v === 1) return true;
-  if (typeof v === 'string') {
-    var s = v.trim().toLowerCase();
-    return s === 'true' || s === '1' || s === 'yes';
-  }
-  return false;
-}
-
-// Type-safe epoch ms parser. Accepts number, numeric string, or ISO string.
-function toEpochMs(v) {
-  if (v == null || v === '') return 0;
-  if (typeof v === 'number') return v > 1e12 ? v : 0;
-  var s = String(v).trim();
-  // Numeric string like "1778182118783" or "1778702261108.0"
-  var pf = parseFloat(s);
-  if (!isNaN(pf) && pf > 1e12) return Math.round(pf);
-  // ISO date string
-  var d = Date.parse(s);
-  return isNaN(d) ? 0 : d;
-}
-
-// Render one discharged-patient row. Defensive about every field type.
-function dischargedRow(p) {
-  var last  = String(p.last  || '');
-  var first = String(p.first || '');
-  var phn   = String(p.phn   || '');
-  var ward  = String(p.ward  || '');
-  var bed   = String(p.bed   || '');
-  var pid   = String(p.id    || '');
-
-  var isCCU = ward === 'CCU';
-  var avCls = isCCU ? 'av-ccu' : (p.list === 'off' ? 'av-off' : 'av-on');
-  var ini   = (first.charAt(0) || '') + (last.charAt(0) || '');
-
-  var ms = toEpochMs(p.dischargedAt);
-  var daysAgo = ms ? Math.floor((Date.now() - ms) / 86400000) : null;
-  var daysLabel = daysAgo === null ? '' : daysAgo === 0 ? 'today' : daysAgo === 1 ? '1 day ago' : daysAgo + ' days ago';
-  var statusChip = '<span class="chip chip-grey">Discharged' + (daysLabel ? ' ' + daysLabel : '') + '</span>';
-
-  var phnDisplay = phn ? 'PHN …' + phn.slice(-4) : '<span class="warn-tag">⚠ no PHN</span>';
-  var bedDisplay = bed ? ' Rm ' + esc(bed) : '';
-
-  var careChip = isCCU                    ? '<span class="chip chip-red">CCU</span>'
-               : p.care === 'directive'   ? '<span class="chip chip-amber">Directive</span>'
-               : p.care === 'combined'    ? '<span class="chip chip-teal">Combined</span>'
-               :                             '<span class="chip chip-blue">MRP</span>';
-
-  return '<div class="alpha-row" onclick="openClaimFromDischarged(\'' + esc(pid) + '\')">' +
-    '<div class="alpha-av ' + avCls + '">' + esc(ini.toUpperCase()) + '</div>' +
-    '<div style="flex:1;min-width:0">' +
-      '<div class="wp-name">' + esc(last) + ', ' + esc(first) + '</div>' +
-      '<div class="wp-meta">' + esc(wardLabel(ward)) + bedDisplay + ' &bull; ' + phnDisplay + '</div>' +
-      '<div class="wp-chips" style="margin-top:4px">' + careChip + ' ' + statusChip + '</div>' +
-    '</div>' +
-    '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;padding-top:8px">' +
-      '<button class="bb bb-rnd" style="font-size:10px;padding:5px 9px" ' +
-        'onclick="event.stopPropagation();restorePatient(\'' + esc(pid) + '\')">↩ Restore</button>' +
-      chartBtn(pid) +
-    '</div>' +
-  '</div>';
-}
-
-function openClaimFromDischarged(pid) {
-  _claimOriginPane   = 'p-discharged';
-  _claimOriginNavIdx = 2;
-  _openClaimScreen(pid);
-}
-
-// Restore — show on/off service choice using data attributes (no inline quote nesting)
-function restorePatient(pid) {
-  var p = (st.patients || []).find(function(x) { return x.id === pid; });
-  if (!p || !isDischarged(p)) return;
-  var prevWard = wardLabel(p.ward) || '';
-  var prevList = p.list === 'on' ? 'On Service' : 'Off Service';
-  var body  = document.getElementById('merge-body');
-  var title = document.getElementById('merge-title');
-  if (!body || !title) { _doRestore(pid, p.list || 'off'); return; }
-  title.textContent = 'Restore ' + p.last + ', ' + p.first;
-  body.innerHTML =
-    '<div style="font-size:12px;color:var(--text2);margin-bottom:14px">' +
-      'Previously: <strong>' + prevList + '</strong>' +
-      (prevWard ? ' — ' + esc(prevWard) : '') +
-    '</div>' +
-    '<div style="display:flex;flex-direction:column;gap:8px">' +
-      '<button class="btn btn-p" style="margin:0" data-pid="' + esc(pid) + '" data-list="on" onclick="_doRestore(this.dataset.pid,this.dataset.list)">Restore to On Service list</button>' +
-      '<button class="btn btn-s" style="margin:0" data-pid="' + esc(pid) + '" data-list="off" onclick="_doRestore(this.dataset.pid,this.dataset.list)">Restore to Off Service list</button>' +
-    '</div>';
-  showModal('merge-modal');
-}
-
-function _doRestore(pid, list) {
-  var p = (st.patients || []).find(function(x) { return x.id === pid; });
-  if (!p) return;
-  hideModal('merge-modal');
-  p.discharged    = false;
-  p.dischargedAt  = null;
-  p.dischargeDate = null;
-  p.list          = list;
-  if (list === 'on' && !p.ward) p.ward = 'OTHER';
-  sv('patients', st.patients);
-  if (SHEETS_URL) push('savePatient', p);
-  logChange(p, 'Restored', 'Returned to ' + (list === 'on' ? 'On Service' : 'Off Service'));
-  showToast(p.last + ' restored to ' + (list === 'on' ? 'on-service' : 'off-service') + ' list');
-  renderDischarged(document.getElementById('discharged-search') ? document.getElementById('discharged-search').value : '');
-  render();
 }
 
 // ── 06b_discharged.js ──
@@ -6576,7 +6450,7 @@ function openPatientEdit(pid) {
   html += '</div>';
   html += '<div class="fl">';
   html += '<div class="f1"><label>PHN</label><input id="pe-phn" value="' + esc(p.phn||'') + '" inputmode="numeric" maxlength="10" autocorrect="off"></div>';
-  html += '<div class="f1"><label>DOB</label><input id="pe-dob" value="' + esc(p.dob||'') + '" autocorrect="off" placeholder="DD/MMM/YYYY"></div>';
+  html += '<div class="f1"><label>DOB</label><input id="pe-dob" value="' + esc(p.dob||'') + '" autocorrect="off" placeholder="DD/MM/YYYY" inputmode="numeric" oninput="dobAutoSlash(this)"></div>';
   html += '</div>';
   html += '<div class="fl">';
   html += '<div class="f1"><label>Sex</label>' +
@@ -11001,6 +10875,26 @@ function t2m(t) {
   var s = n || String(t);
   var p = s.split(':');
   return parseInt(p[0]) * 60 + parseInt(p[1] || 0);
+}
+
+// ── DOB auto-slash ────────────────────────────────────────────────
+// Typing 01021990 auto-inserts slashes → 01/02/1990.
+// Only fires on pure-digit input; mixed alpha (e.g. "26 Oct 1958")
+// is left untouched so text-month entry still works.
+function dobAutoSlash(el) {
+  var v = el.value;
+  var digits = v.replace(/\//g, '');
+  if (/[^0-9]/.test(digits)) return;        // non-digit chars → leave alone
+  if (digits.length > 8) digits = digits.slice(0, 8);
+  var out = '';
+  for (var i = 0; i < digits.length; i++) {
+    if (i === 2 || i === 4) out += '/';
+    out += digits[i];
+  }
+  if (out !== v) {
+    el.value = out;
+    el.setSelectionRange(out.length, out.length);
+  }
 }
 
 // total minutes → time string "HH:MM"  (wraps at midnight)
