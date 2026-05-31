@@ -1459,24 +1459,25 @@ function handleOCRResult(data, bar) {
     if (!p.room && _loc.room) p.room = _loc.room;
   }
 
-  // Persist the full OCR result for two purposes:
-  //   1. window._lastOCR — debug from console: console.log(window._lastOCR._meta)
-  //   2. window._ocrOriginal — snapshot of what OCR produced, used by
-  //      buildOCRCorrections() at save time to compute a diff against
-  //      the doctor's final form values. Same shape as upload.html.
-  window._lastOCR     = p;
-  window._ocrOriginal = {
-    last:   p.last  || '',
-    first:  p.first || '',
-    phn:    p.phn   || '',
-    dob:    p.dob   || '',
-    sex:    p.sex   || '',
-    mrp:    p.mrp   || '',
-    ward:   p.ward  || '',
-    room:   p.room  || '',
-    engine: p._engine || 'worker',
-    capturedAt: Date.now()
-  };
+  // Persist the full OCR result for debugging:
+  //   window._lastOCR — inspect from console: console.log(window._lastOCR._meta)
+  window._lastOCR = p;
+
+  // v4.20: DOB sanity check — reject if age < 2 or date is in the future.
+  // KGH stickers have admission date adjacent to DOB; OCR sometimes grabs
+  // the wrong line. A 2026 date as DOB yields age 0 and is rejected here.
+  // The field is left blank for manual entry; a toast warns the doctor.
+  if (p.dob) {
+    var _dobFmt = fmtClaimDate(p.dob);
+    var _dobMs  = parseDMYsafe(_dobFmt);
+    if (_dobMs) {
+      var _dobAge = Math.floor((Date.now() - _dobMs) / (365.25 * 86400000));
+      if (_dobAge < 2 || _dobMs > Date.now()) {
+        showToast('DOB "' + p.dob + '" rejected (age ' + _dobAge + ') — likely admission date', 'error');
+        p.dob = '';  // Don't populate — leave blank for manual entry
+      }
+    }
+  }
 
   if (p.last)  document.getElementById('f-last').value  = p.last;
   if (p.first) document.getElementById('f-first').value = p.first;
@@ -1518,6 +1519,26 @@ function handleOCRResult(data, bar) {
     // as a pill — or as "Other" if it didn't normalise to a known room).
     renderRoomPills(gv('f-ward'), 'f-bed', 'f-room-pills');
   }
+
+  // v4.20: _ocrOriginal snapshot now reads from the FORM after all fields
+  // are populated, not from raw OCR data. This ensures buildOCRCorrections
+  // compares normalized values (e.g. DOB as DD/MM/YYYY, MRP as dropdown
+  // value) against the saved patient's normalized values — so only real
+  // doctor edits register as corrections. Previously the raw OCR format
+  // ("26 Oct 1958") always differed from the stored format ("26/10/1958"),
+  // causing every DOB to appear as a false correction.
+  window._ocrOriginal = {
+    last:   (document.getElementById('f-last')  || {}).value || '',
+    first:  (document.getElementById('f-first') || {}).value || '',
+    phn:    (document.getElementById('f-phn')   || {}).value || '',
+    dob:    (document.getElementById('f-dob')   || {}).value || '',
+    sex:    (document.getElementById('f-sex')   || {}).value || '',
+    mrp:    (document.getElementById('f-mrp')   || {}).value || '',
+    ward:   (document.getElementById('f-ward')  || {}).value || '',
+    room:   (document.getElementById('f-bed')   || {}).value || '',
+    engine: p._engine || 'worker',
+    capturedAt: Date.now()
+  };
   if (bar) {
     bar.className = 'ocr-bar ocr-ok';
     var engineTag = '';
@@ -1594,6 +1615,11 @@ function goToExistingPatient(pid) {
 // {ts, phn, patientName, field, ocr_value, corrected_value, engine, source}
 // for every field the doctor changed. Schema matches the live Apps Script
 // 'OCR Corrections' sheet exactly (8 cols).
+//
+// v4.20: _ocrOriginal now reads from the form DOM after OCR populates the
+// fields, so both sides are in the same normalized format (DD/MM/YYYY for
+// DOB, dropdown values for MRP, digits-only for PHN). This fixes the
+// format-mismatch bug where every DOB appeared as a false "correction".
 //
 // Sent to Apps Script via push('logOCRCorrections', { corrections }).
 // upload.html uses the same backend (action name and schema) — corrections

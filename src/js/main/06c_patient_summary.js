@@ -1,5 +1,3 @@
-// ── 06c_patient_summary.js ──
-// ═══════════════════════════════════════════════════════
 // 06c_patient_summary.js — Patient summary "baseball card"
 // Shows patient demographics + all claims chronologically.
 // Opens as a bottom sheet modal.
@@ -79,9 +77,6 @@ function openPatientSummary(pid) {
   html += '<div id="cv-view-cal" style="width:90%;margin:0 auto 0">' + _ptSummaryCalendarHTML(p, claims) + '</div>';
 
   html += '<div id="cv-view-list" style="margin-top:14px">' + _ptSummaryListHTML(p, claims) + '</div>';
-
-  // Close button
-  html += '<button class="btn btn-s" style="margin-top:12px;margin-bottom:0" onclick="hideModal(\'pt-summary-modal\')">Close</button>';
 
   document.getElementById('pt-summary-content').innerHTML = html;
   showModal('pt-summary-modal');

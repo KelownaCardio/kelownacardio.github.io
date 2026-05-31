@@ -1,5 +1,3 @@
-// ── 10_location.js ──
-// ═══════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════
 // 10_location.js — Location change screen + discharge modal
@@ -133,60 +131,38 @@ function closeLocScreen() {
 function openDischModal(pid) {
   _claimPid = pid;
   var p = getP(pid);
+  if (!p) return;
+
+  // v4.20 — check for billing gaps first. If any exist, open the patient
+  // summary calendar so the doctor can review and correct them before
+  // discharging. The discharge modal is NOT opened in this case.
+  var rule = _cvGapRuleForPatient(p);
+  if (rule) {
+    var claims = st.claims.filter(function(c) {
+      return c.phn && p.phn && samePhn(c.phn, p.phn);
+    });
+    var gaps = _cvGapDays(p, claims);
+    if (gaps.length) {
+      showToast(gaps.length + ' unbilled ' + (rule === 'ccu' ? 'CCU' : 'MRP') + ' day' + (gaps.length > 1 ? 's' : '') + ' — review calendar before discharge', 'error');
+      openPatientSummary(pid);
+      return;
+    }
+  }
+
+  // No gaps (or no gap rule) — proceed to discharge modal.
   document.getElementById('disch-title').textContent = p.last + ', ' + p.first;
-  // v3.27 — surface admission-wide billing gaps before the today's-visit prompt
-  _dischCheckGaps(pid);
+  // v4.20 — skip the "add a claim?" prompt; go straight to complex
+  // discharge check (step 2) or confirm date (step 3).
+  _dischStep2(pid);
   showModal('disch-modal');
 }
 
-// v3.27 — if any historical days inside the admission are unbilled (and the
-// patient has a gap rule, i.e. CCU or MRP daily), prompt the doctor to fix
-// them BEFORE the existing today's-visit + LOS>4 flow. If no gaps, fall
-// straight through to _dischStep1 as before.
-function _dischCheckGaps(pid) {
-  var p = getP(pid);
-  if (!p) { _dischStep1(pid); return; }
-  var rule = _cvGapRuleForPatient(p);
-  if (!rule) { _dischStep1(pid); return; }
-  var claims = st.claims.filter(function(c) {
-    return c.phn && p.phn && samePhn(c.phn, p.phn);
-  });
-  var gaps = _cvGapDays(p, claims);
-  if (!gaps.length) { _dischStep1(pid); return; }
-
-  // Render gap-warning step into the discharge modal body
-  var gapStr = gaps.slice(0, 8).map(function(g) {
-    var parts = g.split('/');
-    return parseInt(parts[0]) + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(parts[1])-1];
-  }).join(', ') + (gaps.length > 8 ? '…' : '');
-
-  var body = document.getElementById('disch-body');
-  if (!body) { _dischStep1(pid); return; }
-
-  body.innerHTML =
-    '<div class="cv-warn" style="margin:6px 0 12px">' +
-      '<div class="cv-warn-icon">⚠</div>' +
-      '<div class="cv-warn-body">' +
-        '<b>' + gaps.length + ' unbilled ' + (rule === 'ccu' ? 'CCU' : 'MRP') + ' day' + (gaps.length>1?'s':'') + ' in this admission</b>' +
-        '<span>' + gapStr + '. Discharging now leaves them unbilled.</span>' +
-      '</div>' +
-    '</div>' +
-    '<div style="display:flex;gap:8px;margin-bottom:10px">' +
-      '<button class="btn btn-s" style="flex:1;margin-bottom:0" data-pid="' + pid + '" onclick="_dischIgnoreGaps(this)">Discharge anyway</button>' +
-      '<button class="btn btn-p" style="flex:1;margin-bottom:0" data-pid="' + pid + '" onclick="_dischFixGaps(this)">Fix gaps first</button>' +
-    '</div>';
-}
-
-function _dischIgnoreGaps(btn) {
-  var pid = btn.getAttribute('data-pid');
-  _dischStep1(pid);
-}
-
+// ── Legacy gap helpers (retained for reference, no longer called) ────
+function _dischCheckGaps(pid) { _dischStep2(pid); }
+function _dischIgnoreGaps(btn) { _dischStep2(btn.getAttribute('data-pid')); }
 function _dischFixGaps(btn) {
-  var pid = btn.getAttribute('data-pid');
   hideModal('disch-modal');
-  // Open patient summary on the calendar tab — that's where the doc fixes gaps
-  openPatientSummary(pid);
+  openPatientSummary(btn.getAttribute('data-pid'));
 }
 
 // Has any visit been billed today for this patient?
@@ -197,55 +173,10 @@ function _visitBilledToday(p) {
   });
 }
 
-// Step 1: Prompt to add today's visit if none yet
-function _dischStep1(pid) {
-  var p = getP(pid);
-  if (_visitBilledToday(p)) {
-    _dischStep2(pid);
-    return;
-  }
-
-  var isCCUWard = ['CCU','CSICU','ICUA','ICUB','ICUD'].indexOf(p.ward) !== -1;
-  var isMRP  = p.role === 'mrp';
-  var isComb = p.care === 'combined';
-
-  function vbtn(label, fee, feeCode, isDefault) {
-    var bg  = isDefault ? 'var(--blue)'  : 'var(--surface)';
-    var col = isDefault ? '#fff'         : 'var(--text)';
-    var bdr = isDefault ? 'var(--blue)'  : 'var(--border2)';
-    return '<button style="padding:10px 6px;border:1.5px solid ' + bdr + ';border-radius:var(--rsm);' +
-      'background:' + bg + ';color:' + col + ';font-size:11px;font-weight:700;' +
-      'cursor:pointer;font-family:inherit;text-align:center;line-height:1.3" ' +
-      'data-pid="' + pid + '" data-fee="' + fee + '" data-feecode="' + feeCode + '" ' +
-      'onclick="dischAddVisit(this)">' + label + '</button>';
-  }
-
-  var btns = '';
-  if (isCCUWard && isMRP) {
-    // CCU/ICU ward, MRP role → CCU Daily default
-    // v3.60: write CCU_DAILY placeholder; export consolidates.
-    btns += vbtn('CCU Daily',      'CCU_DAILY', 'CCU_DAILY', true);
-    btns += vbtn('Daily\n33008',   '33008',     '33008',     false);
-    btns += vbtn('Directive',      '33006',     '33006',     false);
-  } else if (isMRP) {
-    // Ward MRP → Daily 33008 default always
-    btns += vbtn('Daily\n33008',   '33008',     '33008',     true);
-    // v3.60: write CCU_DAILY placeholder; export consolidates.
-    btns += vbtn('CCU Daily',      'CCU_DAILY', 'CCU_DAILY', false);
-    btns += vbtn('Directive',      '33006',     '33006',     false);
-  } else {
-    // Consultant role → Combined Daily or Directive only (no CCU Daily)
-    btns += vbtn('Combined\nDaily','33008',     '33008',     false);
-    btns += vbtn('Directive',      '33006',     '33006',     true);
-  }
-
-  var h = '<div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:8px">' +
-    'Add visit for today?</div>' +
-    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:12px">' + btns + '</div>' +
-    '<button class="btn btn-s" style="margin:0;width:100%" data-pid="' + pid + '" ' +
-    'onclick="_dischStep2(this.getAttribute(\'data-pid\'))">Skip — no visit</button>';
-  document.getElementById('disch-body').innerHTML = h;
-}
+// Step 1: v4.20 — "add visit?" prompt removed. Quick-tap pills on the
+// rounds card handle today's visit. Stub retained so any legacy call
+// falls through to the complex-discharge check.
+function _dischStep1(pid) { _dischStep2(pid); }
 
 // Tapping a visit type button bills it then advances to step 2
 function dischAddVisit(btn) {
