@@ -26,7 +26,7 @@ function openPatientEdit(pid) {
   html += '</div>';
   html += '<div class="fl">';
   html += '<div class="f1"><label>PHN</label><input id="pe-phn" value="' + esc(p.phn||'') + '" inputmode="numeric" maxlength="10" autocorrect="off"></div>';
-  html += '<div class="f1"><label>DOB</label><input id="pe-dob" value="' + esc(p.dob||'') + '" autocorrect="off" placeholder="DD/MMM/YYYY"></div>';
+  html += '<div class="f1"><label>DOB</label><input id="pe-dob" value="' + esc(p.dob||'') + '" autocorrect="off" placeholder="DD/MM/YYYY" inputmode="numeric" oninput="dobAutoSlash(this)"></div>';
   html += '</div>';
   html += '<div class="fl">';
   html += '<div class="f1"><label>Sex</label>' +

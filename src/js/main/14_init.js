@@ -379,6 +379,26 @@ function t2m(t) {
   return parseInt(p[0]) * 60 + parseInt(p[1] || 0);
 }
 
+// ── DOB auto-slash ────────────────────────────────────────────────
+// Typing 01021990 auto-inserts slashes → 01/02/1990.
+// Only fires on pure-digit input; mixed alpha (e.g. "26 Oct 1958")
+// is left untouched so text-month entry still works.
+function dobAutoSlash(el) {
+  var v = el.value;
+  var digits = v.replace(/\//g, '');
+  if (/[^0-9]/.test(digits)) return;        // non-digit chars → leave alone
+  if (digits.length > 8) digits = digits.slice(0, 8);
+  var out = '';
+  for (var i = 0; i < digits.length; i++) {
+    if (i === 2 || i === 4) out += '/';
+    out += digits[i];
+  }
+  if (out !== v) {
+    el.value = out;
+    el.setSelectionRange(out.length, out.length);
+  }
+}
+
 // total minutes → time string "HH:MM"  (wraps at midnight)
 function minsToTime(m) {
   m = ((m % 1440) + 1440) % 1440;
