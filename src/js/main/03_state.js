@@ -44,11 +44,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v4.20-2026-05-30-claim-bloc-disch-ocr-dob-corrections';
+var BUILD_ID    = 'v4.21-2026-05-30-ccu-guard-dedup-lock';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v4.20';
+var APP_VERSION = 'v4.21';
 var APP_BUILT   = '2026-05-30';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -596,5 +596,3 @@ async function push(action, body) {
   }
 }
 
-// ── 04_billing.js ──
-// ═══════════════════════════════════════════════════════
