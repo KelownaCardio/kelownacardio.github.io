@@ -171,13 +171,15 @@ function buildOtherClaimForm(p, opts) {
        '<input type="text" id="oc-end" placeholder="14:30 or 2:30pm" onblur="var v=parseTime24(this.value);if(v)this.value=v;" style="width:100%;padding:10px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px">' +
        '</div>';
 
-  // Location
-  h += '<label>Service location</label>';
-  h += '<select id="oc-loc" style="margin-bottom:9px">' +
-       '<option value="I" selected>Inpatient</option>' +
-       '<option value="P">KGH Outpatient</option>' +
-       '<option value="Q">Office</option>' +
-       '</select>';
+  // Location — hidden on Add Patient screen where billing-loc pills handle it
+  if (!opts || !opts.hideLoc) {
+    h += '<label>Service location</label>';
+    h += '<select id="oc-loc" style="margin-bottom:9px">' +
+         '<option value="I" selected>Inpatient</option>' +
+         '<option value="P">KGH Outpatient</option>' +
+         '<option value="Q">Office</option>' +
+         '</select>';
+  }
 
   h += '</div>'; // end card
 
@@ -307,13 +309,14 @@ function submitOtherClaim() {
 }
 
 function selCT(type) {
-  // Highlight selected button
-  var clsMap = { consult:'ct-on-consult', daily:'ct-on-daily', combined:'ct-on-combined', directive:'ct-on-directive', ccu:'ct-on-ccu' };
+  // Highlight selected button — only Consult and Other have buttons now.
+  // Daily/CCU/directive/combined forms are still rendered when called by
+  // openClaimWithRequiredFields (patient missing refby/dx).
   document.querySelectorAll('.ct-btn').forEach(function(b) {
-    Object.values(clsMap).forEach(function(c) { b.classList.remove(c); });
+    b.classList.remove('ct-on-consult');
   });
   var btn = document.getElementById('ctb-' + type);
-  if (btn) btn.classList.add(clsMap[type] || 'ct-on-daily');
+  if (btn) btn.classList.add('ct-on-consult');
 
   // Render the appropriate claim form
   var p = getP(_claimPid);

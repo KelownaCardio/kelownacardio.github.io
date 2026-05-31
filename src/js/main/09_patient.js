@@ -463,7 +463,9 @@ function buildApConsultArea() {
 function buildApOtherClaimArea() {
   // Unified Other-claim form, shared with the +Claim screen.
   // withSubmit:false — the Add Patient screen has its own submit buttons.
-  return buildOtherClaimForm({}, { withSubmit: false });
+  // hideLoc:true — billing-loc pills above the submit buttons handle
+  // the service location; the oc-loc dropdown is redundant here.
+  return buildOtherClaimForm({}, { withSubmit: false, hideLoc: true });
 }
 
 function buildApCCUAdmitArea() {
@@ -1709,3 +1711,5 @@ function buildOCRCorrections(savedPatient) {
 }
 
 
+
+// ═══════════════════════════════════════════════════════

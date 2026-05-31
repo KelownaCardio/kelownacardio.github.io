@@ -1,5 +1,3 @@
-
-// ═══════════════════════════════════════════════════════
 // 10_location.js — Location change screen + discharge modal
 // ═══════════════════════════════════════════════════════
 // LOS helper — days since admission (using first claim date or addedAt)
@@ -155,40 +153,6 @@ function openDischModal(pid) {
   // discharge check (step 2) or confirm date (step 3).
   _dischStep2(pid);
   showModal('disch-modal');
-}
-
-// ── Legacy gap helpers (retained for reference, no longer called) ────
-function _dischCheckGaps(pid) { _dischStep2(pid); }
-function _dischIgnoreGaps(btn) { _dischStep2(btn.getAttribute('data-pid')); }
-function _dischFixGaps(btn) {
-  hideModal('disch-modal');
-  openPatientSummary(btn.getAttribute('data-pid'));
-}
-
-// Has any visit been billed today for this patient?
-function _visitBilledToday(p) {
-  var visitFees = ['33008','33006','CCU_DAILY','33010','33012'];
-  return st.claims.some(function(c) {
-    return samePhn(c.phn, p.phn) && c.date === TODAY && visitFees.indexOf(c.fee) !== -1;
-  });
-}
-
-// Step 1: v4.20 — "add visit?" prompt removed. Quick-tap pills on the
-// rounds card handle today's visit. Stub retained so any legacy call
-// falls through to the complex-discharge check.
-function _dischStep1(pid) { _dischStep2(pid); }
-
-// Tapping a visit type button bills it then advances to step 2
-function dischAddVisit(btn) {
-  var pid     = btn.getAttribute('data-pid');
-  var fee     = btn.getAttribute('data-fee');
-  var feeCode = btn.getAttribute('data-feecode');
-  var p = getP(pid);
-  if (!checkDoc()) return;
-  addClaim(p, fee, feeCode, 1, TODAY, 'I');
-  sv('patients', st.patients);
-  sv('claims', st.claims);
-  _dischStep2(pid);
 }
 
 // ── Complex Discharge (78717) — criteria checklist ──────
