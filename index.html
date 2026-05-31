@@ -1902,13 +1902,13 @@ var FEES = [
   { code:'33008',  desc:'Subsequent hospital visit / MRP daily / combined daily care',    amount:'$63.95',  cat:'Daily',     clr:'chip-green'  },
 
   // ── Cardiology procedures performed by the group ─────────────────
-  { code:'33025', desc:'Cardioversion (operation only)',                                 amount:'$105.70', cat:'Procedure', clr:'chip-red'   },
-  { code:'33030', desc:'Temporary pacemaker placement (TVP)',                            amount:'$176.07', cat:'Procedure', clr:'chip-red'   },
-  { code:'33035', desc:'Graded exercise test (GXT) — Treadmill — professional fee',       amount:'$47.11',  cat:'Procedure', clr:'chip-red'   },
-  { code:'00751',  desc:'Pericardiocentesis (pericardial puncture)',                      amount:'$258.25', cat:'Procedure', clr:'chip-red'   },
+  { code:'33025', desc:'Cardioversion',                                                  amount:'$105.70', cat:'Procedure',    clr:'chip-red'   },
+  { code:'33030', desc:'Temporary pacemaker placement (TVP)',                            amount:'$176.07', cat:'Procedure',    clr:'chip-red'   },
+  { code:'00751',  desc:'Pericardiocentesis (pericardial puncture)',                      amount:'$258.25', cat:'Procedure',    clr:'chip-red'   },
 
-  // ── Echo interpretation ─────────────────────────────────────────
-  { code:'33093', desc:'Level 3 Echo Complex Assessment (Overread)',                     amount:'$252.39', cat:'Echo',      clr:'chip-teal'  },
+  // ── Diagnostics ─────────────────────────────────────────────────
+  { code:'33035', desc:'Treadmill Test (GXT)',                                            amount:'$47.11',  cat:'Diagnostics', clr:'chip-teal'  },
+  { code:'33093', desc:'Level 3 Echo Complex Assessment (Overread)',                     amount:'$252.39', cat:'Diagnostics', clr:'chip-teal'  },
 
   // ── Discharge / planning ────────────────────────────────────────
   { code:'78717',  desc:'Specialist discharge care plan for complex patients (extra)',    amount:'$82.19',  cat:'Discharge', clr:'chip-green' },
@@ -4608,7 +4608,7 @@ function feeSearch(query) {
     'Consult':'var(--blue-t)',    'Daily':'var(--blue-t)',     'Directive':'var(--amber-t)',
     'Telehealth':'var(--blue-t)', 'ECG':'var(--teal-t)',       'Stress':'var(--teal-t)',
     'Echo':'var(--teal-t)',       'Pacemaker':'var(--teal-t)', 'Remote':'var(--teal-t)',
-    'Event':'var(--teal-t)',      'Procedure':'var(--red-t)',  'Rehab':'var(--green-t)',
+    'Diagnostics':'var(--teal-t)','Event':'var(--teal-t)',      'Procedure':'var(--red-t)',  'Rehab':'var(--green-t)',
     'Discharge':'var(--green-t)', 'CCU':'var(--red-t)',        'Modifier':'var(--text3)',
     'Other':'var(--teal-t)'
   };
@@ -4905,6 +4905,211 @@ function closeClaimScreen() {
 function backToRoundsFromClaim() {
   _claimReturnSummaryPid = null;
   closeClaimScreen();
+}
+
+// ── 06b_discharged.js ──
+// ═══════════════════════════════════════════════════════
+// Recently Discharged pane + rounds search filter
+// Pane shows discharged patients (last 21 days, or all when searching)
+// Each row offers: tap to add a missed claim, restore (to On/Off Service)
+// ═══════════════════════════════════════════════════════
+
+function roundsSearch(query) {
+  _roundsQuery = (query || '').toLowerCase().trim();
+  var clearBtn = document.getElementById('rounds-search-clear');
+  if (clearBtn) clearBtn.classList.toggle('on', !!_roundsQuery);
+  // Hide geo/alpha toggle when searching (search shows unified flat list)
+  var vtBar = document.getElementById('view-tog-bar');
+  if (vtBar) vtBar.style.display = (!_roundsQuery && _listView === 'on') ? 'flex' : 'none';
+  render();
+}
+
+function clearRoundsSearch() {
+  var input = document.getElementById('rounds-search');
+  if (input) { input.value = ''; input.focus(); }
+  roundsSearch('');
+}
+
+// ═══════════════════════════════════════════════════════
+// 06b — Recently Discharged pane
+// Single-purpose tab. Reads st.patients (populated by syncFromSheets).
+// Shows: discharged && trueDischarge==irrelevant && < 21 days (or all if searching)
+// Each row: tap to bill missed claim, or restore to On/Off Service.
+// ═══════════════════════════════════════════════════════
+
+function initDischarged() {
+  var input = document.getElementById('discharged-search');
+  if (input) input.value = '';
+  renderDischarged('');
+}
+
+function dischargedSearch(query) {
+  renderDischarged(query);
+}
+
+// Render the discharged pane. Pure function over st.patients.
+// Defensive about field types — patients arrive from Sheets with mixed types
+// (phn could be string or number, dischargedAt could be number or string, etc.).
+function renderDischarged(query) {
+  var container = document.getElementById('discharged-results');
+  if (!container) return;
+  var q = String(query || '').toLowerCase().trim();
+
+  // Filter for discharged patients. Treat any truthy variant as discharged.
+  var pool = (st.patients || []).filter(function(p) {
+    return isDischarged(p);
+  });
+
+  // Sort newest-first by dischargedAt
+  pool.sort(function(a, b) {
+    return (toEpochMs(b.dischargedAt) || 0) - (toEpochMs(a.dischargedAt) || 0);
+  });
+
+  // Apply 21-day filter unless searching
+  var cutoff = Date.now() - (21 * 24 * 60 * 60 * 1000);
+  var visible = q ? pool : pool.filter(function(p) {
+    var ms = toEpochMs(p.dischargedAt);
+    return !ms || ms > cutoff;  // missing timestamps still show
+  });
+
+  // Apply search query
+  if (q) {
+    visible = visible.filter(function(p) {
+      var name = String((p.last || '') + ' ' + (p.first || '')).toLowerCase();
+      var phn  = String(p.phn || '');
+      return name.indexOf(q) !== -1 || phn.indexOf(q) !== -1;
+    });
+  }
+
+  if (!visible.length) {
+    container.innerHTML = q
+      ? '<div class="empty" style="padding:18px 0">No match for &ldquo;' + esc(query) + '&rdquo;</div>'
+      : '<div class="empty" style="padding:18px 0">No patients discharged in the last 21 days.</div>';
+    return;
+  }
+
+  // Render each row defensively — wrap in try so one bad row doesn't kill the whole list.
+  var rows = visible.map(function(p) {
+    try { return dischargedRow(p); }
+    catch (e) {
+      console.error('[discharged] row render failed for', p, e);
+      return '<div class="empty" style="padding:6px 10px;font-size:11px">⚠ Could not render ' + esc(p.last || '?') + ', ' + esc(p.first || '?') + '</div>';
+    }
+  });
+
+  container.innerHTML = rows.join('');
+}
+
+// Type-safe truthy check on the discharged flag.
+// Sheets returns variants: boolean true, "true", "TRUE", 1, "1", etc.
+function isDischarged(p) {
+  if (!p) return false;
+  var v = p.discharged;
+  if (v === true || v === 1) return true;
+  if (typeof v === 'string') {
+    var s = v.trim().toLowerCase();
+    return s === 'true' || s === '1' || s === 'yes';
+  }
+  return false;
+}
+
+// Type-safe epoch ms parser. Accepts number, numeric string, or ISO string.
+function toEpochMs(v) {
+  if (v == null || v === '') return 0;
+  if (typeof v === 'number') return v > 1e12 ? v : 0;
+  var s = String(v).trim();
+  // Numeric string like "1778182118783" or "1778702261108.0"
+  var pf = parseFloat(s);
+  if (!isNaN(pf) && pf > 1e12) return Math.round(pf);
+  // ISO date string
+  var d = Date.parse(s);
+  return isNaN(d) ? 0 : d;
+}
+
+// Render one discharged-patient row. Defensive about every field type.
+function dischargedRow(p) {
+  var last  = String(p.last  || '');
+  var first = String(p.first || '');
+  var phn   = String(p.phn   || '');
+  var ward  = String(p.ward  || '');
+  var bed   = String(p.bed   || '');
+  var pid   = String(p.id    || '');
+
+  var isCCU = ward === 'CCU';
+  var avCls = isCCU ? 'av-ccu' : (p.list === 'off' ? 'av-off' : 'av-on');
+  var ini   = (first.charAt(0) || '') + (last.charAt(0) || '');
+
+  var ms = toEpochMs(p.dischargedAt);
+  var daysAgo = ms ? Math.floor((Date.now() - ms) / 86400000) : null;
+  var daysLabel = daysAgo === null ? '' : daysAgo === 0 ? 'today' : daysAgo === 1 ? '1 day ago' : daysAgo + ' days ago';
+  var statusChip = '<span class="chip chip-grey">Discharged' + (daysLabel ? ' ' + daysLabel : '') + '</span>';
+
+  var phnDisplay = phn ? 'PHN …' + phn.slice(-4) : '<span class="warn-tag">⚠ no PHN</span>';
+  var bedDisplay = bed ? ' Rm ' + esc(bed) : '';
+
+  var careChip = isCCU                    ? '<span class="chip chip-red">CCU</span>'
+               : p.care === 'directive'   ? '<span class="chip chip-amber">Directive</span>'
+               : p.care === 'combined'    ? '<span class="chip chip-teal">Combined</span>'
+               :                             '<span class="chip chip-blue">MRP</span>';
+
+  return '<div class="alpha-row" onclick="openClaimFromDischarged(\'' + esc(pid) + '\')">' +
+    '<div class="alpha-av ' + avCls + '">' + esc(ini.toUpperCase()) + '</div>' +
+    '<div style="flex:1;min-width:0">' +
+      '<div class="wp-name">' + esc(last) + ', ' + esc(first) + '</div>' +
+      '<div class="wp-meta">' + esc(wardLabel(ward)) + bedDisplay + ' &bull; ' + phnDisplay + '</div>' +
+      '<div class="wp-chips" style="margin-top:4px">' + careChip + ' ' + statusChip + '</div>' +
+    '</div>' +
+    '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;padding-top:8px">' +
+      '<button class="bb bb-rnd" style="font-size:10px;padding:5px 9px" ' +
+        'onclick="event.stopPropagation();restorePatient(\'' + esc(pid) + '\')">↩ Restore</button>' +
+      chartBtn(pid) +
+    '</div>' +
+  '</div>';
+}
+
+function openClaimFromDischarged(pid) {
+  _claimOriginPane   = 'p-discharged';
+  _claimOriginNavIdx = 2;
+  _openClaimScreen(pid);
+}
+
+// Restore — show on/off service choice using data attributes (no inline quote nesting)
+function restorePatient(pid) {
+  var p = (st.patients || []).find(function(x) { return x.id === pid; });
+  if (!p || !isDischarged(p)) return;
+  var prevWard = wardLabel(p.ward) || '';
+  var prevList = p.list === 'on' ? 'On Service' : 'Off Service';
+  var body  = document.getElementById('merge-body');
+  var title = document.getElementById('merge-title');
+  if (!body || !title) { _doRestore(pid, p.list || 'off'); return; }
+  title.textContent = 'Restore ' + p.last + ', ' + p.first;
+  body.innerHTML =
+    '<div style="font-size:12px;color:var(--text2);margin-bottom:14px">' +
+      'Previously: <strong>' + prevList + '</strong>' +
+      (prevWard ? ' — ' + esc(prevWard) : '') +
+    '</div>' +
+    '<div style="display:flex;flex-direction:column;gap:8px">' +
+      '<button class="btn btn-p" style="margin:0" data-pid="' + esc(pid) + '" data-list="on" onclick="_doRestore(this.dataset.pid,this.dataset.list)">Restore to On Service list</button>' +
+      '<button class="btn btn-s" style="margin:0" data-pid="' + esc(pid) + '" data-list="off" onclick="_doRestore(this.dataset.pid,this.dataset.list)">Restore to Off Service list</button>' +
+    '</div>';
+  showModal('merge-modal');
+}
+
+function _doRestore(pid, list) {
+  var p = (st.patients || []).find(function(x) { return x.id === pid; });
+  if (!p) return;
+  hideModal('merge-modal');
+  p.discharged    = false;
+  p.dischargedAt  = null;
+  p.dischargeDate = null;
+  p.list          = list;
+  if (list === 'on' && !p.ward) p.ward = 'OTHER';
+  sv('patients', st.patients);
+  if (SHEETS_URL) push('savePatient', p);
+  logChange(p, 'Restored', 'Returned to ' + (list === 'on' ? 'On Service' : 'Off Service'));
+  showToast(p.last + ' restored to ' + (list === 'on' ? 'on-service' : 'off-service') + ' list');
+  renderDischarged(document.getElementById('discharged-search') ? document.getElementById('discharged-search').value : '');
+  render();
 }
 
 // ── 06b_discharged.js ──
