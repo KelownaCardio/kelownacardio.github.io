@@ -1084,6 +1084,85 @@ function ceFeeSelect(code, desc) {
   if (dd) { dd.innerHTML = ''; dd.style.display = 'none'; }
 }
 
+// ── Claim-edit time-field + AM/PM pill helpers ───────────────────
+// Mirrors the consult (_cb) and Other Claim (_oc) time-pill pattern
+// so all three entry points show a consistent numeric input + AM/PM
+// pill pair. Elements use ce- prefix to avoid collisions.
+
+function _ceTo12(t24) {
+  var p = String(t24 || '').split(':');
+  var h = parseInt(p[0], 10);
+  var m = p[1] || '00';
+  if (isNaN(h)) return { disp: '', ap: '' };
+  var ap = h >= 12 ? 'pm' : 'am';
+  var ch = h % 12; if (ch === 0) ch = 12;
+  return { disp: ch + ':' + m, ap: ap };
+}
+
+function _ceTimeRow(which, v) {
+  function pill(ap, label) {
+    var on = (v && v.ap === ap) ? ' ct-on-consult' : '';
+    return '<button type="button" id="ce-' + which + '-' + ap + '" class="ct-btn' + on + '" ' +
+           'style="flex:0 0 42px;padding:10px 0;font-size:12px" ' +
+           'onclick="ceSetMeridiem(\'' + which + '\',\'' + ap + '\')">' + label + '</button>';
+  }
+  return '<div style="display:flex;gap:5px;align-items:stretch">' +
+         '<input type="text" id="ce-' + which + '" inputmode="numeric" autocorrect="off" ' +
+         'value="' + ((v && v.disp) || '') + '" placeholder="2:30" ' +
+         'style="flex:1;min-width:0;font-size:16px" ' +
+         'onblur="ceTimeBlur(\'' + which + '\')">' +
+         pill('am', 'AM') + pill('pm', 'PM') +
+         '</div>';
+}
+
+function ceSetMeridiem(which, ap) {
+  var am = document.getElementById('ce-' + which + '-am');
+  var pm = document.getElementById('ce-' + which + '-pm');
+  if (am) am.className = 'ct-btn' + (ap === 'am' ? ' ct-on-consult' : '');
+  if (pm) pm.className = 'ct-btn' + (ap === 'pm' ? ' ct-on-consult' : '');
+}
+
+function ceMeridiem(which) {
+  var pm = document.getElementById('ce-' + which + '-pm');
+  if (pm && pm.classList.contains('ct-on-consult')) return 'pm';
+  var am = document.getElementById('ce-' + which + '-am');
+  if (am && am.classList.contains('ct-on-consult')) return 'am';
+  return '';
+}
+
+function ceTimeBlur(which) {
+  var el = document.getElementById('ce-' + which);
+  if (!el) return;
+  var t = parseTime24(el.value);
+  if (!t) return;
+  var h = parseInt(t.split(':')[0], 10);
+  if (h >= 13 || h === 0) {
+    var info = _ceTo12(t);
+    el.value = info.disp;
+    if (info.ap) ceSetMeridiem(which, info.ap);
+  } else {
+    el.value = h + ':' + t.split(':')[1];
+    if (!ceMeridiem(which)) {
+      ceSetMeridiem(which, (new Date()).getHours() >= 12 ? 'pm' : 'am');
+    }
+  }
+}
+
+function ceTime24(which) {
+  var el = document.getElementById('ce-' + which);
+  var t = parseTime24(el ? el.value : '');
+  if (!t) return '';
+  var p = t.split(':');
+  var h = parseInt(p[0], 10);
+  var m = p[1];
+  if (h >= 13) return t;
+  if (h === 0) return '00:' + m;
+  var ap = ceMeridiem(which) || ((new Date()).getHours() >= 12 ? 'pm' : 'am');
+  var H  = h % 12;
+  if (ap === 'pm') H += 12;
+  return pad(H) + ':' + m;
+}
+
 function openClaimEdit(btn) {
   var cid = btn.getAttribute('data-cid');
   var pid = btn.getAttribute('data-pid');
@@ -1109,6 +1188,9 @@ function openClaimEdit(btn) {
     dateISO = dp[2] + '-' + dp[1] + '-' + dp[0];
   }
   var startTimeClean = fmtStartTime(c.startTime || '');
+  var endTimeClean   = fmtStartTime(c.endTime || '');
+  var ceStartV = startTimeClean ? _ceTo12(startTimeClean) : null;
+  var ceEndV   = endTimeClean   ? _ceTo12(endTimeClean)   : null;
 
   var refLabel = c.refbyName ? c.refbyName + (c.refby ? ' #' + c.refby : '') : '';
 
@@ -1119,9 +1201,11 @@ function openClaimEdit(btn) {
         '<div class="f1"><label>Date</label>' +
           '<input id="ce-date" type="date" value="' + esc(dateISO) + '"></div>' +
         '<div class="f1"><label>Start time</label>' +
-          '<input id="ce-time" type="text" value="' + esc(startTimeClean) + '" placeholder="14:30 or 2:30pm" onblur="var v=parseTime24(this.value);if(v)this.value=v;"></div>' +
+          _ceTimeRow('start', ceStartV) + '</div>' +
+      '</div>' +
+      '<div class="fl" style="margin-bottom:9px">' +
         '<div class="f1"><label>End time</label>' +
-          '<input id="ce-end-time" type="text" value="' + esc(fmtStartTime(c.endTime || '')) + '" placeholder="14:30 or 2:30pm" onblur="var v=parseTime24(this.value);if(v)this.value=v;"></div>' +
+          _ceTimeRow('end', ceEndV) + '</div>' +
       '</div>' +
       '<label style="margin-top:7px">Performing physician</label>' +
       '<select id="ce-alias" style="margin-bottom:7px">' + docOptions + '</select>' +
@@ -1173,8 +1257,8 @@ function saveClaimEdit(btn) {
   var newIcd   = document.getElementById('ce-icd').value || c.icd;
   var newAlias = document.getElementById('ce-alias').value;
   var newDateISO = (document.getElementById('ce-date') || {}).value || '';
-  var newTime    = (document.getElementById('ce-time')     || {}).value || '';
-  var newEndTime = (document.getElementById('ce-end-time') || {}).value || '';
+  var newTime    = ceTime24('start');
+  var newEndTime = ceTime24('end');
   var newNotes = (document.getElementById('ce-notes') || {}).value || '';
   var newRefby     = (document.getElementById('ce-refby')      || {}).value || '';
   var newRefName   = (document.getElementById('ce-refby-name') || {}).value || '';

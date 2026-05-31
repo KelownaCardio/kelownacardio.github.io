@@ -17,6 +17,15 @@ async function init() {
     // explicit choice before a patient can be added to a rounds list.
     apLocHost.innerHTML = buildLocationCard('f', null, true);
   }
+  // v4.25: attach DOB auto-slash + numeric keypad to f-dob.
+  // pe-dob (edit modal) has it inline; f-dob is in the static template
+  // so it must be wired programmatically here.
+  var fDob = document.getElementById('f-dob');
+  if (fDob) {
+    fDob.setAttribute('inputmode', 'numeric');
+    fDob.placeholder = 'DD/MM/YYYY';
+    fDob.addEventListener('input', function() { dobAutoSlash(fDob); });
+  }
   updateDailyTotal();
   await loadLocal();
   purgeOldPatients(); // remove patients discharged > 21 days ago
