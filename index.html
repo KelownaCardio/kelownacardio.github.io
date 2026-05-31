@@ -2752,12 +2752,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v4.21-2026-05-30-ccu-guard-dedup-lock';
+var BUILD_ID    = 'v4.22-2026-05-31-dead-code-cleanup';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v4.21';
-var APP_BUILT   = '2026-05-30';
+var APP_VERSION = 'v4.22';
+var APP_BUILT   = '2026-05-31';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -3303,6 +3303,10 @@ async function push(action, body) {
     return false;
   }
 }
+
+// 04_billing.js — Modifier logic, BC stat holidays,
+//                 CCU consolidation, directive weekly limit
+// ═══════════════════════════════════════════════════════
 
 // 04_billing.js — Modifier logic, BC stat holidays,
 //                 CCU consolidation, directive weekly limit
@@ -4844,13 +4848,15 @@ function buildOtherClaimForm(p, opts) {
        '<input type="text" id="oc-end" placeholder="14:30 or 2:30pm" onblur="var v=parseTime24(this.value);if(v)this.value=v;" style="width:100%;padding:10px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px">' +
        '</div>';
 
-  // Location
-  h += '<label>Service location</label>';
-  h += '<select id="oc-loc" style="margin-bottom:9px">' +
-       '<option value="I" selected>Inpatient</option>' +
-       '<option value="P">KGH Outpatient</option>' +
-       '<option value="Q">Office</option>' +
-       '</select>';
+  // Location — hidden on Add Patient screen where billing-loc pills handle it
+  if (!opts || !opts.hideLoc) {
+    h += '<label>Service location</label>';
+    h += '<select id="oc-loc" style="margin-bottom:9px">' +
+         '<option value="I" selected>Inpatient</option>' +
+         '<option value="P">KGH Outpatient</option>' +
+         '<option value="Q">Office</option>' +
+         '</select>';
+  }
 
   h += '</div>'; // end card
 
@@ -4980,13 +4986,14 @@ function submitOtherClaim() {
 }
 
 function selCT(type) {
-  // Highlight selected button
-  var clsMap = { consult:'ct-on-consult', daily:'ct-on-daily', combined:'ct-on-combined', directive:'ct-on-directive', ccu:'ct-on-ccu' };
+  // Highlight selected button — only Consult and Other have buttons now.
+  // Daily/CCU/directive/combined forms are still rendered when called by
+  // openClaimWithRequiredFields (patient missing refby/dx).
   document.querySelectorAll('.ct-btn').forEach(function(b) {
-    Object.values(clsMap).forEach(function(c) { b.classList.remove(c); });
+    b.classList.remove('ct-on-consult');
   });
   var btn = document.getElementById('ctb-' + type);
-  if (btn) btn.classList.add(clsMap[type] || 'ct-on-daily');
+  if (btn) btn.classList.add('ct-on-consult');
 
   // Render the appropriate claim form
   var p = getP(_claimPid);
@@ -7895,7 +7902,9 @@ function buildApConsultArea() {
 function buildApOtherClaimArea() {
   // Unified Other-claim form, shared with the +Claim screen.
   // withSubmit:false — the Add Patient screen has its own submit buttons.
-  return buildOtherClaimForm({}, { withSubmit: false });
+  // hideLoc:true — billing-loc pills above the submit buttons handle
+  // the service location; the oc-loc dropdown is redundant here.
+  return buildOtherClaimForm({}, { withSubmit: false, hideLoc: true });
 }
 
 function buildApCCUAdmitArea() {
@@ -9298,40 +9307,6 @@ function openDischModal(pid) {
   // discharge check (step 2) or confirm date (step 3).
   _dischStep2(pid);
   showModal('disch-modal');
-}
-
-// ── Legacy gap helpers (retained for reference, no longer called) ────
-function _dischCheckGaps(pid) { _dischStep2(pid); }
-function _dischIgnoreGaps(btn) { _dischStep2(btn.getAttribute('data-pid')); }
-function _dischFixGaps(btn) {
-  hideModal('disch-modal');
-  openPatientSummary(btn.getAttribute('data-pid'));
-}
-
-// Has any visit been billed today for this patient?
-function _visitBilledToday(p) {
-  var visitFees = ['33008','33006','CCU_DAILY','33010','33012'];
-  return st.claims.some(function(c) {
-    return samePhn(c.phn, p.phn) && c.date === TODAY && visitFees.indexOf(c.fee) !== -1;
-  });
-}
-
-// Step 1: v4.20 — "add visit?" prompt removed. Quick-tap pills on the
-// rounds card handle today's visit. Stub retained so any legacy call
-// falls through to the complex-discharge check.
-function _dischStep1(pid) { _dischStep2(pid); }
-
-// Tapping a visit type button bills it then advances to step 2
-function dischAddVisit(btn) {
-  var pid     = btn.getAttribute('data-pid');
-  var fee     = btn.getAttribute('data-fee');
-  var feeCode = btn.getAttribute('data-feecode');
-  var p = getP(pid);
-  if (!checkDoc()) return;
-  addClaim(p, fee, feeCode, 1, TODAY, 'I');
-  sv('patients', st.patients);
-  sv('claims', st.claims);
-  _dischStep2(pid);
 }
 
 // ── Complex Discharge (78717) — criteria checklist ──────
