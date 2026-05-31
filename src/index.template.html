@@ -926,6 +926,9 @@ input[type=file] { display:none; }
 <div class="overlay" id="pt-summary-modal">
   <div class="modal" style="border-radius:18px 18px 0 0;padding-bottom:env(safe-area-inset-bottom)">
     <div class="modal-handle"></div>
+    <div style="position:sticky;top:0;z-index:2;display:flex;justify-content:flex-end;margin:-8px -4px 0 0">
+      <button onclick="hideModal('pt-summary-modal')" style="width:32px;height:32px;border-radius:50%;border:none;background:var(--surface2);color:var(--text2);font-size:18px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.12)">✕</button>
+    </div>
     <div id="pt-summary-content"></div>
   </div>
 </div>
