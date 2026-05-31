@@ -185,13 +185,13 @@ var FEES = [
   { code:'33008',  desc:'Subsequent hospital visit / MRP daily / combined daily care',    amount:'$63.95',  cat:'Daily',     clr:'chip-green'  },
 
   // ── Cardiology procedures performed by the group ─────────────────
-  { code:'33025', desc:'Cardioversion (operation only)',                                 amount:'$105.70', cat:'Procedure', clr:'chip-red'   },
-  { code:'33030', desc:'Temporary pacemaker placement (TVP)',                            amount:'$176.07', cat:'Procedure', clr:'chip-red'   },
-  { code:'33035', desc:'Graded exercise test (GXT) — Treadmill — professional fee',       amount:'$47.11',  cat:'Procedure', clr:'chip-red'   },
-  { code:'00751',  desc:'Pericardiocentesis (pericardial puncture)',                      amount:'$258.25', cat:'Procedure', clr:'chip-red'   },
+  { code:'33025', desc:'Cardioversion',                                                  amount:'$105.70', cat:'Procedure',    clr:'chip-red'   },
+  { code:'33030', desc:'Temporary pacemaker placement (TVP)',                            amount:'$176.07', cat:'Procedure',    clr:'chip-red'   },
+  { code:'00751',  desc:'Pericardiocentesis (pericardial puncture)',                      amount:'$258.25', cat:'Procedure',    clr:'chip-red'   },
 
-  // ── Echo interpretation ─────────────────────────────────────────
-  { code:'33093', desc:'Level 3 Echo Complex Assessment (Overread)',                     amount:'$252.39', cat:'Echo',      clr:'chip-teal'  },
+  // ── Diagnostics ─────────────────────────────────────────────────
+  { code:'33035', desc:'Treadmill Test (GXT)',                                            amount:'$47.11',  cat:'Diagnostics', clr:'chip-teal'  },
+  { code:'33093', desc:'Level 3 Echo Complex Assessment (Overread)',                     amount:'$252.39', cat:'Diagnostics', clr:'chip-teal'  },
 
   // ── Discharge / planning ────────────────────────────────────────
   { code:'78717',  desc:'Specialist discharge care plan for complex patients (extra)',    amount:'$82.19',  cat:'Discharge', clr:'chip-green' },
