@@ -688,4 +688,3 @@ function recordIcdUsage(code) {
   if (st.recentIcds.length > 5) st.recentIcds = st.recentIcds.slice(0, 5);
   sv('recentIcds', st.recentIcds);
 }
-
