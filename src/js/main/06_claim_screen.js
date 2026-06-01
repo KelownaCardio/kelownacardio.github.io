@@ -877,6 +877,16 @@ function _cvAdmitSpan(p) {
   if (p.discharged && p.dischargeDate) {
     endMs = parseDMYsafe(p.dischargeDate);
   }
+  // v4.26: Fall back to dischargedAt timestamp when dischargeDate is blank.
+  // disch78717/dischSimple set dischargedAt but not dischargeDate — without
+  // this fallback the span extends to today and shows false gaps.
+  if (!endMs && p.discharged && p.dischargedAt) {
+    var ts = typeof p.dischargedAt === 'number' ? p.dischargedAt : parseFloat(p.dischargedAt);
+    if (ts > 0) {
+      var dt = new Date(ts);
+      endMs = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).getTime();
+    }
+  }
   if (!endMs) {
     // Fall back to today
     var now = new Date();
@@ -993,6 +1003,18 @@ function _ptSummaryCalendarHTML(p, claims) {
   var span = _cvAdmitSpan(p);
   var rule = _cvGapRuleForPatient(p);
   var gaps = _cvGapDays(p, claims);
+
+  // v4.26: Derive discharge date string for the red ring display. Falls back
+  // to dischargedAt timestamp when dischargeDate is blank (same as _cvAdmitSpan).
+  var _dischDateStr = p.dischargeDate || '';
+  if (!_dischDateStr && p.discharged && p.dischargedAt) {
+    var _dts = typeof p.dischargedAt === 'number' ? p.dischargedAt : parseFloat(p.dischargedAt);
+    if (_dts > 0) {
+      var _ddt = new Date(_dts);
+      _dischDateStr = pad(_ddt.getDate()) + '/' + pad(_ddt.getMonth()+1) + '/' + _ddt.getFullYear();
+    }
+  }
+
   var month = window._cvMonth || (function() {
     var n = new Date();
     return new Date(n.getFullYear(), n.getMonth(), 1);
@@ -1085,7 +1107,7 @@ function _ptSummaryCalendarHTML(p, claims) {
       cls += ' cv-gap';
     }
     if (dateStr === todayKey) cls += ' cv-today';
-    if (p.discharged && p.dischargeDate === dateStr) cls += ' cv-discharged';
+    if (p.discharged && _dischDateStr === dateStr) cls += ' cv-discharged';
 
     var tag = '';
     if (dominant === 'ccu') {
