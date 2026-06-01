@@ -24,6 +24,18 @@ function openPatientSummary(pid) {
 
   var html = '';
 
+  // v4.25: Sticky close button — always visible in top-right while scrolling.
+  // Fixes the issue where the bottom Close button fell under iPhone's dynamic
+  // home bar. Uses position:sticky so it stays at the top of the scroll
+  // container without blocking the demographics card content.
+  html += '<div style="position:sticky;top:0;z-index:10;display:flex;justify-content:flex-end;margin-bottom:-28px;pointer-events:none">' +
+          '<button onclick="hideModal(\'pt-summary-modal\')" ' +
+          'style="pointer-events:auto;width:32px;height:32px;border-radius:50%;border:none;' +
+          'background:rgba(0,0,0,.10);font-size:18px;cursor:pointer;color:var(--text2);' +
+          'display:flex;align-items:center;justify-content:center;font-family:inherit;' +
+          'box-shadow:0 1px 4px rgba(0,0,0,.12);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)"' +
+          ' title="Close">✕</button></div>';
+
   // ── Demographics card ────────────────────────────────
   html += '<div style="background:var(--blue-bg);border-radius:var(--r);padding:13px 14px;margin-bottom:13px;border:.5px solid #a8c4e8">';
   html += '<div style="display:flex;align-items:flex-start;justify-content:space-between">';

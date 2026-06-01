@@ -44,7 +44,7 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v4.25-2026-05-31-dob-autoslash-ce-time-pills';
+var BUILD_ID    = 'v4.25-2026-05-31-dedup-guard-ce-pills-dob-close';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
@@ -537,6 +537,13 @@ async function logoutAndRefresh() {
 // Cleared once the item appears in a sync response.
 if (!window._pendingPush) window._pendingPush = {};
 
+// v4.25: In-flight guard — prevents a second fetch for the same ID while
+// the first is still running. This was the root cause of the 31/05 duplicates:
+// batchRound fired push() for 5 CCU claims, then syncFromSheets retried them
+// from _pendingPush before the originals returned. Two concurrent saveClaim
+// requests for the same ID raced past the server lock.
+if (!window._pushInFlight) window._pushInFlight = {};
+
 async function push(action, body) {
   if (!SHEETS_URL) return false;
   // Guard: never push a patient or claim with no id — prevents blank row creation
@@ -554,6 +561,15 @@ async function push(action, body) {
     console.warn('push blocked — empty claim record', body);
     return false;
   }
+  // v4.25: In-flight guard — if a fetch for this exact ID is already running,
+  // skip silently. The pending retry will catch it on the next sync cycle
+  // once the in-flight request completes.
+  if ((action === 'savePatient' || action === 'saveClaim') && body && body.id) {
+    if (window._pushInFlight[body.id]) {
+      return true;  // true = don't trigger error handling
+    }
+    window._pushInFlight[body.id] = true;
+  }
   // Mark as pending until next successful sync confirms it
   if (action === 'savePatient' || action === 'saveClaim') {
     window._pendingPush[body.id] = { action: action, body: body, ts: Date.now() };
@@ -563,6 +579,8 @@ async function push(action, body) {
     var resp = await fetch(SHEETS_URL + '?action=' + action + '&key=' + SHARED_KEY, {
       method: 'POST', body: JSON.stringify(body)
     });
+    // v4.25: clear in-flight flag on completion (success or server rejection)
+    if (body && body.id) delete window._pushInFlight[body.id];
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     // v3.91: inspect the response BODY, not just the HTTP status. Apps Script
     // returns HTTP 200 even when saveRow rejects a record ({ok:false,error}).
@@ -588,6 +606,9 @@ async function push(action, body) {
     setSyncState('synced');
     return true;
   } catch(e) {
+    // v4.25: clear in-flight flag on network failure too — the next sync
+    // cycle will retry from _pendingPush.
+    if (body && body.id) delete window._pushInFlight[body.id];
     // Network / transport failure — transient. Leave it in _pendingPush so
     // the next sync retries it.
     window._lastPushError = e.message || String(e);
