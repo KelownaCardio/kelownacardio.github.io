@@ -343,12 +343,52 @@ function consultFormOpened() {
 }
 
 // Submit guard — prevents double/triple tap on mobile from firing twice.
+// v4.26: Submit overlay — covers the entire claim form after submit is tapped.
+// Blocks all interaction until pending pushes resolve or timeout fires.
+// Also serves as UX training ("don't tap again").
 var _submitGuard = false;
+var _submitOverlayEl = null;
+function _ensureOverlayEl() {
+  if (_submitOverlayEl) return _submitOverlayEl;
+  var el = document.createElement('div');
+  el.id = 'submit-overlay';
+  el.style.cssText = 'position:fixed;inset:0;z-index:9999;display:none;' +
+    'background:rgba(0,0,0,0.45);backdrop-filter:blur(3px);' +
+    'align-items:center;justify-content:center;flex-direction:column;gap:10px;' +
+    'color:#fff;font-size:15px;text-align:center;padding:24px;';
+  el.innerHTML = '<div style="font-size:28px">🔒</div>' +
+    '<div style="font-weight:700">Submitting claim securely…</div>' +
+    '<div style="font-size:12px;opacity:0.8">This takes a few seconds — please don\'t tap again</div>';
+  document.body.appendChild(el);
+  _submitOverlayEl = el;
+  return el;
+}
+function _showSubmitOverlay() {
+  var el = _ensureOverlayEl();
+  el.style.display = 'flex';
+}
+function _hideSubmitOverlay() {
+  if (_submitOverlayEl) _submitOverlayEl.style.display = 'none';
+  _submitGuard = false;
+}
 function claimSubmitOnce(fn) {
   if (_submitGuard) return;
   _submitGuard = true;
-  setTimeout(function() { _submitGuard = false; }, 1500);
+  _showSubmitOverlay();
+  // Run the submit function
   fn();
+  // Poll _pushInFlight — hide overlay when all pushes resolve
+  var _elapsed = 0;
+  var _poll = setInterval(function() {
+    _elapsed += 300;
+    var keys = Object.keys(window._pushInFlight || {});
+    if (keys.length === 0 || _elapsed >= 8000) {
+      clearInterval(_poll);
+      // Minimum 1.2s display for UX training + network latency
+      var remaining = Math.max(0, 1200 - _elapsed);
+      setTimeout(_hideSubmitOverlay, remaining);
+    }
+  }, 300);
 }
 
 // ── Shared consult-claim creation ──────────────────────
@@ -418,6 +458,8 @@ function submitConsult() {
   showToast('Consult claims added for ' + p.last);
   closeClaimScreen();
 }
+// ── 08_daily.js ──
+// ═══════════════════════════════════════════════════════
 // ── 08_daily.js ──
 // ═══════════════════════════════════════════════════════
 // ── 08_daily.js ──

@@ -343,6 +343,22 @@ function ccuFeeForDate(p, dateStr) {
 // Backward-compat wrapper — TODAY band for patient p.
 function ccuFeeForToday(p) { return ccuFeeForDate(p, TODAY); }
 
+// v4.26: Normalize referring physician names to "Dr. Last, First" format.
+// The Physicians tab returns this format; the local hardcoded list sometimes
+// wrote "Last,First" (no "Dr.", no space after comma). This catches both
+// paths so exported data is consistent regardless of lookup source.
+function normalizeRefName(name) {
+  if (!name) return name;
+  var n = String(name).trim();
+  if (!n) return '';
+  // Already prefixed — just ensure space after comma
+  if (/^Dr[\.\s]/i.test(n)) return n.replace(/,(\S)/, ', $1');
+  // Looks like "Last,First" or "Last, First" — add "Dr. " prefix + ensure spacing
+  if (/^[A-Z][a-zA-Z' -]+,/.test(n)) return 'Dr. ' + n.replace(/,(\S)/, ', $1');
+  // Unknown format — return as-is (manual entry, etc.)
+  return n;
+}
+
 // ── Add Claim Helper ───────────────────────────────────
 function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, performingAlias, overrides) {
   // overrides: optional { icd, refby, refbyName } — per-claim diagnosis /
@@ -393,7 +409,7 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, 
     units:     units || 1,
     date:      date,
     refby:     (overrides.refby     != null && overrides.refby     !== '') ? overrides.refby     : (p.refby     || ''),
-    refbyName: (overrides.refbyName != null && overrides.refbyName !== '') ? overrides.refbyName : (p.refbyName || ''),
+    refbyName: normalizeRefName((overrides.refbyName != null && overrides.refbyName !== '') ? overrides.refbyName : (p.refbyName || '')),
     notes:     notes       || '',
     startTime: _start,
     endTime:   endTime || '',
@@ -404,16 +420,29 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, 
   // v4.21: CCU family comparison — treat CCU_DAILY/1411/1421/1431 as the
   // same fee for dedup purposes (a manual 1421 should not bypass an
   // existing CCU_DAILY on the same day).
+  // v4.26: CCU dedup is CROSS-PHYSICIAN — only one cardiologist may bill
+  // CCU care per patient per date, regardless of who submits. Other fee
+  // codes still dedup per-alias only.
   var _ccuFamily = ['CCU_DAILY','1411','1421','1431'];
   var _isCCU = _ccuFamily.indexOf(c.fee) !== -1;
+  var _dupClaim = null;
   var _dupCheck = st.claims.some(function(x) {
-    if (!samePhn(x.phn, c.phn) || x.date !== c.date || x.alias !== c.alias) return false;
+    if (!samePhn(x.phn, c.phn) || x.date !== c.date) return false;
     if (x.id === c.id) return false;
-    if (_isCCU) return _ccuFamily.indexOf(x.fee) !== -1;
+    if (_isCCU) {
+      // Cross-physician: skip alias check for CCU family
+      if (_ccuFamily.indexOf(x.fee) !== -1) { _dupClaim = x; return true; }
+      return false;
+    }
+    // Non-CCU: per-alias dedup only
+    if (x.alias !== c.alias) return false;
     return x.fee === c.fee;
   });
   if (_dupCheck) {
-    console.warn('Duplicate claim blocked:', c.fee, c.date, c.phn);
+    if (_isCCU && _dupClaim && _dupClaim.alias !== c.alias) {
+      showToast('Another physician (' + _dupClaim.alias + ') has already claimed CCU care for this date', true);
+    }
+    console.warn('Duplicate claim blocked:', c.fee, c.date, c.phn, _dupClaim ? 'existing alias=' + _dupClaim.alias : '');
     return c; // return without saving
   }
   st.claims.push(c);
@@ -500,3 +529,4 @@ function claimedTodayFee(p, feeTypes) {
   });
 }
 
+// ═══════════════════════════════════════════════════════

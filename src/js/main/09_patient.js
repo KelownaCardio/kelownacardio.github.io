@@ -519,6 +519,8 @@ function syncApRolePills()  { return locSyncRolePills('f'); }
 function syncApListPills()  { locSyncListPills('f'); locSyncRolePills('f'); }
 
 async function apSubmit(addToList, _skipDupCheck) {
+  // v4.26: Submit overlay — reuse the same guard and overlay as claimSubmitOnce
+  if (_submitGuard) return;
   window._apPendingAddToList = addToList;
   var last = (document.getElementById('f-last') || {}).value || '';
   var phn  = gv('f-phn');
@@ -753,6 +755,10 @@ async function apSubmit(addToList, _skipDupCheck) {
   st.patients.push(p);
   sv('patients', st.patients);
 
+  // v4.26: Show overlay — all validation passed, now doing network I/O
+  _submitGuard = true;
+  _showSubmitOverlay();
+
   if (SHEETS_URL) {
     var ok = await push('savePatient', p);
     if (!ok) {
@@ -761,6 +767,7 @@ async function apSubmit(addToList, _skipDupCheck) {
       showToast(window._lastPushError
         ? 'Not saved: ' + window._lastPushError
         : 'Could not save patient — check wifi and try again');
+      _hideSubmitOverlay();
       return;
     }
   }
@@ -807,6 +814,7 @@ async function apSubmit(addToList, _skipDupCheck) {
 
   var listLabel = addToList ? (p.list === 'on' ? 'On' : 'Off') + ' Service' : 'claim only';
   showToast(last + ' added — ' + listLabel);
+  _hideSubmitOverlay();
   clearAddForm();
   if (addToList) {
     nav(0, document.querySelectorAll('.nb')[0]);
