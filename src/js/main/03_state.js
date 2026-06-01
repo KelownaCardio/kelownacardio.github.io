@@ -44,12 +44,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v4.25-2026-05-31-dedup-guard-ce-pills-dob-close';
+var BUILD_ID    = 'v4.26-2026-06-01-submit-overlay';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v4.25';
-var APP_BUILT   = '2026-05-31';
+var APP_VERSION = 'v4.26';
+var APP_BUILT   = '2026-06-01';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -544,6 +544,35 @@ if (!window._pendingPush) window._pendingPush = {};
 // requests for the same ID raced past the server lock.
 if (!window._pushInFlight) window._pushInFlight = {};
 
+// ── Submit overlay — blocks UI during saveClaim round-trip ──
+// Reference-counted: a consult can fire 4 addClaim calls in sequence, each
+// calling push('saveClaim'). The overlay stays visible until every push
+// completes (success or failure). 15-second safety timeout prevents a hung
+// request from permanently locking the UI.
+var _submitOverlayN = 0;
+var _submitOverlayTimer = null;
+
+function showSubmitOverlay() {
+  _submitOverlayN++;
+  var el = document.getElementById('submit-overlay');
+  if (el) el.style.display = 'flex';
+  clearTimeout(_submitOverlayTimer);
+  _submitOverlayTimer = setTimeout(function() {
+    _submitOverlayN = 0;
+    var el2 = document.getElementById('submit-overlay');
+    if (el2) el2.style.display = 'none';
+  }, 15000);
+}
+
+function hideSubmitOverlay() {
+  _submitOverlayN = Math.max(0, _submitOverlayN - 1);
+  if (_submitOverlayN === 0) {
+    clearTimeout(_submitOverlayTimer);
+    var el = document.getElementById('submit-overlay');
+    if (el) el.style.display = 'none';
+  }
+}
+
 async function push(action, body) {
   if (!SHEETS_URL) return false;
   // Guard: never push a patient or claim with no id — prevents blank row creation
@@ -574,6 +603,10 @@ async function push(action, body) {
   if (action === 'savePatient' || action === 'saveClaim') {
     window._pendingPush[body.id] = { action: action, body: body, ts: Date.now() };
   }
+  // v4.26: Show submit overlay to block double-taps during saveClaim.
+  // Reference-counted so a multi-claim consult holds the overlay until all
+  // pushes complete.
+  if (action === 'saveClaim') showSubmitOverlay();
   setSyncState('syncing');
   try {
     var resp = await fetch(SHEETS_URL + '?action=' + action + '&key=' + SHARED_KEY, {
@@ -614,6 +647,11 @@ async function push(action, body) {
     window._lastPushError = e.message || String(e);
     setSyncState('error');
     return false;
+  } finally {
+    // v4.26: Hide submit overlay once this push completes, regardless of
+    // outcome. Reference-counted — only hides when the last concurrent
+    // saveClaim finishes (e.g. a consult fires 4 pushes; overlay stays
+    // up until the 4th one resolves).
+    if (action === 'saveClaim') hideSubmitOverlay();
   }
 }
-
