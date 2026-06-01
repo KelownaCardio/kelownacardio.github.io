@@ -402,6 +402,10 @@ function removePatient(pid) {
   var p = st.patients.find(function(p) { return p.id === pid; });
   if (!p) return;
   // Soft delete — keep for 21 days for "Recent patients" claims, then purge
+  // v4.26: Safety net — ensure dischargeDate is always set. disch78717() and
+  // dischSimple() call removePatient without setting dischargeDate first,
+  // which left the calendar span unbounded (gaps shown after discharge).
+  if (!p.dischargeDate) p.dischargeDate = TODAY;
   p.dischargedAt = Date.now();
   p.discharged   = true;
   sv('patients', st.patients);
@@ -430,3 +434,5 @@ function purgeOldPatients() {
   }
 }
 
+// ── 11_export.js ──
+// ═══════════════════════════════════════════════════════
