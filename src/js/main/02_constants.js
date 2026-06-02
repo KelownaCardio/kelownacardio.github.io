@@ -25,8 +25,16 @@ function calcDailyTotal() {
   st.claims.forEach(function(c) {
     if (c.alias !== st.doc.alias) return;
     if (c.date !== TODAY) return;
-    if (c.fee === 'CCU_DAILY') return; // excluded — shown consolidated at export
-    var rate = FEE_RATES[c.fee] || 0;
+    // v4.27: Resolve CCU_DAILY to actual band (1411/1421/1431) so the
+    // daily tally shows the real billing amount instead of $0.
+    var fee = c.fee;
+    var rate;
+    if (fee === 'CCU_DAILY') {
+      var resolved = ccuFeeForDate({phn: c.phn}, c.date);
+      rate = FEE_RATES[resolved] || 0;
+    } else {
+      rate = FEE_RATES[fee] || 0;
+    }
     total += rate * (c.units || 1);
     if (rate > 0) count++;
   });
@@ -53,21 +61,25 @@ function openDailyClaimsList() {
   var feeDesc = {};
   FEES.forEach(function(f) { feeDesc[f.code] = f.desc; });
   // CCU rollups not in FEES
-  feeDesc['CCU_DAILY'] = 'CCU daily (pre-rollup tap)';
-  feeDesc['1411']      = 'CCU critical care — Day 1';
-  feeDesc['1421']      = 'CCU critical care — Days 2-7';
-  feeDesc['1431']      = 'CCU critical care — Day 8+';
+  // CCU_DAILY resolved per-claim below — no static description needed
+  feeDesc['1411']      = 'CCU Day 1';
+  feeDesc['1421']      = 'CCU Daily (2-7)';
+  feeDesc['1431']      = 'CCU Daily (8+)';
 
   // Filter for today + this doctor
   var todays = (st.claims || []).filter(function(c) {
     return c.alias === st.doc.alias && c.date === TODAY;
   });
 
-  // Sort: by last name, then by start time
+  // v4.27: Sort oldest-first — by start time if available, then entry order.
+  // Claims with times sort chronologically; claims without sort by when entered.
   todays.sort(function(a, b) {
-    var ln = String(a.last || '').localeCompare(String(b.last || ''));
-    if (ln !== 0) return ln;
-    return String(a.startTime || '').localeCompare(String(b.startTime || ''));
+    var tA = a.startTime || '';
+    var tB = b.startTime || '';
+    if (tA && tB) return tA.localeCompare(tB);
+    if (tA) return -1;
+    if (tB) return 1;
+    return (a.createdAt || 0) - (b.createdAt || 0);
   });
 
   var titleEl = document.getElementById('daily-claims-title');
@@ -81,11 +93,17 @@ function openDailyClaimsList() {
     return;
   }
 
-  // Total $ for the visible claims (excluding CCU_DAILY which rolls up)
+  // v4.27: Total includes CCU at resolved band rates
   var total = 0;
   todays.forEach(function(c) {
-    if (c.fee === 'CCU_DAILY') return;
-    var rate = FEE_RATES[c.fee] || 0;
+    var fee = c.fee;
+    var rate;
+    if (fee === 'CCU_DAILY') {
+      var resolved = ccuFeeForDate({phn: c.phn}, c.date);
+      rate = FEE_RATES[resolved] || 0;
+    } else {
+      rate = FEE_RATES[fee] || 0;
+    }
     total += rate * (c.units || 1);
   });
 
@@ -98,11 +116,12 @@ function openDailyClaimsList() {
       var last  = String(c.last  || '?');
       var first = String(c.first || '?');
       var fee   = String(c.fee   || '');
-      var desc  = feeDesc[fee] || fee;
-      var rate  = FEE_RATES[fee] || 0;
+      // v4.27: Resolve CCU_DAILY to actual band for display
+      var resolvedFee = (fee === 'CCU_DAILY') ? ccuFeeForDate({phn: c.phn}, c.date) : fee;
+      var desc  = feeDesc[resolvedFee] || feeDesc[fee] || fee;
+      var rate  = FEE_RATES[resolvedFee] || 0;
       var amt   = (rate * (c.units || 1));
       var time  = c.startTime ? String(c.startTime) : '';
-      var isCCUTap = fee === 'CCU_DAILY';
       return '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:8px 4px;border-bottom:.5px solid var(--border)">' +
         '<div style="flex:1;min-width:0">' +
           '<div style="font-size:13px;font-weight:600;color:var(--text)">' +
@@ -111,7 +130,7 @@ function openDailyClaimsList() {
           '<div style="font-size:11px;color:var(--text2);margin-top:2px">' +
             esc(desc) +
             (time ? ' &middot; ' + esc(time) : '') +
-            (isCCUTap ? ' <span style="color:var(--amber-t)">(rolls up at export)</span>' : '') +
+
           '</div>' +
         '</div>' +
         '<div style="font-size:12px;font-weight:700;color:' + (amt > 0 ? 'var(--green)' : 'var(--text3)') + ';flex-shrink:0">' +
