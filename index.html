@@ -50,7 +50,7 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 .hdr-sub { font-size:10px; color:var(--text2); margin-top:1px; }
 .doc-chip { display:flex; align-items:center; gap:5px; padding:5px 10px; border:.5px solid var(--border2); border-radius:var(--rpill); cursor:pointer; font-size:11px; font-weight:600; background:var(--surface); }
 .logout-btn { display:flex; align-items:center; justify-content:center; width:30px; height:30px; border:.5px solid var(--border2); border-radius:50%; cursor:pointer; background:var(--surface); color:var(--text3); transition:color .15s,border-color .15s; }
-.logout-btn:active { color:var(--red-t); border-color:var(--red-t); background:var(--red-bg); }
+.logout-btn:active { color:var(--blue-t); border-color:var(--blue-t); background:var(--blue-bg); }
 .doc-dot { width:7px; height:7px; border-radius:50%; background:var(--text3); flex-shrink:0; transition:background .3s; }
 .doc-dot.on { background:var(--green); }
 .sync-dot { width:6px; height:6px; border-radius:50%; background:var(--text3); display:inline-block; margin-left:4px; vertical-align:middle; transition:background .3s; }
@@ -677,9 +677,8 @@ input[type=file] { display:none; }
     </div>
     <div class="logout-btn" id="logout-btn" onclick="logoutAndRefresh()" title="Sync &amp; refresh">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-        <polyline points="16 17 21 12 16 7"/>
-        <line x1="21" y1="12" x2="9" y2="12"/>
+        <polyline points="23 4 23 10 17 10"/>
+        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
       </svg>
     </div>
   </div>
