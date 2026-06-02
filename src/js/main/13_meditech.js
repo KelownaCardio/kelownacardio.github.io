@@ -1,5 +1,3 @@
-// ── 13_meditech.js ──
-// ═══════════════════════════════════════════════════════
 // 13_meditech.js — Meditech rounds list bulk photo import
 // ═══════════════════════════════════════════════════════
 
@@ -160,9 +158,47 @@ function handleMediteachPhoto(inp) {
 
 async function extractMediteachAI(dataUrl) {
   var status = document.getElementById('mit-status');
+
+  var MEDITECH_PROMPT =
+    'Meditech rounds list from Kelowna General Hospital (KGH). Extract EVERY patient row visible.\n\n' +
+    'Return a JSON array. Each object must have exactly these fields:\n' +
+    '  last, first, sex, age, locationCode, roomBed, reason, attending, los\n\n' +
+    'locationCode = top line of first column e.g. "KELKGHSCCU", "KELKGHS2W", "KELKGHS2S", "KELKGHS3E"\n' +
+    'roomBed      = second line of first column e.g. "KGHS2502-A", "KGHS0201-A", "KGHS0225-B"\n' +
+    'first        = use preferred name in brackets if shown e.g. "(Steve)" \u2192 "Steve"\n' +
+    'reason       = full text, do not truncate\n\n' +
+    'KGH reference:\n' +
+    '  CCU  = KELKGHSCCU, rooms KGHS2502-A (2502 = Bed 2, 2506 = Bed 6 etc.)\n' +
+    '  2W   = KELKGHS2W,  rooms KGHS0201-A to KGHS0213-A\n' +
+    '  2S   = KELKGHS2S,  rooms KGHS0217-A to KGHS0234-B (225 and 226 have A and B)\n' +
+    '  CSICU= KELKGHICSI, rooms KGHI2607-A (2607 = Bed 7 etc.)\n' +
+    '  Other location codes = off-service ward\n\n' +
+    'Return ONLY a JSON array, no markdown, no explanation.';
+
+  var b64 = dataUrl.split(',')[1];
+  var mt  = dataUrl.split(';')[0].split(':')[1];
+  var steps = [];
+
+  // Tier 1: Apps Script key fetch → Anthropic (shared helper from 09_patient)
   try {
-    var b64 = dataUrl.split(',')[1];
-    var mt  = dataUrl.split(';')[0].split(':')[1];
+    status.textContent = 'Reading list (Apps Script)…';
+    steps.push('Apps Script');
+    var result = await _runAppsScriptOCR(b64, mt, MEDITECH_PROMPT, 2000);
+    // _runAppsScriptOCR returns parsed JSON — for Meditech it should be an array
+    var parsed = Array.isArray(result) ? result : [result];
+    steps[steps.length - 1] += ': \u2713';
+    status.textContent = steps.join(' \u2192 ');
+    renderMediteachPreview(parsed);
+    return;
+  } catch(e1) {
+    steps[steps.length - 1] += ': ' + _shortErr(e1);
+    console.warn('[OCR Meditech] Apps Script failed:', e1.message, '\u2014 trying direct');
+  }
+
+  // Tier 2: Direct Anthropic call (uses ANTHROPIC_KEY from external script)
+  try {
+    steps.push('Direct API');
+    status.textContent = steps.join(' \u2192 ') + '…';
     var resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
@@ -171,22 +207,7 @@ async function extractMediteachAI(dataUrl) {
         max_tokens: 2000,
         messages: [{ role:'user', content: [
           { type:'image', source:{ type:'base64', media_type:mt, data:b64 } },
-          { type:'text', text:
-            'Meditech rounds list from Kelowna General Hospital (KGH). Extract EVERY patient row visible.\n\n' +
-            'Return a JSON array. Each object must have exactly these fields:\n' +
-            '  last, first, sex, age, locationCode, roomBed, reason, attending, los\n\n' +
-            'locationCode = top line of first column e.g. "KELKGHSCCU", "KELKGHS2W", "KELKGHS2S", "KELKGHS3E"\n' +
-            'roomBed      = second line of first column e.g. "KGHS2502-A", "KGHS0201-A", "KGHS0225-B"\n' +
-            'first        = use preferred name in brackets if shown e.g. "(Steve)" → "Steve"\n' +
-            'reason       = full text, do not truncate\n\n' +
-            'KGH reference:\n' +
-            '  CCU  = KELKGHSCCU, rooms KGHS2502-A (2502 = Bed 2, 2506 = Bed 6 etc.)\n' +
-            '  2W   = KELKGHS2W,  rooms KGHS0201-A to KGHS0213-A\n' +
-            '  2S   = KELKGHS2S,  rooms KGHS0217-A to KGHS0234-B (225 and 226 have A and B)\n' +
-            '  CSICU= KELKGHICSI, rooms KGHI2607-A (2607 = Bed 7 etc.)\n' +
-            '  Other location codes = off-service ward\n\n' +
-            'Return ONLY a JSON array, no markdown, no explanation.'
-          }
+          { type:'text', text: MEDITECH_PROMPT }
         ]}]
       })
     });
@@ -194,10 +215,13 @@ async function extractMediteachAI(dataUrl) {
     var text = data.content.filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
     var parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
     if (!Array.isArray(parsed)) parsed = [parsed];
+    steps[steps.length - 1] += ': \u2713';
+    status.textContent = steps.join(' \u2192 ');
     renderMediteachPreview(parsed);
-  } catch(e) {
+  } catch(e2) {
+    steps[steps.length - 1] += ': ' + _shortErr(e2);
     status.className  = 'ocr-bar ocr-warn';
-    status.textContent = 'Could not read list — try a clearer photo, or add patients manually.';
+    status.textContent = steps.join(' \u2192 ') + ' \u2014 Could not read list. Try a clearer photo, or add patients manually.';
   }
 }
 

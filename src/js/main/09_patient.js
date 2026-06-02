@@ -1060,107 +1060,218 @@ function processStickerOCR(croppedDataUrl, bar) {
     ctx.drawImage(img, 0, 0, w, h);
     var jpegDataUrl = canvas.toDataURL('image/jpeg', 0.88);
     var b64 = jpegDataUrl.split(',')[1];
+    // Cache for retry button — allows re-attempt without re-photographing.
+    window._lastOCRPayload = { b64: b64, mediaType: 'image/jpeg' };
     setTimeout(function() { sendToOCR(b64, 'image/jpeg', bar); }, 0);
   };
   img.src = croppedDataUrl;
 }
 
 // ── OCR routing ────────────────────────────────────────────────────
-// Priority (cascades on failure, in this order):
-//   1. Apps Script → Anthropic  (works on hospital WiFi — no Cloudflare needed)
-//   2. Cloudflare Worker        (works off hospital WiFi)
-//   3. Tesseract / ML Kit       (last resort, offline)
+// v4.28: Redesigned cascade with visible diagnostics, auto-retry,
+// and empty-extraction detection.
 //
-// Apps Script (Tier 1) is attempted on EVERY scan — there is no sticky
-// demotion for it. A transient blip on one scan no longer disables the
-// preferred path for the rest of the session. To keep that retry cheap,
-// sendToAppsScriptOCR bounds each step with a short timeout (see below).
-// _appsScriptOCRReachable is now only a status flag (last attempt
-// ok/failed) for the debug panel — it is not consulted for routing.
+// Priority (cascades on failure, with one retry per cloud tier):
+//   1. Apps Script → Anthropic  (hospital WiFi)
+//   2. Cloudflare Worker        (cellular / off-site)
+//   3. Offline OCR (Tesseract / ML Kit)  (on-device fallback)
+//   4. RED STOP — "OCR unavailable — tap ↻ to retry"
 //
-// _cloudOCRReachable retains its session-cache behaviour inside
-// sendToCloudflareOCR (Tier 2 unchanged).
+// Each cloud tier is tried twice (most blips resolve in 2-5s). Tier 3
+// (offline) runs once. Only after all three fail does the retry button
+// appear.
+//
+// The status bar shows a live diagnostic trail:
+//   "Apps Script: timeout → Apps Script retry: ✓"
+// so the user (and Kathryn debugging) can see exactly what happened.
+//
+// handleOCRResult also detects empty extractions (last+first+phn all
+// blank) — shows amber "Could not read sticker" with retry button
+// instead of the misleading green "✓ Extracted: ?, ?".
 
-function sendToOCR(b64, mediaType, bar) {
-  if (bar) bar.textContent = 'Extracting (' + Math.round(b64.length / 1024) + ' KB)…';
+var STICKER_PROMPT =
+  'Hospital patient sticker or Meditech chart header from Kelowna ' +
+  'General Hospital (KGH). Extract the printed fields ONLY — ignore ' +
+  'any handwriting.\n\n' +
+  'Return a single JSON object with exactly these fields:\n' +
+  '  last, first, phn, dob, sex, mrp, admitDate, locationCode, roomBed\n\n' +
+  'Rules:\n' +
+  '  last / first  — from "Last,First" name line\n' +
+  '  phn           — the HCN number (10 digits after "HCN")\n' +
+  '  dob           — date after "DOB", format DD Mon YYYY e.g. "26 Oct 1958"\n' +
+  '  sex           — M or F (from "L:M" or "L:F" field, or "Sex: M/F")\n' +
+  '  mrp           — text after "MRP" e.g. "CardiologyMRP,KGH Kelowna"\n' +
+  '  admitDate     — date after "ADM", same format as dob\n' +
+  '  locationCode  — ward / unit on the admission line, e.g. "KELKGHS2S",\n' +
+  '                  "KELKGHICSI", or worded forms like\n' +
+  '                  "KGH Emergency Department". Blank if not shown.\n' +
+  '  roomBed       — room-bed token beside it, e.g. "KGHS0221-A",\n' +
+  '                  "KGHI2607-A", "KGH-Main-7". Blank if not shown.\n\n' +
+  'On a Meditech chart header the location is one line, e.g.\n' +
+  '  "ADM ACIN, KELKGHS2S  KGHS0221 -A"\n' +
+  '  → locationCode "KELKGHS2S", roomBed "KGHS0221-A".\n' +
+  'Return ONLY valid JSON, no markdown, no explanation.';
 
-  if (typeof window._cloudOCRReachable === 'undefined') window._cloudOCRReachable = null;
+var KEY_FETCH_TIMEOUT_MS = 5000;
+var VISION_TIMEOUT_MS    = 15000;
+var CLOUD_TIMEOUT_MS     = 10000;
 
-  // Always start at Tier 1. On failure it cascades internally:
-  // Apps Script → Cloudflare → offline.
-  sendToAppsScriptOCR(b64, mediaType, bar);
+// Shared AbortController-based fetch timeout (used by both sticker and
+// Meditech OCR paths).
+function fetchWithTimeout(url, opts, ms, label) {
+  var ctrl  = new AbortController();
+  var timer = setTimeout(function() { ctrl.abort(); }, ms);
+  var o = opts || {};
+  o.signal = ctrl.signal;
+  return fetch(url, o).then(function(r) {
+    clearTimeout(timer);
+    return r;
+  }, function(err) {
+    clearTimeout(timer);
+    if (err && err.name === 'AbortError') {
+      throw new Error((label || 'request') + ' timed out after ' + ms + 'ms');
+    }
+    throw err;
+  });
 }
 
-// Tier 1: fetch API key from Apps Script, then call Anthropic directly.
-// Same network path as import.html — works on hospital WiFi.
-function sendToAppsScriptOCR(b64, mediaType, bar) {
-  if (bar) bar.textContent = 'Extracting (via Apps Script)…';
+// ── Status trail helper ──────────────────────────────────────────
+// Builds a one-line diagnostic: "Apps Script: timeout 5s → Cloud: ok ✓"
+function _ocrTrail(steps) {
+  return steps.map(function(s) { return s; }).join(' \u2192 ');
+}
+function _updateOCRBar(bar, steps, extra) {
+  if (!bar) return;
+  bar.style.display = 'block';
+  bar.className = 'ocr-bar ocr-ok';
+  bar.textContent = _ocrTrail(steps) + (extra ? ' ' + extra : '');
+}
+// ── OCR diagnostic logging ──────────────────────────────────────
+// Fires on EVERY OCR completion — success, empty, error, or exhausted.
+// Two destinations:
+//   1. window._ocrLog (in-memory, last 20) — viewable from console
+//   2. push('logOCRDiagnostic', ...) — persistent to sheet
+//      (silently no-ops until the backend route is added to Router.gs)
+//
+// No PII in the log: field presence is boolean (had_last: true), not values.
+if (!window._ocrLog) window._ocrLog = [];
 
-  var STICKER_PROMPT =
-    'Hospital patient sticker or Meditech chart header from Kelowna ' +
-    'General Hospital (KGH). Extract the printed fields ONLY — ignore ' +
-    'any handwriting.\n\n' +
-    'Return a single JSON object with exactly these fields:\n' +
-    '  last, first, phn, dob, sex, mrp, admitDate, locationCode, roomBed\n\n' +
-    'Rules:\n' +
-    '  last / first  — from "Last,First" name line\n' +
-    '  phn           — the HCN number (10 digits after "HCN")\n' +
-    '  dob           — date after "DOB", format DD Mon YYYY e.g. "26 Oct 1958"\n' +
-    '  sex           — M or F (from "L:M" or "L:F" field, or "Sex: M/F")\n' +
-    '  mrp           — text after "MRP" e.g. "CardiologyMRP,KGH Kelowna"\n' +
-    '  admitDate     — date after "ADM", same format as dob\n' +
-    '  locationCode  — ward / unit on the admission line, e.g. "KELKGHS2S",\n' +
-    '                  "KELKGHICSI", or worded forms like\n' +
-    '                  "KGH Emergency Department". Blank if not shown.\n' +
-    '  roomBed       — room-bed token beside it, e.g. "KGHS0221-A",\n' +
-    '                  "KGHI2607-A", "KGH-Main-7". Blank if not shown.\n\n' +
-    'On a Meditech chart header the location is one line, e.g.\n' +
-    '  "ADM ACIN, KELKGHS2S  KGHS0221 -A"\n' +
-    '  → locationCode "KELKGHS2S", roomBed "KGHS0221-A".\n' +
-    'Return ONLY valid JSON, no markdown, no explanation.';
+function _logOCR(outcome, steps, engine, fields) {
+  var entry = {
+    ts:         new Date().toISOString(),
+    outcome:    outcome,        // 'success' | 'empty' | 'error' | 'exhausted'
+    trail:      steps ? _ocrTrail(steps) : '',
+    engine:     engine || '',
+    had_last:   !!(fields && fields.last),
+    had_first:  !!(fields && fields.first),
+    had_phn:    !!(fields && fields.phn),
+    had_dob:    !!(fields && fields.dob),
+    online:     navigator.onLine,
+    connection: (navigator.connection || {}).effectiveType || '',
+    doctor:     (typeof st !== 'undefined' && st.doc) ? st.doc : ''
+  };
 
-  // Per-step timeouts. The Apps Script key fetch is bounded tight — if the
-  // network is bad it bails fast to Cloudflare. The Vision call gets a
-  // generous limit because a healthy scan legitimately takes several seconds.
-  var KEY_FETCH_TIMEOUT_MS = 5000;
-  var VISION_TIMEOUT_MS    = 15000;
+  // In-memory ring buffer (last 20)
+  window._ocrLog.push(entry);
+  if (window._ocrLog.length > 20) window._ocrLog.shift();
 
-  // fetch() has no native timeout — bound each call with an AbortController.
-  function fetchWithTimeout(url, opts, ms, label) {
-    var ctrl  = new AbortController();
-    var timer = setTimeout(function() { ctrl.abort(); }, ms);
-    var o = opts || {};
-    o.signal = ctrl.signal;
-    return fetch(url, o).then(function(r) {
-      clearTimeout(timer);
-      return r;
-    }, function(err) {
-      clearTimeout(timer);
-      if (err && err.name === 'AbortError') {
-        throw new Error((label || 'request') + ' timed out after ' + ms + 'ms');
-      }
-      throw err;
-    });
+  // Console — always log for bedside debugging
+  var style = outcome === 'success' ? 'color:green' : 'color:red;font-weight:bold';
+  console.log('%c[OCR ' + outcome + '] ' + entry.trail +
+    (engine ? ' (' + engine + ')' : '') +
+    (entry.online ? '' : ' [OFFLINE]'),
+    style);
+
+  // Persistent to sheet — fire-and-forget. If the route doesn't exist
+  // yet, push() returns {ok:false} which we ignore.
+  if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL) {
+    try { push('logOCRDiagnostic', entry); } catch(e) {}
   }
+}
 
-  // Step 1: get API key from Apps Script (short timeout)
-  fetchWithTimeout(
+function _showOCRRetry(bar, steps) {
+  _logOCR('exhausted', steps, '', {});
+  if (!bar) return;
+  bar.style.display = 'block';
+  bar.className = 'ocr-bar ocr-warn';
+  bar.innerHTML = _ocrTrail(steps) +
+    ' &mdash; <b>OCR unavailable</b> ' +
+    '<button onclick="ocrRetry()" style="' +
+    'background:var(--blue);color:#fff;border:none;border-radius:12px;' +
+    'padding:2px 10px;font-size:11px;margin-left:6px;cursor:pointer' +
+    '">↻ Retry</button>';
+}
+
+// Global retry — re-sends the cached image through the full cascade.
+function ocrRetry() {
+  var p = window._lastOCRPayload;
+  if (!p || !p.b64) {
+    showToast('No image to retry — take a new photo', 'error');
+    return;
+  }
+  var bar = document.getElementById('ocr-bar');
+  sendToOCR(p.b64, p.mediaType, bar);
+}
+
+// ── Entry point ──────────────────────────────────────────────────
+function sendToOCR(b64, mediaType, bar) {
+  if (bar) { bar.style.display = 'block'; bar.className = 'ocr-bar ocr-ok'; }
+  var steps = [];
+  window._ocrSteps = steps;  // Expose trail for handleOCRResult logging
+  if (typeof window._cloudOCRReachable === 'undefined') window._cloudOCRReachable = null;
+
+  // Tier 1: Apps Script (attempt 1)
+  _updateOCRBar(bar, ['Apps Script…']);
+  _tryAppsScript(b64, mediaType, bar, steps, 1);
+}
+
+// ── Tier 1: Apps Script → Anthropic ─────────────────────────────
+function _tryAppsScript(b64, mediaType, bar, steps, attempt) {
+  var label = 'Apps Script' + (attempt > 1 ? ' retry' : '');
+  _updateOCRBar(bar, steps.concat([label + '…']));
+
+  _runAppsScriptOCR(b64, mediaType, STICKER_PROMPT, 500)
+    .then(function(p) {
+      p._engine = 'apps-script';
+      window._appsScriptOCRReachable = true;
+      steps.push(label + ': \u2713');
+      _updateOCRBar(bar, steps);
+      handleOCRResult(p, bar);
+    })
+    .catch(function(err) {
+      var reason = _shortErr(err);
+      steps.push(label + ': ' + reason);
+      console.warn('[OCR] ' + label + ' failed:', err.message);
+      window._appsScriptOCRReachable = false;
+
+      if (attempt < 2) {
+        // Auto-retry Tier 1 once
+        _tryAppsScript(b64, mediaType, bar, steps, 2);
+      } else {
+        // Fall to Tier 2
+        _tryCloudflare(b64, mediaType, bar, steps, 1);
+      }
+    });
+}
+
+// Reusable: Apps Script key fetch → Anthropic Vision call.
+// Returns a Promise that resolves to the parsed JSON patient object.
+// Used by both sticker OCR and Meditech OCR.
+function _runAppsScriptOCR(b64, mediaType, prompt, maxTokens) {
+  return fetchWithTimeout(
     SHEETS_URL + '?action=getAnthropicKey&key=' + SHARED_KEY,
     { redirect: 'follow' },
     KEY_FETCH_TIMEOUT_MS,
     'Apps Script key fetch'
   )
     .then(function(r) {
-      if (!r.ok) throw new Error('Apps Script key fetch: HTTP ' + r.status);
+      if (!r.ok) throw new Error('key fetch HTTP ' + r.status);
       return r.json();
     })
     .then(function(j) {
-      if (!j.ok) throw new Error(j.error || 'No API key returned');
+      if (!j.ok) throw new Error(j.error || 'No API key');
       var apiKey = j.key || '';
-      if (!apiKey) throw new Error('No API key returned');
-
-      // Step 2: call Anthropic directly (generous timeout — Vision is
-      // legitimately slow; a healthy scan can take several seconds).
+      if (!apiKey) throw new Error('No API key');
       return fetchWithTimeout('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -1171,13 +1282,13 @@ function sendToAppsScriptOCR(b64, mediaType, bar) {
         },
         body: JSON.stringify({
           model: 'claude-sonnet-4-5-20250929',
-          max_tokens: 500,
+          max_tokens: maxTokens || 500,
           messages: [{ role: 'user', content: [
             { type: 'image', source: { type: 'base64', media_type: mediaType, data: b64 } },
-            { type: 'text', text: STICKER_PROMPT }
+            { type: 'text', text: prompt }
           ]}]
         })
-      }, VISION_TIMEOUT_MS, 'Anthropic Vision call');
+      }, VISION_TIMEOUT_MS, 'Vision call');
     })
     .then(function(r) {
       if (!r.ok) throw new Error('Anthropic HTTP ' + r.status);
@@ -1186,71 +1297,98 @@ function sendToAppsScriptOCR(b64, mediaType, bar) {
     .then(function(j) {
       var raw = (j.content || []).map(function(c) { return c.text || ''; }).join('');
       var clean = raw.replace(/```json|```/g, '').trim();
-      var p = JSON.parse(clean);
-      p._engine = 'apps-script';
-      window._appsScriptOCRReachable = true;
-      handleOCRResult(p, bar);
-    })
-    .catch(function(err) {
-      console.warn('[OCR] Apps Script path failed:', err.message, '— trying Cloudflare');
-      window._appsScriptOCRReachable = false;
-      if (bar) bar.textContent = 'Extracting (cloud fallback)…';
-      sendToCloudflareOCR(b64, mediaType, bar);
+      return JSON.parse(clean);
     });
 }
 
-// Tier 2: Cloudflare Worker (original path — works off hospital WiFi).
-function sendToCloudflareOCR(b64, mediaType, bar) {
-  if (bar) bar.textContent = 'Extracting (cloud)…';
+// ── Tier 2: Cloudflare Worker ───────────────────────────────────
+function _tryCloudflare(b64, mediaType, bar, steps, attempt) {
+  var label = 'Cloud' + (attempt > 1 ? ' retry' : '');
+  _updateOCRBar(bar, steps.concat([label + '…']));
 
-  var xhr = new XMLHttpRequest();
-  xhr.open('POST', OCR_WORKER_URL, true);
-  xhr.setRequestHeader('Content-Type', 'application/json');
-  xhr.timeout = 10000;
+  _runCloudflareOCR(b64, mediaType)
+    .then(function(data) {
+      window._cloudOCRReachable = true;
+      if (data) data._engine = 'cloud';
+      steps.push(label + ': \u2713');
+      _updateOCRBar(bar, steps);
+      handleOCRResult(data, bar);
+    })
+    .catch(function(err) {
+      var reason = _shortErr(err);
+      steps.push(label + ': ' + reason);
+      console.warn('[OCR] ' + label + ' failed:', err.message);
+      window._cloudOCRReachable = false;
 
-  var fellBack = false;
-  function fallback(reason) {
-    if (fellBack) return;
-    fellBack = true;
-    window._cloudOCRReachable = false;
-    if (bar) bar.textContent = 'Extracting (offline)…';
-    runOfflineOCR(b64, mediaType, bar);
-  }
-
-  xhr.onload = function() {
-    if (xhr.status < 200 || xhr.status >= 300) { fallback('http ' + xhr.status); return; }
-    var data;
-    try { data = JSON.parse(xhr.responseText); }
-    catch (e) { fallback('bad json'); return; }
-    if (data && data.error) { fallback('worker error'); return; }
-    window._cloudOCRReachable = true;
-    if (data) data._engine = 'cloud';
-    handleOCRResult(data, bar);
-  };
-  xhr.onerror   = function() { fallback('network'); };
-  xhr.ontimeout = function() { fallback('timeout'); };
-  xhr.send(JSON.stringify({ image: b64, mediaType: mediaType }));
+      if (attempt < 2) {
+        // Auto-retry Tier 2 once
+        _tryCloudflare(b64, mediaType, bar, steps, 2);
+      } else {
+        // Both cloud tiers exhausted — try offline OCR (Tesseract/ML Kit).
+        _tryOffline(b64, mediaType, bar, steps);
+      }
+    });
 }
 
-// Run the offline OCR engine (Tesseract.js on iOS, ML Kit on Android).
-// Result shape matches the Cloudflare worker output, so handleOCRResult
-// consumes it unchanged.
-function runOfflineOCR(b64, mediaType, bar) {
+// Returns a Promise wrapping the XHR to the Cloudflare worker.
+function _runCloudflareOCR(b64, mediaType) {
+  return new Promise(function(resolve, reject) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', OCR_WORKER_URL, true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.timeout = CLOUD_TIMEOUT_MS;
+
+    xhr.onload = function() {
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error('HTTP ' + xhr.status)); return;
+      }
+      var data;
+      try { data = JSON.parse(xhr.responseText); }
+      catch (e) { reject(new Error('bad JSON')); return; }
+      if (data && data.error) { reject(new Error('worker: ' + data.error)); return; }
+      resolve(data);
+    };
+    xhr.onerror   = function() { reject(new Error('network error')); };
+    xhr.ontimeout = function() { reject(new Error('timeout ' + CLOUD_TIMEOUT_MS + 'ms')); };
+    xhr.send(JSON.stringify({ image: b64, mediaType: mediaType }));
+  });
+}
+
+// ── Tier 3: Offline OCR (Tesseract / ML Kit) ────────────────────
+// Full on-device parser with multi-pass preprocessing, PHN checksum
+// rescue, DOB correction, and learned-correction support. Falls here
+// only after both cloud tiers are exhausted. If the offline module
+// isn't loaded, shows retry button instead.
+function _tryOffline(b64, mediaType, bar, steps) {
   if (!window.OCROffline) {
-    if (bar) {
-      bar.className = 'ocr-bar ocr-warn';
-      bar.textContent = 'Offline OCR module not loaded — refresh the page';
-    }
+    steps.push('Offline: not loaded');
+    _showOCRRetry(bar, steps);
     return;
   }
+  steps.push('Offline');
+  _updateOCRBar(bar, steps.concat(['…']));
+
   window.OCROffline.run(b64, mediaType).then(function(data) {
+    if (data) data._engine = data._engine || 'tesseract';
+    steps[steps.length - 1] = 'Offline: \u2713';
+    _updateOCRBar(bar, steps);
     handleOCRResult(data, bar);
   }).catch(function(err) {
-    if (bar) {
-      bar.className = 'ocr-bar ocr-warn';
-      bar.textContent = 'Offline OCR failed: ' + (err && err.message || err);
-    }
+    steps[steps.length - 1] = 'Offline: ' + _shortErr(err);
+    // All three tiers failed. Show retry button.
+    _showOCRRetry(bar, steps);
   });
+}
+
+// Shorten an error message for the status trail (keep it terse).
+function _shortErr(err) {
+  var m = (err && err.message) || String(err);
+  if (m.indexOf('timed out') !== -1) return 'timeout';
+  if (m.indexOf('network') !== -1)   return 'network';
+  if (m.indexOf('HTTP 4') !== -1)    return m.replace(/.*HTTP /, 'HTTP ');
+  if (m.indexOf('HTTP 5') !== -1)    return m.replace(/.*HTTP /, 'HTTP ');
+  if (m.length > 20) return m.slice(0, 20) + '…';
+  return m;
 }
 
 // ── Crop modal ─────────────────────────────────────────
@@ -1445,6 +1583,7 @@ function cropUse() {
 // Worker returns the parsed patient JSON directly — no Apps Script roundtrip.
 function handleOCRResult(data, bar) {
   if (!data || data.error) {
+    _logOCR('error', window._ocrSteps || [], (data && data._engine) || '', {});
     if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'OCR: ' + ((data && data.error) || 'unknown error'); }
     return;
   }
@@ -1454,9 +1593,15 @@ function handleOCRResult(data, bar) {
   var p = data;
   if (typeof data.text === 'string') {
     var match = data.text.match(/\{[\s\S]*\}/);
-    if (!match) { if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'No data in response'; } return; }
+    if (!match) {
+      _logOCR('error', window._ocrSteps || [], '', {});
+      if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'No data in response'; } return;
+    }
     try { p = JSON.parse(match[0]); }
-    catch (e) { if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'Bad JSON in response'; } return; }
+    catch (e) {
+      _logOCR('error', window._ocrSteps || [], '', {});
+      if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'Bad JSON in response'; } return;
+    }
   }
 
   // Meditech chart headers carry a location line ("ADM …, <unit> <room-bed>")
@@ -1550,13 +1695,30 @@ function handleOCRResult(data, bar) {
     capturedAt: Date.now()
   };
   if (bar) {
-    bar.className = 'ocr-bar ocr-ok';
-    var engineTag = '';
-    if (p._engine === 'cloud')          engineTag = '☁️ ';
-    else if (p._engine === 'apps-script') engineTag = '🏥 ';
-    else if (p._engine === 'tesseract') engineTag = '📱 ';
-    else if (p._engine === 'mlkit')     engineTag = '📱 ';
-    bar.textContent = engineTag + '✓ Extracted: ' + (p.last||'?') + ', ' + (p.first||'?') + (p.phn ? ' · ' + p.phn : '');
+    // v4.28: Detect empty extraction — OCR succeeded (valid response) but
+    // found nothing useful. Show amber bar with retry instead of the
+    // misleading green "✓ Extracted: ?, ?".
+    var _gotSomething = !!(p.last || p.first || p.phn);
+    var _ocrFields = { last: p.last, first: p.first, phn: p.phn, dob: p.dob };
+    if (!_gotSomething) {
+      _logOCR('empty', window._ocrSteps || [], p._engine || '', _ocrFields);
+      bar.className = 'ocr-bar ocr-warn';
+      var engineTag2 = p._engine ? (p._engine + ': ') : '';
+      bar.innerHTML = engineTag2 + 'Could not read sticker \u2014 fields empty ' +
+        '<button onclick="ocrRetry()" style="' +
+        'background:var(--blue);color:#fff;border:none;border-radius:12px;' +
+        'padding:2px 10px;font-size:11px;margin-left:6px;cursor:pointer' +
+        '">\u21BB Retry</button>';
+    } else {
+      _logOCR('success', window._ocrSteps || [], p._engine || '', _ocrFields);
+      bar.className = 'ocr-bar ocr-ok';
+      var engineTag = '';
+      if (p._engine === 'cloud')          engineTag = '\u2601\uFE0F ';
+      else if (p._engine === 'apps-script') engineTag = '\uD83C\uDFE5 ';
+      else if (p._engine === 'tesseract') engineTag = '\uD83D\uDCF1 ';
+      else if (p._engine === 'mlkit')     engineTag = '\uD83D\uDCF1 ';
+      bar.textContent = engineTag + '\u2713 Extracted: ' + p.last + ', ' + p.first + (p.phn ? ' \u00B7 ' + p.phn : '');
+    }
   }
 
   // ── Existing-patient fast-path ──────────────────────────────────
@@ -1720,4 +1882,3 @@ function buildOCRCorrections(savedPatient) {
 
 
 
-// ═══════════════════════════════════════════════════════
