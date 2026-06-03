@@ -366,23 +366,16 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, 
   // patient record. When absent, the claim inherits the patient's values.
   overrides = overrides || {};
 
-  // v4.21: Force CCU codes through the CCU_DAILY placeholder. Users must
-  // never manually write 1411/1421/1431 — the export consolidation assigns
-  // the correct band based on consecutive episode days. Without this,
-  // manual 1421 entries bypass consolidation and cause double-billing or
-  // wrong day numbering.
-  if (fee === '1411' || fee === '1421' || fee === '1431') {
-    fee     = 'CCU_DAILY';
-    feeCode = 'CCU_DAILY';
+  // v4.29: Calculate the correct CCU band at creation time using
+  // cross-provider episode logic (ccuFeeForDate scans ALL providers).
+  // Stores 1411/1421/1431 directly — no more CCU_DAILY placeholder.
+  // Episode day 1 = 1411, days 2–7 = 1421, days 8–30 = 1431.
+  // A gap (no CCU from anyone) resets to day 1.
+  if (fee === 'CCU_DAILY' || fee === '1411' || fee === '1421' || fee === '1431') {
+    fee     = ccuFeeForDate(p, date);
+    feeCode = fee;
     units   = 1;
   }
-
-  // v3.60: CCU_DAILY is the canonical placeholder for CCU days. The
-  // Apps Script ccuConsolidateForExport() groups them by patient+alias,
-  // segments into consecutive episodes, and emits properly-banded
-  // 1411/1421/1431 rows with units at export time. So we DELIBERATELY
-  // do not re-band CCU_DAILY at write time anymore — the per-day band
-  // is meaningless until consolidation runs. Reverts the v3.59 guard.
   // Guard: never write an MRP service string into refby/refbyName
   if (looksLikeMRPService(p.refbyName)) {
     p.refbyName = '';
@@ -529,4 +522,5 @@ function claimedTodayFee(p, feeTypes) {
   });
 }
 
+// ═══════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════
