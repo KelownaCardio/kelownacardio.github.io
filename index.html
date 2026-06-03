@@ -2619,12 +2619,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v4.28-2026-06-02-ocr-reliability';
+var BUILD_ID    = 'v4.29-2026-06-03-ccu-band-at-creation';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v4.28';
-var APP_BUILT   = '2026-06-02';
+var APP_VERSION = 'v4.29';
+var APP_BUILT   = '2026-06-03';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -3560,23 +3560,16 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, 
   // patient record. When absent, the claim inherits the patient's values.
   overrides = overrides || {};
 
-  // v4.21: Force CCU codes through the CCU_DAILY placeholder. Users must
-  // never manually write 1411/1421/1431 — the export consolidation assigns
-  // the correct band based on consecutive episode days. Without this,
-  // manual 1421 entries bypass consolidation and cause double-billing or
-  // wrong day numbering.
-  if (fee === '1411' || fee === '1421' || fee === '1431') {
-    fee     = 'CCU_DAILY';
-    feeCode = 'CCU_DAILY';
+  // v4.29: Calculate the correct CCU band at creation time using
+  // cross-provider episode logic (ccuFeeForDate scans ALL providers).
+  // Stores 1411/1421/1431 directly — no more CCU_DAILY placeholder.
+  // Episode day 1 = 1411, days 2–7 = 1421, days 8–30 = 1431.
+  // A gap (no CCU from anyone) resets to day 1.
+  if (fee === 'CCU_DAILY' || fee === '1411' || fee === '1421' || fee === '1431') {
+    fee     = ccuFeeForDate(p, date);
+    feeCode = fee;
     units   = 1;
   }
-
-  // v3.60: CCU_DAILY is the canonical placeholder for CCU days. The
-  // Apps Script ccuConsolidateForExport() groups them by patient+alias,
-  // segments into consecutive episodes, and emits properly-banded
-  // 1411/1421/1431 rows with units at export time. So we DELIBERATELY
-  // do not re-band CCU_DAILY at write time anymore — the per-day band
-  // is meaningless until consolidation runs. Reverts the v3.59 guard.
   // Guard: never write an MRP service string into refby/refbyName
   if (looksLikeMRPService(p.refbyName)) {
     p.refbyName = '';
@@ -3723,6 +3716,7 @@ function claimedTodayFee(p, feeTypes) {
   });
 }
 
+// ═══════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════
 // 05_render.js — Render rounds list (geo + alpha + off service)
