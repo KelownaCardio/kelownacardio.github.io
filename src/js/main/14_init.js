@@ -1,5 +1,3 @@
-// ── 14_init.js ──
-// ═══════════════════════════════════════════════════════
 // 14_init.js — App init, navigation, fee codes, doctor modal,
 //              and all utility/helper functions
 // ═══════════════════════════════════════════════════════
@@ -429,6 +427,13 @@ function chkIco10() {
 // Toast notification
 var _toastTimer;
 function showToast(msg, kind) {
+  // v4.29: If addClaim just blocked a duplicate (within last 2s), don't
+  // let a success toast overwrite the error toast. The caller doesn't
+  // know the claim was blocked and fires its success toast immediately.
+  var isError = (kind === 'error');
+  if (!isError && window._claimBlockedAt && (Date.now() - window._claimBlockedAt) < 2000) {
+    return;  // suppress — let the error toast stay visible
+  }
   // Remove any previous toast div BEFORE adding the new one — v3.31 only
   // cleared the removal timer, so rapid taps left orphan divs visible
   // until each one's individual timer fired. Tag with a class so showPane
@@ -441,13 +446,12 @@ function showToast(msg, kind) {
   var prev = document.querySelectorAll('.kgh-toast');
   for (var i = 0; i < prev.length; i++) { prev[i].remove(); }
 
-  var isError = (kind === 'error');
   var bg = isError ? '#c42828' : '#1a1a18';
   var d = document.createElement('div');
   d.className = 'kgh-toast' + (isError ? ' kgh-toast-error' : '');
   d.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);' +
                     'background:' + bg + ';color:#fff;padding:8px 16px;border-radius:20px;' +
-                    'font-size:12px;font-weight:600;z-index:999;white-space:nowrap;' +
+                    'font-size:12px;font-weight:600;z-index:10000;white-space:nowrap;' +
                     'pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.3)';
   d.textContent = msg;
   document.body.appendChild(d);

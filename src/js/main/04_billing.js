@@ -432,11 +432,18 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, 
     return x.fee === c.fee;
   });
   if (_dupCheck) {
+    // Signal block to callers (return null) and to showToast (suppress
+    // success toasts that fire immediately after, before caller checks)
+    window._claimBlockedAt = Date.now();
     if (_isCCU && _dupClaim && _dupClaim.alias !== c.alias) {
-      showToast('Another physician (' + _dupClaim.alias + ') has already claimed CCU care for this date', true);
+      showToast('Another physician (' + _dupClaim.alias + ') has already claimed CCU for this date — blocked', 'error');
+    } else if (_isCCU) {
+      showToast('CCU already claimed for this patient on ' + c.date + ' — blocked', 'error');
+    } else {
+      showToast('Duplicate ' + c.fee + ' already exists for ' + c.date + ' — blocked', 'error');
     }
     console.warn('Duplicate claim blocked:', c.fee, c.date, c.phn, _dupClaim ? 'existing alias=' + _dupClaim.alias : '');
-    return c; // return without saving
+    return null; // blocked — callers should check
   }
   st.claims.push(c);
   if (SHEETS_URL) push('saveClaim', c);

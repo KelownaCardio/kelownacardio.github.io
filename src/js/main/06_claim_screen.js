@@ -364,7 +364,8 @@ function submitOtherClaimFor(p, alias) {
   var dateFmt = fmtD(parseISODate(dateISO));
   // Units are always 1 for an Other claim.
   var pClone  = Object.assign({}, p, { icd: icd, refby: refby, refbyName: refName });
-  addClaim(pClone, fee, fee, 1, dateFmt, loc, start, notes, endTime || '', alias);
+  var result  = addClaim(pClone, fee, fee, 1, dateFmt, loc, start, notes, endTime || '', alias);
+  if (!result) return false;  // dedup blocked — stay on form, error toast visible
   sv('claims', st.claims);
   return true;
 }
@@ -464,3 +465,27 @@ function backToRoundsFromClaim() {
   closeClaimScreen();
 }
 
+// ── 06b_discharged.js ──
+// ═══════════════════════════════════════════════════════
+// Recently Discharged pane + rounds search filter
+// Pane shows discharged patients (last 21 days, or all when searching)
+// Each row offers: tap to add a missed claim, restore (to On/Off Service)
+// ═══════════════════════════════════════════════════════
+
+function roundsSearch(query) {
+  _roundsQuery = (query || '').toLowerCase().trim();
+  var clearBtn = document.getElementById('rounds-search-clear');
+  if (clearBtn) clearBtn.classList.toggle('on', !!_roundsQuery);
+  // Hide geo/alpha toggle when searching (search shows unified flat list)
+  var vtBar = document.getElementById('view-tog-bar');
+  if (vtBar) vtBar.style.display = (!_roundsQuery && _listView === 'on') ? 'flex' : 'none';
+  render();
+}
+
+function clearRoundsSearch() {
+  var input = document.getElementById('rounds-search');
+  if (input) { input.value = ''; input.focus(); }
+  roundsSearch('');
+}
+
+// ═══════════════════════════════════════════════════════
