@@ -406,6 +406,16 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, 
     notes:     notes       || '',
     startTime: _start,
     endTime:   endTime || '',
+    // v4.31: fields previously dropped — loc was accepted as a parameter
+    // but never written; ward/room/dob/sex/fac/source were never captured.
+    // Blank loc/fac/ward/room on 940+ existing claims trace to this gap.
+    loc:       loc || 'I',
+    fac:       p.fac || 'OA040',
+    ward:      p.ward || '',
+    room:      p.bed  || '',
+    dob:       p.dob  || '',
+    sex:       p.sex  || '',
+    source:    'App',
     createdBy: (st.doc && st.doc.alias) || '',
     createdAt: Date.now()
   };
@@ -529,5 +539,6 @@ function claimedTodayFee(p, feeTypes) {
   });
 }
 
+// ═══════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════

@@ -1,5 +1,3 @@
-// ── 06d_patient_edit.js ──
-// ═══════════════════════════════════════════════════════
 // 06d_patient_edit.js — Edit patient demographics/location
 // Double-tap patient name opens an edit sheet
 // ═══════════════════════════════════════════════════════
@@ -105,14 +103,15 @@ function savePatientEdit(pid) {
   var p = getP(pid);
   if (!p || !p.id) return;
 
-  // v4.09: capture pre-edit name so we can propagate a rename to existing
-  // claim rows. Background: addClaim snapshots p.last/p.first onto each
-  // claim row at write time. Before v4.09 a rename here only updated the
-  // patient record, leaving historical claim rows stuck with the original
-  // (often OCR-misread) name — exactly the failure pattern that landed
-  // last="57" on Malone, Deborah's claims.
+  // v4.09: capture pre-edit values so we can propagate to existing claim rows.
+  // v4.31: expanded from name-only to PHN + DOB + sex. Without this,
+  // fixing a typo'd PHN on the patient tab left claim rows stuck with the
+  // old (wrong) PHN, and the next sync overwrote the correction.
   var _oldLast  = p.last  || '';
   var _oldFirst = p.first || '';
+  var _oldPhn   = p.phn   || '';
+  var _oldDob   = p.dob   || '';
+  var _oldSex   = p.sex   || '';
 
   var role = (document.getElementById('pe-role') || {}).value || 'consultant';
   var ward = (document.getElementById('pe-ward') || {}).value || p.ward;
@@ -134,36 +133,63 @@ function savePatientEdit(pid) {
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
 
-  // v4.09: propagate name change to ALL claim rows for this PHN. Each row
-  // is re-pushed via saveClaim so the Sheet is updated. The set of changed
-  // claims is also reported in the changelog detail and a separate toast
-  // so the doctor can see what was touched.
+  // v4.31: propagate ALL demographic changes to claim rows.
+  // Claims are found by the OLD PHN (in case PHN itself changed), then
+  // each changed field is updated. Each touched claim is re-pushed.
+  var _nameChanged = (p.last !== _oldLast || p.first !== _oldFirst);
+  var _phnChanged  = (p.phn !== _oldPhn);
+  var _dobChanged  = (p.dob !== _oldDob);
+  var _sexChanged  = (p.sex !== _oldSex);
+  var _anyDemoChanged = _nameChanged || _phnChanged || _dobChanged || _sexChanged;
+
   var _claimsTouched = 0;
-  if ((p.last !== _oldLast || p.first !== _oldFirst) && p.phn) {
+  if (_anyDemoChanged && (_oldPhn || p.phn)) {
+    // Use old PHN to find claims (it's what the claim rows currently hold)
+    var searchPhn = _oldPhn || p.phn;
     st.claims.forEach(function(c) {
-      if (!samePhn(c.phn, p.phn)) return;
-      if (c.last === p.last && c.first === p.first) return;
-      c.last  = p.last;
-      c.first = p.first;
-      if (SHEETS_URL) push('saveClaim', c);
-      _claimsTouched++;
+      if (!samePhn(c.phn, searchPhn)) return;
+      var touched = false;
+      if (_nameChanged && (c.last !== p.last || c.first !== p.first)) {
+        c.last  = p.last;
+        c.first = p.first;
+        touched = true;
+      }
+      if (_phnChanged && c.phn !== p.phn) {
+        c.phn = p.phn;
+        touched = true;
+      }
+      if (_dobChanged && c.dob !== p.dob) {
+        c.dob = p.dob;
+        touched = true;
+      }
+      if (_sexChanged && c.sex !== p.sex) {
+        c.sex = p.sex;
+        touched = true;
+      }
+      if (touched) {
+        if (SHEETS_URL) push('saveClaim', c);
+        _claimsTouched++;
+      }
     });
     if (_claimsTouched > 0) {
       sv('claims', st.claims);
-      try { console.log('[v4.09] Propagated name change to ' + _claimsTouched + ' claim row(s) for PHN ' + p.phn); } catch (e) {}
+      try { console.log('[v4.31] Propagated demographic edit to ' + _claimsTouched + ' claim row(s) for PHN ' + searchPhn + (_phnChanged ? ' → ' + p.phn : '')); } catch (e) {}
     }
   }
 
-  var _renameDetail = '';
-  if (p.last !== _oldLast || p.first !== _oldFirst) {
+  var _detailParts = [];
+  if (_nameChanged) {
     var _oldDisplay = _oldLast + (_oldFirst ? ', ' + _oldFirst : '');
-    _renameDetail = 'Renamed from "' + _oldDisplay + '"' +
-      (_claimsTouched > 0 ? ' \u2014 updated ' + _claimsTouched + ' claim row(s)' : '');
+    _detailParts.push('Renamed from "' + _oldDisplay + '"');
   }
-  logChange(p, 'Demographics edited', _renameDetail);
+  if (_phnChanged) _detailParts.push('PHN ' + _oldPhn + ' → ' + p.phn);
+  if (_dobChanged) _detailParts.push('DOB ' + (_oldDob || '(blank)') + ' → ' + p.dob);
+  if (_sexChanged) _detailParts.push('Sex ' + (_oldSex || '(blank)') + ' → ' + p.sex);
+  if (_claimsTouched > 0) _detailParts.push(_claimsTouched + ' claim row(s) updated');
+  logChange(p, 'Demographics edited', _detailParts.join(' \u2014 '));
   hideModal('pt-edit-modal');
   render();
-  showToast(p.last + ' updated' + (_claimsTouched > 0 ? ' (\u2713 ' + _claimsTouched + ' claim row(s) renamed)' : ''));
+  showToast(p.last + ' updated' + (_claimsTouched > 0 ? ' (\u2713 ' + _claimsTouched + ' claim row(s) updated)' : ''));
 }
 
 // ═══════════════════════════════════════════════════════

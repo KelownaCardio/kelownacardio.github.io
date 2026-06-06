@@ -1,5 +1,3 @@
-// ── 08_daily.js ──
-// ═══════════════════════════════════════════════════════
 // 08_daily.js — Daily, combined daily, directive, CCU forms
 // ═══════════════════════════════════════════════════════
 
@@ -197,10 +195,15 @@ function submitDirective() {
 }
 
 // ── CCU daily tap ──────────────────────────────────────
-// Records raw tap; 1411/1421/1431 bands calculated at export
+// Records raw tap; 1411/1421/1431 bands resolved in addClaim (v4.29)
 function buildCCUForm(p) {
+  // v4.31: check all CCU family codes — since v4.29, addClaim stores the
+  // resolved band (1411/1421/1431), not 'CCU_DAILY'. The old check for
+  // only 'CCU_DAILY' never matched, so the "already recorded" warning
+  // never fired. This was a contributing factor in Cleave's 05/06 duplicate.
+  var _ccuFam = ['CCU_DAILY','1411','1421','1431'];
   var alreadyToday = st.claims.some(function(c) {
-    return samePhn(c.phn, p.phn) && c.fee === 'CCU_DAILY' && c.date === TODAY;
+    return samePhn(c.phn, p.phn) && _ccuFam.indexOf(c.fee) !== -1 && c.date === TODAY;
   });
   var h = '<div class="card"><div class="card-title">CCU daily</div>' +
     '<p style="font-size:12px;color:var(--text2);margin-bottom:9px">' +
