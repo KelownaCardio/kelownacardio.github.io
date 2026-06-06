@@ -61,6 +61,7 @@ async function init() {
   } catch(e) {}
   wardChange();
   renderRefs('');
+  _injectLeaderboardUI(); // 🏆 retro arcade leaderboard button + modal
   // Show loading state immediately
   render();
   if (SHEETS_URL) {
