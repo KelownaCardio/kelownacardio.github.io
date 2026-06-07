@@ -59,6 +59,20 @@ function _lbInitials(alias) {
 // Fee codes that always count for shepherd (CCU family)
 var LB_CCU_FEES = { 'CCU_DAILY':1, '1411':1, '1421':1, '1431':1, '1441':1 };
 
+// Return the Monday that starts this DD/MM/YYYY's Mon-Sun week ("YYYY-MM-DD")
+function _lbWeekKey(dateStr) {
+  var parts = String(dateStr).split('/');
+  if (parts.length !== 3) return dateStr;
+  var d = new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
+  d.setHours(12); // avoid DST edge
+  var day = d.getDay(); // 0=Sun 1=Mon ... 6=Sat
+  var diff = (day === 0) ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  var mm = ('0' + (d.getMonth() + 1)).slice(-2);
+  var dd = ('0' + d.getDate()).slice(-2);
+  return d.getFullYear() + '-' + mm + '-' + dd;
+}
+
 function _computeLeaderboard() {
   if (!st.claims || !st.claims.length) return null;
 
@@ -130,8 +144,21 @@ function _computeLeaderboard() {
     .sort(function(a, b) { return b.consults - a.consults; }).slice(0, 3);
   var byRevenue = entries.filter(function(e) { return e.revenue > 0; })
     .sort(function(a, b) { return b.revenue - a.revenue; }).slice(0, 3);
-  var byShepherd = entries.filter(function(e) { return e.shepherd > 0; })
-    .sort(function(a, b) { return b.shepherd - a.shepherd; }).slice(0, 3);
+  var byShepherd = (function() {
+    // One entry per doctor per Mon-Sun rotation week (best day wins)
+    var weekBest = {};  // key: "alias|weekStart" → { alias, date, shepherd }
+    entries.filter(function(e) { return e.shepherd > 0; }).forEach(function(e) {
+      var wk = _lbWeekKey(e.date);
+      var key = e.alias + '|' + wk;
+      if (!weekBest[key] || e.shepherd > weekBest[key].shepherd) {
+        weekBest[key] = e;
+      }
+    });
+    var arr = [];
+    for (var k in weekBest) arr.push(weekBest[k]);
+    arr.sort(function(a, b) { return b.shepherd - a.shepherd; });
+    return arr.slice(0, 3);
+  })();
 
   return {
     ccuAdmits: byAdmits.map(function(e) { return [e.alias, e.date, e.ccuAdmits]; }),
@@ -144,15 +171,14 @@ function _computeLeaderboard() {
 // ── Merge local + BQ results ─────────────────────────
 function _mergeLeaderboards(local, bq) {
   return {
-    ccuAdmits: _mergeCat(local ? local.ccuAdmits : [], bq ? bq.ccuAdmits : []),
-    consults:  _mergeCat(local ? local.consults  : [], bq ? bq.consults  : []),
-    revenue:   _mergeCat(local ? local.revenue   : [], bq ? bq.revenue   : []),
-    shepherd:  _mergeCat(local ? local.shepherd  : [], bq ? bq.shepherd  : [])
+    ccuAdmits: _mergeCat(local ? local.ccuAdmits : [], bq ? bq.ccuAdmits : [], 3),
+    consults:  _mergeCat(local ? local.consults  : [], bq ? bq.consults  : [], 3),
+    revenue:   _mergeCat(local ? local.revenue   : [], bq ? bq.revenue   : [], 3),
+    shepherd:  _mergeShepherd(local ? local.shepherd : [], bq ? bq.shepherd : [])
   };
 }
 
-function _mergeCat(a, b) {
-  // Each row: [alias, date, score] — keep highest per (alias, date)
+function _mergeCat(a, b, limit) {
   var map = {};
   (a || []).concat(b || []).forEach(function(r) {
     var key = r[0] + '|' + r[1];
@@ -162,7 +188,31 @@ function _mergeCat(a, b) {
   var out = [];
   for (var k in map) out.push(map[k]);
   out.sort(function(x, y) { return Number(y[2]) - Number(x[2]); });
-  return out.slice(0, 3);
+  return out.slice(0, limit || 3);
+}
+
+// Shepherd merge: one entry per doctor per Mon-Sun week
+function _mergeShepherd(a, b) {
+  var map = {};
+  (a || []).concat(b || []).forEach(function(r) {
+    var key = r[0] + '|' + r[1];
+    var score = Number(r[2]) || 0;
+    if (!map[key] || score > Number(map[key][2])) map[key] = r;
+  });
+  var all = [];
+  for (var k in map) all.push(map[k]);
+  all.sort(function(x, y) { return Number(y[2]) - Number(x[2]); });
+  // Dedup: one entry per doctor per Mon-Sun week
+  var seen = {};
+  var out = [];
+  for (var i = 0; i < all.length && out.length < 3; i++) {
+    var wk = all[i][0] + '|' + _lbWeekKey(all[i][1]);
+    if (!seen[wk]) {
+      seen[wk] = true;
+      out.push(all[i]);
+    }
+  }
+  return out;
 }
 
 // ── Async BQ fetch (background merge for historical) ──
