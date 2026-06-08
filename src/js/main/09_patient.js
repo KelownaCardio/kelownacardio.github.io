@@ -885,6 +885,10 @@ function validatePatientFieldsLive() {
 }
 
 function clearAddForm() {
+  // v4.33: Cancel any in-flight OCR background loop and unlock fields.
+  _ocrGeneration++;
+  _unlockDemoFields();
+
   ['f-last','f-first','f-phn','f-dob'].forEach(function(id) {
     var el = document.getElementById(id);
     if (el) {
@@ -936,6 +940,59 @@ function resetPhotoZone() {
 //   callback receives the cropped JPEG dataUrl
 var _cropPending = null;
 var _cropState = null;
+
+// ── OCR background retry state ─────────────────────────────────────
+// Generation counter: each new photo bumps it. The background retry loop
+// checks its own generation against the current one — if they differ
+// (doctor cleared the form or took a new photo), the loop self-cancels.
+var _ocrGeneration = 0;
+var _ocrInFlight   = false;
+
+// Lock the demographic fields (name/PHN/DOB/sex) while OCR works in the
+// background. Doctor can fill diagnosis, referring MD, location, claim
+// type immediately — only these auto-extracted fields are held.
+function _lockDemoFields() {
+  _ocrInFlight = true;
+  ['f-last', 'f-first', 'f-phn', 'f-dob'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) {
+      el.disabled = true;
+      el.dataset.ocrLocked = '1';
+      el.placeholder = 'Extracting…';
+      el.style.cssText = 'background:var(--surface2);color:var(--text3);border:.5px solid var(--border);';
+    }
+  });
+  ['f-sex-m', 'f-sex-f'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) { el.disabled = true; el.style.opacity = '0.4'; el.style.pointerEvents = 'none'; }
+  });
+}
+
+// Unlock the demographic fields — called on OCR success OR timeout.
+function _unlockDemoFields() {
+  _ocrInFlight = false;
+  ['f-last', 'f-first', 'f-phn', 'f-dob'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) {
+      el.disabled = false;
+      delete el.dataset.ocrLocked;
+      el.style.cssText = '';
+    }
+  });
+  // Restore default placeholders
+  var phEl = document.getElementById('f-phn');
+  if (phEl) phEl.placeholder = '10 digits';
+  var dbEl = document.getElementById('f-dob');
+  if (dbEl) dbEl.placeholder = 'DD/MMM/YYYY';
+  var lnEl = document.getElementById('f-last');
+  if (lnEl) lnEl.placeholder = '';
+  var fnEl = document.getElementById('f-first');
+  if (fnEl) fnEl.placeholder = '';
+  ['f-sex-m', 'f-sex-f'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) { el.disabled = false; el.style.opacity = ''; el.style.pointerEvents = ''; }
+  });
+}
 
 // Handle paste of a screenshot (Ctrl+V / Cmd+V) from clipboard.
 // Called both from the photo-zone paste listener and the global paste
@@ -1043,10 +1100,19 @@ function processStickerOCR(croppedDataUrl, bar) {
     pz.innerHTML = '<img src="' + croppedDataUrl + '" style="width:100%;max-height:200px;object-fit:contain;border-radius:8px;display:block">';
     pz.style.padding = '0';
   }
-  if (bar) bar.textContent = 'Compressing image…';
+
+  // v4.33: Lock demographic fields while OCR works in the background.
+  // Doctor can fill diagnosis, referring MD, location, etc. immediately.
+  _lockDemoFields();
+  if (bar) {
+    bar.style.display = 'block';
+    bar.className = 'ocr-bar ocr-ok';
+    bar.innerHTML = '<span style="display:inline-block;animation:pulse 1s infinite">\uD83D\uDCF7</span> Extracting data from photo\u2026';
+  }
 
   var img = new Image();
   img.onerror = function() {
+    _unlockDemoFields();
     if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'Could not decode cropped image'; }
   };
   img.onload = function() {
@@ -1112,9 +1178,14 @@ var STICKER_PROMPT =
   '  → locationCode "KELKGHS2S", roomBed "KGHS0221-A".\n' +
   'Return ONLY valid JSON, no markdown, no explanation.';
 
-var KEY_FETCH_TIMEOUT_MS = 5000;
-var VISION_TIMEOUT_MS    = 15000;
-var CLOUD_TIMEOUT_MS     = 10000;
+var KEY_FETCH_TIMEOUT_MS = 10000;
+var VISION_TIMEOUT_MS    = 20000;
+
+// v4.33: Background retry — Apps Script only, no Cloudflare, no Tesseract.
+// Retries with a pause between attempts. Doctor works on other fields while
+// this runs. Total max wait ~65s before fields unlock for manual entry.
+var OCR_BG_MAX_RETRIES   = 5;
+var OCR_BG_RETRY_DELAY   = 3000;   // 3s pause between attempts
 
 // Shared AbortController-based fetch timeout (used by both sticker and
 // Meditech OCR paths).
@@ -1189,67 +1260,87 @@ function _logOCR(outcome, steps, engine, fields) {
   }
 }
 
-function _showOCRRetry(bar, steps) {
+function _showOCRExhausted(bar, steps) {
   _logOCR('exhausted', steps, '', {});
+  // v4.33: unlock fields so doctor can type manually from the sticker photo.
+  _unlockDemoFields();
   if (!bar) return;
   bar.style.display = 'block';
   bar.className = 'ocr-bar ocr-warn';
-  bar.innerHTML = _ocrTrail(steps) +
-    ' &mdash; <b>OCR unavailable</b> ' +
+  bar.innerHTML = 'Could not extract data \u2014 enter from photo above ' +
     '<button onclick="ocrRetry()" style="' +
     'background:var(--blue);color:#fff;border:none;border-radius:12px;' +
     'padding:2px 10px;font-size:11px;margin-left:6px;cursor:pointer' +
-    '">↻ Retry</button>';
+    '">\u21BB Retry</button>';
 }
 
-// Global retry — re-sends the cached image through the full cascade.
+// Global retry — re-sends the cached image through the background loop.
 function ocrRetry() {
   var p = window._lastOCRPayload;
   if (!p || !p.b64) {
-    showToast('No image to retry — take a new photo', 'error');
+    showToast('No image to retry \u2014 take a new photo', 'error');
     return;
   }
+  _lockDemoFields();
   var bar = document.getElementById('ocr-bar');
   sendToOCR(p.b64, p.mediaType, bar);
 }
 
-// ── Entry point ──────────────────────────────────────────────────
+// ── Entry point: background retry loop ──────────────────────────
+// v4.33: Apps Script only, up to OCR_BG_MAX_RETRIES attempts with
+// OCR_BG_RETRY_DELAY ms pause between each. No Cloudflare (always
+// blocked on hospital WiFi), no Tesseract (unreliable first-letter
+// errors). Fields are locked; doctor works on diagnosis/refMD/location
+// while this runs. On success → fields populate and unlock. On
+// exhaustion → fields unlock for manual entry.
 function sendToOCR(b64, mediaType, bar) {
   if (bar) { bar.style.display = 'block'; bar.className = 'ocr-bar ocr-ok'; }
   var steps = [];
-  window._ocrSteps = steps;  // Expose trail for handleOCRResult logging
-  if (typeof window._cloudOCRReachable === 'undefined') window._cloudOCRReachable = null;
+  window._ocrSteps = steps;
 
-  // Tier 1: Apps Script (attempt 1)
-  _updateOCRBar(bar, ['Apps Script…']);
-  _tryAppsScript(b64, mediaType, bar, steps, 1);
+  // Bump generation — any prior background loop self-cancels.
+  var gen = ++_ocrGeneration;
+
+  _ocrBackgroundLoop(b64, mediaType, bar, steps, 1, gen);
 }
 
-// ── Tier 1: Apps Script → Anthropic ─────────────────────────────
-function _tryAppsScript(b64, mediaType, bar, steps, attempt) {
-  var label = 'Apps Script' + (attempt > 1 ? ' retry' : '');
-  _updateOCRBar(bar, steps.concat([label + '…']));
+// Single-tier retry loop: Apps Script → Anthropic, up to N attempts.
+function _ocrBackgroundLoop(b64, mediaType, bar, steps, attempt, gen) {
+  // Stale generation — doctor cleared/retook photo. Abort silently.
+  if (gen !== _ocrGeneration) return;
+
+  var label = 'Attempt ' + attempt + '/' + OCR_BG_MAX_RETRIES;
+  if (bar) {
+    bar.style.display = 'block';
+    bar.className = 'ocr-bar ocr-ok';
+    bar.innerHTML = '<span style="display:inline-block;animation:pulse 1s infinite">\uD83D\uDCF7</span> Extracting data from photo\u2026 <span style="font-size:10px;opacity:.6">(' + label + ')</span>';
+  }
 
   _runAppsScriptOCR(b64, mediaType, STICKER_PROMPT, 500)
     .then(function(p) {
+      if (gen !== _ocrGeneration) return; // stale
       p._engine = 'apps-script';
       window._appsScriptOCRReachable = true;
       steps.push(label + ': \u2713');
-      _updateOCRBar(bar, steps);
       handleOCRResult(p, bar);
     })
     .catch(function(err) {
+      if (gen !== _ocrGeneration) return; // stale
       var reason = _shortErr(err);
       steps.push(label + ': ' + reason);
       console.warn('[OCR] ' + label + ' failed:', err.message);
-      window._appsScriptOCRReachable = false;
 
-      if (attempt < 2) {
-        // Auto-retry Tier 1 once
-        _tryAppsScript(b64, mediaType, bar, steps, 2);
+      if (attempt < OCR_BG_MAX_RETRIES) {
+        // Update bar to show waiting state
+        if (bar) {
+          bar.innerHTML = '<span style="display:inline-block;animation:pulse 1s infinite">\uD83D\uDCF7</span> Extracting data from photo\u2026 <span style="font-size:10px;opacity:.6">(retrying in ' + Math.round(OCR_BG_RETRY_DELAY / 1000) + 's\u2026)</span>';
+        }
+        setTimeout(function() {
+          _ocrBackgroundLoop(b64, mediaType, bar, steps, attempt + 1, gen);
+        }, OCR_BG_RETRY_DELAY);
       } else {
-        // Fall to Tier 2
-        _tryCloudflare(b64, mediaType, bar, steps, 1);
+        // All retries exhausted — unlock fields for manual entry.
+        _showOCRExhausted(bar, steps);
       }
     });
 }
@@ -1301,84 +1392,11 @@ function _runAppsScriptOCR(b64, mediaType, prompt, maxTokens) {
     });
 }
 
-// ── Tier 2: Cloudflare Worker ───────────────────────────────────
-function _tryCloudflare(b64, mediaType, bar, steps, attempt) {
-  var label = 'Cloud' + (attempt > 1 ? ' retry' : '');
-  _updateOCRBar(bar, steps.concat([label + '…']));
-
-  _runCloudflareOCR(b64, mediaType)
-    .then(function(data) {
-      window._cloudOCRReachable = true;
-      if (data) data._engine = 'cloud';
-      steps.push(label + ': \u2713');
-      _updateOCRBar(bar, steps);
-      handleOCRResult(data, bar);
-    })
-    .catch(function(err) {
-      var reason = _shortErr(err);
-      steps.push(label + ': ' + reason);
-      console.warn('[OCR] ' + label + ' failed:', err.message);
-      window._cloudOCRReachable = false;
-
-      if (attempt < 2) {
-        // Auto-retry Tier 2 once
-        _tryCloudflare(b64, mediaType, bar, steps, 2);
-      } else {
-        // Both cloud tiers exhausted — try offline OCR (Tesseract/ML Kit).
-        _tryOffline(b64, mediaType, bar, steps);
-      }
-    });
-}
-
-// Returns a Promise wrapping the XHR to the Cloudflare worker.
-function _runCloudflareOCR(b64, mediaType) {
-  return new Promise(function(resolve, reject) {
-    var xhr = new XMLHttpRequest();
-    xhr.open('POST', OCR_WORKER_URL, true);
-    xhr.setRequestHeader('Content-Type', 'application/json');
-    xhr.timeout = CLOUD_TIMEOUT_MS;
-
-    xhr.onload = function() {
-      if (xhr.status < 200 || xhr.status >= 300) {
-        reject(new Error('HTTP ' + xhr.status)); return;
-      }
-      var data;
-      try { data = JSON.parse(xhr.responseText); }
-      catch (e) { reject(new Error('bad JSON')); return; }
-      if (data && data.error) { reject(new Error('worker: ' + data.error)); return; }
-      resolve(data);
-    };
-    xhr.onerror   = function() { reject(new Error('network error')); };
-    xhr.ontimeout = function() { reject(new Error('timeout ' + CLOUD_TIMEOUT_MS + 'ms')); };
-    xhr.send(JSON.stringify({ image: b64, mediaType: mediaType }));
-  });
-}
-
-// ── Tier 3: Offline OCR (Tesseract / ML Kit) ────────────────────
-// Full on-device parser with multi-pass preprocessing, PHN checksum
-// rescue, DOB correction, and learned-correction support. Falls here
-// only after both cloud tiers are exhausted. If the offline module
-// isn't loaded, shows retry button instead.
-function _tryOffline(b64, mediaType, bar, steps) {
-  if (!window.OCROffline) {
-    steps.push('Offline: not loaded');
-    _showOCRRetry(bar, steps);
-    return;
-  }
-  steps.push('Offline');
-  _updateOCRBar(bar, steps.concat(['…']));
-
-  window.OCROffline.run(b64, mediaType).then(function(data) {
-    if (data) data._engine = data._engine || 'tesseract';
-    steps[steps.length - 1] = 'Offline: \u2713';
-    _updateOCRBar(bar, steps);
-    handleOCRResult(data, bar);
-  }).catch(function(err) {
-    steps[steps.length - 1] = 'Offline: ' + _shortErr(err);
-    // All three tiers failed. Show retry button.
-    _showOCRRetry(bar, steps);
-  });
-}
+// v4.33: Cloudflare Worker and Tesseract offline tiers REMOVED.
+// Cloudflare is always blocked on hospital WiFi. Tesseract produced
+// unreliable first-letter errors on KGH sticker fonts. The background
+// retry loop now retries Apps Script exclusively — if all attempts
+// fail, fields unlock for manual entry from the sticker photo.
 
 // Shorten an error message for the status trail (keep it terse).
 function _shortErr(err) {
@@ -1582,6 +1600,10 @@ function cropUse() {
 }
 // Worker returns the parsed patient JSON directly — no Apps Script roundtrip.
 function handleOCRResult(data, bar) {
+  // v4.33: Unlock demographic fields — OCR got a response (good or bad),
+  // so the waiting is over. Must happen before any early return.
+  _unlockDemoFields();
+
   if (!data || data.error) {
     _logOCR('error', window._ocrSteps || [], (data && data._engine) || '', {});
     if (bar) { bar.className = 'ocr-bar ocr-warn'; bar.textContent = 'OCR: ' + ((data && data.error) || 'unknown error'); }
@@ -1879,6 +1901,3 @@ function buildOCRCorrections(savedPatient) {
   });
   return corrections;
 }
-
-
-

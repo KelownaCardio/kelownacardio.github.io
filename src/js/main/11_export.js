@@ -176,9 +176,10 @@ function _qcGenerate() {
     });
   }
 
+  var isOn = _qcListMode === 'on';
   var baseHour = 7, baseMin = 0;
   var rows = pts.map(function(p, i) {
-    var mins = _qcListMode === 'on' ? (baseMin + i * 10) : 0;
+    var mins = isOn ? (baseMin + i * 10) : 0;
     var h = baseHour + Math.floor(mins / 60);
     var m = mins % 60;
     var timeStr = pad(h) + ':' + pad(m);
@@ -208,11 +209,10 @@ function _qcGenerate() {
 
   var today = new Date();
   var dateStr = today.toLocaleDateString('en-CA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-  var listLabel = _qcListMode === 'on' ? 'On Service' : 'Off Service';
+  var listLabel = isOn ? 'On Service' : 'Off Service';
 
-  // Build selected-wards label for on-service
   var wardLabel = '';
-  if (_qcListMode === 'on') {
+  if (isOn) {
     var sel = [];
     if (_qcWards.CCU) sel.push('CCU');
     if (_qcWards['2S']) sel.push('2S');
@@ -220,14 +220,15 @@ function _qcGenerate() {
     wardLabel = sel.join(' + ');
   }
 
+  // --- Build the generated HTML page ---
   var html = '<!DOCTYPE html><html><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<title>QuickChart \u2014 ' + listLabel + ' \u2014 ' + dateStr + '</title>' +
     '<style>' +
-    'body{font-family:-apple-system,system-ui,sans-serif;margin:20px;color:#222;font-size:12px}' +
+    'body{font-family:-apple-system,system-ui,sans-serif;margin:20px;color:#222;font-size:13px}' +
     'h1{font-size:16px;margin:0 0 4px;font-weight:800}' +
     '.subtitle{font-size:12px;color:#666;margin-bottom:14px}' +
-    'table{width:100%;border-collapse:collapse}' +
+    '#pt-table{width:100%;border-collapse:collapse}' +
     'th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#666;' +
     'border-bottom:2px solid #333;padding:5px 8px;font-weight:700}' +
     'td{padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;vertical-align:top}' +
@@ -236,47 +237,161 @@ function _qcGenerate() {
     'padding:10px 8px 4px;background:none;border:none}' +
     '.time{font-family:monospace;font-size:12px;white-space:nowrap}' +
     '.phn{font-family:monospace;letter-spacing:.5px}' +
-    '@media print{body{margin:10px}h1{font-size:14px}}' +
-    '@media screen{.print-hint{display:block;margin-top:16px;padding:10px;background:#f0f4ff;' +
-    'border:1px solid #c8d8f0;border-radius:6px;font-size:11px;color:#336}}' +
+    '.actions{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}' +
+    '.act-btn{display:flex;align-items:center;gap:6px;padding:10px 16px;border:none;border-radius:8px;' +
+    'font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;color:#fff;flex:1;justify-content:center;min-width:140px}' +
+    '.act-btn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2}' +
+    '.btn-blue{background:#2563eb}.btn-blue:active{background:#1d4ed8}' +
+    '.btn-green{background:#16a34a}.btn-green:active{background:#15803d}' +
+    '.btn-gray{background:#475569}.btn-gray:active{background:#334155}' +
+    '.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#222;color:#fff;' +
+    'padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;opacity:0;transition:opacity .3s;pointer-events:none;z-index:99}' +
+    '.toast.show{opacity:1}' +
+    '@media print{.actions,.toast{display:none!important}body{margin:10px}h1{font-size:14px}}' +
     '</style></head><body>';
 
-  html += '<h1>QuickChart \u2014 ' + esc(listLabel) + '</h1>';
-  html += '<div class="subtitle">' + esc(dateStr);
-  if (_qcListMode === 'on') {
-    html += ' &middot; ' + esc(wardLabel);
-    if (_qcWards.CCU) html += ' &middot; CCU ' + (_qcCcuOrder === 'desc' ? 'descending' : 'ascending');
+  html += '<h1>QuickChart \u2014 ' + _qcEsc(listLabel) + '</h1>';
+  html += '<div class="subtitle">' + _qcEsc(dateStr);
+  if (isOn) {
+    html += ' \u00b7 ' + _qcEsc(wardLabel);
+    if (_qcWards.CCU) html += ' \u00b7 CCU ' + (_qcCcuOrder === 'desc' ? 'descending' : 'ascending');
   }
-  html += ' &middot; ' + rows.length + ' patient' + (rows.length !== 1 ? 's' : '');
+  html += ' \u00b7 ' + rows.length + ' patient' + (rows.length !== 1 ? 's' : '');
   html += '</div>';
 
-  html += '<table><thead><tr>';
+  html += '<table id="pt-table"><thead><tr>';
   html += '<th>Time</th><th>Name</th><th>DOB</th><th>PHN</th><th>Sex</th>';
-  if (_qcListMode === 'on') html += '<th>Ward</th><th>Bed</th>';
+  if (isOn) html += '<th>Ward</th><th>Bed</th>';
   html += '</tr></thead><tbody>';
 
   var lastWard = null;
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i];
-    if (_qcListMode === 'on' && r.ward !== lastWard) {
-      html += '<tr><td colspan="7" class="ward-label">' + esc(r.ward || 'Other') + '</td></tr>';
+    if (isOn && r.ward !== lastWard) {
+      html += '<tr><td colspan="7" class="ward-label">' + _qcEsc(r.ward || 'Other') + '</td></tr>';
       lastWard = r.ward;
     }
     html += '<tr>';
-    html += '<td class="time">' + esc(r.time) + '</td>';
-    html += '<td><b>' + esc(r.name) + '</b></td>';
-    html += '<td>' + esc(r.dob) + '</td>';
-    html += '<td class="phn">' + esc(r.phn) + '</td>';
-    html += '<td>' + esc(r.sex) + '</td>';
-    if (_qcListMode === 'on') {
-      html += '<td>' + esc(r.ward) + '</td>';
-      html += '<td>' + esc(r.bed) + '</td>';
+    html += '<td class="time">' + _qcEsc(r.time) + '</td>';
+    html += '<td><b>' + _qcEsc(r.name) + '</b></td>';
+    html += '<td>' + _qcEsc(r.dob) + '</td>';
+    html += '<td class="phn">' + _qcEsc(r.phn) + '</td>';
+    html += '<td>' + _qcEsc(r.sex) + '</td>';
+    if (isOn) {
+      html += '<td>' + _qcEsc(r.ward) + '</td>';
+      html += '<td>' + _qcEsc(r.bed) + '</td>';
     }
     html += '</tr>';
   }
-
   html += '</tbody></table>';
-  html += '<div class="print-hint">Tap <b>Share \u2192 Print</b> (iOS) or <b>\u22ee \u2192 Print</b> (Android) to save as PDF, then import into QuickChart MD.</div>';
+
+  // Action buttons
+  html += '<div class="actions">';
+  html += '<button class="act-btn btn-blue" onclick="copyImage()">' +
+    '<svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>' +
+    'Copy as Image</button>';
+  html += '<button class="act-btn btn-green" onclick="saveImage()">' +
+    '<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' +
+    'Save as Image</button>';
+  html += '<button class="act-btn btn-gray" onclick="window.print()">' +
+    '<svg viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>' +
+    'Print / PDF</button>';
+  html += '</div>';
+
+  html += '<div class="toast" id="toast"></div>';
+
+  // Canvas rendering script — draws the table as a clean image
+  html += '<script>';
+  html += 'var _rows=' + JSON.stringify(rows) + ';';
+  html += 'var _isOn=' + (isOn ? 'true' : 'false') + ';';
+  html += 'var _title="QuickChart \\u2014 ' + listLabel + '";';
+  html += 'var _sub="' + _qcEsc(dateStr);
+  if (isOn) {
+    html += ' \\u00b7 ' + _qcEsc(wardLabel);
+    if (_qcWards.CCU) html += ' \\u00b7 CCU ' + (_qcCcuOrder === 'desc' ? 'desc' : 'asc');
+  }
+  html += ' \\u00b7 ' + rows.length + 'pt";';
+
+  html += 'function _toast(msg){var t=document.getElementById("toast");t.textContent=msg;t.classList.add("show");setTimeout(function(){t.classList.remove("show")},2200);}';
+
+  // renderCanvas: draws the patient table onto a canvas and returns it
+  html += 'function renderCanvas(){' +
+    'var dpr=window.devicePixelRatio||2;' +
+    'var pad=20,rowH=28,hdrH=36,subH=20,gap=10;' +
+    // Column config
+    'var cols=_isOn?["Time","Name","DOB","PHN","Sex","Ward","Bed"]:["Time","Name","DOB","PHN","Sex"];' +
+    'var cw=_isOn?[60,180,100,110,40,50,40]:[60,200,110,120,50];' +
+    'var totalW=cw.reduce(function(a,b){return a+b},0)+pad*2;' +
+    // Count total rows (including ward headers)
+    'var nRows=_rows.length;' +
+    'if(_isOn){var lw=null;_rows.forEach(function(r){if(r.ward!==lw){nRows++;lw=r.ward;}});}' +
+    'var totalH=pad+hdrH+subH+gap+rowH+nRows*rowH+pad;' +
+    'var c=document.createElement("canvas");' +
+    'c.width=totalW*dpr;c.height=totalH*dpr;' +
+    'var ctx=c.getContext("2d");ctx.scale(dpr,dpr);' +
+    // White background
+    'ctx.fillStyle="#fff";ctx.fillRect(0,0,totalW,totalH);' +
+    // Title
+    'ctx.fillStyle="#222";ctx.font="bold 15px -apple-system,system-ui,sans-serif";' +
+    'ctx.fillText(_title,pad,pad+16);' +
+    // Subtitle
+    'ctx.fillStyle="#888";ctx.font="11px -apple-system,system-ui,sans-serif";' +
+    'ctx.fillText(_sub,pad,pad+16+subH);' +
+    // Table header
+    'var y=pad+hdrH+subH+gap;' +
+    'ctx.fillStyle="#666";ctx.font="bold 9px -apple-system,system-ui,sans-serif";' +
+    'var x=pad;' +
+    'cols.forEach(function(h,i){ctx.fillText(h.toUpperCase(),x,y);x+=cw[i];});' +
+    'y+=4;ctx.strokeStyle="#333";ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(pad,y);ctx.lineTo(totalW-pad,y);ctx.stroke();' +
+    'y+=rowH-4;' +
+    // Rows
+    'var lastW=null;' +
+    '_rows.forEach(function(r){' +
+    '  if(_isOn&&r.ward!==lastW){' +
+    '    ctx.fillStyle="#888";ctx.font="bold 9px -apple-system,system-ui,sans-serif";' +
+    '    ctx.fillText(r.ward||"Other",pad,y);' +
+    '    lastW=r.ward;y+=rowH;' +
+    '  }' +
+    '  ctx.fillStyle="#222";' +
+    '  var x=pad;' +
+    '  ctx.font="11px monospace";ctx.fillText(r.time,x,y);x+=cw[0];' +
+    '  ctx.font="bold 12px -apple-system,system-ui,sans-serif";ctx.fillText(r.name,x,y);x+=cw[1];' +
+    '  ctx.font="11px -apple-system,system-ui,sans-serif";ctx.fillText(r.dob,x,y);x+=cw[2];' +
+    '  ctx.font="11px monospace";ctx.fillText(r.phn,x,y);x+=cw[3];' +
+    '  ctx.font="11px -apple-system,system-ui,sans-serif";ctx.fillText(r.sex,x,y);x+=cw[4];' +
+    '  if(_isOn){ctx.fillText(r.ward,x,y);x+=cw[5];ctx.fillText(r.bed,x,y);}' +
+    '  ctx.strokeStyle="#e5e5e5";ctx.lineWidth=0.5;ctx.beginPath();ctx.moveTo(pad,y+6);ctx.lineTo(totalW-pad,y+6);ctx.stroke();' +
+    '  y+=rowH;' +
+    '});' +
+    'return c;}';
+
+  // Copy as image to clipboard
+  html += 'function copyImage(){' +
+    'var c=renderCanvas();' +
+    'c.toBlob(function(blob){' +
+    '  if(!blob){_toast("Could not render image");return;}' +
+    '  if(navigator.clipboard&&window.ClipboardItem){' +
+    '    navigator.clipboard.write([new ClipboardItem({"image/png":blob})]).then(' +
+    '      function(){_toast("Copied to clipboard!");},' +
+    '      function(){_toast("Clipboard blocked \\u2014 try Save as Image");}' +
+    '    );' +
+    '  }else{_toast("Clipboard not supported \\u2014 try Save as Image");}' +
+    '},"image/png");}';
+
+  // Save as image (download PNG)
+  html += 'function saveImage(){' +
+    'var c=renderCanvas();' +
+    'c.toBlob(function(blob){' +
+    '  if(!blob){_toast("Could not render image");return;}' +
+    '  var url=URL.createObjectURL(blob);' +
+    '  var a=document.createElement("a");' +
+    '  a.href=url;a.download="quickchart_' + today.toISOString().slice(0,10) + '.png";' +
+    '  document.body.appendChild(a);a.click();document.body.removeChild(a);' +
+    '  URL.revokeObjectURL(url);' +
+    '  _toast("Image saved!");' +
+    '},"image/png");}';
+
+  html += '<\/script>';
   html += '</body></html>';
 
   var blob = new Blob([html], { type: 'text/html' });
@@ -286,6 +401,9 @@ function _qcGenerate() {
   hideModal('qc-modal');
   showToast(rows.length + ' patient' + (rows.length !== 1 ? 's' : '') + ' exported for QuickChart');
 }
+
+// Escape helper for generated HTML (avoids collision with the main app's esc())
+function _qcEsc(s) { return esc(s); }
 
 // ═══════════════════════════════════════════════════════
 // LEADERBOARD — retro arcade high-score board
