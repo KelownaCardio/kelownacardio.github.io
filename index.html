@@ -10025,17 +10025,19 @@ function clearQueue() {
 }
 
 // ═══════════════════════════════════════════════════════
-// QuikChart export — patient list for QuikChart MD AI scribe
+// QuickChart export — patient list for QuickChart MD AI scribe
 // Generates a print-ready page with patient name, DOB, PHN,
 // sex, and appointment time. User prints / saves as PDF.
 // ═══════════════════════════════════════════════════════
 
 var _qcListMode = 'on';   // 'on' | 'off'
 var _qcCcuOrder = 'desc'; // 'desc' | 'asc'
+var _qcWards    = { CCU: true, '2S': true, '2W': true };
 
-function openQuikChartExport() {
+function openQuickChartExport() {
   _qcListMode = 'on';
   _qcCcuOrder = 'desc';
+  _qcWards    = { CCU: true, '2S': true, '2W': true };
   _qcRenderModal();
   showModal('qc-modal');
 }
@@ -10050,14 +10052,26 @@ function _qcRenderModal() {
   html += '<button class="ap-list-pill' + (_qcListMode === 'off' ? ' on' : '') + '" onclick="_qcSetList(\'off\')">Off Service</button>';
   html += '</div></div>';
 
-  // CCU order pills (only for on-service)
+  // Ward selection + CCU order (only for on-service)
   if (_qcListMode === 'on') {
+    // Ward toggles
     html += '<div style="margin-bottom:12px">';
-    html += '<label style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">CCU bed order</label>';
+    html += '<label style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">Wards to include</label>';
     html += '<div class="fl" style="gap:6px">';
-    html += '<button class="ap-list-pill' + (_qcCcuOrder === 'desc' ? ' on' : '') + '" onclick="_qcSetCcu(\'desc\')">Descending (8→1)</button>';
-    html += '<button class="ap-list-pill' + (_qcCcuOrder === 'asc'  ? ' on' : '') + '" onclick="_qcSetCcu(\'asc\')">Ascending (1→8)</button>';
+    html += '<button class="ap-list-pill' + (_qcWards.CCU ? ' on' : '') + '" onclick="_qcToggleWard(\'CCU\')">CCU</button>';
+    html += '<button class="ap-list-pill' + (_qcWards['2S'] ? ' on' : '') + '" onclick="_qcToggleWard(\'2S\')">2S</button>';
+    html += '<button class="ap-list-pill' + (_qcWards['2W'] ? ' on' : '') + '" onclick="_qcToggleWard(\'2W\')">2W</button>';
     html += '</div></div>';
+
+    // CCU bed order (only when CCU is selected)
+    if (_qcWards.CCU) {
+      html += '<div style="margin-bottom:12px">';
+      html += '<label style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px">CCU bed order</label>';
+      html += '<div class="fl" style="gap:6px">';
+      html += '<button class="ap-list-pill' + (_qcCcuOrder === 'desc' ? ' on' : '') + '" onclick="_qcSetCcu(\'desc\')">Descending (8\u21921)</button>';
+      html += '<button class="ap-list-pill' + (_qcCcuOrder === 'asc'  ? ' on' : '') + '" onclick="_qcSetCcu(\'asc\')">Ascending (1\u21928)</button>';
+      html += '</div></div>';
+    }
   }
 
   // Patient count preview
@@ -10065,10 +10079,10 @@ function _qcRenderModal() {
   html += '<div style="font-size:12px;color:var(--text2);margin-bottom:12px;padding:8px 10px;background:var(--surface2);border-radius:var(--rsm)">';
   html += '<b>' + pts.length + '</b> patient' + (pts.length !== 1 ? 's' : '') + ' will be exported';
   if (_qcListMode === 'on' && pts.length > 0) {
-    var wards = {};
-    pts.forEach(function(p) { var w = p.ward || 'Other'; wards[w] = (wards[w] || 0) + 1; });
+    var wardCounts = {};
+    pts.forEach(function(p) { var w = p.ward || 'Other'; wardCounts[w] = (wardCounts[w] || 0) + 1; });
     var bits = [];
-    Object.keys(wards).forEach(function(w) { bits.push(w + ': ' + wards[w]); });
+    Object.keys(wardCounts).forEach(function(w) { bits.push(w + ': ' + wardCounts[w]); });
     html += ' (' + bits.join(', ') + ')';
   }
   html += '</div>';
@@ -10091,11 +10105,28 @@ function _qcSetCcu(order) {
   _qcRenderModal();
 }
 
+function _qcToggleWard(ward) {
+  _qcWards[ward] = !_qcWards[ward];
+  _qcRenderModal();
+}
+
 function _qcGetPatients() {
   var list = _qcListMode;
-  return st.patients.filter(function(p) {
+  var pts = st.patients.filter(function(p) {
     return p.list === list && !p.discharged;
   });
+  // On-service: filter to selected wards only
+  if (list === 'on') {
+    pts = pts.filter(function(p) {
+      var w = p.ward || '';
+      // If ward is one of the toggleable wards, check the toggle
+      if (w === 'CCU' || w === '2S' || w === '2W') return !!_qcWards[w];
+      // Other wards: include only if at least one main ward is selected
+      // (they always round on "other" patients when rounding at all)
+      return _qcWards.CCU || _qcWards['2S'] || _qcWards['2W'];
+    });
+  }
+  return pts;
 }
 
 function _qcSortOnService(pts) {
@@ -10178,9 +10209,19 @@ function _qcGenerate() {
   var dateStr = today.toLocaleDateString('en-CA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   var listLabel = _qcListMode === 'on' ? 'On Service' : 'Off Service';
 
+  // Build selected-wards label for on-service
+  var wardLabel = '';
+  if (_qcListMode === 'on') {
+    var sel = [];
+    if (_qcWards.CCU) sel.push('CCU');
+    if (_qcWards['2S']) sel.push('2S');
+    if (_qcWards['2W']) sel.push('2W');
+    wardLabel = sel.join(' + ');
+  }
+
   var html = '<!DOCTYPE html><html><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width,initial-scale=1">' +
-    '<title>QuikChart \u2014 ' + listLabel + ' \u2014 ' + dateStr + '</title>' +
+    '<title>QuickChart \u2014 ' + listLabel + ' \u2014 ' + dateStr + '</title>' +
     '<style>' +
     'body{font-family:-apple-system,system-ui,sans-serif;margin:20px;color:#222;font-size:12px}' +
     'h1{font-size:16px;margin:0 0 4px;font-weight:800}' +
@@ -10199,10 +10240,11 @@ function _qcGenerate() {
     'border:1px solid #c8d8f0;border-radius:6px;font-size:11px;color:#336}}' +
     '</style></head><body>';
 
-  html += '<h1>QuikChart \u2014 ' + esc(listLabel) + '</h1>';
+  html += '<h1>QuickChart \u2014 ' + esc(listLabel) + '</h1>';
   html += '<div class="subtitle">' + esc(dateStr);
   if (_qcListMode === 'on') {
-    html += ' &middot; CCU ' + (_qcCcuOrder === 'desc' ? 'descending' : 'ascending');
+    html += ' &middot; ' + esc(wardLabel);
+    if (_qcWards.CCU) html += ' &middot; CCU ' + (_qcCcuOrder === 'desc' ? 'descending' : 'ascending');
   }
   html += ' &middot; ' + rows.length + ' patient' + (rows.length !== 1 ? 's' : '');
   html += '</div>';
@@ -10233,7 +10275,7 @@ function _qcGenerate() {
   }
 
   html += '</tbody></table>';
-  html += '<div class="print-hint">Tap <b>Share \u2192 Print</b> (iOS) or <b>\u22ee \u2192 Print</b> (Android) to save as PDF, then import into QuikChart MD.</div>';
+  html += '<div class="print-hint">Tap <b>Share \u2192 Print</b> (iOS) or <b>\u22ee \u2192 Print</b> (Android) to save as PDF, then import into QuickChart MD.</div>';
   html += '</body></html>';
 
   var blob = new Blob([html], { type: 'text/html' });
@@ -10241,7 +10283,7 @@ function _qcGenerate() {
   window.open(url, '_blank');
 
   hideModal('qc-modal');
-  showToast(rows.length + ' patient' + (rows.length !== 1 ? 's' : '') + ' exported for QuikChart');
+  showToast(rows.length + ' patient' + (rows.length !== 1 ? 's' : '') + ' exported for QuickChart');
 }
 
 // ═══════════════════════════════════════════════════════
@@ -10647,6 +10689,8 @@ function _renderCategory(title, subtitle, rows, isDollar) {
   html += '</div>';
   return html;
 }
+// ── 12_referrers.js ──
+// ═══════════════════════════════════════════════════════
 // ── 12_referrers.js ──
 // ═══════════════════════════════════════════════════════
 // ── 12_referrers.js ──
