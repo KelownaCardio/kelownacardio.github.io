@@ -1,4 +1,3 @@
-
 // ── Debug panel show/hide ──────────────────────────────
 function dbgToggle(expand) {
   var pill  = document.getElementById('kgh-debug-pill');
@@ -26,47 +25,15 @@ function dbgToggle(expand) {
     try { wasExpanded = localStorage.getItem('kgh:dbg-expanded') === '1'; } catch (e) {}
     dbgToggle(wasExpanded);
 
-    var toggle = document.getElementById('dbg-force-offline');
     var pill   = document.getElementById('dbg-engine-pill');
     var pillText = document.getElementById('dbg-pill-text');
 
     function paintPill() {
-      var r = window._cloudOCRReachable;
-      var label, bg;
-      if (r === false)     { label = '📱 OFFLINE FORCED'; bg = '#5a3030'; }
-      else if (r === true) { label = '☁️ cloud reachable'; bg = '#1f3d2f'; }
-      else                 { label = 'cloud: untested';   bg = '#333'; }
-      if (pill) { pill.textContent = label; pill.style.background = bg; }
-      // Mirror state in the minimized pill so you can see engine status at a glance
-      if (pillText) {
-        if (r === false)     pillText.textContent = '📱 offline';
-        else if (r === true) pillText.textContent = '☁️ cloud';
-        else                 pillText.textContent = 'debug';
-      }
+      if (pill) { pill.textContent = 'Apps Script OCR'; pill.style.background = '#1f3d2f'; }
+      if (pillText) pillText.textContent = 'debug';
     }
 
-    toggle.addEventListener('change', function() {
-      if (toggle.checked) {
-        window._cloudOCRReachable = false;
-        if (window.OCROffline && window.OCROffline.preload) {
-          window.OCROffline.preload().then(function() {
-            dbgSetStatus('Offline engine ready — go scan');
-          }).catch(function(e) {
-            dbgSetStatus('Tesseract preload failed: ' + (e && e.message || e));
-          });
-          dbgSetStatus('Loading Tesseract (~2 MB one-time)…');
-        }
-      } else {
-        window._cloudOCRReachable = null;
-        dbgSetStatus('Cloud re-enabled. Next scan probes Cloudflare.');
-      }
-      paintPill();
-    });
-
-    if (window._cloudOCRReachable === false) toggle.checked = true;
     paintPill();
-
-    setInterval(paintPill, 2000);
 
     // Tap status area to see full parser log
     document.getElementById('dbg-status').addEventListener('click', function() {
