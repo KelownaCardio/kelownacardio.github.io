@@ -1,4 +1,3 @@
-// ═══════════════════════════════════════════════════════
 // 05_render.js — Render rounds list (geo + alpha + off service)
 //
 // v4.19 change: alphaRow (on-service alphabetical view) now places
@@ -56,6 +55,17 @@ function wardAvCls(ward) {
   return 'av-on';
 }
 
+// v4.32: Stranded patient — MRP Cardiology, on-service, but NOT on a
+// Cardiology home ward (CCU/2S/2W). These patients are stuck in ED or
+// another ward and must appear on BOTH the on-service and off-service
+// lists for rounding safety. The off-service doctor rounds on them daily;
+// on weekends the on-service doctor covers them.
+function isStranded(p) {
+  return p.list === 'on' && !p.discharged &&
+         p.role === 'mrp' && p.mrp === 'Cardiology' &&
+         !_isCardiologyMRPWard(p.ward);
+}
+
 function roleChip(p) {
   if (p.role === 'mrp') {
     return '<span class="chip chip-blue">Cardiology MRP</span>';
@@ -78,7 +88,13 @@ function render() {
   var onCount  = document.getElementById('ls-on-count');
   var offCount = document.getElementById('ls-off-count');
   if (onCount)  onCount.textContent  = on  ? '(' + on  + ')' : '';
-  if (offCount) offCount.textContent = off ? '(' + off + ')' : '';
+  // v4.32: stranded patients (MRP Cardiology off home wards) shown on
+  // both lists — red ⚠ badge on off-service tab when any exist.
+  if (offCount) {
+    var _strandedN = all.filter(isStranded).length;
+    offCount.innerHTML = (off ? '(' + off + ')' : '') +
+      (_strandedN ? ' <span style="color:var(--red-t);font-weight:800">\u26A0' + _strandedN + '</span>' : '');
+  }
 
   // Search overrides list selection — show unified results across On + Off Service
   if (_roundsQuery) {
@@ -168,26 +184,47 @@ function renderGeo() {
 // patient on ED/3E/3W/ICU/CSICU/etc. fell into a blind spot — visible only
 // to whoever opened the alphabetical view or searched. This block lists
 // them above CCU when any exist and is suppressed when empty.
+// v4.32: split into stranded (MRP Cardiology → red) and other (amber).
+// Stranded patients also appear on the off-service list for rounding safety.
 function otherLocationsHtml() {
   var pts = st.patients.filter(function(p) {
     return p.list === 'on' && !p.discharged &&
            p.ward !== 'CCU' && p.ward !== '2S' && p.ward !== '2W';
   });
   if (!pts.length) return '';
-  pts = pts.slice().sort(function(a, b) {
-    var wa = String(a.ward || ''), wb = String(b.ward || '');
-    if (wa !== wb) return wa.localeCompare(wb);
-    return String(a.last || '').localeCompare(String(b.last || ''));
-  });
-  return '<div class="ward-block" style="border-left:3px solid var(--amber-t)">' +
-    '<div class="ward-hdr">' +
-      '<div class="ward-lbl">\u26A0 Other Locations (' + pts.length + ')</div>' +
-    '</div>' +
-    '<div style="padding:0 12px 8px;font-size:11px;color:var(--text3);line-height:1.4">' +
-      'On-service patients outside CCU / 2S / 2W \u2014 verify each location is correct.' +
-    '</div>' +
-    safeRowMap(pts, alphaRow) +
-    '</div>';
+  function _sortByWardName(arr) {
+    return arr.slice().sort(function(a, b) {
+      var wa = String(a.ward || ''), wb = String(b.ward || '');
+      if (wa !== wb) return wa.localeCompare(wb);
+      return String(a.last || '').localeCompare(String(b.last || ''));
+    });
+  }
+  var stranded = _sortByWardName(pts.filter(isStranded));
+  var other    = _sortByWardName(pts.filter(function(p) { return !isStranded(p); }));
+  var h = '';
+  if (stranded.length) {
+    h += '<div class="ward-block" style="border-left:3px solid var(--red-t);background:var(--red-bg)">' +
+      '<div class="ward-hdr">' +
+        '<div class="ward-lbl" style="color:var(--red-t)">\u26A0 Cardiology MRP \u2014 Off Regular Wards (' + stranded.length + ')</div>' +
+      '</div>' +
+      '<div style="padding:0 12px 8px;font-size:11px;color:var(--red-t);line-height:1.4">' +
+        'Also shown on off-service list for rounding safety.' +
+      '</div>' +
+      safeRowMap(stranded, alphaRow) +
+      '</div>';
+  }
+  if (other.length) {
+    h += '<div class="ward-block" style="border-left:3px solid var(--amber-t)">' +
+      '<div class="ward-hdr">' +
+        '<div class="ward-lbl">\u26A0 Other Locations (' + other.length + ')</div>' +
+      '</div>' +
+      '<div style="padding:0 12px 8px;font-size:11px;color:var(--text3);line-height:1.4">' +
+        'On-service patients outside CCU / 2S / 2W \u2014 verify each location is correct.' +
+      '</div>' +
+      safeRowMap(other, alphaRow) +
+      '</div>';
+  }
+  return h;
 }
 
 function wardHtml(ward) {
@@ -289,8 +326,23 @@ function renderAlpha() {
   var on = st.patients
     .filter(function(p) { return p.list === 'on' && !p.discharged; })
     .sort(function(a, b) { return String(a.last || "").localeCompare(String(b.last || "")); });
-  document.getElementById('alpha-view').innerHTML =
-    on.length ? safeRowMap(on, alphaRow) : '<div class="empty">No on-service patients.</div>';
+  // v4.34: stranded patients pinned to top of alpha view (same as geo + off)
+  var stranded = on.filter(isStranded);
+  var regular  = on.filter(function(p) { return !isStranded(p); });
+  var h = '';
+  if (stranded.length) {
+    h += '<div class="ward-block" style="border-left:3px solid var(--red-t);background:var(--red-bg);margin-bottom:12px">' +
+      '<div class="ward-hdr">' +
+        '<div class="ward-lbl" style="color:var(--red-t)">\u26A0 Cardiology MRP \u2014 Off Regular Wards (' + stranded.length + ')</div>' +
+      '</div>' +
+      '<div style="padding:0 12px 8px;font-size:11px;color:var(--red-t);line-height:1.4">' +
+        'Round daily \u2014 also shown on off-service list.' +
+      '</div>' +
+      safeRowMap(stranded, alphaRow) +
+      '</div>';
+  }
+  h += regular.length ? safeRowMap(regular, alphaRow) : (!stranded.length ? '<div class="empty">No on-service patients.</div>' : '');
+  document.getElementById('alpha-view').innerHTML = h;
 }
 
 // ── Off service view ───────────────────────────────────
@@ -304,8 +356,25 @@ function setOffView(v) {
 function renderOff() {
   var off = st.patients.filter(function(p) { return p.list === 'off' && !p.discharged; });
 
+  // v4.32: stranded patients — MRP Cardiology stuck outside home wards.
+  // Shown at the top of the off-service list so the rounding doctor sees them.
+  var stranded = st.patients.filter(isStranded)
+    .sort(function(a, b) { return String(a.last || '').localeCompare(String(b.last || '')); });
+
   var h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">' +
     '<div class="ward-lbl">Off Service</div></div>';
+
+  if (stranded.length) {
+    h += '<div class="ward-block" style="border-left:3px solid var(--red-t);background:var(--red-bg);margin-bottom:12px">' +
+      '<div class="ward-hdr">' +
+        '<div class="ward-lbl" style="color:var(--red-t)">\u26A0 Cardiology MRP \u2014 Off Regular Wards (' + stranded.length + ')</div>' +
+      '</div>' +
+      '<div style="padding:0 12px 8px;font-size:11px;color:var(--red-t);line-height:1.4">' +
+        'On-service patients outside CCU / 2S / 2W \u2014 round daily.' +
+      '</div>' +
+      safeRowMap(stranded, alphaRow) +
+      '</div>';
+  }
 
   // View toggle — named functions avoid inline quote issues
   var onAlpha = _offView === 'alpha'    ? ' on' : '';
@@ -482,13 +551,15 @@ function calcAgeGender(p) {
 function alphaRow(p) {
   var dn      = claimedToday(p);
   var avCls   = wardAvCls(p.ward);
+  // v4.34: red border on stranded patient cards for safety visibility
+  var _stranded = isStranded(p) ? ' stranded-card' : '';
   // Circle shows ward abbreviation (same as off-service)
   var wardAbbr = String(wardLabel(p.ward) || '').replace('Ward ', '').replace('ICU ', 'IC').slice(0, 5);
   // Row 2: room number (prominent) + last-seen chip — same structure as offRow.
   // Room is on its own line so long names never push it off the card.
   var roomStr  = p.bed ? esc(String(p.bed)) : '';
   var lastSeen = lastSeenByGroup(p);
-  return '<div class="alpha-row' + (dn ? ' done' : '') + '">' +
+  return '<div class="alpha-row' + (dn ? ' done' : '') + _stranded + '">' +
     '<div class="alpha-av ' + avCls + '" style="font-size:9px;font-weight:800;letter-spacing:-.3px" data-pid="' + p.id + '" onclick="openLocationEditEl(this)" title="Tap to move patient">' + esc(wardAbbr) + '</div>' +
     '<div class="wp-main">' +
       '<div class="wp-name-row">' +
