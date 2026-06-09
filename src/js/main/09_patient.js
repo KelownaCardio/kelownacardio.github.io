@@ -249,6 +249,8 @@ function locSaveCustomWard(prefix) {
       else sel.appendChild(newOpt);
     });
     showToast(name + ' added to ward list');
+    if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL)
+      push('logNewRoom', { ward:key, room:'(new ward)', doctor:st.doc||'' });
   }
   var wardSel = document.getElementById(X + '-ward');
   if (wardSel) { wardSel.value = key; locWardChange(X); }
@@ -290,17 +292,68 @@ function getSavedRooms(ward) {
   } catch(e) { return []; }
 }
 
+// ── Grouped-room (subsection) persistence ──────────────
+// For wards with roomGroups (e.g. ED), custom rooms are stored per
+// subsection: kgh5:rooms:ED:C1 → ["5","12"]
+function _getSavedSubRooms(ward, prefix) {
+  try {
+    var raw = localStorage.getItem('kgh5:rooms:' + ward + ':' + prefix);
+    return raw ? JSON.parse(raw) : [];
+  } catch(e) { return []; }
+}
+function _saveSubRoom(ward, prefix, room, presetRooms) {
+  room = String(room).trim();
+  if (!room) return;
+  if (presetRooms && presetRooms.indexOf(room) !== -1) return;
+  var saved = _getSavedSubRooms(ward, prefix);
+  if (saved.indexOf(room) !== -1) return;
+  saved.push(room);
+  try { localStorage.setItem('kgh5:rooms:' + ward + ':' + prefix, JSON.stringify(saved)); } catch(e) {}
+}
+function _getAllSubRooms(ward, group) {
+  var preset = (group.rooms || []).slice();
+  var saved  = _getSavedSubRooms(ward, group.prefix);
+  saved.forEach(function(r) { if (preset.indexOf(r) === -1) preset.push(r); });
+  return preset;
+}
+// Parse a composite value like "Trauma 2" → { groupIdx, prefix, room, presetRooms }
+function _parseGroupedValue(wdef, val) {
+  if (!val || !wdef.roomGroups) return { groupIdx:-1, prefix:'', room:'', presetRooms:[] };
+  for (var i = 0; i < wdef.roomGroups.length; i++) {
+    var g = wdef.roomGroups[i];
+    if (val === g.prefix) return { groupIdx:i, prefix:g.prefix, room:'', presetRooms:g.rooms||[] };
+    if (val.indexOf(g.prefix + ' ') === 0)
+      return { groupIdx:i, prefix:g.prefix, room:val.slice(g.prefix.length + 1), presetRooms:g.rooms||[] };
+  }
+  return { groupIdx:-1, prefix:'', room:val, presetRooms:[] };
+}
+
 function saveCustomRoom(ward, room) {
   if (!ward || !room) return;
   room = String(room).trim();
   if (!room) return;
   var wdef = WARDS[ward] || {};
+
+  // Grouped wards (e.g. ED): save the room part per subsection
+  if (wdef.roomGroups && wdef.roomGroups.length) {
+    var parsed = _parseGroupedValue(wdef, room);
+    if (parsed.prefix && parsed.room) {
+      _saveSubRoom(ward, parsed.prefix, parsed.room, parsed.presetRooms);
+    }
+    if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL)
+      push('logNewRoom', { ward:ward, room:room, doctor:st.doc||'' });
+    return;
+  }
+
   var preset = wdef.rooms || [];
   if (preset.indexOf(room) !== -1) return; // already a preset, don't need to save
   var saved = getSavedRooms(ward);
   if (saved.indexOf(room) !== -1) return; // already saved
   saved.push(room);
   try { localStorage.setItem('kgh5:rooms:' + ward, JSON.stringify(saved)); } catch(e) {}
+  // Log to backend learning database
+  if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL)
+    push('logNewRoom', { ward:ward, room:room, doctor:st.doc||'' });
 }
 
 function getBedRooms(ward) {
@@ -352,10 +405,22 @@ function selectBed(row) {
 // off-list room. Shared by Add Patient (f-bed) and the location-change
 // screen (loc-room). The text input always holds the value, so existing
 // submit code (gv('f-bed') / gv('loc-room')) is unchanged.
+//
+// Two-level mode: wards with a `roomGroups` array (e.g. ED) render
+// subsection pills first, then room pills for the selected subsection.
 function renderRoomPills(ward, inputId, containerId) {
   var box = document.getElementById(containerId);
   var inp = document.getElementById(inputId);
   if (!box || !inp) return;
+
+  var wdef = WARDS[ward] || {};
+
+  // Two-level grouped pills (e.g. ED subsections)
+  if (wdef.roomGroups && wdef.roomGroups.length) {
+    _renderGroupedPills(ward, inputId, containerId);
+    return;
+  }
+
   var rooms = getBedRooms(ward);
   // Ward with no preset rooms — plain free-text entry, no pills.
   if (!rooms.length) {
@@ -397,6 +462,122 @@ function pickRoomOther(inputId, containerId) {
   });
   var inp = document.getElementById(inputId);
   if (inp) { inp.value = ''; inp.style.display = ''; inp.focus(); }
+}
+
+// ── Two-level grouped pills (ED subsections) ───────────
+// Level 1: subsection pills (Trauma, Main, BCAS, …)
+// Level 2: room pills for the active subsection (1, 2, 3, Other…)
+// Tapping a subsection sets the value to the prefix ("Trauma").
+// Tapping a room refines it ("Trauma 2"). Custom rooms learn per subsection.
+// Colour: active subsection = green; level-2 pills = green (same tint,
+// showing "pick one of these"); selected room = solid green to confirm.
+var _GP_SEL  = 'background:var(--green-bg);border-color:var(--green);color:var(--green-t)';
+var _GP_ROOM = 'background:var(--green-bg);border-color:var(--green);color:var(--green-t)';
+var _GP_PICK = 'background:var(--green);border-color:var(--green);color:#fff';
+
+function _renderGroupedPills(ward, inputId, containerId) {
+  var box  = document.getElementById(containerId);
+  var inp  = document.getElementById(inputId);
+  var wdef = WARDS[ward] || {};
+  var groups = wdef.roomGroups;
+  var cur  = String(inp.value || '').trim();
+  var parsed = _parseGroupedValue(wdef, cur);
+  var activeIdx = parsed.groupIdx;
+
+  box.style.display = 'block';
+
+  // ── Level 1: subsection pills ──
+  var html = '<div class="room-pills">';
+  for (var j = 0; j < groups.length; j++) {
+    var isSel = (j === activeIdx);
+    html += '<button type="button" class="room-pill' +
+            (isSel ? ' selected' : '') +
+            '" style="font-weight:700;min-width:50px' +
+            (isSel ? ';' + _GP_SEL : '') + '" ' +
+            'onclick="_pickSubsection(' + j + ',\'' + esc(ward) + '\',\'' +
+            inputId + '\',\'' + containerId + '\')">' +
+            esc(groups[j].label) + '</button>';
+  }
+  html += '</div>';
+
+  // ── Level 2: room pills for active subsection ──
+  if (activeIdx >= 0) {
+    var g = groups[activeIdx];
+    var subRooms = _getAllSubRooms(ward, g);
+    var activeRoom = parsed.room;
+
+    html += '<div class="room-pills" style="margin-top:6px;padding-left:2px">';
+
+    subRooms.forEach(function(r) {
+      var isSel = (r === activeRoom);
+      html += '<button type="button" class="room-pill' +
+              (isSel ? ' selected' : '') + '" ' +
+              'style="' + (isSel ? _GP_PICK : _GP_ROOM) + '" ' +
+              'onclick="_pickSubRoom(' + activeIdx + ',\'' + esc(r) +
+              '\',\'' + esc(ward) + '\',\'' + inputId + '\',\'' + containerId + '\')">' +
+              esc(r) + '</button>';
+    });
+
+    // "Other…" for typing a custom room (always shown for learning)
+    var otherOn = !!activeRoom && subRooms.indexOf(activeRoom) === -1;
+    html += '<button type="button" class="room-pill room-pill-other' +
+            (otherOn ? ' selected' : '') + '" ' +
+            'style="' + (otherOn ? _GP_PICK : _GP_ROOM) + '" ' +
+            'onclick="_pickSubRoomOther(' + activeIdx + ',\'' + esc(ward) +
+            '\',\'' + inputId + '\',\'' + containerId + '\')">Other…</button>';
+    html += '</div>';
+
+    // Show text input only when "Other…" is active
+    inp.style.display = otherOn ? '' : 'none';
+  } else {
+    inp.style.display = 'none';
+  }
+
+  box.innerHTML = html;
+}
+
+// Tap a subsection pill → set value to prefix, show level 2
+function _pickSubsection(groupIdx, ward, inputId, containerId) {
+  var wdef = WARDS[ward] || {};
+  var g = (wdef.roomGroups || [])[groupIdx];
+  if (!g) return;
+  var inp = document.getElementById(inputId);
+  if (inp) inp.value = g.prefix;
+  _renderGroupedPills(ward, inputId, containerId);
+}
+
+// Tap a room pill in level 2 → set value to "prefix room"
+function _pickSubRoom(groupIdx, room, ward, inputId, containerId) {
+  var wdef = WARDS[ward] || {};
+  var g = (wdef.roomGroups || [])[groupIdx];
+  if (!g) return;
+  var inp = document.getElementById(inputId);
+  if (inp) { inp.value = g.prefix + ' ' + room; inp.style.display = 'none'; }
+  _renderGroupedPills(ward, inputId, containerId);
+}
+
+// Tap "Other…" in level 2 → show text input for typing a custom room.
+// On blur, the typed value is prepended with the prefix.
+function _pickSubRoomOther(groupIdx, ward, inputId, containerId) {
+  var wdef = WARDS[ward] || {};
+  var g = (wdef.roomGroups || [])[groupIdx];
+  if (!g) return;
+  var inp = document.getElementById(inputId);
+  if (!inp) return;
+  inp.value = '';
+  inp.style.display = '';
+  inp.placeholder = g.prefix + ' bed #';
+  inp.focus();
+  // On blur: prepend prefix if user typed a bare number/letter
+  inp._grpBlur = function() {
+    var v = String(inp.value || '').trim();
+    if (!v) { inp.value = g.prefix; }
+    else if (v.indexOf(g.prefix) !== 0) { inp.value = g.prefix + ' ' + v; }
+    inp.removeEventListener('blur', inp._grpBlur);
+    inp._grpBlur = null;
+    _renderGroupedPills(ward, inputId, containerId);
+  };
+  inp.addEventListener('blur', inp._grpBlur);
 }
 
 // Apply ward-default role / mrp / care / list to a set of form selects.
