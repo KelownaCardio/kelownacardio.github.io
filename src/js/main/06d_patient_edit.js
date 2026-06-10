@@ -40,6 +40,17 @@ function openPatientEdit(pid) {
   // ── Location & list (shared component) ───────────────
   html += buildLocationCard('pe', p);
 
+  // ── Handover flag ────────────────────────────────────
+  var _hoOn = !!p.handover && p.handover !== 'false' && p.handover !== false;
+  html += '<div class="card" style="padding:10px 12px">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between">' +
+      '<div style="font-size:13px;font-weight:700;color:var(--text)">Flag for handover — on call issue</div>' +
+      '<button class="ap-list-pill' + (_hoOn ? ' on' : '') + '" id="pe-handover" ' +
+        'onclick="this.classList.toggle(\'on\')" ' +
+        'style="min-width:0;padding:4px 12px;font-size:11px;text-align:center">Flag</button>' +
+    '</div>' +
+    '</div>';
+
   // ── Audit footer (who added the patient) ─────────────
   if (p.createdBy || p.createdAt) {
     html += '<div style="font-size:10px;color:var(--text3);text-align:center;margin:8px 0 12px">' +
@@ -128,6 +139,16 @@ function savePatientEdit(pid) {
   p.mrp       = (document.getElementById('pe-mrp')  || {}).value || '';
   p.list      = (document.getElementById('pe-list') || {}).value || p.list;
   p.care      = (document.getElementById('pe-care') || {}).value || p.care;
+
+  // v4.37: handover flag — 'oncall' when toggled on from edit, preserve 'new' if untouched
+  var _hoPill = document.getElementById('pe-handover');
+  if (_hoPill) {
+    var _wasOn = !!p.handover && p.handover !== 'false' && p.handover !== false;
+    var _nowOn = _hoPill.classList.contains('on');
+    if (_nowOn && !_wasOn)      p.handover = 'oncall';   // newly flagged
+    else if (!_nowOn && _wasOn) p.handover = false;       // cleared
+    // else: unchanged — keep existing value ('new' or 'oncall')
+  }
 
   saveCustomRoom(p.ward, p.bed);
   sv('patients', st.patients);

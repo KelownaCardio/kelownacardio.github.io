@@ -66,6 +66,51 @@ function isStranded(p) {
          !_isCardiologyMRPWard(p.ward);
 }
 
+// v4.37: Handover flag — new admissions or on-call issues flagged for handover.
+// handover = 'new' (new patient admission) | 'oncall' (existing patient, on-call issue) | false
+function isHandover(p) {
+  return !p.discharged && !!p.handover && p.handover !== 'false';
+}
+
+function clearHandover(pid) {
+  var p = getP(pid);
+  if (!p) return;
+  p.handover = false;
+  sv('patients', st.patients);
+  if (SHEETS_URL) push('savePatient', p);
+  logChange(p, 'Handover acknowledged', (st.doc && st.doc.alias) || '');
+  render();
+}
+
+function handoverSectionHtml(patients) {
+  if (!patients.length) return '';
+  return '<div class="handover-block">' +
+    '<div class="ward-hdr">' +
+      '<div class="ward-lbl" style="color:#7a6d00">\u2691 For Handover (' + patients.length + ')</div>' +
+    '</div>' +
+    '<div style="padding:0 12px 4px;font-size:10px;color:#7a6d00;line-height:1.4">' +
+      'Tap \u2713 to acknowledge.' +
+    '</div>' +
+    safeRowMap(patients, handoverRow) +
+    '</div>';
+}
+
+function handoverRow(p) {
+  var inner = alphaRow(p);
+  var label = p.handover === 'oncall'
+    ? 'Flag for Handover \u2014 On Call Issue'
+    : 'New Patient \u2014 For Handover';
+  // Wrap the standard alpha row with handover styling + label + acknowledge button
+  return '<div style="position:relative">' +
+    '<div style="padding:2px 10px 0;font-size:10px;font-weight:700;color:#7a6d00">' + label + '</div>' +
+    inner.replace('class="alpha-row', 'class="alpha-row handover-card') +
+    '<button class="handover-ack-btn" data-pid="' + p.id + '" onclick="event.stopPropagation();clearHandover(this.getAttribute(\'data-pid\'))">' +
+      '<svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2.5"><polyline points="20 6 9 17 4 12"/></svg>' +
+      'Acknowledged' +
+    '</button>' +
+    '</div>';
+}
+
 function roleChip(p) {
   if (p.role === 'mrp') {
     return '<span class="chip chip-blue">Cardiology MRP</span>';
@@ -87,12 +132,17 @@ function render() {
   // Update tab counts
   var onCount  = document.getElementById('ls-on-count');
   var offCount = document.getElementById('ls-off-count');
-  if (onCount)  onCount.textContent  = on  ? '(' + on  + ')' : '';
+  // v4.37: handover badge on on-service tab
+  var _hoOnN = all.filter(function(p) { return p.list === 'on' && isHandover(p); }).length;
+  if (onCount) onCount.innerHTML = (on ? '(' + on + ')' : '') +
+    (_hoOnN ? ' <span style="color:#7a6d00;font-weight:800">\u2691' + _hoOnN + '</span>' : '');
   // v4.32: stranded patients (MRP Cardiology off home wards) shown on
   // both lists — red ⚠ badge on off-service tab when any exist.
   if (offCount) {
     var _strandedN = all.filter(isStranded).length;
+    var _hoOffN    = all.filter(function(p) { return p.list === 'off' && isHandover(p); }).length;
     offCount.innerHTML = (off ? '(' + off + ')' : '') +
+      (_hoOffN ? ' <span style="color:#7a6d00;font-weight:800">\u2691' + _hoOffN + '</span>' : '') +
       (_strandedN ? ' <span style="color:var(--red-t);font-weight:800">\u26A0' + _strandedN + '</span>' : '');
   }
 
@@ -174,7 +224,10 @@ var _offView = 'alpha'; // 'alpha' | 'location' — off-service view toggle
 
 // ── Geographic view ────────────────────────────────────
 function renderGeo() {
-  var h = otherLocationsHtml() + wardHtml('CCU') + wardHtml('2S') + wardHtml('2W');
+  // v4.37: Handover patients pinned to very top of geo view
+  var _ho = st.patients.filter(function(p) { return p.list === 'on' && isHandover(p); })
+    .sort(function(a, b) { return String(a.last || '').localeCompare(String(b.last || '')); });
+  var h = handoverSectionHtml(_ho) + otherLocationsHtml() + wardHtml('CCU') + wardHtml('2S') + wardHtml('2W');
   document.getElementById('geo-view').innerHTML = h;
 }
 
@@ -326,10 +379,13 @@ function renderAlpha() {
   var on = st.patients
     .filter(function(p) { return p.list === 'on' && !p.discharged; })
     .sort(function(a, b) { return String(a.last || "").localeCompare(String(b.last || "")); });
+  // v4.37: handover patients pinned to very top
+  var handover = on.filter(isHandover);
+  var rest     = on.filter(function(p) { return !isHandover(p); });
   // v4.34: stranded patients pinned to top of alpha view (same as geo + off)
-  var stranded = on.filter(isStranded);
-  var regular  = on.filter(function(p) { return !isStranded(p); });
-  var h = '';
+  var stranded = rest.filter(isStranded);
+  var regular  = rest.filter(function(p) { return !isStranded(p); });
+  var h = handoverSectionHtml(handover);
   if (stranded.length) {
     h += '<div class="ward-block" style="border-left:3px solid var(--red-t);background:var(--red-bg);margin-bottom:12px">' +
       '<div class="ward-hdr">' +
@@ -341,7 +397,7 @@ function renderAlpha() {
       safeRowMap(stranded, alphaRow) +
       '</div>';
   }
-  h += regular.length ? safeRowMap(regular, alphaRow) : (!stranded.length ? '<div class="empty">No on-service patients.</div>' : '');
+  h += regular.length ? safeRowMap(regular, alphaRow) : (!stranded.length && !handover.length ? '<div class="empty">No on-service patients.</div>' : '');
   document.getElementById('alpha-view').innerHTML = h;
 }
 
@@ -356,6 +412,10 @@ function setOffView(v) {
 function renderOff() {
   var off = st.patients.filter(function(p) { return p.list === 'off' && !p.discharged; });
 
+  // v4.37: handover patients pinned to very top of off-service
+  var _hoOff = off.filter(isHandover)
+    .sort(function(a, b) { return String(a.last || '').localeCompare(String(b.last || '')); });
+
   // v4.32: stranded patients — MRP Cardiology stuck outside home wards.
   // Shown at the top of the off-service list so the rounding doctor sees them.
   var stranded = st.patients.filter(isStranded)
@@ -363,6 +423,8 @@ function renderOff() {
 
   var h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">' +
     '<div class="ward-lbl">Off Service</div></div>';
+
+  h += handoverSectionHtml(_hoOff);
 
   if (stranded.length) {
     h += '<div class="ward-block" style="border-left:3px solid var(--red-t);background:var(--red-bg);margin-bottom:12px">' +

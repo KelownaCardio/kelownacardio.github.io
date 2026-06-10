@@ -922,6 +922,8 @@ async function apSubmit(addToList, _skipDupCheck) {
     p.list  = gv('f-list') || 'on';
     p.care  = gv('f-care') || 'directive';
     if (p.ward && p.bed) saveCustomRoom(p.ward, p.bed);
+    // v4.37: Auto-flag for handover when patient added after 17:00
+    if (new Date().getHours() >= 17) p.handover = 'new';
   } else {
     // Consult-only patient — not added to rounds; lives in Recently Discharged
     p.ward  = ''; p.bed = ''; p.role = 'consultant';
@@ -1107,12 +1109,19 @@ function clearAddForm() {
 
 function resetPhotoZone() {
   dismissExistingPatientBanner();
-  document.getElementById('photo-zone').innerHTML =
-    '<svg style="width:26px;height:26px;stroke:var(--text3);fill:none;stroke-width:1.5" viewBox="0 0 24 24">' +
-      '<path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>' +
-      '<circle cx="12" cy="13" r="4"/>' +
-    '</svg>' +
-    '<span style="font-size:12px;color:var(--text2)">Tap to photograph sticker or chart header</span>' +
+  var pz = document.getElementById('photo-zone');
+  pz.style.padding = '';
+  pz.innerHTML =
+    '<div class="pz-btns">' +
+      '<button class="pz-btn" onclick="event.stopPropagation();document.getElementById(\'f-photo-cam\').click()">' +
+        '<svg style="width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.5" viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>' +
+        'Take Photo' +
+      '</button>' +
+      '<button class="pz-btn" onclick="event.stopPropagation();document.getElementById(\'f-photo-gal\').click()">' +
+        '<svg style="width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.5" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>' +
+        'Choose Photo' +
+      '</button>' +
+    '</div>' +
     '<span style="font-size:10px;color:var(--text3)">Auto-fills name, PHN, DOB, ward, room</span>';
 }
 // ── Sticker / Meditech photo capture → crop → OCR ──
