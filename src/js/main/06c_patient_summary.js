@@ -3,6 +3,92 @@
 // Opens as a bottom sheet modal.
 // ═══════════════════════════════════════════════════════
 
+// ── Patient Notes — free-text clinical narrative per patient ────────────
+// Opened by tapping patient name on the rounds list card.
+// Stored: summary (text), summaryUpdatedAt (epoch ms), summaryUpdatedBy (alias).
+
+function openPatientNotes(pid) {
+  var p = getP(pid);
+  if (!p || !p.id) return;
+
+  var displayName = esc(String(p.first || '')) + ' ' +
+                    esc(String(p.last || '').toUpperCase()) +
+                    '<span style="font-weight:500;font-size:14px;color:var(--text2);margin-left:8px">' + esc(calcAgeGender(p)) + '</span>';
+  var summary = p.summary || '';
+  var footerText = '';
+  if (p.summaryUpdatedBy) {
+    var ts = parseFloat(p.summaryUpdatedAt);
+    var when = '';
+    if (!isNaN(ts) && ts > 0) {
+      var d = new Date(ts);
+      var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      var hr = d.getHours(); var mn = d.getMinutes();
+      var ampm = hr >= 12 ? 'pm' : 'am';
+      hr = hr % 12 || 12;
+      when = months[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear() +
+             ' ' + hr + ':' + (mn < 10 ? '0' : '') + mn + ampm;
+    }
+    footerText = 'Last edited by ' + esc(String(p.summaryUpdatedBy)) +
+                 (when ? ' · ' + when : '');
+  }
+
+  var html = '';
+  // Sticky close button — same pattern as claim summary modal
+  html += '<div style="position:sticky;top:0;z-index:10;display:flex;justify-content:flex-end;margin-bottom:-28px;pointer-events:none">' +
+          '<button onclick="hideModal(\'pt-notes-modal\')" ' +
+          'style="pointer-events:auto;width:32px;height:32px;border-radius:50%;border:none;' +
+          'background:rgba(0,0,0,.10);font-size:18px;cursor:pointer;color:var(--text2);' +
+          'display:flex;align-items:center;justify-content:center;font-family:inherit;' +
+          'box-shadow:0 1px 4px rgba(0,0,0,.12);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)"' +
+          ' title="Close">✕</button></div>';
+
+  html += '<div class="pn-header">' + displayName + '</div>';
+
+  html += '<textarea class="pn-textarea" id="pn-text" placeholder="Add clinical notes…">' +
+          esc(summary) + '</textarea>';
+
+  if (footerText) {
+    html += '<div class="pn-footer">' + footerText + '</div>';
+  }
+
+  html += '<div class="pn-actions">' +
+          '<button class="btn btn-p" onclick="savePatientNotes(\'' + esc(p.id) + '\')">Save</button>' +
+          '<button class="btn btn-s" onclick="hideModal(\'pt-notes-modal\')">Close</button>' +
+          '</div>';
+
+  document.getElementById('pt-notes-content').innerHTML = html;
+  showModal('pt-notes-modal');
+
+  // Focus textarea after modal renders
+  setTimeout(function() {
+    var ta = document.getElementById('pn-text');
+    if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+  }, 120);
+}
+
+function savePatientNotes(pid) {
+  var p = getP(pid);
+  if (!p) return;
+  var ta = document.getElementById('pn-text');
+  if (!ta) return;
+
+  var newText = ta.value.trim();
+  var alias   = (st.doc && st.doc.alias) || '';
+
+  p.summary          = newText;
+  p.summaryUpdatedAt = String(Date.now());
+  p.summaryUpdatedBy = alias;
+
+  sv('patients', st.patients);
+  if (SHEETS_URL) push('savePatient', p);
+  logChange(p, 'Summary updated', alias);
+
+  hideModal('pt-notes-modal');
+  showToast('Notes saved');
+}
+
+// ── Claim history view (existing) ──────────────────────────────────────
+
 function openPatientSummary(pid) {
   var p = getP(pid);
   if (!p || !p.id) return;
