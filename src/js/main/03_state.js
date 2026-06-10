@@ -44,12 +44,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v4.35-2026-06-08-ed-subsection-pills';
+var BUILD_ID    = 'v4.36-2026-06-09-filtered-sync-orphan-guard';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v4.35';
-var APP_BUILT   = '2026-06-08';
+var APP_VERSION = 'v4.36';
+var APP_BUILT   = '2026-06-09';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -429,7 +429,12 @@ async function syncFromSheets() {
     // bug fixed above for any pre-existing orphans, and provides defence in
     // depth for future races. Upload-tool claims (8-char IDs) are skipped —
     // historical billing is allowed to lack a patient row by design.
-    if (Array.isArray(st.patients) && Array.isArray(st.claims)) {
+    //
+    // v4.36: Skip when getAll() returns pre-filtered data (d.filtered===true).
+    // Filtered responses intentionally exclude old discharged patients — the
+    // healer would misread those absent patients as orphans and create
+    // duplicate stubs. The healer still runs on any unfiltered sync.
+    if (!d.filtered && Array.isArray(st.patients) && Array.isArray(st.claims)) {
       var phnHasPatient = {};
       st.patients.forEach(function(p) { if (p.phn) phnHasPatient[String(p.phn)] = true; });
       var orphansByPhn = {};
