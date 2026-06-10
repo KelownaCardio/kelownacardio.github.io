@@ -12050,7 +12050,7 @@ function reorderBtn(btn) {
 
 function ctxEditBtn(btn) { openPatientEdit(btn.getAttribute("data-pid")); }
 
-function openSummaryEl(el) { openPatientSummary(el.getAttribute("data-pid") || el.closest("[data-pid]").getAttribute("data-pid")); }
+function openSummaryEl(el) { openPatientNotes(el.getAttribute("data-pid") || el.closest("[data-pid]").getAttribute("data-pid")); }
 
 </script>
 
