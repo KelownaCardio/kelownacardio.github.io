@@ -1284,6 +1284,7 @@ var FEES = [
   { code:'33025', desc:'Cardioversion',                                                  amount:'$105.70', cat:'Procedure',    clr:'chip-red'   },
   { code:'33030', desc:'Temporary pacemaker placement (TVP)',                            amount:'$176.07', cat:'Procedure',    clr:'chip-red'   },
   { code:'00751',  desc:'Pericardiocentesis (pericardial puncture)',                      amount:'$258.25', cat:'Procedure',    clr:'chip-red'   },
+  { code:'00017',  desc:'Central line insertion',                                         amount:'$26.63',  cat:'Procedure',    clr:'chip-red'   },
 
   // ── Diagnostics ─────────────────────────────────────────────────
   { code:'33035', desc:'Treadmill Test (GXT)',                                            amount:'$47.11',  cat:'Diagnostics', clr:'chip-teal'  },
@@ -1787,6 +1788,8 @@ function recordIcdUsage(code) {
 
 // ── 02b_icd_search.js ──
 // ═══════════════════════════════════════════════════════
+// ── 02b_icd_search.js ──
+// ═══════════════════════════════════════════════════════
 // 02b_icd_search.js — ICD-9 and referrer search helpers
 // Uses element references (no inline quote-escaping issues)
 // ═══════════════════════════════════════════════════════
@@ -1983,12 +1986,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v4.38-2026-06-10-patient-notes';
+var BUILD_ID    = 'v4.39-2026-06-11-dc-prompt-autorefresh-00017';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v4.38';
-var APP_BUILT   = '2026-06-10';
+var APP_VERSION = 'v4.39';
+var APP_BUILT   = '2026-06-11';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -9489,7 +9492,7 @@ function closeLocScreen() {
 // ── Discharge Modal ────────────────────────────────────
 // Flow:
 //   Step 1 — if no visit billed today: offer visit type buttons (default by ward/role)
-//   Step 2 — if Cardiology MRP, non-CCU ward, LOS > 4: complex discharge prompt
+//   Step 2 — if Cardiology MRP, LOS > 4 (admit day=1, losdays>=4): complex discharge prompt
 //   Step 3 — Confirm discharge & remove (single action, no error-removal path)
 //
 function openDischModal(pid) {
@@ -9522,7 +9525,7 @@ function openDischModal(pid) {
 }
 
 // ── Complex Discharge (78717) — criteria checklist ──────
-// Qualifies when LOS > 4 AND Cardiology MRP AND clinical criteria:
+// Qualifies when LOS > 4 (admit day = day 1, so losdays() >= 4) AND Cardiology MRP AND clinical criteria:
 //   (2 from A) OR (1 from A + 1 from B) OR (1 from A + C)
 // Note written to the 78717 claim mirrors the clerk's format:
 //   "Complex Discharge: CHF, BMI > 35, Age > 75"
@@ -9663,7 +9666,7 @@ function _dischStep2(pid) {
   var los = losdays(p);
   // Complex discharge applies to ALL Cardiology MRP patients with LOS > 4, including CCU/ICU
   var isCardioMRP = p.role === 'mrp' && p.mrp === 'Cardiology';
-  if (isCardioMRP && los > 4) {
+  if (isCardioMRP && los >= 4) {
     _cdPid   = pid;
     _cdState = {};
     // Pre-tick only what the app can determine itself — MD still confirms each box
@@ -11673,6 +11676,31 @@ async function init() {
     } catch(e) {
       setSyncState('error');
     }
+
+    // v4.39: Auto-refresh every 5 min so other doctors' changes (including
+    // handover summaries from the email processor) appear without closing
+    // and reopening the app.
+    setInterval(async function() {
+      // Skip if any editing screen is open — don't clobber mid-edit state
+      var claimOpen = document.getElementById('p-claim') &&
+                      document.getElementById('p-claim').classList.contains('on');
+      var addOpen   = document.getElementById('p1') &&
+                      document.getElementById('p1').classList.contains('on');
+      var dischOpen = document.getElementById('disch-modal') &&
+                      document.getElementById('disch-modal').classList.contains('on');
+      var ocrBusy   = typeof _ocrInFlight !== 'undefined' && _ocrInFlight;
+      if (claimOpen || addOpen || dischOpen || ocrBusy) {
+        console.log('[auto-refresh] skipped — editing in progress');
+        return;
+      }
+      try {
+        await syncFromSheets();
+        render();
+        console.log('[auto-refresh] synced');
+      } catch(e) {
+        console.log('[auto-refresh] failed:', e);
+      }
+    }, 5 * 60 * 1000);
   }
 }
 
