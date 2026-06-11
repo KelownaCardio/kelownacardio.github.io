@@ -91,22 +91,16 @@ function clearSearchField(searchId, hiddenId, hiddenNameId, ddId) {
   if (dd) { dd.innerHTML = ''; dd.style.display = 'none'; }
 }
 
-// Dynamic role change in edit form
+// Dynamic role change in edit form — v4.39: only updates MRP binding.
+// Care type is NOT auto-changed.
 function peRoleChange() {
-  // Same rules as roleChange() — role ↔ MRP binding, care updates,
-  // list (on/off service) is NOT touched (ward-driven only).
   var roleSel = document.getElementById('pe-role');
   var mrpSel  = document.getElementById('pe-mrp');
-  var careFld = document.getElementById('pe-care');
-  var ward    = (document.getElementById('pe-ward') || {}).value || '';
   if (!roleSel || !mrpSel) return;
-  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
   if (roleSel.value === 'mrp') {
     mrpSel.value = 'Cardiology';
-    if (careFld) careFld.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
   } else {
     if (mrpSel.value === 'Cardiology') mrpSel.value = 'Other';
-    if (careFld) careFld.value = 'directive';
   }
 }
 
@@ -216,8 +210,8 @@ function savePatientEdit(pid) {
 // ═══════════════════════════════════════════════════════
 // Location edit — quick ward/bed/on-off-service change
 // Opened by tapping the ward/bed circle on any patient row.
-// Rule: if the new ward isn't a Cardiology MRP ward (CCU/2S/2W)
-// OR the list flips on→off, force role=consultant + mrp=Other.
+// v4.39: No forced role/care snaps. User controls all fields independently.
+// Stranded-card safety net handles visibility for patients on unexpected wards.
 // ═══════════════════════════════════════════════════════
 function openLocationEditEl(el) {
   var pid = el.getAttribute('data-pid') || (el.closest('[data-pid]') && el.closest('[data-pid]').getAttribute('data-pid'));
@@ -263,19 +257,7 @@ function _isCardiologyMRPWard(ward) {
 
 function leUpdateRuleHint() {
   var hint = document.getElementById('le-rule-hint');
-  if (!hint) return;
-  var newWard = (document.getElementById('le-ward') || {}).value || '';
-  var newList = (document.getElementById('le-list') || {}).value || 'on';
-  var oldList = _leEditP ? _leEditP.list : null;
-
-  var movedOff       = oldList === 'on' && newList === 'off';
-  var leftCardiology = !_isCardiologyMRPWard(newWard);
-  if (movedOff || leftCardiology) {
-    hint.innerHTML = '<b style="color:var(--amber-t)">Note:</b> role will change to ' +
-      '<b>Consulting</b> and MRP to <b>Other</b>. Open full edit if you need to keep them as MRP/Cardiology.';
-  } else {
-    hint.textContent = '';
-  }
+  if (hint) hint.textContent = '';
 }
 
 function saveLocationEdit(pid) {
@@ -293,18 +275,7 @@ function saveLocationEdit(pid) {
   var oldBed  = p.bed || '';
   var oldList = p.list;
 
-  // Apply the rule: leaving cardiology wards OR going on→off → consultant + Other
-  var leftCardiology = !_isCardiologyMRPWard(newWard);
-  var movedOff       = oldList === 'on' && newList === 'off';
-  var snappedRole    = false;
-  if (leftCardiology || movedOff) {
-    if (p.role === 'mrp' || (p.mrp && p.mrp === 'Cardiology')) snappedRole = true;
-    p.role = 'consultant';
-    p.mrp  = 'Other';
-    // Care code stays user-controlled via full edit; default to directive for consultants
-    if (p.care !== 'combined') p.care = 'directive';
-  }
-
+  // v4.39: No forced role/care snaps. Save user's choices directly.
   p.ward = newWard;
   p.bed  = newBed;
   p.list = newList;
@@ -321,7 +292,6 @@ function saveLocationEdit(pid) {
   if (oldWard !== newWard) bits.push(((WARDS[oldWard]||{}).label || oldWard || '—') + ' → ' + ((WARDS[newWard]||{}).label || newWard));
   if (oldBed  !== newBed)  bits.push('bed ' + (oldBed || '—') + ' → ' + (newBed || '—'));
   if (oldList !== newList) bits.push((oldList === 'on' ? 'On' : 'Off') + ' → ' + (newList === 'on' ? 'On' : 'Off') + ' service');
-  if (snappedRole)         bits.push('role→Consulting, MRP→Other');
   logChange(p, 'Moved', bits.join('; ') || 'no change');
 
   hideModal('loc-edit-modal');

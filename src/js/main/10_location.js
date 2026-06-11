@@ -55,6 +55,18 @@ function openLocScreen(pid) {
   document.getElementById('loc-list').value = p.list || 'on';
   document.getElementById('loc-care').value = p.care || 'daily';
 
+  // v4.39: MRP toggle pill
+  var mrpPill = document.getElementById('loc-mrp-pill');
+  if (mrpPill) {
+    mrpPill.classList.toggle('on', p.role === 'mrp');
+    mrpPill.textContent = p.role === 'mrp' ? 'MRP ✓' : 'MRP';
+  }
+  var conPill = document.getElementById('loc-con-pill');
+  if (conPill) {
+    conPill.classList.toggle('on', p.role !== 'mrp');
+    conPill.textContent = p.role !== 'mrp' ? 'Consultant ✓' : 'Consultant';
+  }
+
   showPane('p-loc');
 }
 
@@ -64,19 +76,9 @@ function selectLocWard(ward) {
   var opt = document.getElementById('loc-opt-' + ward);
   if (opt) opt.classList.add('selected');
 
-  var w = WARDS[ward] || {};
-  var geoWards = ['CCU','2S','2W'];
-  var listSel = document.getElementById('loc-list');
-  var careSel = document.getElementById('loc-care');
-
-  if (geoWards.indexOf(ward) === -1) {
-    // Non-geographic ward — always snap to Off Service / directive for safety
-    if (listSel) listSel.value = 'off';
-    if (careSel) careSel.value = 'directive';
-  } else {
-    if (listSel) listSel.value = w.list || 'on';
-    if (careSel) careSel.value = w.care || 'daily';
-  }
+  // v4.39: Ward selection no longer snaps list/care/role.
+  // The stranded-patient safety net (red cards) handles visibility.
+  // Users choose location, MRP, and on/off service independently.
 
   // Render the ward's preset rooms as tap pills. Changing ward clears the
   // room — a room from the previous ward no longer applies.
@@ -92,25 +94,21 @@ function confirmLocChange() {
   p.bed    = gv('loc-room');
   saveCustomRoom(_locWard, p.bed);   // persist an off-list room so it becomes a pill next time
   p.care   = gv('loc-care');
+  p.list   = gv('loc-list');
 
-  // Safety rule: any ward outside the geographic view (CCU/2S/2W)
-  // is forced to Off Service so the patient doesn't disappear from rounds.
-  var geoWards = ['CCU','2S','2W'];
-  var requestedList = gv('loc-list');
-  if (geoWards.indexOf(_locWard) === -1 && requestedList === 'on') {
-    p.list = 'off';
-    p.care = 'directive';
-  } else {
-    p.list = requestedList;
+  // v4.39: MRP toggle — read pill state
+  var mrpPill = document.getElementById('loc-mrp-pill');
+  if (mrpPill) {
+    var isMrp = mrpPill.classList.contains('on');
+    p.role = isMrp ? 'mrp' : 'consultant';
+    p.mrp  = isMrp ? 'Cardiology' : p.mrp;
   }
 
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
   logChange(p, 'Location changed', from + ' → ' + _locWard);
   closeLocScreen();
-  var suffix = (p.list === 'off' && requestedList === 'on')
-    ? ' → moved to Off Service (not on geo view)' : '';
-  showToast(p.last + ' moved to ' + wardLabel(_locWard) + suffix);
+  showToast(p.last + ' moved to ' + wardLabel(_locWard));
 }
 
 function closeLocScreen() {
@@ -118,6 +116,15 @@ function closeLocScreen() {
   showPane('p0');
   document.querySelectorAll('.nb').forEach(function(b, i) { b.classList.toggle('on', i === 0); });
   render();
+}
+
+// v4.39: Toggle MRP/Consultant pills on Location screen
+function toggleLocRole(role) {
+  var mrpPill = document.getElementById('loc-mrp-pill');
+  var conPill = document.getElementById('loc-con-pill');
+  var isMrp = (role === 'mrp');
+  if (mrpPill) { mrpPill.classList.toggle('on', isMrp);  mrpPill.textContent = isMrp ? 'MRP ✓' : 'MRP'; }
+  if (conPill) { conPill.classList.toggle('on', !isMrp); conPill.textContent = !isMrp ? 'Consultant ✓' : 'Consultant'; }
 }
 
 // ── Discharge Modal ────────────────────────────────────

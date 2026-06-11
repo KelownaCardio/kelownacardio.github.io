@@ -152,7 +152,8 @@ function locWardChange(prefix, opts) {
   if (!opts || !opts.preserveAll) {
     var bedInp = document.getElementById(X + '-bed');
     if (bedInp) bedInp.value = '';
-    applyWardDefaults(w, { list:X + '-list', role:X + '-role', mrp:X + '-mrp', care:X + '-care' });
+    // v4.39: Ward change no longer snaps role/mrp/list/care.
+    // Users choose each independently; stranded-card safety net handles visibility.
   }
   renderRoomPills(w, X + '-bed', X + '-room-pills');
   locSyncListPills(X);
@@ -160,43 +161,34 @@ function locWardChange(prefix, opts) {
   leUpdateRuleHint();
 }
 
-// MRP service ↔ role bidirectional lock. `list` is NOT touched — it is
-// ward-driven and may be manually overridden by the user.
+// MRP service change — v4.39: no longer snaps role or care.
+// User sets role and care independently.
 function locMrpChange(prefix) {
   var X = prefix;
   var mrpSel  = document.getElementById(X + '-mrp');
   var roleSel = document.getElementById(X + '-role');
-  var careFld = document.getElementById(X + '-care');
-  var ward    = (document.getElementById(X + '-ward') || {}).value || '';
   if (!mrpSel || !roleSel) return;
-  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
+  // Only update role pill to match MRP (Cardiology = MRP, other = Consultant)
   if (mrpSel.value === 'Cardiology') {
     roleSel.value = 'mrp';
-    if (careFld) careFld.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
   } else {
     roleSel.value = 'consultant';
-    if (careFld) careFld.value = 'directive';
   }
   locSyncRolePills(X);
 }
 
-// Role pill — toggling auto-fills MRP service (MRP→Cardiology;
-// Consulting→keep a non-Cardiology value, else Other).
+// Role pill — v4.39: toggling only updates MRP binding (MRP→Cardiology;
+// Consulting→keep non-Cardiology, else Other). Care is NOT touched.
 function locRolePill(prefix, val) {
   var X = prefix;
   var roleEl = document.getElementById(X + '-role');
   if (roleEl) roleEl.value = val;
   locSyncRolePills(X);
   var mrpEl  = document.getElementById(X + '-mrp');
-  var careEl = document.getElementById(X + '-care');
-  var ward   = (document.getElementById(X + '-ward') || {}).value || '';
-  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
   if (val === 'mrp') {
     if (mrpEl)  mrpEl.value  = 'Cardiology';
-    if (careEl) careEl.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
   } else {
     if (mrpEl && mrpEl.value === 'Cardiology') mrpEl.value = 'Other';
-    if (careEl) careEl.value = 'directive';
   }
 }
 
@@ -263,24 +255,14 @@ function locSaveCustomWard(prefix) {
 function mrpChange() { return locMrpChange('f'); }
 
 function roleChange() {
-  // Bidirectional rule:
-  //   role = MRP        → MRP = Cardiology
-  //   role = Consulting → MRP becomes "Other" ONLY if it was Cardiology;
-  //                        non-Cardiology values (e.g. Hospitalist from
-  //                        Meditech import) are preserved.
-  // `list` is NOT touched — ward-driven, see wardChange.
+  // v4.39: Only MRP binding, no care snap.
   var roleSel = document.getElementById('f-role');
   var mrpSel  = document.getElementById('f-mrp');
-  var careFld = document.getElementById('f-care');
-  var ward    = gv('f-ward');
   if (!roleSel || !mrpSel) return;
-  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
   if (roleSel.value === 'mrp') {
     mrpSel.value = 'Cardiology';
-    if (careFld) careFld.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
   } else {
     if (mrpSel.value === 'Cardiology') mrpSel.value = 'Other';
-    if (careFld) careFld.value = 'directive';
   }
 }
 
@@ -580,29 +562,9 @@ function _pickSubRoomOther(groupIdx, ward, inputId, containerId) {
   inp.addEventListener('blur', inp._grpBlur);
 }
 
-// Apply ward-default role / mrp / care / list to a set of form selects.
-// CCU/2S/2W → MRP role, Cardiology, on-service, ccu-or-daily care.
-// Everything else → Consulting role, Other mrp, off-service, directive care.
-// Used by locWardChange for every card instance (Add Patient, edit, location).
-// Caller passes the four element IDs; missing IDs are skipped.
-function applyWardDefaults(ward, ids) {
-  var wdef = WARDS[ward] || {};
-  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
-  var isMRPward = wdef.role === 'mrp';
-
-  var listEl = ids.list && document.getElementById(ids.list);
-  var roleEl = ids.role && document.getElementById(ids.role);
-  var mrpEl  = ids.mrp  && document.getElementById(ids.mrp);
-  var careEl = ids.care && document.getElementById(ids.care);
-
-  if (listEl) listEl.value = wdef.list || 'off';
-  if (roleEl) roleEl.value = isMRPward ? 'mrp' : 'consultant';
-  if (mrpEl)  mrpEl.value  = isMRPward ? 'Cardiology' : 'Other';
-  if (careEl) {
-    if (isMRPward) careEl.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
-    else           careEl.value = 'directive';
-  }
-}
+// v4.39: applyWardDefaults removed — fields are independent.
+// Function kept as no-op in case any code path still references it.
+function applyWardDefaults(ward, ids) { /* no-op */ }
 
 function wardChange(opts) { return locWardChange('f', opts); }
 function saveCustomWard()  { return locSaveCustomWard('f'); }
