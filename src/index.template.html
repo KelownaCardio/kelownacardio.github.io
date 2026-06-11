@@ -868,6 +868,13 @@ input[type=file] { display:none; }
     <input id="loc-room" type="text" autocorrect="off" autocomplete="off" placeholder="Type room…" style="margin-bottom:9px;display:none">
     <div id="loc-room-pills" class="room-pills" style="margin-bottom:9px"></div>
   </div>
+  <div style="margin-bottom:9px">
+    <label>Role</label>
+    <div style="display:flex;gap:6px">
+      <button id="loc-mrp-pill" class="ap-list-pill" onclick="toggleLocRole('mrp')" style="flex:1">MRP</button>
+      <button id="loc-con-pill" class="ap-list-pill" onclick="toggleLocRole('consultant')" style="flex:1">Consultant</button>
+    </div>
+  </div>
   <div class="fl" style="margin-bottom:9px">
     <div class="f1"><label>On / Off service</label>
       <select id="loc-list"><option value="on">On Service</option><option value="off">Off Service</option></select>
@@ -1007,7 +1014,9 @@ input[type=file] { display:none; }
   </div>
 </div>
 
+<script>
 <!--KGHBUILDDIR:main-->
+</script>
 
 <!-- Build stamp — visible footer for support/debugging -->
 <div id="kgh-build-stamp" style="
