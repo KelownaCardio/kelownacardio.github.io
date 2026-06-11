@@ -6334,22 +6334,16 @@ function clearSearchField(searchId, hiddenId, hiddenNameId, ddId) {
   if (dd) { dd.innerHTML = ''; dd.style.display = 'none'; }
 }
 
-// Dynamic role change in edit form
+// Dynamic role change in edit form — v4.39: only updates MRP binding.
+// Care type is NOT auto-changed.
 function peRoleChange() {
-  // Same rules as roleChange() — role ↔ MRP binding, care updates,
-  // list (on/off service) is NOT touched (ward-driven only).
   var roleSel = document.getElementById('pe-role');
   var mrpSel  = document.getElementById('pe-mrp');
-  var careFld = document.getElementById('pe-care');
-  var ward    = (document.getElementById('pe-ward') || {}).value || '';
   if (!roleSel || !mrpSel) return;
-  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
   if (roleSel.value === 'mrp') {
     mrpSel.value = 'Cardiology';
-    if (careFld) careFld.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
   } else {
     if (mrpSel.value === 'Cardiology') mrpSel.value = 'Other';
-    if (careFld) careFld.value = 'directive';
   }
 }
 
@@ -6459,8 +6453,8 @@ function savePatientEdit(pid) {
 // ═══════════════════════════════════════════════════════
 // Location edit — quick ward/bed/on-off-service change
 // Opened by tapping the ward/bed circle on any patient row.
-// Rule: if the new ward isn't a Cardiology MRP ward (CCU/2S/2W)
-// OR the list flips on→off, force role=consultant + mrp=Other.
+// v4.39: No forced role/care snaps. User controls all fields independently.
+// Stranded-card safety net handles visibility for patients on unexpected wards.
 // ═══════════════════════════════════════════════════════
 function openLocationEditEl(el) {
   var pid = el.getAttribute('data-pid') || (el.closest('[data-pid]') && el.closest('[data-pid]').getAttribute('data-pid'));
@@ -6506,19 +6500,7 @@ function _isCardiologyMRPWard(ward) {
 
 function leUpdateRuleHint() {
   var hint = document.getElementById('le-rule-hint');
-  if (!hint) return;
-  var newWard = (document.getElementById('le-ward') || {}).value || '';
-  var newList = (document.getElementById('le-list') || {}).value || 'on';
-  var oldList = _leEditP ? _leEditP.list : null;
-
-  var movedOff       = oldList === 'on' && newList === 'off';
-  var leftCardiology = !_isCardiologyMRPWard(newWard);
-  if (movedOff || leftCardiology) {
-    hint.innerHTML = '<b style="color:var(--amber-t)">Note:</b> role will change to ' +
-      '<b>Consulting</b> and MRP to <b>Other</b>. Open full edit if you need to keep them as MRP/Cardiology.';
-  } else {
-    hint.textContent = '';
-  }
+  if (hint) hint.textContent = '';
 }
 
 function saveLocationEdit(pid) {
@@ -6536,18 +6518,7 @@ function saveLocationEdit(pid) {
   var oldBed  = p.bed || '';
   var oldList = p.list;
 
-  // Apply the rule: leaving cardiology wards OR going on→off → consultant + Other
-  var leftCardiology = !_isCardiologyMRPWard(newWard);
-  var movedOff       = oldList === 'on' && newList === 'off';
-  var snappedRole    = false;
-  if (leftCardiology || movedOff) {
-    if (p.role === 'mrp' || (p.mrp && p.mrp === 'Cardiology')) snappedRole = true;
-    p.role = 'consultant';
-    p.mrp  = 'Other';
-    // Care code stays user-controlled via full edit; default to directive for consultants
-    if (p.care !== 'combined') p.care = 'directive';
-  }
-
+  // v4.39: No forced role/care snaps. Save user's choices directly.
   p.ward = newWard;
   p.bed  = newBed;
   p.list = newList;
@@ -6564,7 +6535,6 @@ function saveLocationEdit(pid) {
   if (oldWard !== newWard) bits.push(((WARDS[oldWard]||{}).label || oldWard || '—') + ' → ' + ((WARDS[newWard]||{}).label || newWard));
   if (oldBed  !== newBed)  bits.push('bed ' + (oldBed || '—') + ' → ' + (newBed || '—'));
   if (oldList !== newList) bits.push((oldList === 'on' ? 'On' : 'Off') + ' → ' + (newList === 'on' ? 'On' : 'Off') + ' service');
-  if (snappedRole)         bits.push('role→Consulting, MRP→Other');
   logChange(p, 'Moved', bits.join('; ') || 'no change');
 
   hideModal('loc-edit-modal');
@@ -7428,7 +7398,8 @@ function locWardChange(prefix, opts) {
   if (!opts || !opts.preserveAll) {
     var bedInp = document.getElementById(X + '-bed');
     if (bedInp) bedInp.value = '';
-    applyWardDefaults(w, { list:X + '-list', role:X + '-role', mrp:X + '-mrp', care:X + '-care' });
+    // v4.39: Ward change no longer snaps role/mrp/list/care.
+    // Users choose each independently; stranded-card safety net handles visibility.
   }
   renderRoomPills(w, X + '-bed', X + '-room-pills');
   locSyncListPills(X);
@@ -7436,43 +7407,34 @@ function locWardChange(prefix, opts) {
   leUpdateRuleHint();
 }
 
-// MRP service ↔ role bidirectional lock. `list` is NOT touched — it is
-// ward-driven and may be manually overridden by the user.
+// MRP service change — v4.39: no longer snaps role or care.
+// User sets role and care independently.
 function locMrpChange(prefix) {
   var X = prefix;
   var mrpSel  = document.getElementById(X + '-mrp');
   var roleSel = document.getElementById(X + '-role');
-  var careFld = document.getElementById(X + '-care');
-  var ward    = (document.getElementById(X + '-ward') || {}).value || '';
   if (!mrpSel || !roleSel) return;
-  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
+  // Only update role pill to match MRP (Cardiology = MRP, other = Consultant)
   if (mrpSel.value === 'Cardiology') {
     roleSel.value = 'mrp';
-    if (careFld) careFld.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
   } else {
     roleSel.value = 'consultant';
-    if (careFld) careFld.value = 'directive';
   }
   locSyncRolePills(X);
 }
 
-// Role pill — toggling auto-fills MRP service (MRP→Cardiology;
-// Consulting→keep a non-Cardiology value, else Other).
+// Role pill — v4.39: toggling only updates MRP binding (MRP→Cardiology;
+// Consulting→keep non-Cardiology, else Other). Care is NOT touched.
 function locRolePill(prefix, val) {
   var X = prefix;
   var roleEl = document.getElementById(X + '-role');
   if (roleEl) roleEl.value = val;
   locSyncRolePills(X);
   var mrpEl  = document.getElementById(X + '-mrp');
-  var careEl = document.getElementById(X + '-care');
-  var ward   = (document.getElementById(X + '-ward') || {}).value || '';
-  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
   if (val === 'mrp') {
     if (mrpEl)  mrpEl.value  = 'Cardiology';
-    if (careEl) careEl.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
   } else {
     if (mrpEl && mrpEl.value === 'Cardiology') mrpEl.value = 'Other';
-    if (careEl) careEl.value = 'directive';
   }
 }
 
@@ -7539,24 +7501,14 @@ function locSaveCustomWard(prefix) {
 function mrpChange() { return locMrpChange('f'); }
 
 function roleChange() {
-  // Bidirectional rule:
-  //   role = MRP        → MRP = Cardiology
-  //   role = Consulting → MRP becomes "Other" ONLY if it was Cardiology;
-  //                        non-Cardiology values (e.g. Hospitalist from
-  //                        Meditech import) are preserved.
-  // `list` is NOT touched — ward-driven, see wardChange.
+  // v4.39: Only MRP binding, no care snap.
   var roleSel = document.getElementById('f-role');
   var mrpSel  = document.getElementById('f-mrp');
-  var careFld = document.getElementById('f-care');
-  var ward    = gv('f-ward');
   if (!roleSel || !mrpSel) return;
-  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
   if (roleSel.value === 'mrp') {
     mrpSel.value = 'Cardiology';
-    if (careFld) careFld.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
   } else {
     if (mrpSel.value === 'Cardiology') mrpSel.value = 'Other';
-    if (careFld) careFld.value = 'directive';
   }
 }
 
@@ -7856,29 +7808,9 @@ function _pickSubRoomOther(groupIdx, ward, inputId, containerId) {
   inp.addEventListener('blur', inp._grpBlur);
 }
 
-// Apply ward-default role / mrp / care / list to a set of form selects.
-// CCU/2S/2W → MRP role, Cardiology, on-service, ccu-or-daily care.
-// Everything else → Consulting role, Other mrp, off-service, directive care.
-// Used by locWardChange for every card instance (Add Patient, edit, location).
-// Caller passes the four element IDs; missing IDs are skipped.
-function applyWardDefaults(ward, ids) {
-  var wdef = WARDS[ward] || {};
-  var icuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
-  var isMRPward = wdef.role === 'mrp';
-
-  var listEl = ids.list && document.getElementById(ids.list);
-  var roleEl = ids.role && document.getElementById(ids.role);
-  var mrpEl  = ids.mrp  && document.getElementById(ids.mrp);
-  var careEl = ids.care && document.getElementById(ids.care);
-
-  if (listEl) listEl.value = wdef.list || 'off';
-  if (roleEl) roleEl.value = isMRPward ? 'mrp' : 'consultant';
-  if (mrpEl)  mrpEl.value  = isMRPward ? 'Cardiology' : 'Other';
-  if (careEl) {
-    if (isMRPward) careEl.value = icuWards.indexOf(ward) !== -1 ? 'ccu' : 'daily';
-    else           careEl.value = 'directive';
-  }
-}
+// v4.39: applyWardDefaults removed — fields are independent.
+// Function kept as no-op in case any code path still references it.
+function applyWardDefaults(ward, ids) { /* no-op */ }
 
 function wardChange(opts) { return locWardChange('f', opts); }
 function saveCustomWard()  { return locSaveCustomWard('f'); }
@@ -9424,6 +9356,18 @@ function openLocScreen(pid) {
   document.getElementById('loc-list').value = p.list || 'on';
   document.getElementById('loc-care').value = p.care || 'daily';
 
+  // v4.39: MRP toggle pill
+  var mrpPill = document.getElementById('loc-mrp-pill');
+  if (mrpPill) {
+    mrpPill.classList.toggle('on', p.role === 'mrp');
+    mrpPill.textContent = p.role === 'mrp' ? 'MRP ✓' : 'MRP';
+  }
+  var conPill = document.getElementById('loc-con-pill');
+  if (conPill) {
+    conPill.classList.toggle('on', p.role !== 'mrp');
+    conPill.textContent = p.role !== 'mrp' ? 'Consultant ✓' : 'Consultant';
+  }
+
   showPane('p-loc');
 }
 
@@ -9433,19 +9377,9 @@ function selectLocWard(ward) {
   var opt = document.getElementById('loc-opt-' + ward);
   if (opt) opt.classList.add('selected');
 
-  var w = WARDS[ward] || {};
-  var geoWards = ['CCU','2S','2W'];
-  var listSel = document.getElementById('loc-list');
-  var careSel = document.getElementById('loc-care');
-
-  if (geoWards.indexOf(ward) === -1) {
-    // Non-geographic ward — always snap to Off Service / directive for safety
-    if (listSel) listSel.value = 'off';
-    if (careSel) careSel.value = 'directive';
-  } else {
-    if (listSel) listSel.value = w.list || 'on';
-    if (careSel) careSel.value = w.care || 'daily';
-  }
+  // v4.39: Ward selection no longer snaps list/care/role.
+  // The stranded-patient safety net (red cards) handles visibility.
+  // Users choose location, MRP, and on/off service independently.
 
   // Render the ward's preset rooms as tap pills. Changing ward clears the
   // room — a room from the previous ward no longer applies.
@@ -9461,25 +9395,21 @@ function confirmLocChange() {
   p.bed    = gv('loc-room');
   saveCustomRoom(_locWard, p.bed);   // persist an off-list room so it becomes a pill next time
   p.care   = gv('loc-care');
+  p.list   = gv('loc-list');
 
-  // Safety rule: any ward outside the geographic view (CCU/2S/2W)
-  // is forced to Off Service so the patient doesn't disappear from rounds.
-  var geoWards = ['CCU','2S','2W'];
-  var requestedList = gv('loc-list');
-  if (geoWards.indexOf(_locWard) === -1 && requestedList === 'on') {
-    p.list = 'off';
-    p.care = 'directive';
-  } else {
-    p.list = requestedList;
+  // v4.39: MRP toggle — read pill state
+  var mrpPill = document.getElementById('loc-mrp-pill');
+  if (mrpPill) {
+    var isMrp = mrpPill.classList.contains('on');
+    p.role = isMrp ? 'mrp' : 'consultant';
+    p.mrp  = isMrp ? 'Cardiology' : p.mrp;
   }
 
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
   logChange(p, 'Location changed', from + ' → ' + _locWard);
   closeLocScreen();
-  var suffix = (p.list === 'off' && requestedList === 'on')
-    ? ' → moved to Off Service (not on geo view)' : '';
-  showToast(p.last + ' moved to ' + wardLabel(_locWard) + suffix);
+  showToast(p.last + ' moved to ' + wardLabel(_locWard));
 }
 
 function closeLocScreen() {
@@ -9487,6 +9417,15 @@ function closeLocScreen() {
   showPane('p0');
   document.querySelectorAll('.nb').forEach(function(b, i) { b.classList.toggle('on', i === 0); });
   render();
+}
+
+// v4.39: Toggle MRP/Consultant pills on Location screen
+function toggleLocRole(role) {
+  var mrpPill = document.getElementById('loc-mrp-pill');
+  var conPill = document.getElementById('loc-con-pill');
+  var isMrp = (role === 'mrp');
+  if (mrpPill) { mrpPill.classList.toggle('on', isMrp);  mrpPill.textContent = isMrp ? 'MRP ✓' : 'MRP'; }
+  if (conPill) { conPill.classList.toggle('on', !isMrp); conPill.textContent = !isMrp ? 'Consultant ✓' : 'Consultant'; }
 }
 
 // ── Discharge Modal ────────────────────────────────────
