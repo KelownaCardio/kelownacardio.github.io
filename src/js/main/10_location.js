@@ -123,7 +123,7 @@ function closeLocScreen() {
 // ── Discharge Modal ────────────────────────────────────
 // Flow:
 //   Step 1 — if no visit billed today: offer visit type buttons (default by ward/role)
-//   Step 2 — if Cardiology MRP, non-CCU ward, LOS > 4: complex discharge prompt
+//   Step 2 — if Cardiology MRP, LOS > 4 (admit day=1, losdays>=4): complex discharge prompt
 //   Step 3 — Confirm discharge & remove (single action, no error-removal path)
 //
 function openDischModal(pid) {
@@ -156,7 +156,7 @@ function openDischModal(pid) {
 }
 
 // ── Complex Discharge (78717) — criteria checklist ──────
-// Qualifies when LOS > 4 AND Cardiology MRP AND clinical criteria:
+// Qualifies when LOS > 4 (admit day = day 1, so losdays() >= 4) AND Cardiology MRP AND clinical criteria:
 //   (2 from A) OR (1 from A + 1 from B) OR (1 from A + C)
 // Note written to the 78717 claim mirrors the clerk's format:
 //   "Complex Discharge: CHF, BMI > 35, Age > 75"
@@ -297,7 +297,7 @@ function _dischStep2(pid) {
   var los = losdays(p);
   // Complex discharge applies to ALL Cardiology MRP patients with LOS > 4, including CCU/ICU
   var isCardioMRP = p.role === 'mrp' && p.mrp === 'Cardiology';
-  if (isCardioMRP && los > 4) {
+  if (isCardioMRP && los >= 4) {
     _cdPid   = pid;
     _cdState = {};
     // Pre-tick only what the app can determine itself — MD still confirms each box

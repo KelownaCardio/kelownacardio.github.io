@@ -74,6 +74,31 @@ async function init() {
     } catch(e) {
       setSyncState('error');
     }
+
+    // v4.39: Auto-refresh every 5 min so other doctors' changes (including
+    // handover summaries from the email processor) appear without closing
+    // and reopening the app.
+    setInterval(async function() {
+      // Skip if any editing screen is open — don't clobber mid-edit state
+      var claimOpen = document.getElementById('p-claim') &&
+                      document.getElementById('p-claim').classList.contains('on');
+      var addOpen   = document.getElementById('p1') &&
+                      document.getElementById('p1').classList.contains('on');
+      var dischOpen = document.getElementById('disch-modal') &&
+                      document.getElementById('disch-modal').classList.contains('on');
+      var ocrBusy   = typeof _ocrInFlight !== 'undefined' && _ocrInFlight;
+      if (claimOpen || addOpen || dischOpen || ocrBusy) {
+        console.log('[auto-refresh] skipped — editing in progress');
+        return;
+      }
+      try {
+        await syncFromSheets();
+        render();
+        console.log('[auto-refresh] synced');
+      } catch(e) {
+        console.log('[auto-refresh] failed:', e);
+      }
+    }, 5 * 60 * 1000);
   }
 }
 
