@@ -9699,11 +9699,30 @@ function _dischStep3(pid) {
     '<input type="date" id="disch-date-input" value="' + todayISO + '" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px">' +
     '</div>' +
     '<div style="display:flex;flex-direction:column;gap:8px">' +
+    '<button class="btn btn-p" style="margin:0;background:var(--amber-bg);color:var(--amber-t);border:1px solid var(--amber-t)" data-pid="' + pid + '" ' +
+    'onclick="_dischTryComplex(this)">Add Complex Discharge (78717)</button>' +
     '<button class="btn btn-p" style="margin:0" data-pid="' + pid + '" ' +
-    'onclick="dischConfirmRemove(this)">Confirm discharge &amp; remove</button>' +
+    'onclick="dischConfirmRemove(this)">Remove from list</button>' +
     '<button class="btn btn-s" style="margin:0" onclick="hideModal(\'disch-modal\')">Cancel</button>' +
     '</div>';
   document.getElementById('disch-body').innerHTML = h;
+}
+
+// Manual complex DC from step 3 — checks LOS >= 4, opens criteria checklist or toasts error
+function _dischTryComplex(btn) {
+  var pid = btn.getAttribute('data-pid');
+  var p   = getP(pid);
+  var los = losdays(p);
+  if (los < 4) {
+    showToast('LOS < 4 days — not eligible for complex discharge', 'error');
+    return;
+  }
+  _cdPid   = pid;
+  _cdState = {};
+  if (_cdAge(p) > 75) _cdState['age75'] = true;
+  var icdKey = String(p.icd || '').trim().toUpperCase();
+  if (CD_ICD_MAP[icdKey]) _cdState[CD_ICD_MAP[icdKey]] = true;
+  _cdRender(los);
 }
 
 function dischConfirmRemove(btn) {
