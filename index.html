@@ -34,6 +34,7 @@
   --green:#1a7a4a; --green-bg:#e6f5ec; --green-t:#0f4f2e;
   --amber:#a06010; --amber-bg:#fdf0db; --amber-t:#6b3e08;
   --teal:#0e6e6e; --teal-bg:#e0f4f4; --teal-t:#094848;
+  --purple:#7c3aed; --purple-bg:#f3e8ff; --purple-t:#4c1d95;
   --kca-red:#c42828; --kca-navy:#2e1a6e;
   --r:10px; --rsm:6px; --rpill:20px;
 }
@@ -114,6 +115,7 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 .chip-amber  { background:var(--amber-bg); color:var(--amber-t); }
 .chip-green  { background:var(--green-bg); color:var(--green-t); }
 .chip-teal   { background:var(--teal-bg);  color:var(--teal-t); }
+.chip-purple { background:var(--purple-bg); color:var(--purple-t); }
 .chip-grey   { background:var(--surface2); color:var(--text2); }
 .chip-yellow { background:#fff0c4;         color:#5a2700; }
 .chip-skyblue{ background:#dbe7fc;         color:#002461; }
@@ -253,6 +255,7 @@ input[type=file] { display:none; }
 .ct-on-combined { background:var(--teal-bg);  border-color:#7ec4c4; color:var(--teal-t); }
 .ct-on-directive{ background:var(--amber-bg); border-color:#d4a84a; color:var(--amber-t); }
 .ct-on-ccu      { background:var(--red-bg);   border-color:#e0a090; color:var(--red-t); }
+.ct-on-procedure{ background:var(--purple-bg); border-color:#c4b5fd; color:var(--purple-t); }
 
 /* MOST BUTTON */
 .most-btn { width:100%; padding:12px; border-radius:var(--r); border:2px solid var(--border2); background:var(--surface); cursor:pointer; font-family:inherit; font-size:14px; font-weight:700; color:var(--text2); margin-bottom:9px; display:flex; align-items:center; justify-content:center; gap:8px; transition:all .15s; }
@@ -635,6 +638,7 @@ input[type=file] { display:none; }
 .cv-day.cv-combined  { background:#b8e6c4; color:#0a4520; }
 .cv-day.cv-directive { background:#8eb5fa; color:#002461; }
 .cv-day.cv-ccu       { background:#f08585; color:#5e1414; }
+.cv-day.cv-procedure { background:#d8b4fe; color:#4c1d95; }
 .cv-day .cv-num { font-size:12px; line-height:1; }
 .cv-day .cv-tag { font-size:8px; font-weight:700; line-height:1; margin-top:2px; opacity:.85; letter-spacing:.3px; }
 .cv-warn { background:var(--amber-bg); border:1px solid #f5d28a; color:var(--amber-t);
