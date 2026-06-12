@@ -277,10 +277,12 @@ function _cdRender(los) {
       'Add 78717 &amp; continue</button>';
 
   var h =
+    '<div style="font-size:15px;font-weight:700;color:var(--text1);margin-bottom:2px">' +
+      'Age ' + _cdAge(getP(_cdPid)) + ' · LOS ' + los + ' days</div>' +
     '<div style="font-size:13px;color:var(--amber-t);font-weight:700;margin-bottom:4px">' +
       '\u26a0 Review for Complex D/C criteria</div>' +
     '<div style="font-size:11px;color:var(--text3);margin-bottom:8px">' +
-      'Age ' + _cdAge(getP(_cdPid)) + ' · LOS ' + los + ' days. Rule: 2 major, or 1 major + 1 minor, or 1 major + malignancy.</div>' +
+      'Rule: 2 major, or 1 major + 1 minor, or 1 major + malignancy.</div>' +
     '<div style="max-height:46vh;overflow-y:auto;-webkit-overflow-scrolling:touch;' +
       'border:.5px solid var(--border2);border-radius:var(--rsm);padding:4px 9px 11px">' +
       group('A', 'A — Major comorbidities') +
