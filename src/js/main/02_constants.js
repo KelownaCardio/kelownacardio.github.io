@@ -204,10 +204,10 @@ var FEES = [
   { code:'33008',  desc:'Subsequent hospital visit / MRP daily / combined daily care',    amount:'$63.95',  cat:'Daily',     clr:'chip-green'  },
 
   // ── Cardiology procedures performed by the group ─────────────────
-  { code:'33025', desc:'Cardioversion',                                                  amount:'$105.70', cat:'Procedure',    clr:'chip-red'   },
-  { code:'33030', desc:'Temporary pacemaker placement (TVP)',                            amount:'$176.07', cat:'Procedure',    clr:'chip-red'   },
-  { code:'00751',  desc:'Pericardiocentesis (pericardial puncture)',                      amount:'$258.25', cat:'Procedure',    clr:'chip-red'   },
-  { code:'00017',  desc:'Central line insertion',                                         amount:'$26.63',  cat:'Procedure',    clr:'chip-red'   },
+  { code:'33025', desc:'Cardioversion',                                                  amount:'$105.70', cat:'Procedure',    clr:'chip-purple'   },
+  { code:'33030', desc:'Temporary pacemaker placement (TVP)',                            amount:'$176.07', cat:'Procedure',    clr:'chip-purple'   },
+  { code:'00751',  desc:'Pericardiocentesis (pericardial puncture)',                      amount:'$258.25', cat:'Procedure',    clr:'chip-purple'   },
+  { code:'00017',  desc:'Central line insertion',                                         amount:'$26.63',  cat:'Procedure',    clr:'chip-purple'   },
 
   // ── Diagnostics ─────────────────────────────────────────────────
   { code:'33035', desc:'Treadmill Test (GXT)',                                            amount:'$47.11',  cat:'Diagnostics', clr:'chip-teal'  },
@@ -709,5 +709,7 @@ function recordIcdUsage(code) {
   sv('recentIcds', st.recentIcds);
 }
 
+// ── 02b_icd_search.js ──
+// ═══════════════════════════════════════════════════════
 // ── 02b_icd_search.js ──
 // ═══════════════════════════════════════════════════════

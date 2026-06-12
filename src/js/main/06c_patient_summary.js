@@ -322,7 +322,7 @@ var CV_TYPE_BG = {
 // used for both the dominant cell colour and the 2-claim diagonal split.
 function _cvDayTypes(dayClaims) {
   if (!dayClaims || !dayClaims.length) return [];
-  var has = { consult:false, ccu:false, daily:false, directive:false, combined:false };
+  var has = { consult:false, ccu:false, daily:false, directive:false, combined:false, procedure:false };
   var hasAny = false;
   dayClaims.forEach(function(c) {
     hasAny = true;
@@ -338,12 +338,12 @@ function _cvDayTypes(dayClaims) {
       if (c.notes && String(c.notes).trim()) has.combined = true;
       else has.daily = true;
     }
-    // Bedside procedures (cardioversion, pericardiocentesis) — consult-coloured.
-    else if (c.fee === 'Y33025' || c.fee === '00751') has.consult = true;
+    // Bedside procedures (cardioversion, pericardiocentesis, temp pacemaker, central line)
+    else if (c.fee === '33025' || c.fee === '33030' || c.fee === '00751' || c.fee === '00017') has.procedure = true;
     // 78717 (complex discharge) / 78720 (MOST) are extras that piggyback on a
     // regular visit — they fall through to the hasAny fallback below.
   });
-  var out = ['consult','ccu','daily','directive','combined'].filter(function(t) { return has[t]; });
+  var out = ['consult','ccu','daily','directive','combined','procedure'].filter(function(t) { return has[t]; });
   // Fallback — any claim on the day deserves *some* colour so the doctor sees it
   if (!out.length && hasAny) out.push('consult');
   return out;
@@ -684,14 +684,14 @@ function _cvShowDayDetails(pid, dateStr, dayClaims) {
     var dxLabel  = icdShortLabel(c.icd);
     if (dxLabel.length > 45) dxLabel = dxLabel.slice(0, 42) + '…';
     var typeColor = 'var(--text)';
-    // Match calendar legend: Consult=yellow, Daily=green, Combined=teal, Directive=skyblue, CCU=red, Modifier=blue, Procedure=red, Discharge plan=green
+    // Match calendar legend: Consult=yellow, Daily=green, Combined=teal, Directive=skyblue, CCU=red, Modifier=blue, Procedure=purple, Discharge plan=green
     if (c.fee === '33010' || c.fee === '33012' || c.fee === '33014') typeColor = '#5a2700';            // consult yellow
     else if (c.fee === '33005')                                       typeColor = 'var(--red-t)';       // emergency consult
     else if (c.fee === 'CCU_DAILY' || c.fee === '1411' || c.fee === '1421' || c.fee === '1431' || c.fee === '1441') typeColor = 'var(--red-t)'; // CCU
     else if (c.fee === '33006')                                       typeColor = '#002461';            // directive sky-blue
     else if (c.fee === '33008' && c.notes)                            typeColor = 'var(--teal-t)';      // combined daily
     else if (c.fee === '33008')                                       typeColor = 'var(--green-t)';     // daily
-    else if (c.fee === 'Y33025' || c.fee === '00751')                 typeColor = 'var(--red-t)';       // procedure
+    else if (c.fee === '33025' || c.fee === '33030' || c.fee === '00751' || c.fee === '00017') typeColor = 'var(--purple-t)'; // procedure
     else if (c.fee === '78717' || c.fee === '78720')                  typeColor = 'var(--green-t)';     // MOST / discharge plan
     else if (['1200','1201','1202','1205','1206','1207'].indexOf(c.fee) !== -1) typeColor = 'var(--blue-t)'; // modifiers
     return (

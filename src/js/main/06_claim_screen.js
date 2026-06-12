@@ -83,7 +83,7 @@ function feeSearch(query) {
     'Consult':'var(--blue-t)',    'Daily':'var(--blue-t)',     'Directive':'var(--amber-t)',
     'Telehealth':'var(--blue-t)', 'ECG':'var(--teal-t)',       'Stress':'var(--teal-t)',
     'Echo':'var(--teal-t)',       'Pacemaker':'var(--teal-t)', 'Remote':'var(--teal-t)',
-    'Diagnostics':'var(--teal-t)','Event':'var(--teal-t)',      'Procedure':'var(--red-t)',  'Rehab':'var(--green-t)',
+    'Diagnostics':'var(--teal-t)','Event':'var(--teal-t)',      'Procedure':'var(--purple-t)',  'Rehab':'var(--green-t)',
     'Discharge':'var(--green-t)', 'CCU':'var(--red-t)',        'Modifier':'var(--text3)',
     'Other':'var(--teal-t)'
   };
@@ -465,6 +465,30 @@ function backToRoundsFromClaim() {
   closeClaimScreen();
 }
 
+// ── 06b_discharged.js ──
+// ═══════════════════════════════════════════════════════
+// Recently Discharged pane + rounds search filter
+// Pane shows discharged patients (last 21 days, or all when searching)
+// Each row offers: tap to add a missed claim, restore (to On/Off Service)
+// ═══════════════════════════════════════════════════════
+
+function roundsSearch(query) {
+  _roundsQuery = (query || '').toLowerCase().trim();
+  var clearBtn = document.getElementById('rounds-search-clear');
+  if (clearBtn) clearBtn.classList.toggle('on', !!_roundsQuery);
+  // Hide geo/alpha toggle when searching (search shows unified flat list)
+  var vtBar = document.getElementById('view-tog-bar');
+  if (vtBar) vtBar.style.display = (!_roundsQuery && _listView === 'on') ? 'flex' : 'none';
+  render();
+}
+
+function clearRoundsSearch() {
+  var input = document.getElementById('rounds-search');
+  if (input) { input.value = ''; input.focus(); }
+  roundsSearch('');
+}
+
+// ═══════════════════════════════════════════════════════
 // ── 06b_discharged.js ──
 // ═══════════════════════════════════════════════════════
 // Recently Discharged pane + rounds search filter
