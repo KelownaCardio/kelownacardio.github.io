@@ -130,8 +130,8 @@ function toggleLocRole(role) {
 // ── Discharge Modal ────────────────────────────────────
 // Flow:
 //   Step 1 — if no visit billed today: offer visit type buttons (default by ward/role)
-//   Step 2 — if Cardiology MRP, LOS > 4 (admit day=1, losdays>=4): complex discharge prompt
-//   Step 3 — Confirm discharge & remove (single action, no error-removal path)
+//   Step 2 — if LOS >= 4 (admit day=1, losdays>=4): complex discharge criteria checklist
+//   Step 3 — Confirm discharge date & remove from list
 //
 function openDischModal(pid) {
   _claimPid = pid;
@@ -280,7 +280,7 @@ function _cdRender(los) {
     '<div style="font-size:13px;color:var(--amber-t);font-weight:700;margin-bottom:4px">' +
       '\u26a0 Review for Complex D/C criteria</div>' +
     '<div style="font-size:11px;color:var(--text3);margin-bottom:8px">' +
-      'LOS ' + los + ' days. Rule: 2 major, or 1 major + 1 minor, or 1 major + malignancy.</div>' +
+      'Age ' + _cdAge(getP(_cdPid)) + ' · LOS ' + los + ' days. Rule: 2 major, or 1 major + 1 minor, or 1 major + malignancy.</div>' +
     '<div style="max-height:46vh;overflow-y:auto;-webkit-overflow-scrolling:touch;' +
       'border:.5px solid var(--border2);border-radius:var(--rsm);padding:4px 9px 11px">' +
       group('A', 'A — Major comorbidities') +
@@ -298,13 +298,11 @@ function _cdRender(los) {
   document.getElementById('disch-body').innerHTML = h;
 }
 
-// Step 2: Complex discharge — Cardiology MRP + LOS > 4 -> criteria checklist
+// Step 2: Complex discharge — any patient with LOS >= 4 gets criteria checklist
 function _dischStep2(pid) {
   var p   = getP(pid);
   var los = losdays(p);
-  // Complex discharge applies to ALL Cardiology MRP patients with LOS > 4, including CCU/ICU
-  var isCardioMRP = p.role === 'mrp' && p.mrp === 'Cardiology';
-  if (isCardioMRP && los >= 4) {
+  if (los >= 4) {
     _cdPid   = pid;
     _cdState = {};
     // Pre-tick only what the app can determine itself — MD still confirms each box
@@ -327,7 +325,7 @@ function dischComplex(btn) {
   _dischStep3(pid);
 }
 
-// Step 3: Final confirm — with editable discharge date (defaults to today)
+// Step 3: Final confirm — date picker + remove from list
 function _dischStep3(pid) {
   var todayISO = (function() {
     var p = TODAY.split('/'); return p[2] + '-' + p[1] + '-' + p[0];
@@ -337,30 +335,11 @@ function _dischStep3(pid) {
     '<input type="date" id="disch-date-input" value="' + todayISO + '" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px">' +
     '</div>' +
     '<div style="display:flex;flex-direction:column;gap:8px">' +
-    '<button class="btn btn-p" style="margin:0;background:var(--amber-bg);color:var(--amber-t);border:1px solid var(--amber-t)" data-pid="' + pid + '" ' +
-    'onclick="_dischTryComplex(this)">Add Complex Discharge (78717)</button>' +
     '<button class="btn btn-p" style="margin:0" data-pid="' + pid + '" ' +
     'onclick="dischConfirmRemove(this)">Remove from list</button>' +
     '<button class="btn btn-s" style="margin:0" onclick="hideModal(\'disch-modal\')">Cancel</button>' +
     '</div>';
   document.getElementById('disch-body').innerHTML = h;
-}
-
-// Manual complex DC from step 3 — checks LOS >= 4, opens criteria checklist or toasts error
-function _dischTryComplex(btn) {
-  var pid = btn.getAttribute('data-pid');
-  var p   = getP(pid);
-  var los = losdays(p);
-  if (los < 4) {
-    showToast('LOS < 4 days — not eligible for complex discharge', 'error');
-    return;
-  }
-  _cdPid   = pid;
-  _cdState = {};
-  if (_cdAge(p) > 75) _cdState['age75'] = true;
-  var icdKey = String(p.icd || '').trim().toUpperCase();
-  if (CD_ICD_MAP[icdKey]) _cdState[CD_ICD_MAP[icdKey]] = true;
-  _cdRender(los);
 }
 
 function dischConfirmRemove(btn) {
@@ -460,5 +439,3 @@ function purgeOldPatients() {
   }
 }
 
-// ── 11_export.js ──
-// ═══════════════════════════════════════════════════════
