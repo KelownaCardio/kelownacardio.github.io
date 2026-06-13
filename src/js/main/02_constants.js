@@ -211,6 +211,8 @@ var FEES = [
 
   // ── Diagnostics ─────────────────────────────────────────────────
   { code:'33035', desc:'Treadmill Test (GXT)',                                            amount:'$47.11',  cat:'Diagnostics', clr:'chip-teal'  },
+  { code:'33018', desc:'ECG Professional Fee',                                          amount:'$9.01',   cat:'Diagnostics', clr:'chip-teal'  },
+  { code:'33047', desc:'Holter Monitor Professional Fee',                               amount:'$67.63',  cat:'Diagnostics', clr:'chip-teal'  },
   { code:'33093', desc:'Level 3 Echo Complex Assessment (Overread)',                     amount:'$252.39', cat:'Diagnostics', clr:'chip-teal'  },
 
   // ── Discharge / planning ────────────────────────────────────────
