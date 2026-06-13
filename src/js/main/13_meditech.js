@@ -179,12 +179,13 @@ async function extractMediteachAI(dataUrl) {
   var mt  = dataUrl.split(';')[0].split(':')[1];
   var steps = [];
 
-  // Tier 1: Apps Script key fetch → Anthropic (shared helper from 09_patient)
+  // Single tier (v4.42): server-side OCR via Apps Script, one retry.
+  // The old "Tier 2: Direct Anthropic" was dead code — it referenced an
+  // ANTHROPIC_KEY global that was never defined, so it always threw.
   try {
-    status.textContent = 'Reading list (Apps Script)…';
-    steps.push('Apps Script');
+    status.textContent = 'Reading list\u2026';
+    steps.push('Attempt 1');
     var result = await _runAppsScriptOCR(b64, mt, MEDITECH_PROMPT, 2000);
-    // _runAppsScriptOCR returns parsed JSON — for Meditech it should be an array
     var parsed = Array.isArray(result) ? result : [result];
     steps[steps.length - 1] += ': \u2713';
     status.textContent = steps.join(' \u2192 ');
@@ -192,32 +193,19 @@ async function extractMediteachAI(dataUrl) {
     return;
   } catch(e1) {
     steps[steps.length - 1] += ': ' + _shortErr(e1);
-    console.warn('[OCR Meditech] Apps Script failed:', e1.message, '\u2014 trying direct');
+    console.warn('[OCR Meditech] attempt 1 failed:', e1.message, '\u2014 retrying');
   }
 
-  // Tier 2: Direct Anthropic call (uses ANTHROPIC_KEY from external script)
+  // One retry after a short pause
   try {
-    steps.push('Direct API');
-    status.textContent = steps.join(' \u2192 ') + '…';
-    var resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 2000,
-        messages: [{ role:'user', content: [
-          { type:'image', source:{ type:'base64', media_type:mt, data:b64 } },
-          { type:'text', text: MEDITECH_PROMPT }
-        ]}]
-      })
-    });
-    var data = await resp.json();
-    var text = data.content.filter(function(b) { return b.type === 'text'; }).map(function(b) { return b.text; }).join('');
-    var parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
-    if (!Array.isArray(parsed)) parsed = [parsed];
+    steps.push('Attempt 2');
+    status.textContent = steps.join(' \u2192 ') + '\u2026';
+    await new Promise(function(res) { setTimeout(res, 5000); });
+    var result2 = await _runAppsScriptOCR(b64, mt, MEDITECH_PROMPT, 2000);
+    var parsed2 = Array.isArray(result2) ? result2 : [result2];
     steps[steps.length - 1] += ': \u2713';
     status.textContent = steps.join(' \u2192 ');
-    renderMediteachPreview(parsed);
+    renderMediteachPreview(parsed2);
   } catch(e2) {
     steps[steps.length - 1] += ': ' + _shortErr(e2);
     status.className  = 'ocr-bar ocr-warn';
