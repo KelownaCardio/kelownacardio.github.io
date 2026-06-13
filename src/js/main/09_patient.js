@@ -2,39 +2,221 @@
 //                 chart photo OCR, ward/room selectors
 // ═══════════════════════════════════════════════════════
 
-// ── Hard duplicate block modal ────────────────────────────────────
-// Shown when 2-of-3 (PHN / last name / DOB) match an existing patient.
-// No bypass — user must dismiss and correct the form.
-function openDuplicateBlockModal(existing, matchedFields) {
-  var nameStr    = esc((existing.last || '') + ', ' + (existing.first || ''));
-  var dobStr     = existing.dob ? dispDate(existing.dob) : '—';
-  var phnStr     = existing.phn || '—';
-  var wardStr    = existing.ward ? (existing.ward + (existing.bed ? ' Rm ' + existing.bed : '')) : '';
-  var claimCount = st.claims.filter(function(c) { return samePhn(c.phn, existing.phn); }).length;
-  var status     = existing.discharged
-    ? '<span style="background:var(--amber-bg);color:var(--amber-t);padding:2px 8px;border-radius:var(--rpill);font-size:10px;font-weight:700">Previously discharged</span>'
-    : '<span style="background:var(--red-bg);color:var(--red-t);padding:2px 8px;border-radius:var(--rpill);font-size:10px;font-weight:700">Currently on list</span>';
+// ── Duplicate patient helper: 2-of-3 match on PHN / last / DOB ───
+function _findDup2of3(patients, chkPhn, chkLast, chkDob) {
+  var best = null, bestScore = 0, bestFields = [];
+  (patients || []).forEach(function(x) {
+    if (!x) return;
+    var xPhn  = String(x.phn  || '').replace(/\D/g, '');
+    var xLast = String(x.last || '').trim().toLowerCase();
+    var xDob  = x.dob ? fmtClaimDate(x.dob) : '';
+    var score = 0, fields = [];
+    if (chkPhn  && xPhn  && chkPhn  === xPhn)  { score++; fields.push('PHN'); }
+    if (chkLast && xLast && chkLast === xLast) { score++; fields.push('Last name'); }
+    if (chkDob  && xDob  && chkDob  === xDob)  { score++; fields.push('DOB'); }
+    if (score >= 2 && score > bestScore) {
+      best = x; bestScore = score; bestFields = fields;
+    }
+  });
+  return { match: best, fields: bestFields };
+}
 
-  var h = status +
-    '<div style="margin:10px 0 4px;font-size:15px;font-weight:700">' + nameStr + '</div>' +
-    '<div style="font-size:12px;color:var(--text2);line-height:1.6">' +
-      'PHN: <b>' + esc(phnStr) + '</b><br>' +
-      'DOB: <b>' + esc(dobStr) + '</b>' +
-      (wardStr ? '<br>Location: <b>' + esc(wardStr) + '</b>' : '') +
-      '<br>Claims: <b>' + claimCount + '</b>' +
-    '</div>' +
-    '<div style="margin-top:10px;padding:10px;background:var(--red-bg);border-radius:8px;font-size:12px;line-height:1.5">' +
-      '<b>Duplicate detected</b> — ' + esc(matchedFields.join(' + ')) + ' match' +
-      (matchedFields.length > 1 ? 'es' : '') + ' an existing patient.<br>' +
-      'This patient cannot be added again.' +
-    '</div>' +
-    '<div style="margin-top:14px">' +
-      '<button class="btn btn-p" style="margin:0" onclick="hideModal(\'merge-modal\')">Go back and correct</button>' +
-    '</div>';
+// ── Duplicate merge modal ─────────────────────────────────────────
+// Shows side-by-side comparison pills for each differing demographic.
+// Doctor taps the correct value for each, then merges or creates new.
+function openDuplicateMergeModal(existing, matchedFields, newData) {
+  // Store state for merge/create handlers
+  window._dupExisting = existing;
+  window._dupNewData  = newData;
 
-  document.getElementById('merge-title').textContent = 'Patient already exists';
+  // Build per-field comparison data
+  var demoFields = [
+    { key: 'last',  label: 'Last Name' },
+    { key: 'first', label: 'First Name' },
+    { key: 'phn',   label: 'PHN' },
+    { key: 'dob',   label: 'DOB' },
+    { key: 'sex',   label: 'Sex' }
+  ];
+  window._dupFieldVals = {};
+  window._dupSelections = {};
+  demoFields.forEach(function(f) {
+    var oldV = String(f.key === 'phn'
+      ? (existing.phn || '').replace(/\D/g, '')
+      : f.key === 'dob' && existing.dob ? fmtClaimDate(existing.dob)
+      : (existing[f.key] || '')).trim();
+    var newV = String(newData[f.key] || '').trim();
+    window._dupFieldVals[f.key] = { old: oldV, 'new': newV };
+    // Pre-select new value (unless blank, then keep old)
+    window._dupSelections[f.key] = newV ? 'new' : 'old';
+  });
+
+  // Status badge
+  var isDC = String(existing.discharged || '').toLowerCase() === 'true' || existing.discharged === true;
+  var h = '<div style="margin-bottom:10px">';
+  h += isDC
+    ? '<span class="dup-badge dup-badge-dc">Previously discharged</span>'
+    : '<span class="dup-badge dup-badge-active">Currently on list</span>';
+  var via = existing.addedVia || '';
+  if (via === 'PhoneConsult' || via === 'QuickChart')
+    h += '<span class="dup-badge dup-badge-phone">Phone Consult</span>';
+  h += '</div>';
+  h += '<div style="font-size:11px;color:var(--text3);margin-bottom:6px">Matched on: <b>' +
+       esc(matchedFields.join(' + ')) + '</b></div>';
+
+  // Comparison rows
+  demoFields.forEach(function(f) {
+    var vals = window._dupFieldVals[f.key];
+    var oldV = vals.old, newV = vals['new'];
+    var same = oldV.toLowerCase() === newV.toLowerCase();
+    var dispOld = f.key === 'dob' && oldV ? dispDate(oldV) : oldV;
+    var dispNew = f.key === 'dob' && newV ? dispDate(newV) : newV;
+
+    h += '<div class="dup-row"><div class="dup-label">' + f.label + '</div>';
+    if (same || (!oldV && !newV)) {
+      h += '<div class="dup-match">\u2713 ' + esc(dispOld || '\u2014') + '</div>';
+    } else if (!oldV) {
+      h += '<div class="dup-match">+ ' + esc(dispNew) + '</div>';
+    } else if (!newV) {
+      window._dupSelections[f.key] = 'old';
+      h += '<div class="dup-match">\u2713 ' + esc(dispOld) + '</div>';
+    } else {
+      var sel = window._dupSelections[f.key];
+      h += '<div class="dup-pills">';
+      h += '<button class="dup-pill' + (sel === 'old' ? ' selected' : '') +
+           '" data-field="' + f.key + '" data-which="old" onclick="_tapDupPill(this)">' +
+           esc(dispOld) + '<span class="dup-pill-tag">existing</span></button>';
+      h += '<button class="dup-pill' + (sel === 'new' ? ' selected' : '') +
+           '" data-field="' + f.key + '" data-which="new" onclick="_tapDupPill(this)">' +
+           esc(dispNew) + '<span class="dup-pill-tag">new</span></button>';
+      h += '</div>';
+    }
+    h += '</div>';
+  });
+
+  // Claim count
+  var cc = st.claims.filter(function(c) { return samePhn(c.phn, existing.phn); }).length;
+  if (cc) h += '<div style="font-size:11px;color:var(--text3);margin-top:8px">' +
+               cc + ' existing claim' + (cc > 1 ? 's' : '') + ' linked</div>';
+
+  h += '<div style="display:flex;gap:8px;margin-top:14px">';
+  h += '<button class="btn btn-p" style="flex:1;margin:0" onclick="_mergeAndReadmit()">Readmit &amp; Merge</button>';
+  h += '<button class="btn btn-s" style="flex:1;margin:0" onclick="_createNewPatient()">New Patient</button>';
+  h += '</div>';
+
+  document.getElementById('merge-title').textContent = 'Existing patient found';
   document.getElementById('merge-body').innerHTML = h;
   showModal('merge-modal');
+}
+
+// Pill tap handler — selects old or new value for a field
+function _tapDupPill(el) {
+  var field = el.dataset.field, which = el.dataset.which;
+  window._dupSelections[field] = which;
+  var pills = document.querySelectorAll('.dup-pill[data-field="' + field + '"]');
+  for (var i = 0; i < pills.length; i++)
+    pills[i].classList.toggle('selected', pills[i].dataset.which === which);
+}
+
+// Merge: reactivate existing patient with selected demographics
+async function _mergeAndReadmit() {
+  hideModal('merge-modal');
+  var p = window._dupExisting;
+  if (!p) return;
+  var addToList = window._apPendingAddToList;
+
+  // Apply selected demographics
+  ['last', 'first', 'phn', 'dob', 'sex'].forEach(function(key) {
+    var which = window._dupSelections[key] || 'new';
+    var val = window._dupFieldVals[key][which];
+    if (val) p[key] = (key === 'last' || key === 'first') ? fmtName(val) : val;
+  });
+
+  // Reactivate
+  p.discharged = false;
+  p.dischargedAt = '';
+  p.dischargeDate = '';
+  p.trueDischarge = false;
+  p.consultOnly = false;
+
+  if (addToList) {
+    p.ward = gv('f-ward') || p.ward || 'OTHER';
+    p.bed  = gv('f-bed')  || '';
+    p.role = gv('f-role') || 'consultant';
+    p.mrp  = gv('f-mrp')  || 'Other';
+    p.list = gv('f-list') || 'on';
+    p.care = gv('f-care') || 'directive';
+    if (p.ward && p.bed) saveCustomRoom(p.ward, p.bed);
+    if (new Date().getHours() >= 17) p.handover = 'new';
+  } else {
+    p.ward = ''; p.bed = ''; p.role = 'consultant';
+    p.mrp  = 'Other'; p.list = 'consult-only'; p.care = 'directive';
+    p.discharged    = true;
+    p.trueDischarge = true;
+    p.consultOnly   = true;
+    p.dischargedAt  = Date.now();
+    p.dischargeDate = fmtD(new Date());
+  }
+
+  // Update referrer / ICD from current form
+  p.refby     = gv('cb-refby') || gv('oc-refby') || p.refby || '';
+  p.refbyName = gv('cb-refby-name') || gv('oc-refby-name') || p.refbyName || '';
+  p.icd       = gv('cb-icd') || gv('oc-icd') || p.icd || '';
+
+  // Update or add to local state
+  var idx = st.patients.findIndex(function(x) { return x && x.id === p.id; });
+  if (idx >= 0) { st.patients[idx] = p; } else { st.patients.push(p); }
+  sv('patients', st.patients);
+
+  // Show overlay and save
+  _submitGuard = true;
+  _showSubmitOverlay();
+
+  if (SHEETS_URL) {
+    var ok = await push('savePatient', p);
+    if (!ok) {
+      showToast(window._lastPushError
+        ? 'Not saved: ' + window._lastPushError
+        : 'Could not save patient \u2014 check wifi and try again');
+      _hideSubmitOverlay();
+      return;
+    }
+  }
+  logChange(p, 'Readmit (merged)', addToList ? (p.ward + (p.bed ? ' Rm ' + p.bed : '')) : 'Consult only');
+
+  // Create claim — same flow as apSubmit
+  if (st.doc) {
+    var cPerf  = document.getElementById('cb-performing-doc');
+    var cAlias = (cPerf && cPerf.value) ? cPerf.value : st.doc.alias;
+    var billingLoc = (document.getElementById('f-billing-loc') || {}).value || 'I';
+
+    if (_apClaimType === 'consult') {
+      submitConsultClaims(p, cAlias, billingLoc);
+    } else if (_apClaimType === 'ccu-admit') {
+      var caDateISO = (document.getElementById('ap-ca-date')  || {}).value || '';
+      var caNotes   = (document.getElementById('ap-ca-notes') || {}).value || '';
+      if (caDateISO) {
+        var caDateFmt = fmtD(parseISODate(caDateISO));
+        addClaim(p, '1411', '1411', 1, caDateFmt, billingLoc, null, caNotes, null, cAlias);
+        sv('claims', st.claims);
+      }
+    } else if (_apClaimType === 'other') {
+      var ocLocEl = document.getElementById('oc-loc');
+      if (ocLocEl) ocLocEl.value = billingLoc;
+      submitOtherClaimFor(p, cAlias);
+    }
+  }
+
+  showToast(p.last + ' readmitted (merged)');
+  _hideSubmitOverlay();
+  clearAddForm();
+  if (addToList) { nav(0, document.querySelectorAll('.nb')[0]); }
+  else { nav(2, document.querySelectorAll('.nb')[2]); }
+}
+
+// Skip dup check and create a genuinely new patient
+function _createNewPatient() {
+  hideModal('merge-modal');
+  apSubmit(window._apPendingAddToList, true);
 }
 
 // Called from ward "+ Add" button — pre-fills ward and jumps to Add Patient
@@ -769,6 +951,17 @@ async function apSubmit(addToList, _skipDupCheck) {
                 ' \u2014 must be 10. OCR likely misread \u2014 check the sticker.', 'error');
       return;
     }
+    // v4.44: MOD 11 check digit hard guard — catches single-digit OCR errors
+    if (!isValidPHN(phn)) {
+      var _phnEl2 = document.getElementById('f-phn');
+      if (_phnEl2) {
+        _phnEl2.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)';
+        _phnEl2.focus();
+        _phnEl2.select && _phnEl2.select();
+      }
+      _phnErr('PHN check digit invalid \u2014 a digit is likely wrong. Verify against the sticker.');
+      return;
+    }
   }
 
   // Diagnosis / referring MD — every claim form now uses the unified
@@ -852,37 +1045,44 @@ async function apSubmit(addToList, _skipDupCheck) {
     return;
   }
 
-  // ── Duplicate check — 2-of-3 hard block ─────────────────────────
+  // ── Duplicate check — 2-of-3 match → merge or create new ────────
   // Fields: PHN (exact), last name (case-insensitive), DOB (formatted).
-  // If any 2 of the 3 match an existing patient → hard stop, no bypass.
-  var chkPhn  = String(phn || '').replace(/\D/g,'');
-  var chkLast = String(last || '').trim().toLowerCase();
-  var chkDob  = fmtClaimDate(gv('f-dob') || '');
+  // Checks local st.patients first (instant), then all patients via
+  // listPatients (catches long-discharged + PhoneConsult stubs).
+  if (!_skipDupCheck) {
+    var chkPhn  = String(phn || '').replace(/\D/g,'');
+    var chkLast = String(last || '').trim().toLowerCase();
+    var chkDob  = fmtClaimDate(gv('f-dob') || '');
 
-  var dupMatch = null;
-  var dupScore = 0;
-  var dupFields = [];
+    // 1. Local check (instant — active + recently discharged patients)
+    var dupResult = _findDup2of3(st.patients, chkPhn, chkLast, chkDob);
 
-  st.patients.forEach(function(x) {
-    if (!x) return;
-    var xPhn  = String(x.phn  || '').replace(/\D/g,'');
-    var xLast = String(x.last || '').trim().toLowerCase();
-    var xDob  = x.dob ? fmtClaimDate(x.dob) : '';
-    var score = 0;
-    var fields = [];
-    if (chkPhn  && xPhn  && chkPhn  === xPhn)  { score++; fields.push('PHN');      }
-    if (chkLast && xLast && chkLast === xLast)  { score++; fields.push('Last name'); }
-    if (chkDob  && xDob  && chkDob  === xDob)  { score++; fields.push('DOB');      }
-    if (score >= 2 && score > dupScore) {
-      dupMatch  = x;
-      dupScore  = score;
-      dupFields = fields;
+    // 2. If no local match, check ALL patients via server
+    if (!dupResult.match && SHEETS_URL && (chkPhn || chkLast)) {
+      try {
+        var _dupResp = await fetch(SHEETS_URL + '?action=listPatients&key=' + SHARED_KEY + '&_t=' + Date.now());
+        if (_dupResp.ok) {
+          var _allPats = await _dupResp.json();
+          if (Array.isArray(_allPats)) {
+            dupResult = _findDup2of3(_allPats, chkPhn, chkLast, chkDob);
+          }
+        }
+      } catch(_dupErr) {
+        console.warn('[dup-check] server check failed, proceeding with local only', _dupErr);
+      }
     }
-  });
 
-  if (dupMatch) {
-    openDuplicateBlockModal(dupMatch, dupFields);
-    return;
+    if (dupResult.match) {
+      var _newData = {
+        last:  fmtName(last),
+        first: fmtName(gv('f-first')),
+        phn:   chkPhn,
+        dob:   chkDob,
+        sex:   gv('f-sex')
+      };
+      openDuplicateMergeModal(dupResult.match, dupResult.fields, _newData);
+      return;
+    }
   }
 
   var p = {
@@ -1013,9 +1213,32 @@ function initAddPatientConsult() {
 // visual; the apSubmit guards remain as the hard backstop.
 var _LIVE_RED = 'border:1.5px solid var(--red-t);background:var(--red-bg)';
 
+// v4.44: BC PHN MOD 11 check digit validation.
+// BC PHNs are 10 digits, always start with 9. Digit 10 is a check digit
+// derived from digits 2-9 using weights [2,4,8,5,10,9,7,3] and MOD 11.
+// Source: BC Professional and Software Conformance Standards, Vol 4B §1.3.
+// Catches single-digit OCR errors instantly with no server call.
+function isValidPHN(phn) {
+  var d = String(phn).replace(/\D/g, '');
+  if (d.length !== 10 || d[0] !== '9') return false;
+  var w = [2, 4, 8, 5, 10, 9, 7, 3];
+  var sum = 0;
+  for (var i = 0; i < 8; i++) sum += (parseInt(d[i + 1], 10) * w[i]) % 11;
+  var chk = 11 - (sum % 11);
+  return chk < 10 && chk === parseInt(d[9], 10);
+}
+
 function _liveClear(el) {
   // Only clear styling we applied — leave the field's default look.
   if (el) el.style.cssText = '';
+}
+
+// v4.44: Show/hide persistent error message below PHN field
+function _phnErr(msg) {
+  var div = document.getElementById('phn-chk-err');
+  if (!div) return;
+  if (msg) { div.textContent = msg; div.style.display = ''; }
+  else     { div.textContent = '';  div.style.display = 'none'; }
 }
 
 function validatePhnLive() {
@@ -1024,8 +1247,47 @@ function validatePhnLive() {
   var digits = String(el.value || '').replace(/\D/g,'');
   if (digits.length > 0 && digits.length !== 10) {
     el.style.cssText = _LIVE_RED;
+    _phnErr('PHN is ' + digits.length + ' digit' + (digits.length === 1 ? '' : 's') + ' \u2014 must be 10');
+    return;
+  }
+  // v4.44: MOD 11 check digit validation when PHN is 10 digits
+  if (digits.length === 10) {
+    if (!isValidPHN(digits)) {
+      el.style.cssText = _LIVE_RED;
+      _phnErr('PHN check digit invalid \u2014 a digit is likely wrong. Verify against the sticker.');
+      return;
+    }
+    _liveClear(el);
+    _phnErr(null);
+    // Existing patient check — local first, then server
+    var localMatch = (st.patients || []).filter(function(x) {
+      return x && String(x.phn || '').replace(/\D/g, '').slice(0, 10) === digits;
+    })[0];
+    if (localMatch) {
+      showExistingPatientBanner(localMatch);
+      return;
+    }
+    // Server check (catches long-discharged + PhoneConsult stubs)
+    if (SHEETS_URL && !window._phnLiveCheckInFlight) {
+      window._phnLiveCheckInFlight = digits;
+      fetch(SHEETS_URL + '?action=listPatients&key=' + SHARED_KEY + '&_t=' + Date.now())
+        .then(function(r) { return r.json(); })
+        .then(function(all) {
+          var cur = String((document.getElementById('f-phn') || {}).value || '').replace(/\D/g, '');
+          if (cur !== window._phnLiveCheckInFlight) return;
+          if (!Array.isArray(all)) return;
+          var match = all.filter(function(x) {
+            return x && String(x.phn || '').replace(/\D/g, '').slice(0, 10) === cur;
+          })[0];
+          if (match) showExistingPatientBanner(match);
+        })
+        .catch(function() {})
+        .finally(function() { window._phnLiveCheckInFlight = null; });
+    }
   } else {
     _liveClear(el);
+    _phnErr(null);
+    dismissExistingPatientBanner();
   }
 }
 
@@ -1064,6 +1326,7 @@ function clearAddForm() {
       el.style.cssText = '';
     }
   });
+  _phnErr(null); // v4.44: clear check digit error
   var sx = document.getElementById('f-sex'); if (sx) sx.value = '';
   var sxm = document.getElementById('f-sex-m'); if (sxm) sxm.className = 'ap-list-pill';
   var sxf = document.getElementById('f-sex-f'); if (sxf) sxf.className = 'ap-list-pill';
