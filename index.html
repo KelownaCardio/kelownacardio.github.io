@@ -792,6 +792,7 @@ input[type=file] { display:none; }
     <div class="card-title">Patient</div>
     <label>PHN (HCN)</label>
     <input id="f-phn" inputmode="numeric" maxlength="10" autocorrect="off" placeholder="10 digits" oninput="validatePhnLive()" style="font-size:16px;letter-spacing:.3px">
+    <div id="phn-chk-err" style="display:none;margin:4px 0 2px;padding:6px 10px;background:var(--red-bg);border:1px solid var(--red-t);border-radius:6px;font-size:12px;font-weight:600;color:var(--red-t);line-height:1.4"></div>
     <div class="fl">
       <div class="f1"><label>Last name</label><input id="f-last" autocorrect="off" autocapitalize="words" oninput="validateLastLive()"></div>
       <div class="f1"><label>First name</label><input id="f-first" autocorrect="off" autocapitalize="words"></div>
