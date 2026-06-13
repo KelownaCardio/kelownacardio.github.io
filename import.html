@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   KGH Cardiology · Meditech Import (standalone)
-  Version:    v1.9
+  Version:    v1.10
   Built:      2026-05-26 UTC
   Repo:       github.com/KelownaCardio/kelownacardio.github.io
   Path:       Apps Script → Anthropic (no Cloudflare needed — works on hospital WiFi)
@@ -10,6 +10,11 @@
     - AI extracts patient list, categorises by MRP
     - All rows have checkboxes; ignored rows can be added manually
     - Commit selected directly to Google Sheet
+  Changes in v1.10:
+  - Fixed 0-matched bug: listPatients returns a bare array; the old
+    j.patients read was always undefined so no existing patient ever
+    matched and everything was flagged as new.
+
   Changes in v1.9:
   - Server-side OCR: PDF now sent to Apps Script ocrSticker route
     (Crud.gs v2.39) instead of fetching the API key and calling
@@ -492,7 +497,10 @@ async function buildPreview(patients) {
   try {
     const r = await fetch(`${APPS_SCRIPT_URL}?key=${SHARED_KEY}&action=listPatients`);
     const j = await r.json();
-    existingPats = j.patients || [];
+    // v1.10: listPatients returns a bare array, not {patients:[...]} —
+    // the old j.patients read was always undefined, so existingPats was
+    // empty and every parsed patient was flagged "new" (0 matched bug).
+    existingPats = Array.isArray(j) ? j : (j.patients || []);
   } catch(e) {
     existingPats = [];
     console.warn('Could not fetch existing patients:', e);
