@@ -1999,11 +1999,11 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v4.42-2026-06-12-serverside-ocr';
+var BUILD_ID    = 'v4.43-2026-06-12-pill-sync-fix';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v4.42';
+var APP_VERSION = 'v4.43';
 var APP_BUILT   = '2026-06-12';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -7467,6 +7467,9 @@ function locRolePill(prefix, val) {
   var roleEl = document.getElementById(X + '-role');
   if (roleEl) roleEl.value = val;
   locSyncRolePills(X);
+  // v4.43: clear validation amber if user selects a role after a failed submit
+  var roleRow = document.getElementById(X + '-role-row');
+  if (roleRow) roleRow.style.cssText = 'gap:8px;margin-top:4px';
   var mrpEl  = document.getElementById(X + '-mrp');
   if (val === 'mrp') {
     if (mrpEl)  mrpEl.value  = 'Cardiology';
@@ -7483,12 +7486,18 @@ function locListPill(prefix, val) {
   var pillOff = document.getElementById(X + '-pill-off');
   if (pillOn)  pillOn.className  = 'ap-list-pill' + (val === 'on'  ? ' on' : '');
   if (pillOff) pillOff.className = 'ap-list-pill tone-amber' + (val === 'off' ? ' on' : '');
+  // v4.43: clear validation amber if user selects after a failed submit
+  var listRow = document.getElementById(X + '-list-row');
+  if (listRow) listRow.style.cssText = 'gap:8px;margin-top:4px';
   leUpdateRuleHint();
 }
 
 function locSyncRolePills(prefix) {
   var X = prefix;
-  var val = (document.getElementById(X + '-role') || {}).value || 'consultant';
+  // v4.43: removed || 'consultant' fallback — when the hidden value is
+  // empty (requireChoice fresh form), both pills must stay unselected so
+  // the user sees they need to make an active choice.
+  var val = (document.getElementById(X + '-role') || {}).value;
   var mrp = document.getElementById(X + '-role-mrp');
   var con = document.getElementById(X + '-role-con');
   if (mrp) mrp.className = 'ap-list-pill' + (val === 'mrp'        ? ' on' : '');
@@ -7496,7 +7505,19 @@ function locSyncRolePills(prefix) {
 }
 
 function locSyncListPills(prefix) {
-  locListPill(prefix, (document.getElementById(prefix + '-list') || {}).value || 'on');
+  // v4.43: removed || 'on' fallback — locListPill writes the value back
+  // to the hidden input, so the fallback was silently setting f-list='on'
+  // whenever the form started empty (requireChoice). Now respects empty.
+  var val = (document.getElementById(prefix + '-list') || {}).value;
+  if (val) {
+    locListPill(prefix, val);
+  } else {
+    // Both pills off, hidden value stays empty
+    var pillOn  = document.getElementById(prefix + '-pill-on');
+    var pillOff = document.getElementById(prefix + '-pill-off');
+    if (pillOn)  pillOn.className  = 'ap-list-pill';
+    if (pillOff) pillOff.className = 'ap-list-pill tone-amber';
+  }
 }
 
 // Add a user-typed ward to WARDS + localStorage + every ward select on
