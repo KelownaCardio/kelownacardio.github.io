@@ -548,6 +548,17 @@ function _computeLeaderboard() {
   };
 }
 
+// ── Normalize dates for merge dedup (DD/MM/YYYY vs YYYY-MM-DD) ──
+function _lbNormDate(d) {
+  var s = String(d || '');
+  // Already DD/MM/YYYY
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) return s;
+  // YYYY-MM-DD → DD/MM/YYYY
+  var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return parseInt(m[3],10) + '/' + parseInt(m[2],10) + '/' + m[1];
+  return s;
+}
+
 // ── Merge local + BQ results ─────────────────────────
 function _mergeLeaderboards(local, bq) {
   return {
@@ -561,9 +572,12 @@ function _mergeLeaderboards(local, bq) {
 function _mergeCat(a, b, limit) {
   var map = {};
   (a || []).concat(b || []).forEach(function(r) {
-    var key = r[0] + '|' + r[1];
+    var normD = _lbNormDate(r[1]);
+    var key = r[0] + '|' + normD;
     var score = Number(r[2]) || 0;
-    if (!map[key] || score > Number(map[key][2])) map[key] = r;
+    if (!map[key] || score > Number(map[key][2])) {
+      map[key] = [r[0], normD, r[2]];
+    }
   });
   var out = [];
   for (var k in map) out.push(map[k]);
@@ -575,9 +589,12 @@ function _mergeCat(a, b, limit) {
 function _mergeShepherd(a, b) {
   var map = {};
   (a || []).concat(b || []).forEach(function(r) {
-    var key = r[0] + '|' + r[1];
+    var normD = _lbNormDate(r[1]);
+    var key = r[0] + '|' + normD;
     var score = Number(r[2]) || 0;
-    if (!map[key] || score > Number(map[key][2])) map[key] = r;
+    if (!map[key] || score > Number(map[key][2])) {
+      map[key] = [r[0], normD, r[2]];
+    }
   });
   var all = [];
   for (var k in map) all.push(map[k]);
@@ -595,20 +612,19 @@ function _mergeShepherd(a, b) {
   return out;
 }
 
-// ── Async BQ fetch (background merge for historical) ──
-async function _fetchBQLeaderboard(localData) {
-  if (!SHEETS_URL) return;
+// ── Async BQ fetch — returns data (or null on failure) ──
+async function _fetchBQLeaderboard() {
+  if (!SHEETS_URL) return null;
   try {
     var url = SHEETS_URL + '?action=getLeaderboard&key=' + SHARED_KEY + '&_t=' + Date.now();
     var resp = await fetch(url, { cache: 'no-store', credentials: 'omit' });
-    if (!resp.ok) return;
+    if (!resp.ok) return null;
     var bqData = await resp.json();
-    if (bqData.error) return;
-    var merged = _mergeLeaderboards(localData, bqData);
-    _renderLeaderboard(merged);
+    if (bqData.error) return null;
+    return bqData;
   } catch(e) {
-    // BQ failed — local data already shown, no problem
     console.warn('[Leaderboard] BQ fetch failed:', e.message);
+    return null;
   }
 }
 
@@ -687,7 +703,14 @@ var LB_CSS =
     'width:30px;height:30px;border:.5px solid var(--border2);border-radius:50%;' +
     'cursor:pointer;background:var(--surface);font-size:15px;' +
     'transition:border-color .15s,background .15s}' +
-  '.lb-trophy-btn:active{border-color:var(--amber-t);background:var(--amber-bg)}';
+  '.lb-trophy-btn:active{border-color:var(--amber-t);background:var(--amber-bg)}' +
+
+  /* Loading banner */
+  '.lb-loading{text-align:center;padding:60px 16px}' +
+  '.lb-loading-text{font-family:"Courier New",monospace;font-size:14px;color:#0a0;' +
+    'letter-spacing:3px;text-transform:uppercase;text-shadow:0 0 8px rgba(0,255,0,.4)}' +
+  '@keyframes lb-cursor{0%,49%{opacity:1}50%,100%{opacity:0}}' +
+  '.lb-blink{animation:lb-cursor .8s step-end infinite}';
 
 
 // ── HTML — the modal shell ───────────────────────────
@@ -728,7 +751,7 @@ function _injectLeaderboardUI() {
 }
 
 // ── Show / hide ──────────────────────────────────────
-function showLeaderboard() {
+async function showLeaderboard() {
   var overlay = document.getElementById('lb-overlay');
   if (!overlay) return;
   overlay.classList.add('open');
@@ -738,11 +761,25 @@ function showLeaderboard() {
     void screen.offsetWidth;
     screen.classList.add('animating');
   }
-  // 1. Local data — instant render
+
+  // 1. Show loading banner
+  var body = document.getElementById('lb-body');
+  if (body) {
+    body.innerHTML =
+      '<div class="lb-loading">' +
+        '<div class="lb-loading-text">DUSTING OFF THE ARCHIVES<span class="lb-blink">_</span></div>' +
+      '</div>';
+  }
+
+  // 2. Fetch BQ (authoritative), fall back to local-only on failure
+  var bqData = await _fetchBQLeaderboard();
+
+  // 3. Compute local (covers unsynced active-patient claims)
   var localData = _computeLeaderboard();
-  _renderLeaderboard(localData);
-  // 2. BQ historical — merges in when it arrives
-  _fetchBQLeaderboard(localData);
+
+  // 4. Merge: BQ authoritative for any date it covers, local fills gaps
+  var merged = _mergeLeaderboards(localData, bqData);
+  _renderLeaderboard(merged);
 }
 
 function hideLeaderboard() {
@@ -808,7 +845,3 @@ function _renderCategory(title, subtitle, rows, isDollar) {
   html += '</div>';
   return html;
 }
-// ── 12_referrers.js ──
-// ═══════════════════════════════════════════════════════
-// ── 12_referrers.js ──
-// ═══════════════════════════════════════════════════════
