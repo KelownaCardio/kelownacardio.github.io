@@ -188,8 +188,13 @@ function setSyncState(s) {
   if (banner) banner.style.display = s === 'error' ? 'flex' : 'none';
 }
 
+var _syncInFlight = false;
 async function syncFromSheets() {
   if (!SHEETS_URL) return;
+  // v4.46: Dedup guard — visibilitychange + pageshow both fire on iOS resume,
+  // causing two simultaneous getAll calls (8s instead of 4s). Drop the second.
+  if (_syncInFlight) { console.log('[sync] already in flight — skipping'); return; }
+  _syncInFlight = true;
   setSyncState('syncing');
   window._syncAttempts = (window._syncAttempts || 0) + 1;
   window._lastSyncError = null;
@@ -506,6 +511,8 @@ async function syncFromSheets() {
       window._lastSyncResponse.exception = e.message || String(e);
     }
     setSyncState('error');
+  } finally {
+    _syncInFlight = false;
   }
 }
 
