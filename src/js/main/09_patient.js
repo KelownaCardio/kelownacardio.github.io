@@ -1045,6 +1045,11 @@ async function apSubmit(addToList, _skipDupCheck) {
     return;
   }
 
+  // v4.46: Guard + overlay BEFORE async dup check — instant feedback,
+  // prevents double-tap during the network round-trip.
+  _submitGuard = true;
+  _showSubmitOverlay();
+
   // ── Duplicate check — 2-of-3 match → merge or create new ────────
   // Fields: PHN (exact), last name (case-insensitive), DOB (formatted).
   // Checks local st.patients first (instant), then all patients via
@@ -1081,6 +1086,7 @@ async function apSubmit(addToList, _skipDupCheck) {
         sex:   gv('f-sex')
       };
       openDuplicateMergeModal(dupResult.match, dupResult.fields, _newData);
+      _hideSubmitOverlay();
       return;
     }
   }
@@ -1121,9 +1127,7 @@ async function apSubmit(addToList, _skipDupCheck) {
   st.patients.push(p);
   sv('patients', st.patients);
 
-  // v4.26: Show overlay — all validation passed, now doing network I/O
-  _submitGuard = true;
-  _showSubmitOverlay();
+  // v4.46: Guard + overlay already shown before dup check (see above).
 
   if (SHEETS_URL) {
     var ok = await push('savePatient', p);

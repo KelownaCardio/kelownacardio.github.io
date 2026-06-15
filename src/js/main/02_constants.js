@@ -55,13 +55,16 @@ function dispDateMdy(d) {
 
 // Open the daily claims modal — shows Last,First — fee description for every claim
 // the signed-in doctor has billed today. Quick visual check that nothing was missed.
-function openDailyClaimsList() {
+// v4.46: filter param — 'all' (default) or 'consults' (33010/33012/1411/CCU_DAILY).
+var _dailyClaimsFilter = 'all';
+var _CONSULT_ADMIT_FEES = { '33010':1, '33012':1, '1411':1, 'CCU_DAILY':1 };
+function openDailyClaimsList(filter) {
   if (!st.doc) { showToast('Sign in first'); return; }
+  _dailyClaimsFilter = filter || _dailyClaimsFilter || 'all';
   // Build fee-code → description lookup
   var feeDesc = {};
   FEES.forEach(function(f) { feeDesc[f.code] = f.desc; });
   // CCU rollups not in FEES
-  // CCU_DAILY resolved per-claim below — no static description needed
   feeDesc['1411']      = 'CCU Day 1';
   feeDesc['1421']      = 'CCU Daily (2-7)';
   feeDesc['1431']      = 'CCU Daily (8+)';
@@ -71,24 +74,49 @@ function openDailyClaimsList() {
     return c.alias === st.doc.alias && c.date === TODAY;
   });
 
-  // v4.27: Sort oldest-first — by start time if available, then entry order.
-  // Claims with times sort chronologically; claims without sort by when entered.
-  todays.sort(function(a, b) {
-    var tA = a.startTime || '';
-    var tB = b.startTime || '';
-    if (tA && tB) return tA.localeCompare(tB);
-    if (tA) return -1;
-    if (tB) return 1;
-    return (a.createdAt || 0) - (b.createdAt || 0);
-  });
+  // v4.46: Further filter for consults/admits if active
+  var isConsultView = (_dailyClaimsFilter === 'consults');
+  var filtered = isConsultView
+    ? todays.filter(function(c) { return _CONSULT_ADMIT_FEES[c.fee]; })
+    : todays;
+
+  // v4.46: Consults view sorts newest-first; All view sorts oldest-first.
+  if (isConsultView) {
+    filtered.sort(function(a, b) {
+      var tA = a.startTime || '';
+      var tB = b.startTime || '';
+      if (tA && tB) return tB.localeCompare(tA); // newest first
+      if (tA) return 1;
+      if (tB) return -1;
+      return (b.createdAt || 0) - (a.createdAt || 0);
+    });
+  } else {
+    filtered.sort(function(a, b) {
+      var tA = a.startTime || '';
+      var tB = b.startTime || '';
+      if (tA && tB) return tA.localeCompare(tB);
+      if (tA) return -1;
+      if (tB) return 1;
+      return (a.createdAt || 0) - (b.createdAt || 0);
+    });
+  }
 
   var titleEl = document.getElementById('daily-claims-title');
   var body    = document.getElementById('daily-claims-body');
   if (!titleEl || !body) return;
 
+  // v4.46: Filter pills
+  var _pillStyle = 'display:inline-block;padding:4px 12px;border-radius:14px;font-size:12px;font-weight:600;cursor:pointer;margin-right:6px;border:1.5px solid ';
+  var _onStyle  = _pillStyle + 'var(--blue);background:var(--blue-bg);color:var(--blue-t)';
+  var _offStyle = _pillStyle + 'var(--border);background:var(--surface);color:var(--text2)';
+  var pills = '<div style="display:flex;margin-bottom:10px">' +
+    '<span style="' + (isConsultView ? _offStyle : _onStyle) + '" onclick="openDailyClaimsList(\'all\')">All (' + todays.length + ')</span>' +
+    '<span style="' + (isConsultView ? _onStyle : _offStyle) + '" onclick="openDailyClaimsList(\'consults\')">Consults &amp; Admits</span>' +
+    '</div>';
+
   if (!todays.length) {
     titleEl.textContent = "Today's claims (0)";
-    body.innerHTML = '<div class="empty" style="padding:18px 0">No claims billed today.</div>';
+    body.innerHTML = pills + '<div class="empty" style="padding:18px 0">No claims billed today.</div>';
     showModal('daily-claims-modal');
     return;
   }
@@ -111,16 +139,42 @@ function openDailyClaimsList() {
     '<span style="font-weight:400;color:var(--text2);font-size:13px">(' +
     todays.length + ' &middot; $' + total.toFixed(0) + ')</span>';
 
-  body.innerHTML = todays.map(function(c) {
+  var rows = filtered.map(function(c) {
     try {
       var last  = String(c.last  || '?');
       var first = String(c.first || '?');
       var fee   = String(c.fee   || '');
-      // v4.27: Resolve CCU_DAILY to actual band for display
       var resolvedFee = (fee === 'CCU_DAILY') ? ccuFeeForDate({phn: c.phn}, c.date) : fee;
       var desc  = feeDesc[resolvedFee] || feeDesc[fee] || fee;
       var rate  = FEE_RATES[resolvedFee] || 0;
       var amt   = (rate * (c.units || 1));
+
+      // v4.46: Consults view shows location + start→end; All view shows fee + time.
+      if (isConsultView) {
+        var loc = c.ward ? String(c.ward) : '';
+        if (c.room) loc += (loc ? ' ' : '') + c.room;
+        var timeRange = '';
+        if (c.startTime) {
+          timeRange = String(c.startTime);
+          if (c.endTime) timeRange += ' \u2013 ' + String(c.endTime);
+        }
+        return '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:8px 4px;border-bottom:.5px solid var(--border)">' +
+          '<div style="flex:1;min-width:0">' +
+            '<div style="font-size:13px;font-weight:600;color:var(--text)">' +
+              esc(last) + ', ' + esc(first) +
+            '</div>' +
+            '<div style="font-size:11px;color:var(--text2);margin-top:2px">' +
+              esc(desc) +
+              (loc ? ' &middot; ' + esc(loc) : '') +
+            '</div>' +
+            (timeRange ? '<div style="font-size:11px;color:var(--teal);margin-top:1px">' + esc(timeRange) + '</div>' : '') +
+          '</div>' +
+          '<div style="font-size:12px;font-weight:700;color:' + (amt > 0 ? 'var(--green)' : 'var(--text3)') + ';flex-shrink:0">' +
+            (amt > 0 ? '$' + amt.toFixed(0) : '\u2014') +
+          '</div>' +
+        '</div>';
+      }
+
       var time  = c.startTime ? String(c.startTime) : '';
       return '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:8px 4px;border-bottom:.5px solid var(--border)">' +
         '<div style="flex:1;min-width:0">' +
@@ -130,18 +184,23 @@ function openDailyClaimsList() {
           '<div style="font-size:11px;color:var(--text2);margin-top:2px">' +
             esc(desc) +
             (time ? ' &middot; ' + esc(time) : '') +
-
           '</div>' +
         '</div>' +
         '<div style="font-size:12px;font-weight:700;color:' + (amt > 0 ? 'var(--green)' : 'var(--text3)') + ';flex-shrink:0">' +
-          (amt > 0 ? '$' + amt.toFixed(0) : '—') +
+          (amt > 0 ? '$' + amt.toFixed(0) : '\u2014') +
         '</div>' +
       '</div>';
     } catch (e) {
       console.error('[dailyClaims] row render failed for', c, e);
-      return '<div class="empty" style="padding:6px 4px;font-size:11px">⚠ Could not render claim ' + esc(c && c.id) + '</div>';
+      return '<div class="empty" style="padding:6px 4px;font-size:11px">\u26a0 Could not render claim ' + esc(c && c.id) + '</div>';
     }
   }).join('');
+
+  if (isConsultView && !filtered.length) {
+    rows = '<div class="empty" style="padding:18px 0">No consults or admits billed today.</div>';
+  }
+
+  body.innerHTML = pills + rows;
 
   showModal('daily-claims-modal');
 }
@@ -711,7 +770,3 @@ function recordIcdUsage(code) {
   sv('recentIcds', st.recentIcds);
 }
 
-// ── 02b_icd_search.js ──
-// ═══════════════════════════════════════════════════════
-// ── 02b_icd_search.js ──
-// ═══════════════════════════════════════════════════════
