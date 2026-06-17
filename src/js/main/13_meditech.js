@@ -415,7 +415,7 @@ function renderMediteachPreview(patients) {
               cf.locals.map(function(l) {
                 return '<div class="imp-meta" style="color:var(--text);margin-top:2px">' +
                        '· PHN <code>' + esc(l.phn || '(blank)') + '</code>' +
-                       (l.dob ? ' · DOB ' + esc(l.dob) : '') +
+                       (l.dob ? ' · DOB ' + esc(dispDate(l.dob)) : '') +
                        (l.ward ? ' · ' + esc(l.ward) : '') +
                        ' · ' + (l.discharged ? 'discharged' : 'active') +
                        '</div>';
@@ -432,7 +432,7 @@ function renderMediteachPreview(patients) {
                 'Age mismatch: ' + esc(cf.meditech.last) + ', ' + esc(cf.meditech.first) +
               '</div>' +
               '<div class="imp-meta">Meditech says age ' + cf.meditechAge +
-                ', local DOB ' + esc(cf.local.dob) + ' implies age ' + cf.localAge + '.</div>' +
+                ', local DOB ' + esc(dispDate(cf.local.dob)) + ' implies age ' + cf.localAge + '.</div>' +
               '<div class="imp-meta" style="color:var(--amber-t);font-weight:600;margin-top:4px">' +
                 'Action: verify DOB on the patient sticker and edit if wrong.' +
               '</div>' +

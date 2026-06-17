@@ -24,7 +24,7 @@ function openPatientEdit(pid) {
   html += '</div>';
   html += '<div class="fl">';
   html += '<div class="f1"><label>PHN</label><input id="pe-phn" value="' + esc(p.phn||'') + '" inputmode="numeric" maxlength="10" autocorrect="off"></div>';
-  html += '<div class="f1"><label>DOB</label><input id="pe-dob" value="' + esc(p.dob||'') + '" autocorrect="off" placeholder="DD/MM/YYYY" inputmode="numeric" oninput="dobAutoSlash(this)"></div>';
+  html += '<div class="f1"><label>DOB</label><input id="pe-dob" value="' + esc(dispDate(p.dob)||'') + '" autocorrect="off" placeholder="DD Mon YYYY" oninput="dobAutoSlash(this)"></div>';
   html += '</div>';
   html += '<div class="fl">';
   html += '<div class="f1"><label>Sex</label>' +
@@ -198,7 +198,7 @@ function savePatientEdit(pid) {
     _detailParts.push('Renamed from "' + _oldDisplay + '"');
   }
   if (_phnChanged) _detailParts.push('PHN ' + _oldPhn + ' → ' + p.phn);
-  if (_dobChanged) _detailParts.push('DOB ' + (_oldDob || '(blank)') + ' → ' + p.dob);
+  if (_dobChanged) _detailParts.push('DOB ' + (dispDate(_oldDob) || '(blank)') + ' → ' + dispDate(p.dob));
   if (_sexChanged) _detailParts.push('Sex ' + (_oldSex || '(blank)') + ' → ' + p.sex);
   if (_claimsTouched > 0) _detailParts.push(_claimsTouched + ' claim row(s) updated');
   logChange(p, 'Demographics edited', _detailParts.join(' \u2014 '));

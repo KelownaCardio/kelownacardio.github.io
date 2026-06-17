@@ -18,10 +18,12 @@ async function init() {
   // v4.25: attach DOB auto-slash + numeric keypad to f-dob.
   // pe-dob (edit modal) has it inline; f-dob is in the static template
   // so it must be wired programmatically here.
+  // v4.48: placeholder changed to DD Mon YYYY; inputmode left as default
+  // so users can type month names. dobAutoSlash still handles pure-digit
+  // input (08051963 → 08/05/1963).
   var fDob = document.getElementById('f-dob');
   if (fDob) {
-    fDob.setAttribute('inputmode', 'numeric');
-    fDob.placeholder = 'DD/MM/YYYY';
+    fDob.placeholder = 'DD Mon YYYY';
     fDob.addEventListener('input', function() { dobAutoSlash(fDob); });
   }
   updateDailyTotal();
