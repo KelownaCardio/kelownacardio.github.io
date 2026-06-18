@@ -2083,12 +2083,12 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v4.47-ws-2026-06-16-workspace-parallel';
+var BUILD_ID    = 'v4.49B-ws-2026-06-18-batch-patient-edit';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v4.47-WS';
-var APP_BUILT   = '2026-06-16';
+var APP_VERSION = 'v4.49B-WS';
+var APP_BUILT   = '2026-06-18';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -2679,6 +2679,55 @@ async function push(action, body) {
     if (body && body.id) delete window._pushInFlight[body.id];
     // Network / transport failure — transient. Leave it in _pendingPush so
     // the next sync retries it.
+    window._lastPushError = e.message || String(e);
+    setSyncState('error');
+    return false;
+  }
+}
+
+// v4.49 (B): batch a patient + its changed claims into ONE request.
+// Replaces the old burst (1 savePatient + N saveClaim POSTs) that
+// contended the backend script lock and produced duplicate claim rows.
+// On failure the items are left in _pendingPush so the next sync retries
+// them individually — no claim is dropped.
+async function pushPatientWithClaims(patient, claims) {
+  if (!SHEETS_URL) return false;
+  if (!patient || !patient.id) return false;
+  claims = Array.isArray(claims) ? claims : [];
+  // Mark all items pending until a sync confirms them (same safety net as push()).
+  window._pendingPush[patient.id] = { action: 'savePatient', body: patient, ts: Date.now() };
+  claims.forEach(function(c) {
+    if (c && c.id) window._pendingPush[c.id] = { action: 'saveClaim', body: c, ts: Date.now() };
+  });
+  setSyncState('syncing');
+  try {
+    var resp = await fetch(SHEETS_URL + '?action=savePatientWithClaims&key=' + SHARED_KEY, {
+      method: 'POST', body: JSON.stringify({ patient: patient, claims: claims })
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var data = null;
+    try { data = await resp.json(); } catch (_) { data = null; }
+    if (data && data.error === 'unauthorized') {
+      window._lastPushError = 'unauthorized';
+      setSyncState('error');
+      handleUnauthorized();
+      return false;
+    }
+    if (data && data.ok === false) {
+      // Permanent server-side rejection (validation). Drop from pending and report.
+      window._lastPushError = data.error || 'Server rejected the batch save';
+      delete window._pendingPush[patient.id];
+      claims.forEach(function(c) { if (c && c.id) delete window._pendingPush[c.id]; });
+      console.warn('pushPatientWithClaims rejected — ' + window._lastPushError);
+      setSyncState('synced');
+      return false;
+    }
+    window._lastPushError = null;
+    setSyncState('synced');
+    return true;
+  } catch(e) {
+    // Transport failure — leave everything in _pendingPush; next sync retries
+    // each item individually via the normal push() path.
     window._lastPushError = e.message || String(e);
     setSyncState('error');
     return false;
@@ -6534,20 +6583,19 @@ function savePatientEdit(pid) {
 
   saveCustomRoom(p.ward, p.bed);
   sv('patients', st.patients);
-  if (SHEETS_URL) push('savePatient', p);
 
-  // v4.31: propagate ALL demographic changes to claim rows.
-  // Claims are found by the OLD PHN (in case PHN itself changed), then
-  // each changed field is updated. Each touched claim is re-pushed.
+  // v4.49 (B): collect changed claims, then send patient + claims in ONE
+  // batched request (pushPatientWithClaims) instead of 1 savePatient + N
+  // saveClaim POSTs. The old burst contended the backend lock and produced
+  // duplicate claim rows.
   var _nameChanged = (p.last !== _oldLast || p.first !== _oldFirst);
   var _phnChanged  = (p.phn !== _oldPhn);
   var _dobChanged  = (p.dob !== _oldDob);
   var _sexChanged  = (p.sex !== _oldSex);
   var _anyDemoChanged = _nameChanged || _phnChanged || _dobChanged || _sexChanged;
 
-  var _claimsTouched = 0;
+  var _changedClaims = [];
   if (_anyDemoChanged && (_oldPhn || p.phn)) {
-    // Use old PHN to find claims (it's what the claim rows currently hold)
     var searchPhn = _oldPhn || p.phn;
     st.claims.forEach(function(c) {
       if (!samePhn(c.phn, searchPhn)) return;
@@ -6557,28 +6605,19 @@ function savePatientEdit(pid) {
         c.first = p.first;
         touched = true;
       }
-      if (_phnChanged && c.phn !== p.phn) {
-        c.phn = p.phn;
-        touched = true;
-      }
-      if (_dobChanged && c.dob !== p.dob) {
-        c.dob = p.dob;
-        touched = true;
-      }
-      if (_sexChanged && c.sex !== p.sex) {
-        c.sex = p.sex;
-        touched = true;
-      }
-      if (touched) {
-        if (SHEETS_URL) push('saveClaim', c);
-        _claimsTouched++;
-      }
+      if (_phnChanged && c.phn !== p.phn) { c.phn = p.phn; touched = true; }
+      if (_dobChanged && c.dob !== p.dob) { c.dob = p.dob; touched = true; }
+      if (_sexChanged && c.sex !== p.sex) { c.sex = p.sex; touched = true; }
+      if (touched) _changedClaims.push(c);
     });
-    if (_claimsTouched > 0) {
+    if (_changedClaims.length > 0) {
       sv('claims', st.claims);
-      try { console.log('[v4.31] Propagated demographic edit to ' + _claimsTouched + ' claim row(s) for PHN ' + searchPhn + (_phnChanged ? ' → ' + p.phn : '')); } catch (e) {}
+      try { console.log('[v4.49B] Batching demographic edit: ' + _changedClaims.length + ' claim row(s) for PHN ' + searchPhn + (_phnChanged ? ' → ' + p.phn : '')); } catch (e) {}
     }
   }
+
+  var _claimsTouched = _changedClaims.length;
+  if (SHEETS_URL) pushPatientWithClaims(p, _changedClaims);
 
   var _detailParts = [];
   if (_nameChanged) {
@@ -6592,6 +6631,9 @@ function savePatientEdit(pid) {
   logChange(p, 'Demographics edited', _detailParts.join(' \u2014 '));
   hideModal('pt-edit-modal');
   render();
+  // v4.49 (B): the summary card builds its header once on open and is not
+  // redrawn by render(). Reopen it so the corrected name shows immediately.
+  if (typeof openPatientSummary === 'function') openPatientSummary(p.id);
   showToast(p.last + ' updated' + (_claimsTouched > 0 ? ' (\u2713 ' + _claimsTouched + ' claim row(s) updated)' : ''));
 }
 
