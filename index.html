@@ -8580,6 +8580,41 @@ function isValidPHN(phn) {
   return chk < 10 && chk === parseInt(d[9], 10);
 }
 
+// PHN single-swap repair. When MOD-11 fails, try ONE common OCR digit
+// confusion at ONE position and re-check MOD-11. Returns the corrected PHN
+// only if EXACTLY ONE candidate passes — zero or >=2 are ambiguous and fall
+// through to the red/manual path (never auto-suggest a guess).
+// Pairs are frequency-ordered from observed OCR Corrections (3<->8 dominant);
+// widen this set only when the corrections log justifies it.
+var _PHN_CONFUSIONS = [['3', '8'], ['9', '3'], ['6', '8']];
+function repairPHN(phn) {
+  var d = String(phn).replace(/\D/g, '');
+  if (d.length !== 10) return null;
+  var hits = [];
+  for (var i = 0; i < 10; i++) {
+    for (var p = 0; p < _PHN_CONFUSIONS.length; p++) {
+      var a = _PHN_CONFUSIONS[p][0], b = _PHN_CONFUSIONS[p][1];
+      var sub = null;
+      if (d[i] === a) sub = b;
+      else if (d[i] === b) sub = a;
+      if (sub === null) continue;
+      var cand = d.slice(0, i) + sub + d.slice(i + 1);
+      if (isValidPHN(cand) && hits.indexOf(cand) === -1) hits.push(cand);
+    }
+  }
+  return hits.length === 1 ? hits[0] : null;
+}
+
+// Apply an amber-confirmed PHN correction: write it into the field and
+// re-run live validation so the corrected value flows through the normal
+// valid path (clears styling, runs the duplicate check).
+function _phnApplyFix(corrected) {
+  var el = document.getElementById('f-phn');
+  if (!el) return;
+  el.value = corrected;
+  validatePhnLive();
+}
+
 function _liveClear(el) {
   // Only clear styling we applied — leave the field's default look.
   if (el) el.style.cssText = '';
@@ -8589,6 +8624,10 @@ function _liveClear(el) {
 function _phnErr(msg) {
   var div = document.getElementById('phn-chk-err');
   if (!div) return;
+  // Restore red styling (a prior correction banner may have set it amber).
+  div.style.background = 'var(--red-bg)';
+  div.style.borderColor = 'var(--red-t)';
+  div.style.color = 'var(--red-t)';
   if (msg) { div.textContent = msg; div.style.display = ''; }
   else     { div.textContent = '';  div.style.display = 'none'; }
 }
@@ -8605,6 +8644,28 @@ function validatePhnLive() {
   // v4.44: MOD 11 check digit validation when PHN is 10 digits
   if (digits.length === 10) {
     if (!isValidPHN(digits)) {
+      var fixed = repairPHN(digits);
+      if (fixed) {
+        // Exactly one single-swap candidate passes MOD-11 — offer it amber.
+        // Highlight the changed digit; require a tap to accept (never auto-apply).
+        el.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)';
+        var diffIdx = -1;
+        for (var _k = 0; _k < 10; _k++) { if (digits[_k] !== fixed[_k]) { diffIdx = _k; break; } }
+        var pretty = fixed.slice(0, diffIdx) + '<b style="color:var(--amber-t)">' + fixed[diffIdx] + '</b>' + fixed.slice(diffIdx + 1);
+        var div = document.getElementById('phn-chk-err');
+        if (div) {
+          // Recolor the banner amber (the div defaults to red for errors).
+          div.style.background = 'var(--amber-bg)';
+          div.style.borderColor = 'var(--amber-t)';
+          div.style.color = 'var(--amber-t)';
+          div.innerHTML = 'PHN corrected to ' + pretty +
+            ' <button type="button" class="btn btn-s" style="margin:0 0 0 6px;padding:2px 8px" ' +
+            'onclick="_phnApplyFix(\'' + fixed + '\')">Click to confirm</button>';
+          div.style.display = '';
+        }
+        return;
+      }
+      // Zero or >=2 candidates — ambiguous. Red, manual fix.
       el.style.cssText = _LIVE_RED;
       _phnErr('PHN check digit invalid \u2014 a digit is likely wrong. Verify against the sticker.');
       return;
