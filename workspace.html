@@ -3154,7 +3154,17 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, 
     createdBy: (st.doc && st.doc.alias) || '',
     createdAt: Date.now()
   };
+  createdBy: (st.doc && st.doc.alias) || '',
+    createdAt: Date.now()
+  };
+  // v4.49: stamp the dollar rate from the FEES catalogue onto the claim so
+  // feeAmount travels with it (single source of truth — the backend no longer
+  // re-derives from a separate, drift-prone copy). CCU is already resolved to
+  // its band (1411/1421/1431) above, so this captures the correct band rate.
+  // Blank when the code isn't in FEES (backend then falls back to BQ_FEE_RATES).
+  c.feeAmount = (typeof FEE_RATES !== 'undefined' && FEE_RATES[c.fee] != null) ? FEE_RATES[c.fee] : '';
   // Dedup guard: never create two claims with same phn+date+fee+alias.
+  
   // v4.21: CCU family comparison — treat CCU_DAILY/1411/1421/1431 as the
   // same fee for dedup purposes (a manual 1421 should not bypass an
   // existing CCU_DAILY on the same day).
