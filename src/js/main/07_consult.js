@@ -1,4 +1,3 @@
-// 07_consult.js — Unified consult form (33010/33012)
 //
 // ONE consult form, shared by the +Claim screen and the Add Patient
 // screen. Built on the Add Patient template: flat layout, no claims-
@@ -423,8 +422,9 @@ function submitConsultClaims(p, alias, locOverride) {
   var userNote  = (cVal('cb-notes') || '').trim();
   // CCFPP — one-directional detection. Note belongs on the 120x modifier
   // claims only, never on the consult row.
-  var ccfppNote = ccfppDetectAndUpdate(p, alias, dateISO, dateFmt, start, end);
-  var modNote   = [userNote, ccfppNote].filter(function(s) { return s; }).join(' | ');
+  // v4.49: modifier claims start with the user note only; CCFPP is applied
+  // by ccfppRecomputeAround_ after the claims exist (end of this function).
+  var modNote = userNote;
 
   // Base consult — doctor's note only
   addClaim(p, code, code, 1, dateFmt, loc, start, userNote, end, alias, ov);
@@ -445,6 +445,8 @@ function submitConsultClaims(p, alias, locOverride) {
     }
   }
   sv('claims', st.claims);
+  // v4.49: compute/refresh CCFPP for this consult + cross-midnight neighbours.
+  ccfppRecomputeAround_(alias, dateFmt);
   return true;
 }
 

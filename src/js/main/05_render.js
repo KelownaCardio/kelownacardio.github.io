@@ -1,4 +1,3 @@
-// 05_render.js — Render rounds list (geo + alpha + off service)
 //
 // v4.19 change: alphaRow (on-service alphabetical view) now places
 // the room/bed number on a dedicated second row — identical structure
@@ -772,6 +771,8 @@ function unbillToday(pid, feeTypes) {
   if (idx === -1) return false;
   var removed = st.claims.splice(idx, 1)[0];
   if (SHEETS_URL) push('deleteClaim', { id: removed.id });
+  // v4.49: refresh CCFPP for peers after an unbill.
+  if (removed) ccfppRecomputeAround_(removed.alias, removed.date);
   var stillHasClaims = st.claims.some(function(c) {
     return samePhn(c.phn, p.phn) && c.alias === st.doc.alias && c.date === TODAY;
   });
@@ -995,4 +996,3 @@ function openAddWard(btn)    { openAdd(btn.getAttribute('data-ward')); }
 function wpAddClaim(btn) {
   openClaimScreen(btn.getAttribute('data-pid'));
 }
-
