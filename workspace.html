@@ -8478,7 +8478,14 @@ async function apSubmit(addToList, _skipDupCheck) {
   if (_oop) {
     if (!_oopProv)             addMissing.push('home province');
     if (!gv('f-home-address')) addMissing.push('home address');
-    if (_oopProv !== 'QC' && !gv('f-home-hcn')) addMissing.push('home health number');
+    // Non-QC needs the home-province HCN for the reciprocal MSP claim.
+    // QC is invoiced directly (MSP-value invoice) — needs at least ONE
+    // identifier: a BC PHN OR the home health number.
+    if (_oopProv === 'QC') {
+      if (!phn && !gv('f-home-hcn')) addMissing.push('home health number');
+    } else if (!gv('f-home-hcn')) {
+      addMissing.push('home health number');
+    }
   }
 
   if (addMissing.length) {
