@@ -5644,6 +5644,7 @@ function _cvShowDayDetails(pid, dateStr, dayClaims) {
           '<span>' + esc(c.alias || '—') + '</span>' +
         '</div>' +
         '<div style="font-size:11px;color:var(--text2);margin-top:4px">' + esc(dxLabel) + '</div>' +
+        (c.startTime || c.endTime ? '<div style="font-size:11px;color:var(--text);margin-top:4px;font-weight:600">&#9201; ' + esc(c.startTime || '?') + ' &ndash; ' + esc(c.endTime || '?') + '</div>' : '') +
         (c.notes ? '<div style="font-size:11px;color:var(--amber-t);margin-top:4px;font-style:italic">' + esc(c.notes) + '</div>' : '') +
         (c.createdBy ? '<div style="font-size:10px;color:var(--text3);margin-top:4px">Submitted by ' + esc(c.createdBy) + (c.createdAt ? ' &middot; ' + auditTs(c.createdAt) : '') + '</div>' : '') +
         '<div style="display:flex;gap:6px;margin-top:8px">' +
