@@ -14,7 +14,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>KGH Cardiology Billing</title>
+<title>KGH Billing — WORKSPACE TEST</title>
 
 <!-- PWA -->
 <link rel="manifest" href="manifest.json">
@@ -676,6 +676,10 @@ input[type=file] { display:none; }
 </head>
 <body>
 
+<!-- WORKSPACE TEST BUILD — visible marker. Delete at cutover. -->
+<div id="ws-test-ribbon" style="background:var(--amber-bg);color:var(--amber-t);text-align:center;font-size:11px;font-weight:700;padding:4px 8px;letter-spacing:.04em;border-bottom:.5px solid var(--amber)">
+  WORKSPACE TEST BUILD &middot; not the live app &middot; data goes to the Workspace sheet
+</div>
 <div class="hdr">
   <div class="hdr-l">
     <div class="logo">
@@ -911,6 +915,18 @@ input[type=file] { display:none; }
   </div>
 </div>
 
+<!-- WORKSPACE TEST BUILD — app-password gate. Shown once per device. -->
+<div class="overlay top" id="apppw-modal">
+  <div class="modal">
+    <div class="modal-title">Enter KCA Password</div>
+    <div style="font-size:12px;color:var(--text2);margin-top:-8px;margin-bottom:12px" id="apppw-sub">This is a new device — you need to authorize it to access patient data.</div>
+    <input type="password" id="apppw-input" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+           style="width:100%;box-sizing:border-box;padding:11px 13px;font-size:16px;border:.5px solid var(--border2);border-radius:var(--r);background:var(--surface);margin-bottom:6px"
+           placeholder="App password" onkeydown="if(event.key==='Enter')submitAppPassword()">
+    <div id="apppw-err" style="display:none;font-size:12px;color:var(--amber-t);background:var(--amber-bg);border-radius:var(--r);padding:8px 11px;margin-bottom:8px"></div>
+    <button class="btn btn-p" style="width:100%;margin-top:6px" onclick="submitAppPassword()">Connect</button>
+  </div>
+</div>
 <div class="overlay" id="disch-modal">
   <div class="modal">
     <div class="modal-handle"></div>
@@ -1026,8 +1042,10 @@ var BC_PHYSICIANS_LOCAL = [["Aartsma","Durk Pieter","59243","Psychiatry","Vernon
 // 01_config.js — URLs, ward definitions, alias map
 // ═══════════════════════════════════════════════════════
 
-var SHEETS_URL = 'https://script.google.com/macros/s/AKfycbzQOQa6dZCCyXu15jvkyUTFghtnhGzZFj4NZ4uyczxLov72zj8qNZIgk9pzL4i8Dfuy5Q/exec';
-var SHARED_KEY = 'kgh2026';
+var SHEETS_URL = 'https://script.google.com/macros/s/AKfycbxnd8SjEggYszjTQ3Ljcy7IlSK8PFUuXJwwKggjEqqZrWn9ED0zV3OlfQ6ka5m9y-c_/exec';
+var APP_PW_LS_KEY = 'kgh5:appPw';
+var SHARED_KEY = '';
+try { SHARED_KEY = localStorage.getItem(APP_PW_LS_KEY) || ''; } catch (e) { SHARED_KEY = ''; }
 
 var ALIAS_MAP = {
   FH:'FH', LH:'LH', DP:'DPatton', KB:'KBrown', JKT:'KT',
@@ -2265,6 +2283,7 @@ async function syncFromSheets() {
     window._lastSyncResponse.keys = Object.keys(d || {});
     window._lastSyncResponse.ts = new Date().toISOString();
     console.log('[sync] response shape:', window._lastSyncResponse);
+    if (d.error === 'unauthorized') { handleUnauthorized().then(function () { syncFromSheets().catch(function(){}); }); return; }
     if (d.error) {
       window._lastSyncError = 'Apps Script: ' + d.error;
       setSyncState('error');
@@ -12898,7 +12917,51 @@ function confirmMediteachImport() {
 // ═══════════════════════════════════════════════════════
 
 // ── Init ──────────────────────────────────────────────
+// ── App-password gate (WORKSPACE TEST BUILD) ──────────
+function _getStoredAppPw() {
+  try { return localStorage.getItem(APP_PW_LS_KEY) || ''; } catch (e) { return ''; }
+}
+function ensureAppPassword() {
+  if (_getStoredAppPw()) { SHARED_KEY = _getStoredAppPw(); return Promise.resolve(); }
+  return promptAppPassword('This is a new device — you need to authorize it to access patient data.');
+}
+var _appPwResolve = null;
+function promptAppPassword(msg) {
+  return new Promise(function(resolve) {
+    _appPwResolve = resolve;
+    var sub = document.getElementById('apppw-sub');
+    if (sub && msg) sub.textContent = msg;
+    var err = document.getElementById('apppw-err');
+    if (err) { err.style.display = 'none'; err.textContent = ''; }
+    var inp = document.getElementById('apppw-input');
+    if (inp) inp.value = '';
+    var ov = document.getElementById('apppw-modal');
+    if (ov) ov.classList.add('on');
+    if (inp) setTimeout(function(){ try { inp.focus(); } catch(e){} }, 60);
+  });
+}
+function submitAppPassword() {
+  var inp = document.getElementById('apppw-input');
+  var err = document.getElementById('apppw-err');
+  var val = inp ? (inp.value || '').trim() : '';
+  if (!val) {
+    if (err) { err.textContent = 'Enter the app password to continue.'; err.style.display = 'block'; }
+    return;
+  }
+  try { localStorage.setItem(APP_PW_LS_KEY, val); } catch (e) {}
+  SHARED_KEY = val;
+  var ov = document.getElementById('apppw-modal');
+  if (ov) ov.classList.remove('on');
+  var r = _appPwResolve; _appPwResolve = null;
+  if (r) r();
+}
+function handleUnauthorized() {
+  try { localStorage.removeItem(APP_PW_LS_KEY); } catch (e) {}
+  SHARED_KEY = '';
+  return promptAppPassword('That password was rejected. Re-enter the current app password.');
+}
 async function init() {
+  await ensureAppPassword();
   // Build the Add Patient "Location & list" card from the shared
   // component before anything references f-ward (custom-ward restore,
   // wardChange, prefill all need it present).
