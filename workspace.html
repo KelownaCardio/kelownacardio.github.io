@@ -840,6 +840,20 @@ input[type=file] { display:none; }
       <textarea id="f-home-address" rows="3" autocorrect="off" placeholder="Street, City, Province, Postal code" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical"></textarea>
       <div style="margin-top:6px;font-size:10px;color:var(--text3);line-height:1.5">Find in Meditech: tap the <strong>&#9432;</strong> beside the patient's name (top right) &rarr; <strong>Contact</strong> tab &rarr; copy the ADDRESS block and type it here.</div>
     </div>
+    <!-- ── Private Pay ───────────────────────────────────────────── -->
+    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:10px;border-top:.5px solid var(--border2)">
+      <input type="checkbox" id="f-private" onchange="apTogglePrivate()" style="width:18px;height:18px;flex:0 0 auto;accent-color:var(--green-t)">
+      <label for="f-private" style="margin:0;font-weight:600;cursor:pointer">Private pay patient</label>
+    </div>
+    <div id="f-private-fields" style="display:none;margin-top:10px;padding:10px;background:var(--green-bg);border:.5px solid var(--green-t);border-radius:var(--rsm)">
+      <label style="margin:0 0 6px">Billing rate</label>
+      <div class="fl" style="gap:6px">
+        <button type="button" class="ap-list-pill on" id="f-private-rate-bcma" onclick="apPrivateRate('BCMA')">BCMA (private)</button>
+        <button type="button" class="ap-list-pill" id="f-private-rate-msp" onclick="apPrivateRate('MSP')">MSP rates</button>
+      </div>
+      <input id="f-private-rate" type="hidden" value="BCMA">
+      <div style="margin-top:6px;font-size:10px;color:var(--text3);line-height:1.5">Claims are entered as usual. After discharge this patient is held from the iClinic export and a patient invoice (default <strong>BCMA</strong> rates) is generated with a pay-online link.</div>
+    </div>
   </div>
 
   <!-- Claim card with type toggle -->
@@ -8290,6 +8304,8 @@ function apToggleOOP() {
     });
     var qc = document.getElementById('f-qc-warn'); if (qc) qc.style.display = 'none';
   } else {
+    var _priv = document.getElementById('f-private');
+    if (_priv && _priv.checked) { _priv.checked = false; if (typeof apTogglePrivate === 'function') apTogglePrivate(); }
     apProvinceChange();
   }
 }
@@ -8297,6 +8313,29 @@ function apProvinceChange() {
   var v = (document.getElementById('f-home-province') || {}).value || '';
   var qc = document.getElementById('f-qc-warn');
   if (qc) qc.style.display = (v === 'QC') ? 'block' : 'none';
+}
+// ── Private Pay toggle + rate selector ────────────────────────────
+function apTogglePrivate() {
+  var on = !!((document.getElementById('f-private') || {}).checked);
+  var box = document.getElementById('f-private-fields');
+  if (box) box.style.display = on ? 'block' : 'none';
+  if (on) {
+    // Private pay and Out-of-Province are mutually exclusive categories.
+    var oop = document.getElementById('f-oop');
+    if (oop && oop.checked) { oop.checked = false; if (typeof apToggleOOP === 'function') apToggleOOP(); }
+    apPrivateRate((document.getElementById('f-private-rate') || {}).value || 'BCMA');
+  } else {
+    var rm = document.getElementById('f-private-rate'); if (rm) rm.value = 'BCMA';
+    apPrivateRate('BCMA');
+  }
+}
+function apPrivateRate(mode) {
+  mode = (mode === 'MSP') ? 'MSP' : 'BCMA';
+  var hid = document.getElementById('f-private-rate'); if (hid) hid.value = mode;
+  var b = document.getElementById('f-private-rate-bcma');
+  var m = document.getElementById('f-private-rate-msp');
+  if (b) b.className = 'ap-list-pill' + (mode === 'BCMA' ? ' on' : '');
+  if (m) m.className = 'ap-list-pill' + (mode === 'MSP' ? ' on' : '');
 }
 
 function peSexPill(val) {
@@ -8611,6 +8650,11 @@ async function apSubmit(addToList, _skipDupCheck) {
     p.homeHCN      = gv('f-home-hcn');
     p.homeAddress  = gv('f-home-address');
   }
+  // Private Pay billing (mutually exclusive with OOP). rateMode default BCMA.
+  if ((document.getElementById('f-private') || {}).checked) {
+    p.privatePay = true;
+    p.rateMode   = gv('f-private-rate') || 'BCMA';
+  }
 
   if (addToList) {
     var ward = gv('f-ward') || 'OTHER';
@@ -8908,6 +8952,8 @@ function clearAddForm() {
   // v2.30: reset Out of Province tick box + collapse/clear its fields.
   var oopCb = document.getElementById('f-oop'); if (oopCb) oopCb.checked = false;
   if (typeof apToggleOOP === 'function') apToggleOOP();
+  var privCb = document.getElementById('f-private'); if (privCb) privCb.checked = false;
+  if (typeof apTogglePrivate === 'function') apTogglePrivate();
   // v4.19: reset billing location pills to Inpatient default.
   apBillingLocPill('I');
   var ocr = document.getElementById('ocr-bar'); if (ocr) ocr.style.display = 'none';
