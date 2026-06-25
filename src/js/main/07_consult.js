@@ -420,28 +420,32 @@ function submitConsultClaims(p, alias, locOverride) {
   };
 
   var userNote  = (cVal('cb-notes') || '').trim();
-  // CCFPP — one-directional detection. Note belongs on the 120x modifier
-  // claims only, never on the consult row.
-  // v4.49: modifier claims start with the user note only; CCFPP is applied
-  // by ccfppRecomputeAround_ after the claims exist (end of this function).
-  var modNote = userNote;
+  // CCFPP — one-directional detection (single most-recent overlapping
+  // predecessor). v4.50 FIX: compute the note HERE, BEFORE the first
+  // saveClaim push, and bake it onto the consult + 120x rows so it persists
+  // on the initial save. v4.49 deferred this to ccfppRecomputeAround_, whose
+  // second saveClaim for the same id was silently dropped by push()'s
+  // _pushInFlight de-dupe guard — so the CCFPP note never reached the sheet
+  // on a newly-entered consult. (Recompute still runs at the end to update
+  // neighbours; it's a no-op for these rows since the note is already set.)
+  var ccNote = _ccfppMerge(userNote, ccfppPreviewNote(p, alias, dateISO, dateFmt, start, end));
 
-  // Base consult — doctor's note only
-  addClaim(p, code, code, 1, dateFmt, loc, start, userNote, end, alias, ov);
+  // Base consult — doctor's note + CCFPP (v4.49b: stamped on 33010/33012 too)
+  addClaim(p, code, code, 1, dateFmt, loc, start, ccNote, end, alias, ov);
 
   // MOST — standalone item, no CCFPP, no times
   if (_mostOn) addClaim(p, '78720', '78720', 1, dateFmt, loc, null, null, null, alias, ov);
 
-  // Call-out modifiers — CCFPP note rides on these
+  // Call-out modifiers — CCFPP note rides on these too
   var modBase  = getModifier(start, dateISO);
   var incUnits = consultIncUnits(start, end);
   var modInc   = incUnits > 0 ? getModifierForIncrement(start, dateISO) : null;
   if (modBase) {
     var modBaseEnd = minsToTime((t2m(start) + 30) % (24 * 60));
-    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start, modNote, modBaseEnd, alias, ov);
+    addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start, ccNote, modBaseEnd, alias, ov);
     if (modInc) {
       var incStart = minsToTime((t2m(start) + 30) % (24 * 60));
-      addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, modNote, end, alias, ov);
+      addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, ccNote, end, alias, ov);
     }
   }
   sv('claims', st.claims);

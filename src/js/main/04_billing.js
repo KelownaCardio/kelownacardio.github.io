@@ -68,7 +68,7 @@ function ccfppSamePerson_(a, b) {
   return aDob === bDob;
 }
 
-// 120x call-out modifier fee codes — CCFPP notes attach ONLY to these.
+// 120x call-out modifier fee codes. CCFPP rides on these AND the 33010/33012 consult row (v4.49b); this list identifies the modifier rows.
 var CCFPP_MODIFIER_FEES = ['1200','1201','1202','1205','1206','1207'];
 
 // Format a patient's name as "Last, First" for CCFPP notes.
