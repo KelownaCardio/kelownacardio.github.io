@@ -39,6 +39,19 @@
   --r:10px; --rsm:6px; --rpill:20px;
 }
 * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+/* OOP / Private-pay coverage checkboxes — clear box + checkmark when tapped (Add form + Edit card) */
+#f-oop, #f-private, #pe-oop, #pe-private {
+  -webkit-appearance:none; appearance:none; position:relative;
+  border:2px solid var(--border2); border-radius:5px; background:#fff;
+  cursor:pointer; vertical-align:middle; transition:background .12s,border-color .12s;
+}
+#f-oop:checked, #pe-oop:checked { background:var(--blue); border-color:var(--blue); }
+#f-private:checked, #pe-private:checked { background:var(--green-t); border-color:var(--green-t); }
+#f-oop:checked::after, #f-private:checked::after, #pe-oop:checked::after, #pe-private:checked::after {
+  content:''; position:absolute; left:5px; top:2px;
+  width:5px; height:10px; border:solid #fff; border-width:0 2.5px 2.5px 0;
+  transform:rotate(45deg);
+}
 body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:var(--bg); color:var(--text); font-size:14px; line-height:1.4; max-width:430px; margin:0 auto; min-height:100vh; }
 
 /* HEADER */
