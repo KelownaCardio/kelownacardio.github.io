@@ -2584,9 +2584,21 @@ async function syncFromSheets() {
     }
 
     if (d.doctors)   st.doctors   = d.doctors;
+    // Gap notes (billing-gap explanations, hard-gate). Merge server truth with
+    // any LOCAL note not yet on the server, and re-push those — so a saveGapNote
+    // that failed (offline) isn't lost when the sync response overwrites state.
+    if (d.gapNotes) {
+      var _srvGap = {};
+      d.gapNotes.forEach(function(g) { _srvGap[String(g.phn||'').replace(/\D/g,'') + '|' + String(g.date||'')] = true; });
+      var _localGap = (st.gapNotes || []).filter(function(g) {
+        return !_srvGap[String(g.phn||'').replace(/\D/g,'') + '|' + String(g.date||'')];
+      });
+      if (SHEETS_URL) _localGap.forEach(function(g) { push('saveGapNote', g); });
+      st.gapNotes = d.gapNotes.concat(_localGap);
+    }
     if (d.changelog) st.changelog = d.changelog;
 
-    ['patients','claims','doctors','changelog'].forEach(function(k) { sv(k, st[k]); });
+    ['patients','claims','doctors','gapNotes','changelog'].forEach(function(k) { sv(k, st[k]); });
     window._lastSyncResponse.checkpoint = 'completed';
     window._lastSyncResponse.completedAt = new Date().toISOString();
     window._lastSyncResponse.stPatientsFinal = st.patients.length;
@@ -5345,8 +5357,24 @@ function _cvGapRuleForPatient(p) {
 
 // Returns { startMs, endMs } — admission span as epoch ms, end = dischargeDate or today
 function _cvAdmitSpan(p) {
-  if (!p || !p.admitDate) return null;
-  var startMs = parseDMYsafe(p.admitDate);
+  if (!p || !p.phn) return null;
+  // gap-span fix 2026-06-27: span START = the first consult (33010/33012) or
+  // CCU admission (1411) claim — the true start of the MRP's daily-billing
+  // obligation. Falls back to p.admitDate, then the earliest claim of any type.
+  // Previously this required p.admitDate and returned null when it was blank,
+  // silently SKIPPING the gap check for any patient with no admit date
+  // (phone stubs, quick manual adds).
+  var SPAN_ANCHOR = { '33010':1, '33012':1, '1411':1 };
+  var anchorMs = 0, earliestAnyMs = 0;
+  st.claims.forEach(function(c) {
+    if (!samePhn(c.phn, p.phn)) return;
+    var cms = parseDMYsafe(c.date);
+    if (!cms) return;
+    if (!earliestAnyMs || cms < earliestAnyMs) earliestAnyMs = cms;
+    if (SPAN_ANCHOR[String(c.fee || '').trim()] && (!anchorMs || cms < anchorMs)) anchorMs = cms;
+  });
+  var admitMs = p.admitDate ? parseDMYsafe(p.admitDate) : 0;
+  var startMs = anchorMs || admitMs || earliestAnyMs;
   if (!startMs) return null;
   var endMs;
   if (p.discharged && p.dischargeDate) {
@@ -5426,6 +5454,14 @@ function _cvGapDays(p, claims) {
   claims.forEach(function(c) {
     var ms = parseDMYsafe(c.date);
     if (ms) claimedSet[ms] = true;
+  });
+  // A day the MD explained at discharge ("Note for Billing to understand gap")
+  // is resolved — treat it as occupied so it's not a gap and the discharge
+  // hard-gate can proceed once every day is filled OR explained.
+  (st.gapNotes || []).forEach(function(g) {
+    if (!samePhn(g.phn, p.phn)) return;
+    var gms = parseDMYsafe(g.date);
+    if (gms) claimedSet[gms] = true;
   });
   var gaps = [];
   // Don't flag today as a gap — doctor may still be rounding
@@ -5853,11 +5889,75 @@ function _cvShowPicker(pid, dateStr, preselectedAlias) {
     '<div style="font-size:11px;color:var(--text2);margin-bottom:10px">' + hint + '</div>' +
     docRow +
     '<div class="cv-pick-grid">' + btns + '</div>' +
+    '<button class="btn btn-s" style="width:100%;margin:8px 0 0;background:var(--surface2)" ' +
+      'data-pid="' + pid + '" data-date="' + dateStr + '" onclick="_cvExplainGap(this.getAttribute(\'data-pid\'),this.getAttribute(\'data-date\'))">' +
+      '✎ Explain gap — note for billing</button>' +
     '<div style="display:flex;gap:8px;margin-top:6px">' +
       '<button class="btn btn-s" style="flex:1;margin-bottom:0" onclick="hideModal(\'cv-picker-modal\')">Cancel</button>' +
     '</div>';
   document.getElementById('cv-picker-content').innerHTML = html;
   showModal('cv-picker-modal');
+}
+
+// ── Explain a billing gap (discharge hard-gate alternative to filling) ──
+// Records a "Note for Billing to understand gap" for an unbilled day. The day
+// then counts as resolved (so discharge can proceed) and DataCheck reports it
+// as GAP_EXPLAINED with the note instead of flagging a missed day.
+function _cvGapNoteFor(phn, dateStr) {
+  var hit = (st.gapNotes || []).find(function(g) {
+    return samePhn(g.phn, phn) && String(g.date) === String(dateStr);
+  });
+  return hit ? String(hit.note || '') : null;
+}
+
+function _cvExplainGap(pid, dateStr) {
+  var p = getP(pid);
+  if (!p) return;
+  var existing = _cvGapNoteFor(p.phn, dateStr) || '';
+  var html =
+    '<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:2px">Explain gap — ' + dispDate(dateStr) + '</div>' +
+    '<div style="font-size:11px;color:var(--text2);margin-bottom:12px">No claim this day. Write why — this goes to billing and stops the day being flagged as missed.</div>' +
+    '<textarea id="cv-gap-note" rows="3" autocomplete="off" placeholder="e.g. Seen by surgery / off-ward for dialysis / patient on pass" ' +
+    'style="width:100%;padding:11px;border:.5px solid var(--border2);border-radius:8px;font-size:14px;font-family:inherit;background:var(--surface2);resize:vertical">' + esc(existing) + '</textarea>' +
+    '<div style="display:flex;gap:8px;margin-top:14px">' +
+      '<button class="btn btn-s" style="flex:1;margin-bottom:0" data-pid="' + pid + '" data-date="' + dateStr + '" ' +
+        'onclick="_cvShowPicker(this.getAttribute(\'data-pid\'),this.getAttribute(\'data-date\'),_cvCurrentDocAlias())">‹ Back</button>' +
+      '<button class="btn btn-p" style="flex:1;margin-bottom:0" data-pid="' + pid + '" data-date="' + dateStr + '" ' +
+        'onclick="_cvConfirmGapNote(this)">Save note</button>' +
+    '</div>';
+  document.getElementById('cv-picker-content').innerHTML = html;
+  showModal('cv-picker-modal');
+  setTimeout(function() { var el = document.getElementById('cv-gap-note'); if (el) el.focus(); }, 200);
+}
+
+function _cvConfirmGapNote(btn) {
+  var pid     = btn.getAttribute('data-pid');
+  var dateStr = btn.getAttribute('data-date');
+  var p = getP(pid);
+  if (!p) return;
+  var el = document.getElementById('cv-gap-note');
+  var note = (el && el.value || '').trim();
+  if (!note) { showToast('Enter a note to explain the gap', 'error'); return; }
+  var alias = _cvCurrentDocAlias();
+  var rec = {
+    phn:     String(p.phn || '').replace(/\D/g, ''),
+    date:    dateStr,
+    patName: (p.last || '') + ', ' + (p.first || ''),
+    alias:   alias,
+    note:    note,
+    by:      (st.doc ? st.doc.alias : '') || alias
+  };
+  if (!st.gapNotes) st.gapNotes = [];
+  var idx = -1;
+  for (var i = 0; i < st.gapNotes.length; i++) {
+    if (samePhn(st.gapNotes[i].phn, rec.phn) && String(st.gapNotes[i].date) === String(dateStr)) { idx = i; break; }
+  }
+  if (idx >= 0) st.gapNotes[idx] = rec; else st.gapNotes.push(rec);
+  sv('gapNotes', st.gapNotes);
+  if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL) push('saveGapNote', rec);
+  hideModal('cv-picker-modal');
+  showToast('Gap explained — noted for billing');
+  if (typeof openPatientSummary === 'function') openPatientSummary(pid);
 }
 
 function _cvPickType(btn) {
