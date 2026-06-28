@@ -122,6 +122,10 @@ function openPatientSummary(pid) {
           'box-shadow:0 1px 4px rgba(0,0,0,.12);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)"' +
           ' title="Close">✕</button></div>';
 
+  // Discharge gap banner — shown at the TOP while resolving gaps. Wrapped so it
+  // can be refreshed in place (preserving the active legend pill) as gaps fill.
+  html += '<div id="cv-disch-banner-wrap">' + _cvDischBannerHTML(p, claims) + '</div>';
+
   // ── Demographics card ────────────────────────────────
   html += '<div style="background:var(--blue-bg);border-radius:var(--r);padding:13px 14px;margin-bottom:13px;border:.5px solid #a8c4e8">';
   html += '<div style="display:flex;align-items:flex-start;justify-content:space-between">';
@@ -276,17 +280,48 @@ function _ptSummaryListHTML(p, claims) {
 // Returns 'ccu' (CCU/ICU ward + MRP role) | 'daily' (MRP role, non-CCU ward) | null
 function _cvGapRuleForPatient(p) {
   if (!p) return null;
-  if (p.role !== 'mrp' && p.care !== 'daily' && p.care !== 'ccu') return null;
+  // gap-rule fix 2026-06-28: derive the daily/CCU billing obligation from the
+  // actual BILLING PATTERN, not just the role/care flag. A patient billed a
+  // daily (33008) or a CCU code (1411/1421/1431/CCU_DAILY) has a daily
+  // obligation even if role wasn't set to MRP (e.g. a consultant/directive who
+  // billed a 33008 — previously skipped the discharge gap gate entirely). The
+  // hard-gate's "Explain gap" option covers any one-off that's legitimately
+  // not a gap.
+  var hasDaily = false, hasCcu = false;
+  (st.claims || []).forEach(function(c) {
+    if (!c.phn || !p.phn || !samePhn(c.phn, p.phn)) return;
+    var fee = String(c.fee || '').trim();
+    if (fee === '33008') hasDaily = true;
+    else if (fee === '1411' || fee === '1421' || fee === '1431' || fee === 'CCU_DAILY') hasCcu = true;
+  });
+  var flaggedDaily = (p.role === 'mrp' || p.care === 'daily');
+  var flaggedCcu   = (p.care === 'ccu');
+  if (!hasDaily && !hasCcu && !flaggedDaily && !flaggedCcu) return null;
   var ccuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
-  if (ccuWards.indexOf(p.ward) !== -1) return 'ccu';
-  if (p.role === 'mrp' || p.care === 'daily') return 'daily';
-  return null;
+  if (hasCcu || flaggedCcu || ccuWards.indexOf(p.ward) !== -1) return 'ccu';
+  return 'daily';
 }
 
 // Returns { startMs, endMs } — admission span as epoch ms, end = dischargeDate or today
 function _cvAdmitSpan(p) {
-  if (!p || !p.admitDate) return null;
-  var startMs = parseDMYsafe(p.admitDate);
+  if (!p || !p.phn) return null;
+  // gap-span fix 2026-06-27: span START = the first consult (33010/33012) or
+  // CCU admission (1411) claim — the true start of the MRP's daily-billing
+  // obligation. Falls back to p.admitDate, then the earliest claim of any type.
+  // Previously this required p.admitDate and returned null when it was blank,
+  // silently SKIPPING the gap check for any patient with no admit date
+  // (phone stubs, quick manual adds).
+  var SPAN_ANCHOR = { '33010':1, '33012':1, '1411':1 };
+  var anchorMs = 0, earliestAnyMs = 0;
+  st.claims.forEach(function(c) {
+    if (!samePhn(c.phn, p.phn)) return;
+    var cms = parseDMYsafe(c.date);
+    if (!cms) return;
+    if (!earliestAnyMs || cms < earliestAnyMs) earliestAnyMs = cms;
+    if (SPAN_ANCHOR[String(c.fee || '').trim()] && (!anchorMs || cms < anchorMs)) anchorMs = cms;
+  });
+  var admitMs = p.admitDate ? parseDMYsafe(p.admitDate) : 0;
+  var startMs = anchorMs || admitMs || earliestAnyMs;
   if (!startMs) return null;
   var endMs;
   if (p.discharged && p.dischargeDate) {
@@ -366,6 +401,14 @@ function _cvGapDays(p, claims) {
   claims.forEach(function(c) {
     var ms = parseDMYsafe(c.date);
     if (ms) claimedSet[ms] = true;
+  });
+  // A day the MD explained at discharge ("Note for Billing to understand gap")
+  // is resolved — treat it as occupied so it's not a gap and the discharge
+  // hard-gate can proceed once every day is filled OR explained.
+  (st.gapNotes || []).forEach(function(g) {
+    if (!samePhn(g.phn, p.phn)) return;
+    var gms = parseDMYsafe(g.date);
+    if (gms) claimedSet[gms] = true;
   });
   var gaps = [];
   // Don't flag today as a gap — doctor may still be rounding
@@ -534,7 +577,7 @@ function _ptSummaryCalendarHTML(p, claims) {
     }
 
     var tappable = true;  // all in-month days tappable — active pill mode needs this
-    var onclick = ' onclick="tapCalDay(\'' + dateStr + '\')"';
+    var onclick = ' onclick="tapCalDay(\'' + dateStr + '\',event)"';
     html += '<div class="' + cls + '"' + styleAttr + onclick + '>' +
               '<div class="cv-num">' + d + '</div>' +
               (tag ? '<div class="cv-tag">' + tag + '</div>' : '') +
@@ -606,6 +649,7 @@ function _cvCurrentDocAlias() {
 function _cvSelectLegend(type, btn) {
   var wasActive = _cvActiveType === type;
   _cvActiveType = wasActive ? null : type;
+  window._cvRangeAnchor = null;   // reset Shift+tap range anchor on any pill change
   document.querySelectorAll('.cv-lg-pill').forEach(function(b) { b.classList.remove('active'); });
   if (!wasActive && btn) btn.classList.add('active');
   var hint = document.getElementById('cv-tap-hint');
@@ -626,8 +670,23 @@ function _cvRestoreActivePill() {
     var labelMap = { ccu:'CCU', daily:'Daily', directive:'Directive', combined:'Combined daily' };
     hint.style.display = '';
     hint.style.color = 'var(--blue-t)';
-    hint.textContent = '↑ Tap any day to add ' + (labelMap[_cvActiveType] || _cvActiveType) + ' — tap pill again to cancel';
+    hint.textContent = '↑ Tap any day to add ' + (labelMap[_cvActiveType] || _cvActiveType) + ' — Shift+tap to fill a range — tap pill again to cancel';
   }
+}
+
+// Refresh the calendar + list + (discharge) gap banner IN PLACE, preserving the
+// active legend pill so a selected type persists across day-taps / ranges.
+// Used instead of a full openPatientSummary() re-render during quick-add.
+function _cvRefreshSummary(pid) {
+  var p = getP(pid); if (!p) return;
+  var claims = st.claims.filter(function(c) { return c.phn && p.phn && samePhn(c.phn, p.phn); })
+    .sort(function(a, b) { return parseDMY(a.date) - parseDMY(b.date); });
+  var calEl = document.getElementById('cv-view-cal');
+  if (calEl) { calEl.innerHTML = _ptSummaryCalendarHTML(p, claims); _cvRestoreActivePill(); }
+  var listEl = document.getElementById('cv-view-list');
+  if (listEl) listEl.innerHTML = _ptSummaryListHTML(p, claims);
+  var bnEl = document.getElementById('cv-disch-banner-wrap');
+  if (bnEl) bnEl.innerHTML = _cvDischBannerHTML(p, claims);
 }
 
 // Consult legend pill — opens the full consult card for the current patient.
@@ -646,7 +705,7 @@ function _cvOpenConsultCard() {
 }
 
 // Tap a day — open details or the gap-fill picker
-function tapCalDay(dateStr) {
+function tapCalDay(dateStr, ev) {
   var pid = window._cvPid;
   if (!pid) return;
   var p = getP(pid);
@@ -655,6 +714,14 @@ function tapCalDay(dateStr) {
   // Active legend pill mode — add that type directly without opening picker
   if (_cvActiveType) {
     var alias = _cvCurrentDocAlias();
+    // Shift+tap fills a RANGE of the active type from the last-tapped day to
+    // this one (ccu/daily/directive only — combined needs a per-day reason).
+    if (ev && ev.shiftKey && window._cvRangeAnchor && _cvActiveType !== 'combined') {
+      _cvApplyTypeRange(pid, window._cvRangeAnchor, dateStr, _cvActiveType, alias);
+      window._cvRangeAnchor = dateStr;
+      return;
+    }
+    window._cvRangeAnchor = dateStr;   // anchor for a subsequent Shift+tap range
     if (_cvActiveType === 'combined') {
       // Combined daily: reuse this patient's reason if one is already on file;
       // only prompt the first time (see _cvPriorCombinedReason).
@@ -675,6 +742,38 @@ function tapCalDay(dateStr) {
   } else {
     _cvShowPicker(pid, dateStr, _cvCurrentDocAlias());
   }
+}
+
+// Shift+tap range fill — apply the active legend type to every day from
+// fromDate..toDate (inclusive). Skips days that already carry that type. CCU
+// writes the CCU_DAILY placeholder (export consolidates to 1411/1421/1431).
+function _cvApplyTypeRange(pid, fromDate, toDate, type, alias) {
+  var p = getP(pid); if (!p) return;
+  var a = parseDMY(fromDate), b = parseDMY(toDate);
+  if (!a || !b) return;
+  var lo = Math.min(a.getTime(), b.getTime()), hi = Math.max(a.getTime(), b.getTime());
+  var DAY = 86400000;
+  var feeMap = { ccu:'CCU_DAILY', daily:'33008', directive:'33006' };
+  var fee = feeMap[type]; if (!fee) return;
+  var CCU = { 'CCU_DAILY':1, '1411':1, '1421':1, '1431':1 };
+  var added = 0;
+  for (var t = lo; t <= hi; t += DAY) {
+    var dt = new Date(t);
+    var ds = pad(dt.getDate()) + '/' + pad(dt.getMonth() + 1) + '/' + dt.getFullYear();
+    var dup = st.claims.some(function(c) {
+      if (!samePhn(c.phn, p.phn) || c.date !== ds) return false;
+      return (type === 'ccu') ? CCU[String(c.fee)] : (String(c.fee) === fee);
+    });
+    if (dup) continue;
+    addClaim(p, fee, fee, 1, ds, 'I', null, null, null, alias);
+    added++;
+  }
+  sv('patients', st.patients);
+  sv('claims', st.claims);
+  showToast(added ? (added + ' ' + (type === 'ccu' ? 'CCU' : type) + ' day' + (added > 1 ? 's' : '') + ' added — ' + p.last)
+                  : 'Those days already billed — nothing added');
+  _cvRefreshSummary(pid);
+  render();
 }
 
 // Sheet showing all claims on a single day with edit/delete
@@ -701,6 +800,7 @@ function _cvShowDayDetails(pid, dateStr, dayClaims) {
           '<span>' + esc(c.alias || '—') + '</span>' +
         '</div>' +
         '<div style="font-size:11px;color:var(--text2);margin-top:4px">' + esc(dxLabel) + '</div>' +
+        (c.startTime || c.endTime ? '<div style="font-size:11px;color:var(--text);margin-top:4px;font-weight:600">&#9201; ' + esc(c.startTime || '?') + ' &ndash; ' + esc(c.endTime || '?') + '</div>' : '') +
         (c.notes ? '<div style="font-size:11px;color:var(--amber-t);margin-top:4px;font-style:italic">' + esc(c.notes) + '</div>' : '') +
         (c.createdBy ? '<div style="font-size:10px;color:var(--text3);margin-top:4px">Submitted by ' + esc(c.createdBy) + (c.createdAt ? ' &middot; ' + auditTs(c.createdAt) : '') + '</div>' : '') +
         '<div style="display:flex;gap:6px;margin-top:8px">' +
@@ -792,11 +892,76 @@ function _cvShowPicker(pid, dateStr, preselectedAlias) {
     '<div style="font-size:11px;color:var(--text2);margin-bottom:10px">' + hint + '</div>' +
     docRow +
     '<div class="cv-pick-grid">' + btns + '</div>' +
+    '<button class="btn btn-s" style="width:100%;margin:8px 0 0;background:var(--surface2)" ' +
+      'data-pid="' + pid + '" data-date="' + dateStr + '" onclick="_cvExplainGap(this.getAttribute(\'data-pid\'),this.getAttribute(\'data-date\'))">' +
+      '✎ Explain gap — note for billing</button>' +
     '<div style="display:flex;gap:8px;margin-top:6px">' +
       '<button class="btn btn-s" style="flex:1;margin-bottom:0" onclick="hideModal(\'cv-picker-modal\')">Cancel</button>' +
     '</div>';
   document.getElementById('cv-picker-content').innerHTML = html;
   showModal('cv-picker-modal');
+}
+
+// ── Explain a billing gap (discharge hard-gate alternative to filling) ──
+// Records a "Note for Billing to understand gap" for an unbilled day. The day
+// then counts as resolved (so discharge can proceed) and DataCheck reports it
+// as GAP_EXPLAINED with the note instead of flagging a missed day.
+function _cvGapNoteFor(phn, dateStr) {
+  var hit = (st.gapNotes || []).find(function(g) {
+    return samePhn(g.phn, phn) && String(g.date) === String(dateStr);
+  });
+  return hit ? String(hit.note || '') : null;
+}
+
+function _cvExplainGap(pid, dateStr) {
+  var p = getP(pid);
+  if (!p) return;
+  var existing = _cvGapNoteFor(p.phn, dateStr) || '';
+  var html =
+    '<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:2px">Explain gap — ' + dispDate(dateStr) + '</div>' +
+    '<div style="font-size:11px;color:var(--text2);margin-bottom:12px">No claim this day. Write why — this goes to billing and stops the day being flagged as missed.</div>' +
+    '<textarea id="cv-gap-note" rows="3" autocomplete="off" placeholder="e.g. Seen by surgery / off-ward for dialysis / patient on pass" ' +
+    'style="width:100%;padding:11px;border:.5px solid var(--border2);border-radius:8px;font-size:14px;font-family:inherit;background:var(--surface2);resize:vertical">' + esc(existing) + '</textarea>' +
+    '<div style="display:flex;gap:8px;margin-top:14px">' +
+      '<button class="btn btn-s" style="flex:1;margin-bottom:0" data-pid="' + pid + '" data-date="' + dateStr + '" ' +
+        'onclick="_cvShowPicker(this.getAttribute(\'data-pid\'),this.getAttribute(\'data-date\'),_cvCurrentDocAlias())">‹ Back</button>' +
+      '<button class="btn btn-p" style="flex:1;margin-bottom:0" data-pid="' + pid + '" data-date="' + dateStr + '" ' +
+        'onclick="_cvConfirmGapNote(this)">Save note</button>' +
+    '</div>';
+  document.getElementById('cv-picker-content').innerHTML = html;
+  showModal('cv-picker-modal');
+  setTimeout(function() { var el = document.getElementById('cv-gap-note'); if (el) el.focus(); }, 200);
+}
+
+function _cvConfirmGapNote(btn) {
+  var pid     = btn.getAttribute('data-pid');
+  var dateStr = btn.getAttribute('data-date');
+  var p = getP(pid);
+  if (!p) return;
+  var el = document.getElementById('cv-gap-note');
+  var note = (el && el.value || '').trim();
+  if (!note) { showToast('Enter a note to explain the gap', 'error'); return; }
+  var alias = _cvCurrentDocAlias();
+  var rec = {
+    phn:     String(p.phn || '').replace(/\D/g, ''),
+    date:    dateStr,
+    patName: (p.last || '') + ', ' + (p.first || ''),
+    alias:   alias,
+    note:    note,
+    by:      (st.doc ? st.doc.alias : '') || alias
+  };
+  if (!st.gapNotes) st.gapNotes = [];
+  var idx = -1;
+  for (var i = 0; i < st.gapNotes.length; i++) {
+    if (samePhn(st.gapNotes[i].phn, rec.phn) && String(st.gapNotes[i].date) === String(dateStr)) { idx = i; break; }
+  }
+  if (idx >= 0) st.gapNotes[idx] = rec; else st.gapNotes.push(rec);
+  sv('gapNotes', st.gapNotes);
+  if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL) push('saveGapNote', rec);
+  showToast('Gap explained — noted for billing');
+  if (window._dischResolvePid === pid) { hideModal('cv-picker-modal'); _cvRefreshSummary(pid); return; }   // back to calendar (banner + active pill preserved)
+  hideModal('cv-picker-modal');
+  if (typeof openPatientSummary === 'function') openPatientSummary(pid);
 }
 
 function _cvPickType(btn) {
@@ -911,17 +1076,11 @@ function _cvFillClaim(pid, dateStr, type, note, icdOverride, alias) {
 
   sv('patients', st.patients);
   sv('claims',   st.claims);
-  hideModal('cv-picker-modal');
   showToast(type === 'combined' ? 'Combined daily added — ' + p.last : 'Claim added — ' + p.last);
-
-  // Refresh the calendar in-place
-  var claims = st.claims.filter(function(c) {
-    return c.phn && p.phn && samePhn(c.phn, p.phn);
-  }).sort(function(a, b) { return parseDMY(a.date) - parseDMY(b.date); });
-  var calEl = document.getElementById('cv-view-cal');
-  if (calEl) { calEl.innerHTML = _ptSummaryCalendarHTML(p, claims); _cvRestoreActivePill(); }
-  var listEl = document.getElementById('cv-view-list');
-  if (listEl) listEl.innerHTML = _ptSummaryListHTML(p, claims);
+  hideModal('cv-picker-modal');
+  // Refresh in place — preserves the active legend pill (so a type stays armed
+  // for the next day-tap / range) AND updates the discharge gap banner.
+  _cvRefreshSummary(pid);
   render();
 }
 
@@ -1390,6 +1549,7 @@ function saveClaimEdit(btn) {
     newDate = dp[2] + '/' + dp[1] + '/' + dp[0];
   }
 
+  var _ccfppOldDate = c.date, _ccfppOldAlias = c.alias;
   c.fee     = newFee;
 
   c.icd     = newIcd;
@@ -1413,6 +1573,10 @@ function saveClaimEdit(btn) {
 
   sv('claims', st.claims);
   if (SHEETS_URL) push('saveClaim', c);
+  // v4.49: refresh CCFPP for the edited claim's window (and old date/alias if moved).
+  ccfppRecomputeAround_(c.alias, c.date);
+  if (_ccfppOldDate && (_ccfppOldDate !== c.date || _ccfppOldAlias !== c.alias))
+    ccfppRecomputeAround_(_ccfppOldAlias, _ccfppOldDate);
   hideClaimEditModal();
 
   // Reopen summary to show updated claim
@@ -1431,6 +1595,8 @@ function deleteClaimBtn(btn) {
   st.claims = st.claims.filter(function(x) { return String(x.id) !== String(cid); });
   sv('claims', st.claims);
   if (SHEETS_URL) push('deleteClaim', { id: cid });
+  // v4.49: refresh CCFPP for peers after a delete.
+  if (c) ccfppRecomputeAround_(c.alias, c.date);
 
   openPatientSummary(pid);
   showToast('Claim deleted');

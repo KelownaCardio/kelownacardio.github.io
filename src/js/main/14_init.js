@@ -3,7 +3,51 @@
 // ═══════════════════════════════════════════════════════
 
 // ── Init ──────────────────────────────────────────────
+// ── App-password gate ──────────
+function _getStoredAppPw() {
+  try { return localStorage.getItem(APP_PW_LS_KEY) || ''; } catch (e) { return ''; }
+}
+function ensureAppPassword() {
+  if (_getStoredAppPw()) { SHARED_KEY = _getStoredAppPw(); return Promise.resolve(); }
+  return promptAppPassword('This is a new device — you need to authorize it to access patient data.');
+}
+var _appPwResolve = null;
+function promptAppPassword(msg) {
+  return new Promise(function(resolve) {
+    _appPwResolve = resolve;
+    var sub = document.getElementById('apppw-sub');
+    if (sub && msg) sub.textContent = msg;
+    var err = document.getElementById('apppw-err');
+    if (err) { err.style.display = 'none'; err.textContent = ''; }
+    var inp = document.getElementById('apppw-input');
+    if (inp) inp.value = '';
+    var ov = document.getElementById('apppw-modal');
+    if (ov) ov.classList.add('on');
+    if (inp) setTimeout(function(){ try { inp.focus(); } catch(e){} }, 60);
+  });
+}
+function submitAppPassword() {
+  var inp = document.getElementById('apppw-input');
+  var err = document.getElementById('apppw-err');
+  var val = inp ? (inp.value || '').trim() : '';
+  if (!val) {
+    if (err) { err.textContent = 'Enter the app password to continue.'; err.style.display = 'block'; }
+    return;
+  }
+  try { localStorage.setItem(APP_PW_LS_KEY, val); } catch (e) {}
+  SHARED_KEY = val;
+  var ov = document.getElementById('apppw-modal');
+  if (ov) ov.classList.remove('on');
+  var r = _appPwResolve; _appPwResolve = null;
+  if (r) r();
+}
+function handleUnauthorized() {
+  try { localStorage.removeItem(APP_PW_LS_KEY); } catch (e) {}
+  SHARED_KEY = '';
+  return promptAppPassword('That password was rejected. Re-enter the current app password.');
+}
 async function init() {
+  await ensureAppPassword();
   // Build the Add Patient "Location & list" card from the shared
   // component before anything references f-ward (custom-ward restore,
   // wardChange, prefill all need it present).
@@ -508,6 +552,21 @@ document.addEventListener('visibilitychange', function() {
 // BUILD_ID then triggers the existing localStorage purge — so one tap fully
 // updates the device. Fails silently: a 404 (version.json not yet deployed),
 // network error, or malformed payload never shows a prompt.
+// FIX (2026-06-27): only prompt when the deployed version is strictly NEWER
+// than the running APP_VERSION. Previously ANY difference triggered the banner,
+// so a lagging/stale version.json (the hand-built workspace rig runs AHEAD of
+// the shared version.json, which tracks index.html) nagged an endless "update"
+// to an OLDER version. Numeric component compare; malformed → 0 (no prompt).
+function _verCmp(a, b) {
+  var pa = String(a).replace(/[^0-9.]/g, '').split('.').map(Number);
+  var pb = String(b).replace(/[^0-9.]/g, '').split('.').map(Number);
+  for (var i = 0; i < Math.max(pa.length, pb.length); i++) {
+    var x = pa[i] || 0, y = pb[i] || 0;
+    if (x > y) return 1;
+    if (x < y) return -1;
+  }
+  return 0;
+}
 var _versionCheckInFlight = false;
 function checkForNewVersion() {
   if (_versionCheckInFlight) return;
@@ -517,8 +576,8 @@ function checkForNewVersion() {
     .then(function(data) {
       _versionCheckInFlight = false;
       if (!data || !data.version) return;            // missing/malformed → silent
-      if (data.version === APP_VERSION) return;      // up to date → nothing
-      showUpdateBanner(data.version);
+      if (_verCmp(data.version, APP_VERSION) <= 0) return; // same or OLDER → no prompt (fixes downgrade-nag)
+      showUpdateBanner(data.version);                // only strictly-newer reaches here
     })
     .catch(function() { _versionCheckInFlight = false; }); // offline/error → silent
 }

@@ -22,6 +22,54 @@ function clearRoundsSearch() {
 }
 
 // ═══════════════════════════════════════════════════════
+// ── 06b_discharged.js ──
+// ═══════════════════════════════════════════════════════
+// Recently Discharged pane + rounds search filter
+// Pane shows discharged patients (last 21 days, or all when searching)
+// Each row offers: tap to add a missed claim, restore (to On/Off Service)
+// ═══════════════════════════════════════════════════════
+
+function roundsSearch(query) {
+  _roundsQuery = (query || '').toLowerCase().trim();
+  var clearBtn = document.getElementById('rounds-search-clear');
+  if (clearBtn) clearBtn.classList.toggle('on', !!_roundsQuery);
+  // Hide geo/alpha toggle when searching (search shows unified flat list)
+  var vtBar = document.getElementById('view-tog-bar');
+  if (vtBar) vtBar.style.display = (!_roundsQuery && _listView === 'on') ? 'flex' : 'none';
+  render();
+}
+
+function clearRoundsSearch() {
+  var input = document.getElementById('rounds-search');
+  if (input) { input.value = ''; input.focus(); }
+  roundsSearch('');
+}
+
+// ═══════════════════════════════════════════════════════
+// ── 06b_discharged.js ──
+// ═══════════════════════════════════════════════════════
+// Recently Discharged pane + rounds search filter
+// Pane shows discharged patients (last 21 days, or all when searching)
+// Each row offers: tap to add a missed claim, restore (to On/Off Service)
+// ═══════════════════════════════════════════════════════
+
+function roundsSearch(query) {
+  _roundsQuery = (query || '').toLowerCase().trim();
+  var clearBtn = document.getElementById('rounds-search-clear');
+  if (clearBtn) clearBtn.classList.toggle('on', !!_roundsQuery);
+  // Hide geo/alpha toggle when searching (search shows unified flat list)
+  var vtBar = document.getElementById('view-tog-bar');
+  if (vtBar) vtBar.style.display = (!_roundsQuery && _listView === 'on') ? 'flex' : 'none';
+  render();
+}
+
+function clearRoundsSearch() {
+  var input = document.getElementById('rounds-search');
+  if (input) { input.value = ''; input.focus(); }
+  roundsSearch('');
+}
+
+// ═══════════════════════════════════════════════════════
 // 06b — Recently Discharged pane
 // Single-purpose tab. Reads st.patients (populated by syncFromSheets).
 // Shows: discharged && trueDischarge==irrelevant && < 21 days (or all if searching)
@@ -41,6 +89,60 @@ function dischargedSearch(query) {
 // Render the discharged pane. Pure function over st.patients.
 // Defensive about field types — patients arrive from Sheets with mixed types
 // (phn could be string or number, dischargedAt could be number or string, etc.).
+// ── Archive pull: find + load a >7-day discharged patient into the calendar ──
+// Uses getAllForDataCheck (all patients + all sheet claims, incl. unsubmitted).
+var _archiveCache = null;   // { patients:[], claims:[], at: ts }
+async function archiveSearch() {
+  var term = ((document.getElementById('discharged-search') || {}).value || '').trim();
+  var box  = document.getElementById('archive-results');
+  if (!box) return;
+  if (term.length < 2) { box.innerHTML = '<div style="font-size:11px;color:var(--text3);padding:6px 2px">Type at least 2 letters of a last name (or a PHN) in the box above, then tap Search.</div>'; return; }
+  box.innerHTML = '<div style="font-size:12px;color:var(--text2);padding:8px 2px">Searching archive…</div>';
+  try {
+    if (!_archiveCache || (Date.now() - _archiveCache.at) > 120000) {
+      var r = await fetch(SHEETS_URL + '?action=getAllForDataCheck&key=' + SHARED_KEY + '&_t=' + Date.now());
+      var j = await r.json();
+      if (j && j.error === 'unauthorized') { if (typeof handleUnauthorized === 'function') handleUnauthorized(); box.innerHTML = ''; return; }
+      _archiveCache = { patients: (j.patients || []), claims: (j.claims || []), at: Date.now() };
+    }
+    var tl = term.toLowerCase(), td = term.replace(/\D/g, '');
+    var loaded = {}; (st.patients || []).forEach(function(p){ if (p.id) loaded[String(p.id)] = true; });
+    var matches = _archiveCache.patients.filter(function(p){
+      var nameF = (String(p.last || '') + ' ' + String(p.first || '')).toLowerCase();
+      var phnD  = String(p.phn || '').replace(/\D/g, '');
+      var hit = (tl && nameF.indexOf(tl) !== -1) || (td.length >= 3 && phnD.indexOf(td) !== -1);
+      return hit && !loaded[String(p.id)];
+    }).slice(0, 30);
+    if (!matches.length) { box.innerHTML = '<div style="font-size:12px;color:var(--text3);padding:8px 2px">No off-list patient matches that.</div>'; return; }
+    var rows = matches.map(function(p){
+      var claimN = _archiveCache.claims.filter(function(c){ return samePhn(c.phn, p.phn); }).length;
+      var dd = p.dischargeDate ? (' &middot; D/C ' + esc(p.dischargeDate)) : '';
+      return '<div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface2);border-radius:8px;padding:9px 11px;margin-bottom:6px">'
+        + '<div><div style="font-weight:700;font-size:13px">' + esc(p.last) + ', ' + esc(p.first) + '</div>'
+        + '<div style="font-size:11px;color:var(--text2)">PHN …' + esc(String(p.phn || '').slice(-4)) + dd + ' &middot; ' + claimN + ' claim' + (claimN === 1 ? '' : 's') + '</div></div>'
+        + '<button class="btn btn-p" style="margin:0;font-size:12px;padding:6px 12px" onclick="pullArchivedPatient(\'' + esc(p.id) + '\')">Pull claims</button>'
+        + '</div>';
+    }).join('');
+    box.innerHTML = '<div style="font-size:11px;color:var(--text3);margin:4px 2px 6px">Archive matches (loads into the calendar for editing):</div>' + rows;
+  } catch (e) {
+    box.innerHTML = '<div style="font-size:12px;color:var(--amber-t);padding:8px 2px">Archive search failed — check connection and retry.</div>';
+  }
+}
+function pullArchivedPatient(pid) {
+  if (!_archiveCache) return;
+  var p = _archiveCache.patients.filter(function(x){ return String(x.id) === String(pid); })[0];
+  if (!p) { showToast('Could not load that patient — re-run the search.'); return; }
+  if (!getP(p.id)) st.patients.push(p);
+  var have = {}; st.claims.forEach(function(c){ if (c.id) have[String(c.id)] = true; });
+  var pulled = 0;
+  _archiveCache.claims.forEach(function(c){
+    if (samePhn(c.phn, p.phn) && !have[String(c.id)]) { st.claims.push(c); pulled++; }
+  });
+  sv('patients', st.patients); sv('claims', st.claims);
+  showToast('Pulled ' + p.last + ' — ' + pulled + ' claim' + (pulled === 1 ? '' : 's') + ' loaded');
+  hideModal('pt-summary-modal');
+  openPatientSummary(p.id);
+}
 function renderDischarged(query) {
   var container = document.getElementById('discharged-results');
   if (!container) return;

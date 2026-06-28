@@ -37,6 +37,44 @@ function openPatientEdit(pid) {
   html += '</div>';
   html += '</div>'; // end demographics card
 
+  // ── Out of Province (editable — correct coverage post-discharge) ──
+  var _peOopOn = (p.oop === true || String(p.oop).toLowerCase() === 'true');
+  html += '<div class="card card-patient">'
+    + '<div style="display:flex;align-items:center;gap:8px">'
+    +   '<input type="checkbox" id="pe-oop"' + (_peOopOn?' checked':'') + ' onchange="peToggleOOP()" style="width:18px;height:18px;flex:0 0 auto;accent-color:var(--blue)">'
+    +   '<label for="pe-oop" style="margin:0;font-weight:600;cursor:pointer">Out of Province patient</label>'
+    + '</div>'
+    + '<div id="pe-oop-fields" style="display:' + (_peOopOn?'block':'none') + ';margin-top:10px">'
+    +   '<label>Home province / territory</label>'
+    +   '<select id="pe-home-province" onchange="peProvinceChange()" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;background:var(--surface)">'
+    +     _peProvOptions(p.homeProvince)
+    +   '</select>'
+    +   '<div id="pe-qc-warn" style="display:' + ((String(p.homeProvince||'').toUpperCase()==='QC')?'block':'none') + ';margin-top:8px;padding:8px 10px;background:var(--amber-bg);border:1px solid var(--amber-t);border-radius:6px;font-size:12px;font-weight:600;color:var(--amber-t);line-height:1.4">Quebec resident — cannot be submitted to MSP. Invoice the patient directly (MSP-value invoice).</div>'
+    +   '<label style="margin-top:8px">Home province health number</label>'
+    +   '<input id="pe-home-hcn" value="' + esc(p.homeHCN||'') + '" autocorrect="off" autocomplete="off" placeholder="Health number from home province" style="font-size:16px">'
+    +   '<label style="margin-top:8px">Home address</label>'
+    +   '<textarea id="pe-home-address" rows="2" autocorrect="off" placeholder="Street, City, Province, Postal code" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical">' + esc(p.homeAddress||'') + '</textarea>'
+    + '</div>'
+    + '</div>';
+
+  // ── Private Pay (editable) ───────────────────────────────────────
+  var _pePrivOn = (p.privatePay === true || String(p.privatePay).toLowerCase() === 'true');
+  var _peRate = (String(p.rateMode||'').toUpperCase()==='MSP') ? 'MSP' : 'BCMA';
+  html += '<div class="card card-patient">'
+    + '<div style="display:flex;align-items:center;gap:8px">'
+    +   '<input type="checkbox" id="pe-private"' + (_pePrivOn?' checked':'') + ' onchange="peTogglePrivate()" style="width:18px;height:18px;flex:0 0 auto;accent-color:var(--green-t)">'
+    +   '<label for="pe-private" style="margin:0;font-weight:600;cursor:pointer">Private pay patient</label>'
+    + '</div>'
+    + '<div id="pe-private-fields" style="display:' + (_pePrivOn?'block':'none') + ';margin-top:10px">'
+    +   '<label style="margin:0 0 6px">Billing rate</label>'
+    +   '<div class="fl" style="gap:6px">'
+    +     '<button type="button" class="ap-list-pill' + (_peRate==='BCMA'?' on':'') + '" id="pe-private-rate-bcma" onclick="pePrivateRate(\'BCMA\')">BCMA (private)</button>'
+    +     '<button type="button" class="ap-list-pill' + (_peRate==='MSP'?' on':'') + '" id="pe-private-rate-msp" onclick="pePrivateRate(\'MSP\')">MSP rates</button>'
+    +   '</div>'
+    +   '<input id="pe-private-rate" type="hidden" value="' + _peRate + '">'
+    + '</div>'
+    + '</div>';
+
   // ── Location & list (shared component) ───────────────
   html += buildLocationCard('pe', p);
 
@@ -93,6 +131,32 @@ function clearSearchField(searchId, hiddenId, hiddenNameId, ddId) {
 
 // Dynamic role change in edit form — v4.39: only updates MRP binding.
 // Care type is NOT auto-changed.
+function _peProvOptions(sel) {
+  sel = String(sel||'').toUpperCase();
+  var provs = [['','Select province…'],['AB','Alberta'],['SK','Saskatchewan'],['MB','Manitoba'],['ON','Ontario'],['NB','New Brunswick'],['NS','Nova Scotia'],['PE','Prince Edward Island'],['NL','Newfoundland and Labrador'],['YT','Yukon'],['NT','Northwest Territories'],['NU','Nunavut'],['QC','Quebec — cannot submit to MSP, invoice directly']];
+  return provs.map(function(o){ return '<option value="'+o[0]+'"'+(o[0]===sel?' selected':'')+'>'+o[1]+'</option>'; }).join('');
+}
+function peToggleOOP() {
+  var on = !!((document.getElementById('pe-oop')||{}).checked);
+  var box = document.getElementById('pe-oop-fields'); if (box) box.style.display = on ? 'block' : 'none';
+  if (on) { var pr=document.getElementById('pe-private'); if(pr&&pr.checked){ pr.checked=false; if(typeof peTogglePrivate==='function') peTogglePrivate(); } peProvinceChange(); }
+}
+function peProvinceChange() {
+  var v=(document.getElementById('pe-home-province')||{}).value||'';
+  var qc=document.getElementById('pe-qc-warn'); if(qc) qc.style.display=(v==='QC')?'block':'none';
+}
+function peTogglePrivate() {
+  var on = !!((document.getElementById('pe-private')||{}).checked);
+  var box = document.getElementById('pe-private-fields'); if (box) box.style.display = on ? 'block' : 'none';
+  if (on) { var op=document.getElementById('pe-oop'); if(op&&op.checked){ op.checked=false; if(typeof peToggleOOP==='function') peToggleOOP(); } pePrivateRate((document.getElementById('pe-private-rate')||{}).value||'BCMA'); }
+}
+function pePrivateRate(mode) {
+  mode=(mode==='MSP')?'MSP':'BCMA';
+  var hid=document.getElementById('pe-private-rate'); if(hid) hid.value=mode;
+  var b=document.getElementById('pe-private-rate-bcma'), m=document.getElementById('pe-private-rate-msp');
+  if(b) b.className='ap-list-pill'+(mode==='BCMA'?' on':'');
+  if(m) m.className='ap-list-pill'+(mode==='MSP'?' on':'');
+}
 function peRoleChange() {
   var roleSel = document.getElementById('pe-role');
   var mrpSel  = document.getElementById('pe-mrp');
@@ -133,6 +197,23 @@ function savePatientEdit(pid) {
   p.mrp       = (document.getElementById('pe-mrp')  || {}).value || '';
   p.list      = (document.getElementById('pe-list') || {}).value || p.list;
   p.care      = (document.getElementById('pe-care') || {}).value || p.care;
+
+  // OOP + Private Pay — editable here to correct coverage post-discharge.
+  // Mutually exclusive; setting one clears the other.
+  if (!!((document.getElementById('pe-oop')||{}).checked)) {
+    p.oop = true;
+    p.homeProvince = (document.getElementById('pe-home-province')||{}).value || '';
+    p.homeHCN      = (document.getElementById('pe-home-hcn')||{}).value || '';
+    p.homeAddress  = (document.getElementById('pe-home-address')||{}).value || '';
+    p.privatePay = false; p.rateMode = '';
+  } else if (!!((document.getElementById('pe-private')||{}).checked)) {
+    p.privatePay = true;
+    p.rateMode = (document.getElementById('pe-private-rate')||{}).value || 'BCMA';
+    p.oop = false; p.homeProvince=''; p.homeHCN=''; p.homeAddress='';
+  } else {
+    p.oop = false; p.homeProvince=''; p.homeHCN=''; p.homeAddress='';
+    p.privatePay = false; p.rateMode = '';
+  }
 
   // v4.37: handover flag — 'oncall' when toggled on from edit, preserve 'new' if untouched
   var _hoPill = document.getElementById('pe-handover');

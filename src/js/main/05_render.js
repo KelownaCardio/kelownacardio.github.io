@@ -1,3 +1,4 @@
+// 05_render.js — Render rounds list (geo + alpha + off service)
 //
 // v4.19 change: alphaRow (on-service alphabetical view) now places
 // the room/bed number on a dedicated second row — identical structure
@@ -996,3 +997,4 @@ function openAddWard(btn)    { openAdd(btn.getAttribute('data-ward')); }
 function wpAddClaim(btn) {
   openClaimScreen(btn.getAttribute('data-pid'));
 }
+

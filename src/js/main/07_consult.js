@@ -1,3 +1,4 @@
+// 07_consult.js — Unified consult form (33010/33012)
 //
 // ONE consult form, shared by the +Claim screen and the Add Patient
 // screen. Built on the Add Patient template: flat layout, no claims-
@@ -464,9 +465,3 @@ function submitConsult() {
   showToast('Consult claims added for ' + p.last);
   closeClaimScreen();
 }
-// ── 08_daily.js ──
-// ═══════════════════════════════════════════════════════
-// ── 08_daily.js ──
-// ═══════════════════════════════════════════════════════
-// ── 08_daily.js ──
-// ═══════════════════════════════════════════════════════

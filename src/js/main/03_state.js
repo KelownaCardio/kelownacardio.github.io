@@ -44,12 +44,18 @@ var LS = window.storage || {
 // Bump this any time you need to force-wipe every device's localStorage cache.
 // On load, if the stored buildId doesn't match, ALL kgh5:* keys are wiped before
 // loadLocal runs. This is the central kill-switch for stuck stale data.
-var BUILD_ID    = 'v4.48-2026-06-16-dob-display-ocr-fix';
+var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 
 // Human-readable version strings used by the visible footer and startup log.
 // Bump these together with BUILD_ID on every meaningful change.
-var APP_VERSION = 'v4.48';
-var APP_BUILT   = '2026-06-16';
+// v4.50 (2026-06-25): CCFPP-persist fix — note now baked in before the first
+// saveClaim push so it persists on new consults. BUILD_ID intentionally NOT
+// bumped (would wipe kgh5:* localStorage incl. the app password → re-login).
+// v4.51 (2026-06-28): src re-modularized from the v4.50 production build;
+// de-duplicated 11_export.js (kept the newer copy). BUILD_ID bumped to force a
+// clean cache wipe (devices will re-enter the app password on next load).
+var APP_VERSION = 'v4.51';
+var APP_BUILT   = '2026-06-28';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -252,6 +258,7 @@ async function syncFromSheets() {
     window._lastSyncResponse.keys = Object.keys(d || {});
     window._lastSyncResponse.ts = new Date().toISOString();
     console.log('[sync] response shape:', window._lastSyncResponse);
+    if (d.error === 'unauthorized') { handleUnauthorized().then(function () { syncFromSheets().catch(function(){}); }); return; }
     if (d.error) {
       window._lastSyncError = 'Apps Script: ' + d.error;
       setSyncState('error');
@@ -489,9 +496,21 @@ async function syncFromSheets() {
     }
 
     if (d.doctors)   st.doctors   = d.doctors;
+    // Gap notes (billing-gap explanations, hard-gate). Merge server truth with
+    // any LOCAL note not yet on the server, and re-push those — so a saveGapNote
+    // that failed (offline) isn't lost when the sync response overwrites state.
+    if (d.gapNotes) {
+      var _srvGap = {};
+      d.gapNotes.forEach(function(g) { _srvGap[String(g.phn||'').replace(/\D/g,'') + '|' + String(g.date||'')] = true; });
+      var _localGap = (st.gapNotes || []).filter(function(g) {
+        return !_srvGap[String(g.phn||'').replace(/\D/g,'') + '|' + String(g.date||'')];
+      });
+      if (SHEETS_URL) _localGap.forEach(function(g) { push('saveGapNote', g); });
+      st.gapNotes = d.gapNotes.concat(_localGap);
+    }
     if (d.changelog) st.changelog = d.changelog;
 
-    ['patients','claims','doctors','changelog'].forEach(function(k) { sv(k, st[k]); });
+    ['patients','claims','doctors','gapNotes','changelog'].forEach(function(k) { sv(k, st[k]); });
     window._lastSyncResponse.checkpoint = 'completed';
     window._lastSyncResponse.completedAt = new Date().toISOString();
     window._lastSyncResponse.stPatientsFinal = st.patients.length;

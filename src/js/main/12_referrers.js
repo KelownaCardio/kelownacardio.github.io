@@ -1,5 +1,3 @@
-// ── 12_referrers.js ──
-// ═══════════════════════════════════════════════════════
 // 12_referrers.js — Physician search (3 tiers) + referrer directory
 //
 // Tier 1: Saved referrers (instant, offline)

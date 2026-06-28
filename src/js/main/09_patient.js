@@ -849,6 +849,55 @@ function apBillingLocPill(code) {
   });
 }
 
+// ── Out of Province (OOP) toggle + province handling ──────────────
+function apToggleOOP() {
+  var on = !!((document.getElementById('f-oop') || {}).checked);
+  var box = document.getElementById('f-oop-fields');
+  if (box) box.style.display = on ? 'block' : 'none';
+  // v2.30: PHN (BC number) is optional when OOP — reflect that in the field.
+  var phnEl = document.getElementById('f-phn');
+  if (phnEl) phnEl.placeholder = on ? 'Optional for OOP — enter if BC number assigned' : '10 digits';
+  if (!on) {
+    // collapse → clear so a hidden OOP block never submits stale data
+    ['f-home-province','f-home-hcn','f-home-address'].forEach(function(id) {
+      var el = document.getElementById(id); if (el) { el.value = ''; el.style.cssText = ''; }
+    });
+    var qc = document.getElementById('f-qc-warn'); if (qc) qc.style.display = 'none';
+  } else {
+    var _priv = document.getElementById('f-private');
+    if (_priv && _priv.checked) { _priv.checked = false; if (typeof apTogglePrivate === 'function') apTogglePrivate(); }
+    apProvinceChange();
+  }
+}
+function apProvinceChange() {
+  var v = (document.getElementById('f-home-province') || {}).value || '';
+  var qc = document.getElementById('f-qc-warn');
+  if (qc) qc.style.display = (v === 'QC') ? 'block' : 'none';
+}
+// ── Private Pay toggle + rate selector ────────────────────────────
+function apTogglePrivate() {
+  var on = !!((document.getElementById('f-private') || {}).checked);
+  var box = document.getElementById('f-private-fields');
+  if (box) box.style.display = on ? 'block' : 'none';
+  if (on) {
+    // Private pay and Out-of-Province are mutually exclusive categories.
+    var oop = document.getElementById('f-oop');
+    if (oop && oop.checked) { oop.checked = false; if (typeof apToggleOOP === 'function') apToggleOOP(); }
+    apPrivateRate((document.getElementById('f-private-rate') || {}).value || 'BCMA');
+  } else {
+    var rm = document.getElementById('f-private-rate'); if (rm) rm.value = 'BCMA';
+    apPrivateRate('BCMA');
+  }
+}
+function apPrivateRate(mode) {
+  mode = (mode === 'MSP') ? 'MSP' : 'BCMA';
+  var hid = document.getElementById('f-private-rate'); if (hid) hid.value = mode;
+  var b = document.getElementById('f-private-rate-bcma');
+  var m = document.getElementById('f-private-rate-msp');
+  if (b) b.className = 'ap-list-pill' + (mode === 'BCMA' ? ' on' : '');
+  if (m) m.className = 'ap-list-pill' + (mode === 'MSP' ? ' on' : '');
+}
+
 function peSexPill(val) {
   var hid = document.getElementById('pe-sex');
   if (hid) hid.value = val;
@@ -966,15 +1015,36 @@ async function apSubmit(addToList, _skipDupCheck) {
 
   // Diagnosis / referring MD — every claim form now uses the unified
   // cb-* / oc-* ids.
+  // Future-DOB guard (manual Add path): a DOB later than today is always a
+  // typo / wrong year. The OCR path has its own check (v4.20); this covers
+  // hand entry, which previously slipped through to save.
+  var _dobFut = gv('f-dob');
+  if (_dobFut) {
+    var _dobFutMs = parseDMYsafe(fmtClaimDate(_dobFut));
+    if (_dobFutMs && _dobFutMs > Date.now()) {
+      var _dobFutEl = document.getElementById('f-dob');
+      if (_dobFutEl) { _dobFutEl.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; _dobFutEl.focus(); }
+      showToast('Date of birth is in the future — check the year.', 'error');
+      return;
+    }
+  }
+
   var icd = gv('cb-icd') || gv('oc-icd') || '';
 
   // Validate required fields. PHN wrong-length is handled above as its own
   // red-flag guard; here we only handle PHN missing (amber, alongside the
   // other blank-required fields). v4.12: blank Last name also lands here
   // (it used to short-circuit before any other validation could run).
+  // v2.30: OOP makes the BC PHN optional (patient may have no BC-assigned
+  // number). Submission is allowed without PHN provided home province +
+  // home HCN are supplied (enforced in the OOP block below). Any PHN that
+  // IS entered still passes the 10-digit + MOD-11 guards above.
+  var _oop     = !!((document.getElementById('f-oop') || {}).checked);
+  var _oopProv = gv('f-home-province');
+
   var addMissing = [];
   if (!_lastTrim)                              addMissing.push('last name');
-  if (!phn)                                    addMissing.push('phn');
+  if (!phn && !_oop)                           addMissing.push('phn');
   if (!gv('cb-refby') && !gv('oc-refby')) addMissing.push('refby');
   if (!icd)                                    addMissing.push('icd');
   if (_apClaimType === 'consult') {
@@ -997,6 +1067,24 @@ async function apSubmit(addToList, _skipDupCheck) {
     if (!gv('f-ward')) addMissing.push('location');
     if (!gv('f-role')) addMissing.push('role');
     if (!gv('f-list')) addMissing.push('list');
+  }
+
+  // ── Out of Province required fields (hard-stop on Add Patient) ─────
+  // OOP needs home province + home address to bill the reciprocal claim
+  // (or invoice Quebec directly). Home health number is required for the
+  // reciprocal MSP submission but NOT for Quebec (invoiced directly).
+  // (_oop / _oopProv are declared in 3a above.)
+  if (_oop) {
+    if (!_oopProv)             addMissing.push('home province');
+    if (!gv('f-home-address')) addMissing.push('home address');
+    // Non-QC needs the home-province HCN for the reciprocal MSP claim.
+    // QC is invoiced directly (MSP-value invoice) — needs at least ONE
+    // identifier: a BC PHN OR the home health number.
+    if (_oopProv === 'QC') {
+      if (!phn && !gv('f-home-hcn')) addMissing.push('home health number');
+    } else if (!gv('f-home-hcn')) {
+      addMissing.push('home health number');
+    }
   }
 
   if (addMissing.length) {
@@ -1029,6 +1117,16 @@ async function apSubmit(addToList, _skipDupCheck) {
       var listRow = document.getElementById('f-list-row');
       if (listRow) { listRow.style.cssText = 'gap:8px;margin-top:4px;border:1.5px solid var(--amber-t);background:var(--amber-bg);border-radius:var(--r);padding:4px'; }
     }
+    if (_oop) {
+      [['home province','f-home-province'],
+       ['home health number','f-home-hcn'],
+       ['home address','f-home-address']].forEach(function(pair) {
+        if (addMissing.indexOf(pair[0]) !== -1) {
+          var el = document.getElementById(pair[1]);
+          if (el) { el.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; }
+        }
+      });
+    }
     var msgs = [];
     if (addMissing.indexOf('last name')  !== -1) msgs.push('last name');
     if (addMissing.indexOf('phn')        !== -1) msgs.push('PHN');
@@ -1041,6 +1139,9 @@ async function apSubmit(addToList, _skipDupCheck) {
     if (addMissing.indexOf('location')   !== -1) msgs.push('location');
     if (addMissing.indexOf('role')       !== -1) msgs.push('Cardiology role');
     if (addMissing.indexOf('list')       !== -1) msgs.push('On/Off service');
+    if (addMissing.indexOf('home province')      !== -1) msgs.push('home province');
+    if (addMissing.indexOf('home health number') !== -1) msgs.push('home health number');
+    if (addMissing.indexOf('home address')        !== -1) msgs.push('home address');
     showToast('Required: ' + msgs.join(', '));
     return;
   }
@@ -1101,6 +1202,19 @@ async function apSubmit(addToList, _skipDupCheck) {
     createdBy: (st.doc && st.doc.alias) || '',
     createdAt: Date.now()
   };
+
+  // v2.30: Out of Province billing fields (only when ticked).
+  if (_oop) {
+    p.oop          = true;
+    p.homeProvince = _oopProv;
+    p.homeHCN      = gv('f-home-hcn');
+    p.homeAddress  = gv('f-home-address');
+  }
+  // Private Pay billing (mutually exclusive with OOP). rateMode default BCMA.
+  if ((document.getElementById('f-private') || {}).checked) {
+    p.privatePay = true;
+    p.rateMode   = gv('f-private-rate') || 'BCMA';
+  }
 
   if (addToList) {
     var ward = gv('f-ward') || 'OTHER';
@@ -1395,6 +1509,11 @@ function clearAddForm() {
   var sx = document.getElementById('f-sex'); if (sx) sx.value = '';
   var sxm = document.getElementById('f-sex-m'); if (sxm) sxm.className = 'ap-list-pill';
   var sxf = document.getElementById('f-sex-f'); if (sxf) sxf.className = 'ap-list-pill';
+  // v2.30: reset Out of Province tick box + collapse/clear its fields.
+  var oopCb = document.getElementById('f-oop'); if (oopCb) oopCb.checked = false;
+  if (typeof apToggleOOP === 'function') apToggleOOP();
+  var privCb = document.getElementById('f-private'); if (privCb) privCb.checked = false;
+  if (typeof apTogglePrivate === 'function') apTogglePrivate();
   // v4.19: reset billing location pills to Inpatient default.
   apBillingLocPill('I');
   var ocr = document.getElementById('ocr-bar'); if (ocr) ocr.style.display = 'none';

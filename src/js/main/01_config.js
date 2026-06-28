@@ -1,8 +1,10 @@
 // 01_config.js — URLs, ward definitions, alias map
 // ═══════════════════════════════════════════════════════
 
-var SHEETS_URL = 'https://script.google.com/macros/s/AKfycbzQOQa6dZCCyXu15jvkyUTFghtnhGzZFj4NZ4uyczxLov72zj8qNZIgk9pzL4i8Dfuy5Q/exec';
-var SHARED_KEY = 'kgh2026';
+var SHEETS_URL = 'https://script.google.com/macros/s/AKfycbxnd8SjEggYszjTQ3Ljcy7IlSK8PFUuXJwwKggjEqqZrWn9ED0zV3OlfQ6ka5m9y-c_/exec';
+var APP_PW_LS_KEY = 'kgh5:appPw';
+var SHARED_KEY = '';
+try { SHARED_KEY = localStorage.getItem(APP_PW_LS_KEY) || ''; } catch (e) { SHARED_KEY = ''; }
 
 var ALIAS_MAP = {
   FH:'FH', LH:'LH', DP:'DPatton', KB:'KBrown', JKT:'KT',
