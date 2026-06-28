@@ -5908,7 +5908,7 @@ function _cvShowPicker(pid, dateStr, preselectedAlias) {
       'data-pid="' + pid + '" data-date="' + dateStr + '" onclick="_cvExplainGap(this.getAttribute(\'data-pid\'),this.getAttribute(\'data-date\'))">' +
       '✎ Explain gap — note for billing</button>' +
     '<div style="display:flex;gap:8px;margin-top:6px">' +
-      '<button class="btn btn-s" style="flex:1;margin-bottom:0" onclick="hideModal(\'cv-picker-modal\')">Cancel</button>' +
+      '<button class="btn btn-s" style="flex:1;margin-bottom:0" data-pid="' + pid + '" onclick="_cvPickerCancel(this.getAttribute(\'data-pid\'))">' + (window._dischResolvePid === pid ? '‹ Back' : 'Cancel') + '</button>' +
     '</div>';
   document.getElementById('cv-picker-content').innerHTML = html;
   showModal('cv-picker-modal');
@@ -5936,7 +5936,7 @@ function _cvExplainGap(pid, dateStr) {
     'style="width:100%;padding:11px;border:.5px solid var(--border2);border-radius:8px;font-size:14px;font-family:inherit;background:var(--surface2);resize:vertical">' + esc(existing) + '</textarea>' +
     '<div style="display:flex;gap:8px;margin-top:14px">' +
       '<button class="btn btn-s" style="flex:1;margin-bottom:0" data-pid="' + pid + '" data-date="' + dateStr + '" ' +
-        'onclick="_cvShowPicker(this.getAttribute(\'data-pid\'),this.getAttribute(\'data-date\'),_cvCurrentDocAlias())">‹ Back</button>' +
+        'onclick="_cvExplainBack(this.getAttribute(\'data-pid\'),this.getAttribute(\'data-date\'))">‹ Back</button>' +
       '<button class="btn btn-p" style="flex:1;margin-bottom:0" data-pid="' + pid + '" data-date="' + dateStr + '" ' +
         'onclick="_cvConfirmGapNote(this)">Save note</button>' +
     '</div>';
@@ -5970,8 +5970,9 @@ function _cvConfirmGapNote(btn) {
   if (idx >= 0) st.gapNotes[idx] = rec; else st.gapNotes.push(rec);
   sv('gapNotes', st.gapNotes);
   if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL) push('saveGapNote', rec);
-  hideModal('cv-picker-modal');
   showToast('Gap explained — noted for billing');
+  if (window._dischResolvePid === pid) { _cvShowGapResolve(pid); return; }   // back to resolve screen
+  hideModal('cv-picker-modal');
   if (typeof openPatientSummary === 'function') openPatientSummary(pid);
 }
 
@@ -6087,8 +6088,11 @@ function _cvFillClaim(pid, dateStr, type, note, icdOverride, alias) {
 
   sv('patients', st.patients);
   sv('claims',   st.claims);
-  hideModal('cv-picker-modal');
   showToast(type === 'combined' ? 'Combined daily added — ' + p.last : 'Claim added — ' + p.last);
+  // 2026-06-28: in discharge gap-resolve mode, return to the resolve screen
+  // (recomputes remaining gaps) instead of the calendar.
+  if (window._dischResolvePid === pid) { render(); _cvShowGapResolve(pid); return; }
+  hideModal('cv-picker-modal');
 
   // Refresh the calendar in-place
   var claims = st.claims.filter(function(c) {
@@ -10401,18 +10405,76 @@ function openDischModal(pid) {
     });
     var gaps = _cvGapDays(p, claims);
     if (gaps.length) {
-      showToast(gaps.length + ' unbilled ' + (rule === 'ccu' ? 'CCU' : 'MRP') + ' day' + (gaps.length > 1 ? 's' : '') + ' — review calendar before discharge', 'error');
-      openPatientSummary(pid);
+      // 2026-06-28: hard-gate — open a clear resolve screen listing each
+      // unbilled day with Fill / Explain. Discharge stays blocked until every
+      // day is filled or explained (replaces the old toast→calendar route,
+      // which buried the Explain option in the per-day picker).
+      window._dischResolvePid = pid;
+      _cvShowGapResolve(pid);
       return;
     }
   }
+  _cvProceedDischarge(pid);
+}
 
-  // No gaps (or no gap rule) — proceed to discharge modal.
+// Continue into the actual discharge modal (no gaps / all resolved).
+function _cvProceedDischarge(pid) {
+  window._dischResolvePid = null;
+  var p = getP(pid);
+  if (!p) return;
   document.getElementById('disch-title').textContent = p.last + ', ' + p.first;
-  // v4.20 — skip the "add a claim?" prompt; go straight to complex
-  // discharge check (step 2) or confirm date (step 3).
   _dischStep2(pid);
   showModal('disch-modal');
+}
+
+// Resolve-gaps screen — lists each unbilled day with Fill + Explain. Re-shown
+// after each action; when no gaps remain it offers "Continue discharge".
+function _cvShowGapResolve(pid) {
+  var p = getP(pid);
+  if (!p) return;
+  var claims = st.claims.filter(function(c) { return c.phn && p.phn && samePhn(c.phn, p.phn); });
+  var gaps = _cvGapDays(p, claims);
+
+  if (!gaps.length) {
+    document.getElementById('cv-picker-content').innerHTML =
+      '<div style="font-size:14px;font-weight:700;color:var(--green-t,#1a7f37);margin-bottom:6px">✓ All days accounted for</div>' +
+      '<div style="font-size:12px;color:var(--text2);margin-bottom:14px">Every day is billed or has a billing note. You can discharge ' + esc(p.last) + ' now.</div>' +
+      '<div style="display:flex;gap:8px">' +
+        '<button class="btn btn-s" style="flex:1;margin-bottom:0" onclick="window._dischResolvePid=null;hideModal(\'cv-picker-modal\')">Not yet</button>' +
+        '<button class="btn btn-p" style="flex:1;margin-bottom:0" data-pid="' + pid + '" onclick="hideModal(\'cv-picker-modal\');_cvProceedDischarge(this.getAttribute(\'data-pid\'))">Continue discharge ›</button>' +
+      '</div>';
+    showModal('cv-picker-modal');
+    return;
+  }
+
+  var rows = gaps.map(function(dt) {
+    var noted = _cvGapNoteFor(p.phn, dt);
+    return '<div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:.5px solid var(--border2)">' +
+      '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600">' + dispDate(dt) + '</div>' +
+        (noted ? '<div style="font-size:11px;color:var(--text3)">note: ' + esc(noted) + '</div>' : '') + '</div>' +
+      '<button class="btn btn-s" style="margin:0;padding:7px 13px;font-size:12px" data-pid="' + pid + '" data-date="' + dt + '" onclick="_cvShowPicker(this.getAttribute(\'data-pid\'),this.getAttribute(\'data-date\'),_cvCurrentDocAlias())">Fill</button>' +
+      '<button class="btn btn-s" style="margin:0;padding:7px 13px;font-size:12px;background:var(--surface2)" data-pid="' + pid + '" data-date="' + dt + '" onclick="_cvExplainGap(this.getAttribute(\'data-pid\'),this.getAttribute(\'data-date\'))">Explain</button>' +
+    '</div>';
+  }).join('');
+
+  document.getElementById('cv-picker-content').innerHTML =
+    '<div style="font-size:14px;font-weight:700;color:var(--amber-t);margin-bottom:2px">⚠ ' + gaps.length + ' unbilled day' + (gaps.length > 1 ? 's' : '') + ' before discharge</div>' +
+    '<div style="font-size:11px;color:var(--text2);margin-bottom:8px">Fill each day with a claim, or explain why for billing. Discharge unlocks once every day is handled.</div>' +
+    rows +
+    '<div style="display:flex;gap:8px;margin-top:12px">' +
+      '<button class="btn btn-s" style="flex:1;margin-bottom:0" onclick="window._dischResolvePid=null;hideModal(\'cv-picker-modal\')">Cancel discharge</button>' +
+    '</div>';
+  showModal('cv-picker-modal');
+}
+
+// Back/cancel targets that return to the resolve screen when in discharge mode.
+function _cvExplainBack(pid, date) {
+  if (window._dischResolvePid === pid) _cvShowGapResolve(pid);
+  else _cvShowPicker(pid, date, _cvCurrentDocAlias());
+}
+function _cvPickerCancel(pid) {
+  if (window._dischResolvePid === pid) _cvShowGapResolve(pid);
+  else hideModal('cv-picker-modal');
 }
 
 // ── Complex Discharge (78717) — criteria checklist ──────
