@@ -5348,11 +5348,26 @@ function _ptSummaryListHTML(p, claims) {
 // Returns 'ccu' (CCU/ICU ward + MRP role) | 'daily' (MRP role, non-CCU ward) | null
 function _cvGapRuleForPatient(p) {
   if (!p) return null;
-  if (p.role !== 'mrp' && p.care !== 'daily' && p.care !== 'ccu') return null;
+  // gap-rule fix 2026-06-28: derive the daily/CCU billing obligation from the
+  // actual BILLING PATTERN, not just the role/care flag. A patient billed a
+  // daily (33008) or a CCU code (1411/1421/1431/CCU_DAILY) has a daily
+  // obligation even if role wasn't set to MRP (e.g. a consultant/directive who
+  // billed a 33008 — previously skipped the discharge gap gate entirely). The
+  // hard-gate's "Explain gap" option covers any one-off that's legitimately
+  // not a gap.
+  var hasDaily = false, hasCcu = false;
+  (st.claims || []).forEach(function(c) {
+    if (!c.phn || !p.phn || !samePhn(c.phn, p.phn)) return;
+    var fee = String(c.fee || '').trim();
+    if (fee === '33008') hasDaily = true;
+    else if (fee === '1411' || fee === '1421' || fee === '1431' || fee === 'CCU_DAILY') hasCcu = true;
+  });
+  var flaggedDaily = (p.role === 'mrp' || p.care === 'daily');
+  var flaggedCcu   = (p.care === 'ccu');
+  if (!hasDaily && !hasCcu && !flaggedDaily && !flaggedCcu) return null;
   var ccuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
-  if (ccuWards.indexOf(p.ward) !== -1) return 'ccu';
-  if (p.role === 'mrp' || p.care === 'daily') return 'daily';
-  return null;
+  if (hasCcu || flaggedCcu || ccuWards.indexOf(p.ward) !== -1) return 'ccu';
+  return 'daily';
 }
 
 // Returns { startMs, endMs } — admission span as epoch ms, end = dischargeDate or today
