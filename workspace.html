@@ -5194,6 +5194,10 @@ function openPatientSummary(pid) {
           'box-shadow:0 1px 4px rgba(0,0,0,.12);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)"' +
           ' title="Close">✕</button></div>';
 
+  // Discharge gap banner — shown at the TOP while resolving gaps for THIS
+  // patient, so the Confirm / note-for-billing action is immediately visible.
+  html += _cvDischBannerHTML(p, claims);
+
   // ── Demographics card ────────────────────────────────
   html += '<div style="background:var(--blue-bg);border-radius:var(--r);padding:13px 14px;margin-bottom:13px;border:.5px solid #a8c4e8">';
   html += '<div style="display:flex;align-items:flex-start;justify-content:space-between">';
@@ -5242,9 +5246,6 @@ function openPatientSummary(pid) {
               '<button class="pt-addclaim-btn" data-pid2="' + p.id + '" data-fn2="' + addClaimFn2 + '" onclick="ptSummaryAddClaim(this)">+ Add claim</button>' +
             '</div>';
   html += '</div>';
-
-  // Discharge gap banner (only while resolving gaps for THIS patient).
-  html += _cvDischBannerHTML(p, claims);
 
   // Calendar (90% width, centred) + list below — no toggle
   html += '<div id="cv-view-cal" style="width:90%;margin:0 auto 0">' + _ptSummaryCalendarHTML(p, claims) + '</div>';
@@ -10435,30 +10436,73 @@ function _cvProceedDischarge(pid) {
 
 // Resolve-gaps screen — lists each unbilled day with Fill + Explain. Re-shown
 // after each action; when no gaps remain it offers "Continue discharge".
-// Sticky discharge banner shown ATOP the patient-summary calendar while
-// resolving gaps. The calendar gives the visual claim-history context; gap
-// days stay tappable (→ picker: Fill or Explain). Tracks remaining gaps and
-// only enables "Confirm & discharge" when none remain.
+// Sticky discharge banner shown at the TOP of the patient-summary while
+// resolving gaps. Two paths: (a) fill individual days by tapping the highlighted
+// calendar days below, and/or (b) the primary button writes ONE billing note
+// covering every still-unbilled day and proceeds to discharge. Confirm is
+// ALWAYS available — the doctor is never trapped behind unbillable days.
 function _cvDischBannerHTML(p, claims) {
   if (window._dischResolvePid !== p.id) return '';
   var gaps = _cvGapDays(p, claims);
   var n = gaps.length, ready = (n === 0);
   var col = ready ? 'var(--green-t,#1a7f37)' : 'var(--amber-t)';
-  return '<div style="position:sticky;top:0;z-index:9;background:' + (ready ? '#d4f4dd' : '#fff3cd') + ';border:1px solid ' + col + ';border-radius:var(--r);padding:11px 13px;margin:0 0 13px">' +
+  var primary = ready
+    ? '<button class="btn btn-p" style="flex:1.4;margin:0" data-pid="' + p.id + '" onclick="_cvProceedDischarge(this.getAttribute(\'data-pid\'))">Confirm &amp; discharge ›</button>'
+    : '<button class="btn btn-p" style="flex:1.4;margin:0" data-pid="' + p.id + '" onclick="_cvNoteAllGapsAndDischarge(this.getAttribute(\'data-pid\'))">Confirm claims &amp; note gaps for billing ›</button>';
+  return '<div style="position:sticky;top:0;z-index:9;background:' + (ready ? '#d4f4dd' : '#fff3cd') + ';border:1px solid ' + col + ';border-radius:var(--r);padding:11px 13px;margin:0 0 13px;box-shadow:0 2px 8px rgba(0,0,0,.12)">' +
     '<div style="font-size:13px;font-weight:800;color:' + col + '">' +
       (ready ? '✓ All days billed or noted — ready to discharge ' + esc(p.last)
-             : '⚠ ' + n + ' gap day' + (n > 1 ? 's' : '') + ' remaining before discharge') + '</div>' +
-    (ready ? '' : '<div style="font-size:11px;color:var(--text2);margin-top:3px">Tap each highlighted day below to add a claim, or use “Explain gap” to note it for billing.</div>') +
+             : '⚠ ' + n + ' unbilled day' + (n > 1 ? 's' : '') + ' before discharging ' + esc(p.last)) + '</div>' +
+    (ready ? '' : '<div style="font-size:11px;color:var(--text2);margin-top:3px">Tap the highlighted days in the calendar below to bill any you can — then add one note for the rest and confirm.</div>') +
     '<div style="display:flex;gap:8px;margin-top:9px">' +
       '<button class="btn btn-s" style="flex:1;margin:0" onclick="_cvCancelDischarge()">Cancel</button>' +
-      '<button class="btn btn-p" style="flex:1;margin:0;' + (ready ? '' : 'opacity:.45;pointer-events:none') + '" data-pid="' + p.id + '" onclick="_cvProceedDischarge(this.getAttribute(\'data-pid\'))">' +
-        (ready ? 'Confirm &amp; discharge ›' : n + ' to resolve') + '</button>' +
+      primary +
     '</div></div>';
 }
 function _cvCancelDischarge() {
   var pid = window._dischResolvePid;
   window._dischResolvePid = null;
   if (pid) openPatientSummary(pid);   // re-render the summary without the banner
+}
+
+// Write ONE billing note covering every still-unbilled day, then discharge.
+function _cvNoteAllGapsAndDischarge(pid) {
+  var p = getP(pid); if (!p) return;
+  var claims = st.claims.filter(function(c){ return c.phn && p.phn && samePhn(c.phn, p.phn); });
+  var gaps = _cvGapDays(p, claims);
+  if (!gaps.length) { _cvProceedDischarge(pid); return; }
+  document.getElementById('cv-picker-content').innerHTML =
+    '<div style="font-size:14px;font-weight:700;margin-bottom:2px">Note for billing — ' + gaps.length + ' unbilled day' + (gaps.length > 1 ? 's' : '') + '</div>' +
+    '<div style="font-size:11px;color:var(--text2);margin-bottom:10px">Explain why these days aren\'t billed. This note is recorded against all ' + gaps.length + ' remaining day' + (gaps.length > 1 ? 's' : '') + ' for the billing team.</div>' +
+    '<textarea id="cv-allgap-note" rows="3" autocomplete="off" placeholder="e.g. In CCU — daily care billed by intensivist / patient off-ward / palliative" ' +
+    'style="width:100%;padding:11px;border:.5px solid var(--border2);border-radius:8px;font-size:14px;font-family:inherit;background:var(--surface2);resize:vertical"></textarea>' +
+    '<div style="display:flex;gap:8px;margin-top:14px">' +
+      '<button class="btn btn-s" style="flex:1;margin-bottom:0" data-pid="' + pid + '" onclick="openPatientSummary(this.getAttribute(\'data-pid\'))">‹ Back</button>' +
+      '<button class="btn btn-p" style="flex:1;margin-bottom:0" data-pid="' + pid + '" onclick="_cvConfirmAllGapNote(this)">Save note &amp; discharge ›</button>' +
+    '</div>';
+  showModal('cv-picker-modal');
+  setTimeout(function(){ var el = document.getElementById('cv-allgap-note'); if (el) el.focus(); }, 200);
+}
+function _cvConfirmAllGapNote(btn) {
+  var pid = btn.getAttribute('data-pid'); var p = getP(pid); if (!p) return;
+  var el = document.getElementById('cv-allgap-note');
+  var note = (el && el.value || '').trim();
+  if (!note) { showToast('Enter a note explaining the gaps', 'error'); return; }
+  var claims = st.claims.filter(function(c){ return c.phn && p.phn && samePhn(c.phn, p.phn); });
+  var gaps = _cvGapDays(p, claims);
+  var alias = _cvCurrentDocAlias();
+  if (!st.gapNotes) st.gapNotes = [];
+  gaps.forEach(function(dt){
+    var rec = { phn:String(p.phn||'').replace(/\D/g,''), date:dt, patName:(p.last||'')+', '+(p.first||''), alias:alias, note:note, by:(st.doc?st.doc.alias:'')||alias };
+    var idx = -1;
+    for (var i = 0; i < st.gapNotes.length; i++) { if (samePhn(st.gapNotes[i].phn, rec.phn) && String(st.gapNotes[i].date) === String(dt)) { idx = i; break; } }
+    if (idx >= 0) st.gapNotes[idx] = rec; else st.gapNotes.push(rec);
+    if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL) push('saveGapNote', rec);
+  });
+  sv('gapNotes', st.gapNotes);
+  hideModal('cv-picker-modal');
+  showToast(gaps.length + ' day' + (gaps.length > 1 ? 's' : '') + ' noted for billing');
+  _cvProceedDischarge(pid);
 }
 
 // ── Complex Discharge (78717) — criteria checklist ──────
