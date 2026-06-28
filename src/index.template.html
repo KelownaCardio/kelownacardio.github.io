@@ -39,6 +39,19 @@
   --r:10px; --rsm:6px; --rpill:20px;
 }
 * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+/* OOP / Private-pay coverage checkboxes — clear box + checkmark when tapped (Add form + Edit card) */
+#f-oop, #f-private, #pe-oop, #pe-private {
+  -webkit-appearance:none; appearance:none; position:relative;
+  border:2px solid var(--border2); border-radius:5px; background:#fff;
+  cursor:pointer; vertical-align:middle; transition:background .12s,border-color .12s;
+}
+#f-oop:checked, #pe-oop:checked { background:var(--blue); border-color:var(--blue); }
+#f-private:checked, #pe-private:checked { background:var(--green-t); border-color:var(--green-t); }
+#f-oop:checked::after, #f-private:checked::after, #pe-oop:checked::after, #pe-private:checked::after {
+  content:''; position:absolute; left:5px; top:2px;
+  width:5px; height:10px; border:solid #fff; border-width:0 2.5px 2.5px 0;
+  transform:rotate(45deg);
+}
 body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:var(--bg); color:var(--text); font-size:14px; line-height:1.4; max-width:430px; margin:0 auto; min-height:100vh; }
 
 /* HEADER */
@@ -807,6 +820,49 @@ input[type=file] { display:none; }
         <input id="f-sex" type="hidden" value="">
       </div>
     </div>
+    <!-- ── Out of Province (OOP) ─────────────────────────────────── -->
+    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:10px;border-top:.5px solid var(--border2)">
+      <input type="checkbox" id="f-oop" onchange="apToggleOOP()" style="width:18px;height:18px;flex:0 0 auto;accent-color:var(--blue)">
+      <label for="f-oop" style="margin:0;font-weight:600;cursor:pointer">Out of Province patient</label>
+    </div>
+    <div id="f-oop-fields" style="display:none;margin-top:10px;padding:10px;background:var(--blue-bg);border:.5px solid var(--blue-t);border-radius:var(--rsm)">
+      <label>Home province / territory</label>
+      <select id="f-home-province" onchange="apProvinceChange()" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;background:#fff">
+        <option value="">Select province…</option>
+        <option value="AB">Alberta</option>
+        <option value="SK">Saskatchewan</option>
+        <option value="MB">Manitoba</option>
+        <option value="ON">Ontario</option>
+        <option value="NB">New Brunswick</option>
+        <option value="NS">Nova Scotia</option>
+        <option value="PE">Prince Edward Island</option>
+        <option value="NL">Newfoundland and Labrador</option>
+        <option value="YT">Yukon</option>
+        <option value="NT">Northwest Territories</option>
+        <option value="NU">Nunavut</option>
+        <option value="QC">Quebec — cannot submit to MSP, invoice directly</option>
+      </select>
+      <div id="f-qc-warn" style="display:none;margin-top:8px;padding:8px 10px;background:var(--amber-bg);border:1px solid var(--amber-t);border-radius:6px;font-size:12px;font-weight:600;color:var(--amber-t);line-height:1.4">Quebec resident — cannot be submitted to MSP. Invoice the patient directly (private billing — separate build).</div>
+      <label style="margin-top:8px">Home province health number</label>
+      <input id="f-home-hcn" autocorrect="off" autocomplete="off" placeholder="Health number from home province" style="font-size:16px">
+      <label style="margin-top:8px">Home address</label>
+      <textarea id="f-home-address" rows="3" autocorrect="off" placeholder="Street, City, Province, Postal code" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical"></textarea>
+      <div style="margin-top:6px;font-size:10px;color:var(--text3);line-height:1.5">Find in Meditech: tap the <strong>&#9432;</strong> beside the patient's name (top right) &rarr; <strong>Contact</strong> tab &rarr; copy the ADDRESS block and type it here.</div>
+    </div>
+    <!-- ── Private Pay ───────────────────────────────────────────── -->
+    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:10px;border-top:.5px solid var(--border2)">
+      <input type="checkbox" id="f-private" onchange="apTogglePrivate()" style="width:18px;height:18px;flex:0 0 auto;accent-color:var(--green-t)">
+      <label for="f-private" style="margin:0;font-weight:600;cursor:pointer">Private pay patient</label>
+    </div>
+    <div id="f-private-fields" style="display:none;margin-top:10px;padding:10px;background:var(--green-bg);border:.5px solid var(--green-t);border-radius:var(--rsm)">
+      <label style="margin:0 0 6px">Billing rate</label>
+      <div class="fl" style="gap:6px">
+        <button type="button" class="ap-list-pill on" id="f-private-rate-bcma" onclick="apPrivateRate('BCMA')">BCMA (private)</button>
+        <button type="button" class="ap-list-pill" id="f-private-rate-msp" onclick="apPrivateRate('MSP')">MSP rates</button>
+      </div>
+      <input id="f-private-rate" type="hidden" value="BCMA">
+      <div style="margin-top:6px;font-size:10px;color:var(--text3);line-height:1.5">Claims are entered as usual. After discharge this patient is held from the iClinic export and a patient invoice (default <strong>BCMA</strong> rates) is generated with a pay-online link.</div>
+    </div>
   </div>
 
   <!-- Claim card with type toggle -->
@@ -851,6 +907,10 @@ input[type=file] { display:none; }
     <input id="discharged-search" placeholder="Search discharged patients…"
       oninput="dischargedSearch(this.value)" autocorrect="off" autocomplete="off">
   </div>
+  <div style="margin:6px 0 4px">
+    <button class="btn btn-s" style="margin:0;width:100%;font-size:12px" onclick="archiveSearch()">&#128269; Search all discharged (incl. &gt;7-day archive)</button>
+  </div>
+  <div id="archive-results"></div>
   <div id="discharged-results"></div>
 </div>
 
@@ -911,6 +971,18 @@ input[type=file] { display:none; }
   </div>
 </div>
 
+<!-- App-password gate. Shown once per device. -->
+<div class="overlay top" id="apppw-modal">
+  <div class="modal">
+    <div class="modal-title">Enter KCA Password</div>
+    <div style="font-size:12px;color:var(--text2);margin-top:-8px;margin-bottom:12px" id="apppw-sub">This is a new device — you need to authorize it to access patient data.</div>
+    <input type="password" id="apppw-input" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+           style="width:100%;box-sizing:border-box;padding:11px 13px;font-size:16px;border:.5px solid var(--border2);border-radius:var(--r);background:var(--surface);margin-bottom:6px"
+           placeholder="App password" onkeydown="if(event.key==='Enter')submitAppPassword()">
+    <div id="apppw-err" style="display:none;font-size:12px;color:var(--amber-t);background:var(--amber-bg);border-radius:var(--r);padding:8px 11px;margin-bottom:8px"></div>
+    <button class="btn btn-p" style="width:100%;margin-top:6px" onclick="submitAppPassword()">Connect</button>
+  </div>
+</div>
 <div class="overlay" id="disch-modal">
   <div class="modal">
     <div class="modal-handle"></div>
