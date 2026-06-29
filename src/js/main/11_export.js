@@ -540,11 +540,36 @@ function _computeLeaderboard() {
     return arr.slice(0, 3);
   })();
 
+  // ── THE CLEANER — most MRP Cardiology discharges in one calendar day ──
+  // Discharges are patient-record events, not claims, so this is computed
+  // from st.patients rather than the claim groups above. A true rounds
+  // discharge (removePatient) preserves mrp/role; consult-only discharges
+  // reset mrp→'Other'/role→'consultant' and are correctly excluded.
+  // Attributed to the current doctor; BigQuery supplies all-time +
+  // multi-doctor history (extrapolated from last MRP-daily claim date).
+  var cleanerByDay = {};   // dischargeDate(DD/MM/YYYY) → { phn|id : true }
+  (st.patients || []).forEach(function(p) {
+    if (!p || !isDischarged(p) || !p.dischargeDate) return;
+    if (p.role !== 'mrp' || !/cardiology/i.test(String(p.mrp || ''))) return;
+    var d = String(p.dischargeDate);
+    if (!cleanerByDay[d]) cleanerByDay[d] = {};
+    cleanerByDay[d][p.phn ? String(p.phn) : ('_' + p.id)] = true;
+  });
+  var _cleanerAlias = (st.doc && st.doc.alias) || '';
+  var cleanerEntries = [];
+  for (var _cd in cleanerByDay) {
+    var _cn = 0; for (var _ck in cleanerByDay[_cd]) _cn++;
+    cleanerEntries.push([_cleanerAlias, _cd, _cn]);
+  }
+  cleanerEntries.sort(function(a, b) { return b[2] - a[2]; });
+  cleanerEntries = cleanerEntries.slice(0, 3);
+
   return {
     ccuAdmits: byAdmits.map(function(e) { return [e.alias, e.date, e.ccuAdmits]; }),
     consults:  byConsults.map(function(e) { return [e.alias, e.date, e.consults]; }),
     revenue:   byRevenue.map(function(e) { return [e.alias, e.date, Math.round(e.revenue * 100) / 100]; }),
-    shepherd:  byShepherd.map(function(e) { return [e.alias, e.date, e.shepherd]; })
+    shepherd:  byShepherd.map(function(e) { return [e.alias, e.date, e.shepherd]; }),
+    cleaner:   cleanerEntries
   };
 }
 
@@ -565,7 +590,8 @@ function _mergeLeaderboards(local, bq) {
     ccuAdmits: _mergeCat(local ? local.ccuAdmits : [], bq ? bq.ccuAdmits : [], 3),
     consults:  _mergeCat(local ? local.consults  : [], bq ? bq.consults  : [], 3),
     revenue:   _mergeCat(local ? local.revenue   : [], bq ? bq.revenue   : [], 3),
-    shepherd:  _mergeShepherd(local ? local.shepherd : [], bq ? bq.shepherd : [])
+    shepherd:  _mergeShepherd(local ? local.shepherd : [], bq ? bq.shepherd : []),
+    cleaner:   _mergeCat(local ? local.cleaner : [], bq ? bq.cleaner : [], 3)
   };
 }
 
@@ -808,6 +834,7 @@ function _renderLeaderboard(data) {
   html += _renderCategory('\uD83D\uDC1D BUSY BEE', 'Most consults in 24hrs', data.consults || [], false);
   html += _renderCategory('\uD83D\uDCB0 THE TAX MAN COMETH', 'Highest $ billed in 24hrs', data.revenue || [], true);
   html += _renderCategory('\uD83D\uDC11 THE SHEPHERD', 'Most patients on service in 24hrs', data.shepherd || [], false);
+  html += _renderCategory('\uD83E\uDDF9 THE CLEANER', 'Most discharges in 24hrs', data.cleaner || [], false);
 
   body.innerHTML = html;
 }

@@ -61,7 +61,11 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // v4.53 (2026-06-29): decoder update from the 29/06 baseline — new ward
 // KELKGHI1 -> IHSC1 (bed Other), plus room formats for HAH/ED-Main/3MU/4A-
 // hallway/REHAB. parseLocCode + LOC_MAP + WARDS. No cache-format change.
-var APP_VERSION = 'v4.53';
+// v4.54 (2026-06-29): Leaderboard — added 5th trophy "The Cleaner" (most
+// MRP-cardiology discharges in one calendar day). Frontend compute from
+// patient records; BigQuery all-time via last MRP-daily claim date. No
+// cache-format change.
+var APP_VERSION = 'v4.54';
 var APP_BUILT   = '2026-06-29';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
