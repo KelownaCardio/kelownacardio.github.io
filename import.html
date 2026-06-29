@@ -263,6 +263,7 @@ var LOC_MAP = {
   // v4.30: RICU is generic ICU (could be A/B/D) — default ICUA, user
   // corrects in preview if needed. RSB is R-building 5B (KELKGHRSB).
   RICU:'ICUA',
+  I1:'IHSC1',    // KELKGHI1 — IH surgical post-op recovery (Kathryn 2026-06-29)
   R4A:'4A',      R4B:'4B',
   R5A:'5A',      R5B:'5B',      RSB:'5B',
   C6W:'6W',
@@ -311,6 +312,30 @@ function parseLocCode(locCode, roomBed) {
       var m = rb.match(/^0*(\d+)([A-Z]?)$/);
       if (m) room = m[1] + m[2];
     }
+  } else if (ward === 'IHSC1' || ward === 'HAH') {
+    // Post-op recovery (IHSC1) and Hospital-at-Home (HAH) have no standard
+    // bed numbering — the token holds an internal/virtual id. Bed = Other.
+    // (Kathryn 2026-06-29.)
+    room = 'Other';
+  } else if (ward === 'REHAB') {
+    // Rehab: real numbered rooms decode (KGHAC0127 -> 127A); the named
+    // "AHREH" bed has no number -> Other.
+    var mreh = rb.match(/^0*(\d+)([A-Z]?)$/);
+    room = mreh ? (mreh[1] + mreh[2]) : 'Other';
+  } else if (ward === 'ED') {
+    // ED overflow token "CEDOF<NN>" -> Main bed N (Kathryn 2026-06-29).
+    var med = rb.match(/EDOF0*(\d+)/);
+    if (med) { room = 'Main ' + parseInt(med[1], 10); }
+    else { var me2 = rb.match(/^0*(\d+)([A-Z]?)$/); if (me2) room = me2[1] + me2[2]; }
+  } else if (ward === '3MU') {
+    // "3MU<NN>" -> bed N (Kathryn 2026-06-29).
+    var mmu = rb.match(/3MU0*(\d+)/);
+    if (mmu) room = String(parseInt(mmu[1], 10));
+  } else if (ward === '4A') {
+    // 4A hallway bed "H4A<letter>" -> Hallway <letter> (Kathryn 2026-06-29).
+    var m4a = rb.match(/^H4A([A-Z])$/);
+    if (m4a) { room = 'Hallway ' + m4a[1]; }
+    else { var m4 = rb.match(/^0*(\d+)([A-Z]?)$/); if (m4) room = m4[1] + m4[2]; }
   } else {
     var m2 = rb.match(/^0*(\d+)([A-Z]?)$/);
     if (m2) room = m2[1] + m2[2];
