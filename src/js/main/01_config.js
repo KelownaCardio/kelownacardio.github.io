@@ -57,6 +57,7 @@ var WARDS = {
   REHAB:{ label:'Rehab',       list:'off', care:'directive', role:'consultant', rooms:[] },
   '6W': { label:'6W',          list:'off', care:'directive', role:'consultant', rooms:[] },
   PAR:  { label:'Centennial PAR', list:'off', care:'directive', role:'consultant', rooms:[] },
+  IHSC1:{ label:'IHSC1',       list:'off', care:'directive', role:'consultant', rooms:[] },
   C1C:  { label:'C1C',         list:'off', care:'directive', role:'consultant', rooms:[] },
   HAH:  { label:'HAH',         list:'off', care:'directive', role:'consultant', rooms:[] },
   OTHER:{ label:'Other',       list:'off', care:'directive', role:'consultant', rooms:[] }

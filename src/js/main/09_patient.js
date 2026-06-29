@@ -1264,6 +1264,36 @@ async function apSubmit(addToList, _skipDupCheck) {
     window._ocrOriginal = null;
   }
 
+  // Room-detection learning log — fired on every chart-header scan that
+  // carried a KGH location code, whether or not the doctor changed the
+  // decoded ward/room. Builds the "Room Detection" corpus used to improve
+  // the LOC_MAP decoder across users. Fire-and-forget (never blocks save).
+  if (window._ocrLocDecode && addToList && SHEETS_URL) {
+    var _ld = window._ocrLocDecode;
+    var _fw = p.ward || '', _fr = p.bed || '';
+    var _normLoc = function(s) { return String(s || '').toUpperCase().replace(/\s+/g, ''); };
+    var _wc = _normLoc(_ld.ocrWard) !== _normLoc(_fw);
+    var _rc = _normLoc(_ld.ocrRoom) !== _normLoc(_fr);
+    push('logRoomDetection', { record: {
+      ts:          new Date().toISOString(),
+      by:          (st.doc && st.doc.alias) || '',
+      locCode:     _ld.locCode,
+      roomBed:     _ld.roomBed,
+      ocrWard:     _ld.ocrWard,
+      ocrRoom:     _ld.ocrRoom,
+      finalWard:   _fw,
+      finalRoom:   _fr,
+      wardChanged: _wc ? 'yes' : 'no',
+      roomChanged: _rc ? 'yes' : 'no',
+      changed:     (_wc || _rc) ? 'yes' : 'no',
+      suspect:     _ld.suspect ? 'yes' : 'no',
+      phn:         p.phn || '',
+      patientName: (p.last || '') + ', ' + (p.first || ''),
+      engine:      _ld.engine || ''
+    }});
+  }
+  window._ocrLocDecode = null;
+
   // Create claim
   if (st.doc) {
     // Performing physician — consult area uses cb-performing-doc (unified
@@ -1495,6 +1525,7 @@ function clearAddForm() {
   // v4.33: Cancel any in-flight OCR background loop and unlock fields.
   _ocrGeneration++;
   _unlockDemoFields();
+  window._ocrLocDecode = null;  // drop any stale chart-header decode snapshot
 
   ['f-last','f-first','f-phn','f-dob'].forEach(function(id) {
     var el = document.getElementById(id);
@@ -2264,10 +2295,24 @@ function handleOCRResult(data, bar) {
   // that single-photo OCR now returns as locationCode + roomBed. Decode it
   // with the shared parseLocCode() — fill ward/room only when OCR did not
   // already supply them and the decode is meaningful.
+  window._ocrLocDecode = null;
   if ((p.locationCode || p.roomBed) && typeof parseLocCode === 'function') {
     var _loc = parseLocCode(p.locationCode || '', p.roomBed || '');
     if (!p.ward && _loc.ward && _loc.ward !== 'OTHER') p.ward = _loc.ward;
     if (!p.room && _loc.room) p.room = _loc.room;
+    // Room-detection learning log: stash the raw KGH hospital code the OCR
+    // captured off the chart header + what parseLocCode decoded it to. At
+    // save we compare against the ward/room the doctor actually keeps and log
+    // EVERY decode (with a changed flag) to the "Room Detection" sheet, so the
+    // LOC_MAP decoder can be improved across users. See apSubmit / logRoomDetection.
+    window._ocrLocDecode = {
+      locCode: String(p.locationCode || ''),
+      roomBed: String(p.roomBed || ''),
+      ocrWard: _loc.ward || '',
+      ocrRoom: _loc.room || '',
+      suspect: !!_loc.suspect,
+      engine:  String(p._engine || '')
+    };
   }
 
   // Persist the full OCR result for debugging:

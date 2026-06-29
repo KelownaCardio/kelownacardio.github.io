@@ -54,8 +54,15 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // v4.51 (2026-06-28): src re-modularized from the v4.50 production build;
 // de-duplicated 11_export.js (kept the newer copy). BUILD_ID bumped to force a
 // clean cache wipe (devices will re-enter the app password on next load).
-var APP_VERSION = 'v4.51';
-var APP_BUILT   = '2026-06-28';
+// v4.52 (2026-06-28): room-detection learning log — every chart-header scan
+// with a KGH location code logs raw code + decoded vs final ward/room to the
+// "Room Detection" sheet (needs backend Crud v3.08 + Router v3.03). No cache
+// format change, so BUILD_ID NOT bumped (no re-login).
+// v4.53 (2026-06-29): decoder update from the 29/06 baseline — new ward
+// KELKGHI1 -> IHSC1 (bed Other), plus room formats for HAH/ED-Main/3MU/4A-
+// hallway/REHAB. parseLocCode + LOC_MAP + WARDS. No cache-format change.
+var APP_VERSION = 'v4.53';
+var APP_BUILT   = '2026-06-29';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
