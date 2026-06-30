@@ -2153,8 +2153,15 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // MRP-cardiology discharges in one calendar day). Frontend compute from
 // patient records; BigQuery all-time via last MRP-daily claim date. No
 // cache-format change.
-var APP_VERSION = 'v4.54';
-var APP_BUILT   = '2026-06-29';
+// v4.56 (2026-06-30): Claim history — (1) phone-advice consults (10001 /
+// PhoneAdvice web-form) render dark-blue in the list + calendar (vs yellow
+// in-person consults); (2) "Discharged by (initials) on (date)" line, with
+// dischargedBy captured at discharge going forward; (3) claim history now
+// auto-pulls a patient's older submitted claims from BigQuery (action=
+// claimHistory) and shows them read-only. Additive field (dischargedBy);
+// no cache-format change, BUILD_ID not bumped.
+var APP_VERSION = 'v4.56';
+var APP_BUILT   = '2026-06-30';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -5071,6 +5078,7 @@ function _doRestore(pid, list) {
   p.discharged    = false;
   p.dischargedAt  = null;
   p.dischargeDate = null;
+  p.dischargedBy  = '';
   p.list          = list;
   if (list === 'on' && !p.ward) p.ward = 'OTHER';
   sv('patients', st.patients);
@@ -5177,19 +5185,12 @@ function openPatientSummary(pid) {
   if (!p || !p.id) return;
   _cvActiveType = null;  // reset legend pill selection for fresh open
   _cvDocAlias   = null;  // reset calendar performing-doctor to signed-in default
+  window._cvBQClaims = [];  // reset archived (BigQuery) claims for fresh open
 
-  // All claims for this patient, sorted oldest → newest
-  var claims = st.claims
-    .filter(function(c) { return c.phn && p.phn && samePhn(c.phn, p.phn); })
-    .sort(function(a, b) { return parseDMY(a.date) - parseDMY(b.date); });
-
-  // Also check by name if no PHN match (sticker not yet scanned)
-  if (!claims.length || !p.phn) {
-    var nameClaims = st.claims.filter(function(c) {
-      return samePhn(c.phn, p.phn);
-    }).sort(function(a, b) { return parseDMY(a.date) - parseDMY(b.date); });
-    if (nameClaims.length > claims.length) claims = nameClaims;
-  }
+  // All claims for this patient (Sheet + any already-loaded BQ archive),
+  // sorted oldest → newest. _cvBQClaims is empty on first open and is filled
+  // asynchronously by _augmentSummaryWithBQ() below, which then re-renders.
+  var claims = _cvClaimsFor(p);
 
   var html = '';
 
@@ -5246,12 +5247,28 @@ function openPatientSummary(pid) {
   }
   if (p.icd) {
   }
+  // Discharge summary line — "Discharged by (initials) on (date)".
+  // dischargedBy is captured at discharge time going forward; discharges made
+  // before this field existed show the date only.
+  if (p.discharged) {
+    var _dcDate = p.dischargeDate || '';
+    if (!_dcDate && p.dischargedAt) {
+      var _dcMs = parseDischargedAt(p.dischargedAt);
+      if (_dcMs) _dcDate = fmtD(new Date(_dcMs));
+    }
+    var _dcBy = (p.dischargedBy != null) ? String(p.dischargedBy).trim() : '';
+    if (_dcDate || _dcBy) {
+      html += '<div style="font-size:11px;font-weight:700;color:var(--red-t);margin-top:7px">' +
+              'Discharged ' + (_dcBy ? 'by ' + esc(_dcBy) + ' ' : '') +
+              (_dcDate ? 'on ' + esc(_dcDate) : '') + '</div>';
+    }
+  }
   html += '</div>'; // end demographics card
 
   // ── Claims section — toggle (Calendar default) + List/Calendar views (v3.27) ─
   var addClaimFn2 = p.discharged ? 'openClaimFromDischarged' : 'openClaimScreen';
   html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px">';
-  html +=   '<div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">' +
+  html +=   '<div id="cv-claim-count" style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">' +
             claims.length + ' claim' + (claims.length !== 1 ? 's' : '') + ' on record</div>';
   html +=   '<div style="display:flex;gap:6px">' +
               '<button class="pt-addclaim-btn" data-pid2="' + p.id + '" data-fn2="' + addClaimFn2 + '" onclick="ptSummaryAddClaim(this)">+ Add claim</button>' +
@@ -5277,6 +5294,118 @@ function openPatientSummary(pid) {
     window._cvMonth = new Date(nowD.getFullYear(), nowD.getMonth(), 1);
   } else {
     window._cvMonth = new Date(nowD.getFullYear(), nowD.getMonth(), 1);
+  }
+
+  // Pull the patient's older (submitted + archived) claims from BigQuery and
+  // merge them into the view. Nightly maintenance purges submitted claims from
+  // the Sheet after discharge, so without this an older/re-admitted patient's
+  // history reads "0 claims on record" while the data lives only in BQ.
+  _augmentSummaryWithBQ(p);
+}
+
+// ── Merge Sheet claims with cached BigQuery archive claims for a patient ──
+// _cvBQClaims holds normalized, display-only claims pulled from the warehouse
+// for the currently-open patient. Sheet claims win on id collision (they may be
+// newer / still editable). Used by the calendar, list, and gap calc so archived
+// history appears everywhere the live claims do.
+function _cvClaimsFor(p) {
+  if (!p) return [];
+  var local = (st.claims || []).filter(function(c) { return c.phn && p.phn && samePhn(c.phn, p.phn); });
+  var have = {};
+  local.forEach(function(c) { if (c.id != null) have[String(c.id)] = true; });
+  var merged = local.slice();
+  (window._cvBQClaims || []).forEach(function(c) {
+    if (c && c.phn && p.phn && samePhn(c.phn, p.phn) && !have[String(c.id)]) merged.push(c);
+  });
+  merged.sort(function(a, b) { return parseDMY(a.date) - parseDMY(b.date); });
+  return merged;
+}
+
+// Normalize one BigQuery claim row (getClaimsByPhn shape) into the app's claim
+// shape. BQ uses feeCode/serviceDate/billingDoc/claimId; the query omits phn so
+// we stamp the one we searched. Flagged _archived → rendered read-only (these
+// are already submitted; edits/resubmits go through iClinic, not the app).
+function _bqClaimToLocal(b, phn) {
+  if (!b) return null;
+  var date = b.serviceDate || '';
+  if (!date && b.serviceDateParsed) {
+    var m = String(b.serviceDateParsed).match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (m) date = ('0' + m[3]).slice(-2) + '/' + ('0' + m[2]).slice(-2) + '/' + m[1];
+  }
+  if (!b.claimId || !date) return null;
+  return {
+    id:        b.claimId,
+    alias:     b.billingDoc || '',
+    fee:       String(b.feeCode || '').replace(/\.0+$/, ''),
+    icd:       String(b.icd || '').replace(/\.0+$/, ''),
+    units:     parseFloat(b.units) || 1,
+    date:      date,
+    loc:       b.loc || '',
+    fac:       b.fac || '',
+    startTime: b.startTime || '',
+    endTime:   b.endTime || '',
+    notes:     b.notes || '',
+    refby:     String(b.refby || '').replace(/\.0+$/, ''),
+    refbyName: b.refbyName || '',
+    last:      b.last || '',
+    first:     b.first || '',
+    phn:       phn,
+    dob:       b.dob || '',
+    sex:       b.sex || '',
+    ward:      b.ward || '',
+    room:      b.room || '',
+    source:    b.source || 'BQ',
+    submitted: String(b.submitted) === 'true',
+    _archived: true            // display-only — lives in BigQuery, not the Sheet
+  };
+}
+
+// Async: fetch this patient's archived claims from BigQuery (action=claimHistory
+// → getClaimsByPhn) and re-render the summary in place. Best-effort: silent on
+// failure, and guarded so a slow response for a closed/!switched modal is dropped.
+function _augmentSummaryWithBQ(p) {
+  if (!p || !p.phn || !SHEETS_URL || !SHARED_KEY) return;
+  var phnQ = String(p.phn).replace(/\D/g, '');
+  if (phnQ.length !== 10) return;   // BQ getClaimsByPhn requires a 10-digit PHN
+  var openedPid = p.id;
+  _cvSetClaimCountLoading(true);
+  fetch(SHEETS_URL + '?action=claimHistory&key=' + encodeURIComponent(SHARED_KEY) +
+        '&phn=' + encodeURIComponent(phnQ) + '&_t=' + Date.now())
+    .then(function(r) { return r.json(); })
+    .then(function(j) {
+      if (window._cvPid !== openedPid) return;   // modal closed or switched patient
+      if (!j || j.ok === false || !Array.isArray(j.claims)) { _cvSetClaimCountLoading(false); return; }
+      window._cvBQClaims = j.claims.map(function(b) { return _bqClaimToLocal(b, phnQ); })
+                                   .filter(function(c) { return !!c; });
+      _cvRerenderAfterBQ(p);
+    })
+    .catch(function() { if (window._cvPid === openedPid) _cvSetClaimCountLoading(false); });
+}
+
+// Toggle a small "loading archive…" suffix on the claim-count line.
+function _cvSetClaimCountLoading(on) {
+  var cc = document.getElementById('cv-claim-count');
+  if (!cc) return;
+  var base = cc.getAttribute('data-base') || cc.textContent.replace(/\s*·.*$/, '');
+  cc.setAttribute('data-base', base);
+  cc.innerHTML = on ? esc(base) + ' · loading archive…' : esc(base);
+}
+
+// Re-render calendar + list + discharge banner + claim count after BQ merge.
+function _cvRerenderAfterBQ(p) {
+  var claims = _cvClaimsFor(p);
+  var calEl  = document.getElementById('cv-view-cal');
+  if (calEl) { calEl.innerHTML = _ptSummaryCalendarHTML(p, claims); _cvRestoreActivePill(); }
+  var listEl = document.getElementById('cv-view-list');
+  if (listEl) listEl.innerHTML = _ptSummaryListHTML(p, claims);
+  var bnEl   = document.getElementById('cv-disch-banner-wrap');
+  if (bnEl)   bnEl.innerHTML = _cvDischBannerHTML(p, claims);
+  var arch = claims.filter(function(c) { return c._archived; }).length;
+  var cc = document.getElementById('cv-claim-count');
+  if (cc) {
+    var txt = claims.length + ' claim' + (claims.length !== 1 ? 's' : '') + ' on record';
+    cc.setAttribute('data-base', txt);
+    cc.innerHTML = esc(txt) + (arch ? ' · ' + arch + ' from archive' : '');
   }
 }
 
@@ -5326,8 +5455,11 @@ function _ptSummaryListHTML(p, claims) {
       var dxLabel  = icdShortLabel(c.icd);
       if (dxLabel.length > 45) dxLabel = dxLabel.slice(0, 42) + '…';
       var isCCU = c.fee === 'CCU_DAILY' || c.fee === '1411' || c.fee === '1421' || c.fee === '1431';
+      var isPhone  = isPhoneAdviceClaim(c);   // PhoneAdvice web-form / phone consult
       var feeMeta  = FEES.find(function(f) { return f.code === c.fee; });
-      var feeChip  = (isCCU ? 'chip-red' : (feeMeta && feeMeta.clr) || 'chip-grey');
+      // Phone consults get a dark-blue chip so they stand out from in-person
+      // consults (yellow). CCU stays red; everything else keeps its catalogue clr.
+      var feeChip  = isPhone ? 'chip-navy' : (isCCU ? 'chip-red' : (feeMeta && feeMeta.clr) || 'chip-grey');
 
       html += '<div style="display:flex;align-items:flex-start;gap:9px;padding:7px 0;border-bottom:.5px solid var(--border)">';
       html +=   '<div style="min-width:52px;flex-shrink:0">';
@@ -5348,10 +5480,17 @@ function _ptSummaryListHTML(p, claims) {
         }
       }
       html +=     '</div>';
-      html +=     '<div style="display:flex;gap:4px">';
-      html +=       '<button class="claim-action-btn claim-edit-btn" data-cid="' + c.id + '" data-pid="' + p.id + '" onclick="openClaimEdit(this)" title="Edit claim">✎</button>';
-      html +=       '<button class="claim-action-btn claim-del-btn"  data-cid="' + c.id + '" data-pid="' + p.id + '" onclick="deleteClaimBtn(this)" title="Delete claim">✕</button>';
-      html +=     '</div>';
+      if (c._archived) {
+        // Submitted + archived in BigQuery — read-only in the app. Edits/resubmits
+        // go through iClinic, not here.
+        html +=   '<span class="chip chip-grey" style="font-size:8px;padding:1px 5px;white-space:nowrap" ' +
+                  'title="Submitted and archived in BigQuery. Edit or resubmit via iClinic, not the app.">submitted</span>';
+      } else {
+        html +=   '<div style="display:flex;gap:4px">';
+        html +=     '<button class="claim-action-btn claim-edit-btn" data-cid="' + c.id + '" data-pid="' + p.id + '" onclick="openClaimEdit(this)" title="Edit claim">✎</button>';
+        html +=     '<button class="claim-action-btn claim-del-btn"  data-cid="' + c.id + '" data-pid="' + p.id + '" onclick="deleteClaimBtn(this)" title="Delete claim">✕</button>';
+        html +=   '</div>';
+      }
       html +=   '</div>';
       html += '</div>';
     });
@@ -5431,6 +5570,7 @@ function _cvAdmitSpan(p) {
 // Cell-colour background per claim type — MUST match the .cv-day.cv-<type>
 // CSS rules exactly, so a 2-claim diagonal split aligns with the solid cells.
 var CV_TYPE_BG = {
+  phone:'#5f75b0',                                            // softened dark blue (≈ rgba(27,58,143,.7) over white)
   consult:'#ffcf73', ccu:'#f08585', daily:'#3fa658',
   directive:'#8eb5fa', combined:'#b8e6c4'
 };
@@ -5440,12 +5580,15 @@ var CV_TYPE_BG = {
 // used for both the dominant cell colour and the 2-claim diagonal split.
 function _cvDayTypes(dayClaims) {
   if (!dayClaims || !dayClaims.length) return [];
-  var has = { consult:false, ccu:false, daily:false, directive:false, combined:false, procedure:false };
+  var has = { phone:false, consult:false, ccu:false, daily:false, directive:false, combined:false, procedure:false };
   var hasAny = false;
   dayClaims.forEach(function(c) {
     hasAny = true;
+    // Phone-advice (PhoneAdvice web-form / 10001) — checked first so it owns the
+    // day colour (dark blue) rather than falling into the consult bucket.
+    if (isPhoneAdviceClaim(c)) has.phone = true;
     // Consults (full / limited / emergency / prolonged counselling)
-    if (c.fee === '33010' || c.fee === '33012' || c.fee === '33005' || c.fee === '33014') has.consult = true;
+    else if (c.fee === '33010' || c.fee === '33012' || c.fee === '33005' || c.fee === '33014') has.consult = true;
     // CCU bands (raw tap + days 1 / 2-7 / 8-30 / 31+)
     else if (c.fee === 'CCU_DAILY' || c.fee === '1411' || c.fee === '1421' || c.fee === '1431' || c.fee === '1441') has.ccu = true;
     // Directive visit
@@ -5461,7 +5604,7 @@ function _cvDayTypes(dayClaims) {
     // 78717 (complex discharge) / 78720 (MOST) are extras that piggyback on a
     // regular visit — they fall through to the hasAny fallback below.
   });
-  var out = ['consult','ccu','daily','directive','combined','procedure'].filter(function(t) { return has[t]; });
+  var out = ['phone','consult','ccu','daily','directive','combined','procedure'].filter(function(t) { return has[t]; });
   // Fallback — any claim on the day deserves *some* colour so the doctor sees it
   if (!out.length && hasAny) out.push('consult');
   return out;
@@ -5574,6 +5717,7 @@ function _ptSummaryCalendarHTML(p, claims) {
             '<button class="cv-lg-pill cv-lgp-daily"     id="cv-lgp-daily"     onclick="_cvSelectLegend(\'daily\',this)"><div class="cv-sw" style="background:#3fa658"></div>Daily</button>' +
             '<button class="cv-lg-pill cv-lgp-directive" id="cv-lgp-directive" onclick="_cvSelectLegend(\'directive\',this)"><div class="cv-sw" style="background:#8eb5fa"></div>Directive</button>' +
             '<button class="cv-lg-pill cv-lgp-combined"  id="cv-lgp-combined"  onclick="_cvSelectLegend(\'combined\',this)"><div class="cv-sw" style="background:#b8e6c4"></div>Combined daily</button>' +
+            '<div class="cv-lg"><div class="cv-sw" style="background:rgba(27,58,143,.7)"></div>Phone</div>' +
             (rule ? '<div class="cv-lg"><div class="cv-sw" style="background:#d4d4d8;border:1px dashed #8a8a92"></div>Gap</div>' : '') +
           '</div>' +
           '<div class="cv-tap-hint" id="cv-tap-hint"></div>';
@@ -5703,9 +5847,7 @@ function _cvChangeMonth(delta) {
   if (!pid) return;
   var p = getP(pid);
   if (!p) return;
-  var claims = st.claims.filter(function(c) {
-    return c.phn && p.phn && samePhn(c.phn, p.phn);
-  }).sort(function(a, b) { return parseDMY(a.date) - parseDMY(b.date); });
+  var claims = _cvClaimsFor(p);
   var calEl = document.getElementById('cv-view-cal');
   if (calEl) { calEl.innerHTML = _ptSummaryCalendarHTML(p, claims); _cvRestoreActivePill(); }
 }
@@ -5762,8 +5904,7 @@ function _cvRestoreActivePill() {
 // Used instead of a full openPatientSummary() re-render during quick-add.
 function _cvRefreshSummary(pid) {
   var p = getP(pid); if (!p) return;
-  var claims = st.claims.filter(function(c) { return c.phn && p.phn && samePhn(c.phn, p.phn); })
-    .sort(function(a, b) { return parseDMY(a.date) - parseDMY(b.date); });
+  var claims = _cvClaimsFor(p);
   var calEl = document.getElementById('cv-view-cal');
   if (calEl) { calEl.innerHTML = _ptSummaryCalendarHTML(p, claims); _cvRestoreActivePill(); }
   var listEl = document.getElementById('cv-view-list');
@@ -5886,10 +6027,12 @@ function _cvShowDayDetails(pid, dateStr, dayClaims) {
         (c.startTime || c.endTime ? '<div style="font-size:11px;color:var(--text);margin-top:4px;font-weight:600">&#9201; ' + esc(c.startTime || '?') + ' &ndash; ' + esc(c.endTime || '?') + '</div>' : '') +
         (c.notes ? '<div style="font-size:11px;color:var(--amber-t);margin-top:4px;font-style:italic">' + esc(c.notes) + '</div>' : '') +
         (c.createdBy ? '<div style="font-size:10px;color:var(--text3);margin-top:4px">Submitted by ' + esc(c.createdBy) + (c.createdAt ? ' &middot; ' + auditTs(c.createdAt) : '') + '</div>' : '') +
-        '<div style="display:flex;gap:6px;margin-top:8px">' +
-          '<button class="claim-action-btn claim-edit-btn" data-cid="' + c.id + '" data-pid="' + pid + '" onclick="_cvEditFromSheet(this)" title="Edit">✎ Edit</button>' +
-          '<button class="claim-action-btn claim-del-btn"  data-cid="' + c.id + '" data-pid="' + pid + '" onclick="_cvDeleteFromSheet(this)" title="Delete">✕ Delete</button>' +
-        '</div>' +
+        (c._archived
+          ? '<div style="font-size:10px;color:var(--text3);margin-top:8px;font-style:italic">Submitted &amp; archived (BigQuery) — edit or resubmit via iClinic, not the app.</div>'
+          : '<div style="display:flex;gap:6px;margin-top:8px">' +
+              '<button class="claim-action-btn claim-edit-btn" data-cid="' + c.id + '" data-pid="' + pid + '" onclick="_cvEditFromSheet(this)" title="Edit">✎ Edit</button>' +
+              '<button class="claim-action-btn claim-del-btn"  data-cid="' + c.id + '" data-pid="' + pid + '" onclick="_cvDeleteFromSheet(this)" title="Delete">✕ Delete</button>' +
+            '</div>') +
       '</div>'
     );
   }).join('');
@@ -6280,6 +6423,29 @@ function icdDescOnly(code) {
   return full.replace(/\s*\([^)]+\)\s*$/, '').trim() || full;
 }
 
+// Phone-advice (PhoneAdvice web-form) fee labels — these codes are written by
+// the PhoneAdvice intake (web form / QuickChart email), not the in-app picker,
+// so they have no FEES catalogue entry. Listed here so claim history shows a
+// meaningful label instead of a bare code.
+var PHONE_ADVICE_LABELS = {
+  '10001': 'Telephone advice < 24hrs 📞'
+};
+
+// True when a claim originated from the PhoneAdvice phone-consult intake rather
+// than an in-app entry. Keyed off (a) the phone-advice fee code(s), (b) the
+// claim source the web form / email pipeline stamps (WebForm / PhoneAdvice /
+// QuickChart), or (c) an explicit phone claimType. Robust to new phone fee
+// codes added on the web form, since source alone is enough.
+function isPhoneAdviceClaim(c) {
+  if (!c) return false;
+  var fee = String(c.fee || '');
+  if (PHONE_ADVICE_LABELS[fee]) return true;
+  var src = String(c.source || '').toLowerCase();
+  if (src === 'webform' || src === 'phoneadvice' || src === 'quickchart') return true;
+  if (String(c.claimType || '').toLowerCase() === 'phone') return true;
+  return false;
+}
+
 // Get short human label for a fee code
 function getFeeLabel(fee) {
   // CCU pre-rollup tap (not a real MSC code)
@@ -6287,6 +6453,8 @@ function getFeeLabel(fee) {
   // Look up canonical FEES first
   var f = FEES.find(function(x) { return x.code === fee; });
   if (f) return f.desc;
+  // Phone-advice intake codes (not in the in-app picker catalogue)
+  if (PHONE_ADVICE_LABELS[fee]) return PHONE_ADVICE_LABELS[fee];
   // Fall back to legacy labels for historical claims that used invalid codes
   if (LEGACY_FEE_LABELS[fee]) return LEGACY_FEE_LABELS[fee];
   // Unknown — return the raw code so doctor can investigate
@@ -7915,6 +8083,7 @@ async function _mergeAndReadmit() {
   p.discharged = false;
   p.dischargedAt = '';
   p.dischargeDate = '';
+  p.dischargedBy = '';
   p.trueDischarge = false;
   p.consultOnly = false;
 
@@ -7935,6 +8104,7 @@ async function _mergeAndReadmit() {
     p.consultOnly   = true;
     p.dischargedAt  = Date.now();
     p.dischargeDate = fmtD(new Date());
+    if (!p.dischargedBy && st.doc && st.doc.alias) p.dischargedBy = st.doc.alias;
   }
 
   // Update referrer / ICD from current form
@@ -9016,6 +9186,7 @@ async function apSubmit(addToList, _skipDupCheck) {
     p.consultOnly   = true;
     p.dischargedAt  = Date.now();
     p.dischargeDate = fmtD(new Date());
+    if (!p.dischargedBy && st.doc && st.doc.alias) p.dischargedBy = st.doc.alias;
   }
 
   st.patients.push(p);
@@ -10861,6 +11032,8 @@ function removePatient(pid) {
   if (!p.dischargeDate) p.dischargeDate = TODAY;
   p.dischargedAt = Date.now();
   p.discharged   = true;
+  // Capture who discharged (signed-in doctor's initials) — shown in claim history.
+  if (!p.dischargedBy && st.doc && st.doc.alias) p.dischargedBy = st.doc.alias;
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p); // update on sheets too
   render();
@@ -12675,6 +12848,7 @@ function confirmMediteachImport() {
     p.dischargeDate = TODAY;                                // DD/MM/YYYY display
     p.dischargedAt  = Date.now();                           // epoch ms — drives "recently discharged" sort
     p.discharged    = true;
+    if (!p.dischargedBy && st.doc && st.doc.alias) p.dischargedBy = st.doc.alias;
     p.dischargeNote = d.reason;                             // non-billing Sheets note
     if (SHEETS_URL) push('savePatient', p);
     logChange(p, 'Discharged via Meditech import', d.reason);
