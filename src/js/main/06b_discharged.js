@@ -295,6 +295,7 @@ function _doRestore(pid, list) {
   p.discharged    = false;
   p.dischargedAt  = null;
   p.dischargeDate = null;
+  p.dischargedBy  = '';
   p.list          = list;
   if (list === 'on' && !p.ward) p.ward = 'OTHER';
   sv('patients', st.patients);

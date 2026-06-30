@@ -65,8 +65,15 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // MRP-cardiology discharges in one calendar day). Frontend compute from
 // patient records; BigQuery all-time via last MRP-daily claim date. No
 // cache-format change.
-var APP_VERSION = 'v4.54';
-var APP_BUILT   = '2026-06-29';
+// v4.56 (2026-06-30): Claim history — (1) phone-advice consults (10001 /
+// PhoneAdvice web-form) render dark-blue in the list + calendar (vs yellow
+// in-person consults); (2) "Discharged by (initials) on (date)" line, with
+// dischargedBy captured at discharge going forward; (3) claim history now
+// auto-pulls a patient's older submitted claims from BigQuery (action=
+// claimHistory) and shows them read-only. Additive field (dischargedBy);
+// no cache-format change, BUILD_ID not bumped.
+var APP_VERSION = 'v4.56';
+var APP_BUILT   = '2026-06-30';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');

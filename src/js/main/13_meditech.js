@@ -582,6 +582,7 @@ function confirmMediteachImport() {
     p.dischargeDate = TODAY;                                // DD/MM/YYYY display
     p.dischargedAt  = Date.now();                           // epoch ms — drives "recently discharged" sort
     p.discharged    = true;
+    if (!p.dischargedBy && st.doc && st.doc.alias) p.dischargedBy = st.doc.alias;
     p.dischargeNote = d.reason;                             // non-billing Sheets note
     if (SHEETS_URL) push('savePatient', p);
     logChange(p, 'Discharged via Meditech import', d.reason);

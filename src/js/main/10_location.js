@@ -497,6 +497,8 @@ function removePatient(pid) {
   if (!p.dischargeDate) p.dischargeDate = TODAY;
   p.dischargedAt = Date.now();
   p.discharged   = true;
+  // Capture who discharged (signed-in doctor's initials) — shown in claim history.
+  if (!p.dischargedBy && st.doc && st.doc.alias) p.dischargedBy = st.doc.alias;
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p); // update on sheets too
   render();

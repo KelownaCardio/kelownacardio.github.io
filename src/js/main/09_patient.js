@@ -135,6 +135,7 @@ async function _mergeAndReadmit() {
   p.discharged = false;
   p.dischargedAt = '';
   p.dischargeDate = '';
+  p.dischargedBy = '';
   p.trueDischarge = false;
   p.consultOnly = false;
 
@@ -155,6 +156,7 @@ async function _mergeAndReadmit() {
     p.consultOnly   = true;
     p.dischargedAt  = Date.now();
     p.dischargeDate = fmtD(new Date());
+    if (!p.dischargedBy && st.doc && st.doc.alias) p.dischargedBy = st.doc.alias;
   }
 
   // Update referrer / ICD from current form
@@ -1236,6 +1238,7 @@ async function apSubmit(addToList, _skipDupCheck) {
     p.consultOnly   = true;
     p.dischargedAt  = Date.now();
     p.dischargeDate = fmtD(new Date());
+    if (!p.dischargedBy && st.doc && st.doc.alias) p.dischargedBy = st.doc.alias;
   }
 
   st.patients.push(p);
