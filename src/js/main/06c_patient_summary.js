@@ -411,25 +411,25 @@ function _ptSummaryListHTML(p, claims) {
 // Returns 'ccu' (CCU/ICU ward + MRP role) | 'daily' (MRP role, non-CCU ward) | null
 function _cvGapRuleForPatient(p) {
   if (!p) return null;
-  // gap-rule fix 2026-06-28: derive the daily/CCU billing obligation from the
-  // actual BILLING PATTERN, not just the role/care flag. A patient billed a
-  // daily (33008) or a CCU code (1411/1421/1431/CCU_DAILY) has a daily
-  // obligation even if role wasn't set to MRP (e.g. a consultant/directive who
-  // billed a 33008 — previously skipped the discharge gap gate entirely). The
-  // hard-gate's "Explain gap" option covers any one-off that's legitimately
-  // not a gap.
-  var hasDaily = false, hasCcu = false;
+  // gap-scope fix 2026-07-04: billing gaps are only a genuine missed-billing when
+  // Cardiology is the MRP — the cardiologist rounds and bills every day, so an
+  // unbilled day is a true gap. Consulting / directive-care patients bill only on
+  // the days they are seen, so gaps in their run are EXPECTED and must NOT trigger
+  // the discharge gap gate (the 2026-06-28 billing-pattern rule pulled them in and
+  // forced JW to write "directive care" gap notes to clear them — unnecessary).
+  // role==='mrp' is bidirectionally locked to mrp==='Cardiology' in the edit form;
+  // accept either flag so a half-set record on a real MRP patient is still gated.
+  var isMrpCardiology = (p.role === 'mrp') || (p.mrp === 'Cardiology');
+  if (!isMrpCardiology) return null;
+  // CCU vs daily: a CCU care flag, a CCU/ICU ward, or any CCU-band claim → 'ccu'.
+  var hasCcu = false;
   (st.claims || []).forEach(function(c) {
     if (!c.phn || !p.phn || !samePhn(c.phn, p.phn)) return;
     var fee = String(c.fee || '').trim();
-    if (fee === '33008') hasDaily = true;
-    else if (fee === '1411' || fee === '1421' || fee === '1431' || fee === 'CCU_DAILY') hasCcu = true;
+    if (fee === '1411' || fee === '1421' || fee === '1431' || fee === 'CCU_DAILY') hasCcu = true;
   });
-  var flaggedDaily = (p.role === 'mrp' || p.care === 'daily');
-  var flaggedCcu   = (p.care === 'ccu');
-  if (!hasDaily && !hasCcu && !flaggedDaily && !flaggedCcu) return null;
   var ccuWards = ['CCU','CSICU','ICUA','ICUB','ICUD'];
-  if (hasCcu || flaggedCcu || ccuWards.indexOf(p.ward) !== -1) return 'ccu';
+  if (p.care === 'ccu' || hasCcu || ccuWards.indexOf(p.ward) !== -1) return 'ccu';
   return 'daily';
 }
 

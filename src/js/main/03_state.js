@@ -72,8 +72,13 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // auto-pulls a patient's older submitted claims from BigQuery (action=
 // claimHistory) and shows them read-only. Additive field (dischargedBy);
 // no cache-format change, BUILD_ID not bumped.
-var APP_VERSION = 'v4.56';
-var APP_BUILT   = '2026-06-30';
+// v4.57 (2026-07-04): gap-scope fix. Discharge billing-gap gate
+// (_cvGapRuleForPatient) now fires ONLY for MRP Cardiology patients; consulting
+// & directive-care patients no longer prompt for gap explanations. Pairs with
+// backend DataCheck v2.34. Includes the pending v4.56 claim-history changes
+// (they share 06c_patient_summary.js). No cache-format change, BUILD_ID not bumped.
+var APP_VERSION = 'v4.57';
+var APP_BUILT   = '2026-07-04';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
