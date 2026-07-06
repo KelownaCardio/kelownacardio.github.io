@@ -431,22 +431,68 @@ function submitConsultClaims(p, alias, locOverride) {
   // neighbours; it's a no-op for these rows since the note is already set.)
   var ccNote = _ccfppMerge(userNote, ccfppPreviewNote(p, alias, dateISO, dateFmt, start, end));
 
+  // ── Pre-save sanity gates (v4.58) ─────────────────────────────────
+  // Catch the three edge cases that historically produced malformed call-out
+  // modifier blocks. Each is a confirm() so the user VERIFIES the times — not
+  // a silent auto-fix. Cancelling any prompt aborts the whole save (no rows
+  // are written yet — all addClaim calls are below).
+  var _sM  = t2m(start), _eM = t2m(end);
+  var _dur = _eM - _sM; if (_dur < 0) _dur += 24 * 60;      // cross-midnight aware
+  var modBase  = getModifier(start, dateISO);
+  var incUnits = consultIncUnits(start, end);
+
+  // (Harris) Midnight / abnormally long end. end==00:00 is the classic
+  // 12am-vs-12pm meridiem slip; a span > 180 min is implausibly long.
+  if (end === '00:00' || _dur > 180) {
+    if (!confirm('Check the END time.\n\n' + code + ':  ' + start + '–' + end +
+        '   (' + _dur + ' min)\n\nThat looks unusual — a midnight end or a very long ' +
+        'span, often a 12am/12pm mix-up. Save these times as entered?')) return false;
+  }
+
+  // (Altenhofen) Consult shorter than the 30-min call-out minimum. The base
+  // modifier alone bills a full 30 min, so a sub-30-min consult with a call-out
+  // makes no sense and is usually a mistyped end time.
+  if (_dur < 30) {
+    if (!confirm('Check the consult LENGTH.\n\n' + code + ':  ' + start + '–' + end +
+        '   (' + _dur + ' min)\n\n' + (modBase
+          ? 'The after-hours call-out modifier bills a 30-min minimum, so a shorter ' +
+            'consult is usually a typo. '
+          : '') + 'Save this duration as entered?')) return false;
+  }
+
+  // (White) Increment period crosses the after-hours boundary. The 30-min base
+  // pushes the increment start into a different rate window (or out of the
+  // after-hours window entirely). We now bill the increment at the BASE tier
+  // (see modInc below) rather than dropping it — but flag it for confirmation.
+  if (modBase && incUnits > 0) {
+    var _reclk = getModifierForIncrement(start, dateISO);
+    if (!_reclk || _reclk.base !== modBase.base) {
+      if (!confirm('Check the call-out TIMES.\n\n' + modBase.label + ':  ' +
+          start + '–' + end + '\n\nThe 30-min base ends at ' +
+          minsToTime((_sM + 30) % (24 * 60)) + ', which crosses into a different ' +
+          'rate window. The increment will be billed at the ' + modBase.label +
+          ' rate. Confirm the times are correct?')) return false;
+    }
+  }
+
   // Base consult — doctor's note + CCFPP (v4.49b: stamped on 33010/33012 too)
   addClaim(p, code, code, 1, dateFmt, loc, start, ccNote, end, alias, ov);
 
   // MOST — standalone item, no CCFPP, no times
   if (_mostOn) addClaim(p, '78720', '78720', 1, dateFmt, loc, null, null, null, alias, ov);
 
-  // Call-out modifiers — CCFPP note rides on these too
-  var modBase  = getModifier(start, dateISO);
-  var incUnits = consultIncUnits(start, end);
-  var modInc   = incUnits > 0 ? getModifierForIncrement(start, dateISO) : null;
+  // Call-out modifiers — CCFPP note rides on these too.
+  // v4.58 FIX: the increment INHERITS the base tier instead of being re-clocked
+  // at start+30. Re-clocking dropped the modifier whenever the increment start
+  // fell outside the after-hours window (e.g. a 07:39 night consult whose
+  // increment began 08:09 = daytime → getModifier returned null → 1206 lost).
+  var modInc = (modBase && incUnits > 0) ? modBase.inc : null;
   if (modBase) {
-    var modBaseEnd = minsToTime((t2m(start) + 30) % (24 * 60));
+    var modBaseEnd = minsToTime((_sM + 30) % (24 * 60));
     addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start, ccNote, modBaseEnd, alias, ov);
     if (modInc) {
-      var incStart = minsToTime((t2m(start) + 30) % (24 * 60));
-      addClaim(p, modInc.inc, modInc.inc, incUnits, dateFmt, loc, incStart, ccNote, end, alias, ov);
+      var incStart = minsToTime((_sM + 30) % (24 * 60));
+      addClaim(p, modInc, modInc, incUnits, dateFmt, loc, incStart, ccNote, end, alias, ov);
     }
   }
   sv('claims', st.claims);

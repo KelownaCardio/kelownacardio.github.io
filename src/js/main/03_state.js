@@ -77,8 +77,16 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // & directive-care patients no longer prompt for gap explanations. Pairs with
 // backend DataCheck v2.34. Includes the pending v4.56 claim-history changes
 // (they share 06c_patient_summary.js). No cache-format change, BUILD_ID not bumped.
-var APP_VERSION = 'v4.57';
-var APP_BUILT   = '2026-07-04';
+// v4.58 (2026-07-05): call-out modifier hardening (07_consult.js). (1) FIX —
+// the increment modifier (1205/1206/1207) now inherits the base call-out tier
+// instead of being re-clocked at start+30; re-clocking silently dropped the
+// increment when its start fell outside the after-hours window (e.g. 07:39
+// night consult, increment 08:09 = daytime → 1206 lost). (2) Three pre-save
+// confirm() gates on submitConsultClaims: abnormal/midnight end time, consult
+// < 30 min, and increment period crossing the after-hours boundary. All are
+// user-confirmations, not auto-fixes. No cache-format change, BUILD_ID not bumped.
+var APP_VERSION = 'v4.58';
+var APP_BUILT   = '2026-07-05';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
