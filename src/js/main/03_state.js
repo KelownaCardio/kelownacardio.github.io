@@ -85,8 +85,14 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // confirm() gates on submitConsultClaims: abnormal/midnight end time, consult
 // < 30 min, and increment period crossing the after-hours boundary. All are
 // user-confirmations, not auto-fixes. No cache-format change, BUILD_ID not bumped.
-var APP_VERSION = 'v4.58';
-var APP_BUILT   = '2026-07-05';
+// v4.59 (2026-07-06): Add-Patient DOB safety check — a live age readout now
+// sits under the DOB field and recomputes on every keystroke and after an OCR
+// sticker scan fills the DOB. A mis-read date of birth shows an obviously wrong
+// age (grey = plausible adult, amber = implausibly young/old, red = unparseable)
+// before the claim is submitted. UI-only, additive; no cache-format change,
+// BUILD_ID not bumped. (index.template.html + 14_init.js + 09_patient.js)
+var APP_VERSION = 'v4.59';
+var APP_BUILT   = '2026-07-06';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');

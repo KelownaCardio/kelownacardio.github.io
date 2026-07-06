@@ -68,7 +68,7 @@ async function init() {
   var fDob = document.getElementById('f-dob');
   if (fDob) {
     fDob.placeholder = 'DD Mon YYYY';
-    fDob.addEventListener('input', function() { dobAutoSlash(fDob); });
+    fDob.addEventListener('input', function() { dobAutoSlash(fDob); updateApDobAge(); });
   }
   updateDailyTotal();
   await loadLocal();
@@ -476,6 +476,37 @@ function dobAutoSlash(el) {
     el.value = out;
     el.setSelectionRange(out.length, out.length);
   }
+}
+
+// v4.59: Live age readout beside the Add-Patient DOB field. Recomputes on
+// every keystroke and after an OCR sticker scan fills the DOB, so a mis-read
+// date of birth shows an obviously wrong age (e.g. "Age 3" on a cardiology
+// inpatient) BEFORE the claim is submitted. Same age maths as calcAgeGender.
+// Grey = plausible adult; amber = implausibly young/old (shown + flagged);
+// red = unparseable; blank while empty or mid-entry (year not yet 4 digits).
+function updateApDobAge() {
+  var out = document.getElementById('f-dob-age');
+  if (!out) return;
+  var raw = (document.getElementById('f-dob') || {}).value || '';
+  if (!raw.trim()) { out.textContent = ''; out.style.color = ''; return; }
+  var parts = fmtClaimDate(raw).split('/');
+  if (parts.length !== 3 || !parts[2] || parts[2].length < 4) {
+    out.textContent = ''; out.style.color = '';   // incomplete — say nothing yet
+    return;
+  }
+  var dob = new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
+  var now = new Date();
+  var yr  = now.getFullYear() - dob.getFullYear();
+  var mo  = now.getMonth() - dob.getMonth();
+  if (mo < 0 || (mo === 0 && now.getDate() < dob.getDate())) yr--;
+  if (isNaN(yr) || yr < 0 || yr > 130) {
+    out.textContent = '⚠ Check DOB';
+    out.style.color = 'var(--red-t)';
+    return;
+  }
+  var plausible = (yr >= 18 && yr <= 110);
+  out.textContent = 'Age ' + yr + (plausible ? '' : '  — check DOB');
+  out.style.color = plausible ? 'var(--text2)' : 'var(--amber-t)';
 }
 
 // total minutes → time string "HH:MM"  (wraps at midnight)

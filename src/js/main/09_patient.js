@@ -1540,6 +1540,9 @@ function clearAddForm() {
     }
   });
   _phnErr(null); // v4.44: clear check digit error
+  // v4.59: clear the live DOB age readout for the next patient.
+  var _dobAge = document.getElementById('f-dob-age');
+  if (_dobAge) { _dobAge.textContent = ''; _dobAge.style.color = ''; }
   var sx = document.getElementById('f-sex'); if (sx) sx.value = '';
   var sxm = document.getElementById('f-sex-m'); if (sxm) sxm.className = 'ap-list-pill';
   var sxf = document.getElementById('f-sex-f'); if (sxf) sxf.className = 'ap-list-pill';
@@ -2347,6 +2350,10 @@ function handleOCRResult(data, bar) {
   // a number/slash into the last name, the field turns red immediately —
   // the doctor sees it the moment the scan lands, not at submit.
   validatePatientFieldsLive();
+  // v4.59: .value assignment above doesn't fire the input handler, so refresh
+  // the live age readout explicitly — lets the doctor sanity-check the OCR'd
+  // DOB against the patient's apparent age the moment the scan lands.
+  if (typeof updateApDobAge === 'function') updateApDobAge();
   if (p.sex)   { apSexPill(p.sex); }
   if (p.ward && WARDS[p.ward]) { document.getElementById('f-ward').value = p.ward; wardChange(); }
   if (p.mrp) {
