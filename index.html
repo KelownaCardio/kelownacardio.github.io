@@ -813,14 +813,17 @@ input[type=file] { display:none; }
       <div class="f1"><label>First name</label><input id="f-first" autocorrect="off" autocapitalize="words"></div>
     </div>
     <div class="fl">
-      <div class="f1"><label>DOB (DD Mon YYYY)</label><input id="f-dob" autocorrect="off" placeholder="DD Mon YYYY"><div id="f-dob-age" style="font-size:12px;font-weight:700;margin-top:3px;min-height:15px;line-height:1.2"></div></div>
-      <div class="f1"><label>Sex</label>
-        <div class="fl" style="gap:6px">
-          <button class="ap-list-pill" id="f-sex-m" onclick="apSexPill('M')">M</button>
-          <button class="ap-list-pill" id="f-sex-f" onclick="apSexPill('F')">F</button>
-        </div>
-        <input id="f-sex" type="hidden" value="">
+      <div class="f1"><label>DOB (DD Mon YYYY)</label><input id="f-dob" autocorrect="off" placeholder="DD Mon YYYY"></div>
+      <!-- v4.59: live calculated age beside DOB as an OCR safety check -->
+      <div class="f1"><label>Age (calculated)</label><div id="f-dob-age" style="padding:8px 9px;border:.5px solid var(--border2);border-radius:var(--rsm);background:var(--surface2);font-size:15px;font-weight:800;color:var(--text3);min-height:18px;line-height:1.35">&mdash;</div></div>
+    </div>
+    <div style="margin-bottom:7px">
+      <label>Sex</label>
+      <div class="fl" style="gap:6px;max-width:52%">
+        <button class="ap-list-pill" id="f-sex-m" onclick="apSexPill('M')">M</button>
+        <button class="ap-list-pill" id="f-sex-f" onclick="apSexPill('F')">F</button>
       </div>
+      <input id="f-sex" type="hidden" value="">
     </div>
     <!-- ── Out of Province (OOP) ─────────────────────────────────── -->
     <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:10px;border-top:.5px solid var(--border2)">
