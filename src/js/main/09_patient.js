@@ -1540,9 +1540,9 @@ function clearAddForm() {
     }
   });
   _phnErr(null); // v4.44: clear check digit error
-  // v4.59: clear the live DOB age readout for the next patient.
+  // v4.59: reset the live DOB age readout to its neutral dash for the next patient.
   var _dobAge = document.getElementById('f-dob-age');
-  if (_dobAge) { _dobAge.textContent = ''; _dobAge.style.color = ''; }
+  if (_dobAge) { _dobAge.textContent = '—'; _dobAge.style.color = 'var(--text3)'; }
   var sx = document.getElementById('f-sex'); if (sx) sx.value = '';
   var sxm = document.getElementById('f-sex-m'); if (sxm) sxm.className = 'ap-list-pill';
   var sxf = document.getElementById('f-sex-f'); if (sxf) sxf.className = 'ap-list-pill';

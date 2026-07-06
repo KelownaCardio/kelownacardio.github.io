@@ -487,11 +487,12 @@ function dobAutoSlash(el) {
 function updateApDobAge() {
   var out = document.getElementById('f-dob-age');
   if (!out) return;
+  out.style.fontWeight = '800';
   var raw = (document.getElementById('f-dob') || {}).value || '';
-  if (!raw.trim()) { out.textContent = ''; out.style.color = ''; return; }
-  var parts = fmtClaimDate(raw).split('/');
+  // Empty or still mid-entry (year not yet 4 digits) — neutral dash.
+  var parts = raw.trim() ? fmtClaimDate(raw).split('/') : [];
   if (parts.length !== 3 || !parts[2] || parts[2].length < 4) {
-    out.textContent = ''; out.style.color = '';   // incomplete — say nothing yet
+    out.textContent = '—'; out.style.color = 'var(--text3)';
     return;
   }
   var dob = new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
@@ -500,13 +501,15 @@ function updateApDobAge() {
   var mo  = now.getMonth() - dob.getMonth();
   if (mo < 0 || (mo === 0 && now.getDate() < dob.getDate())) yr--;
   if (isNaN(yr) || yr < 0 || yr > 130) {
-    out.textContent = '⚠ Check DOB';
+    out.textContent = '⚠ check DOB';    // unparseable / absurd date
     out.style.color = 'var(--red-t)';
     return;
   }
-  var plausible = (yr >= 18 && yr <= 110);
-  out.textContent = 'Age ' + yr + (plausible ? '' : '  — check DOB');
-  out.style.color = plausible ? 'var(--text2)' : 'var(--amber-t)';
+  // Plausible cardiology-patient window: 17–105. We don't see 16 or younger,
+  // so anything under 17 (or over 105) is flagged as a likely OCR mis-read.
+  var plausible = (yr >= 17 && yr <= 105);
+  out.textContent = yr + ' yrs' + (plausible ? '' : '  ⚠');
+  out.style.color = plausible ? 'var(--text)' : 'var(--amber-t)';
 }
 
 // total minutes → time string "HH:MM"  (wraps at midnight)

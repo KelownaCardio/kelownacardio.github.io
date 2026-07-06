@@ -88,7 +88,7 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // v4.59 (2026-07-06): Add-Patient DOB safety check — a live age readout now
 // sits under the DOB field and recomputes on every keystroke and after an OCR
 // sticker scan fills the DOB. A mis-read date of birth shows an obviously wrong
-// age (grey = plausible adult, amber = implausibly young/old, red = unparseable)
+// age (grey = plausible 17–105, amber = <17 or >105, red = unparseable)
 // before the claim is submitted. UI-only, additive; no cache-format change,
 // BUILD_ID not bumped. (index.template.html + 14_init.js + 09_patient.js)
 var APP_VERSION = 'v4.59';
