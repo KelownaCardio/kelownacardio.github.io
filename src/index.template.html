@@ -155,7 +155,9 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 
 /* WARD LIST */
 .ward-list { display:flex; flex-direction:column; gap:5px; }
-.wp { display:flex; align-items:center; gap:8px; padding:8px 10px; border:.5px solid var(--border); border-radius:var(--r); background:var(--surface); cursor:pointer; }
+.wp { display:flex; flex-direction:column; padding:0; border:.5px solid var(--border); border-radius:var(--r); background:var(--surface); cursor:pointer; overflow:hidden; }
+/* v4.62: shared inner body — loc column + main content; footer sits below */
+.card-body { display:flex; align-items:center; gap:9px; padding:9px 11px 8px; }
 .wp.done      { border-color:#7ec49a; background:var(--green-bg); }
 .wp.directive { border-color:#d4a84a; }
 .wp-pos { min-width:32px; height:28px; padding:0 8px; border-radius:14px; background:var(--surface2); display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:var(--text2); flex-shrink:0; margin-top:0; letter-spacing:-.2px; }
@@ -180,11 +182,13 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 .wp-pos-badge { position:absolute; top:-4px; right:-4px; width:11px; height:11px; border-radius:50%; background:var(--green); display:flex; align-items:center; justify-content:center; border:1.5px solid var(--surface); }
 .wp-pos-badge svg { width:6px; height:6px; stroke:#fff; fill:none; stroke-width:3; }
 .wp-info { flex:1; min-width:0; }
-.wp-name { font-size:18px; font-weight:700; letter-spacing:.5px; line-height:1.2; white-space:nowrap; flex:0 0 auto; min-width:0; }
-.wp-meta { font-size:15px; color:var(--text2); margin-top:2px; }
+/* v4.62: FIXED type scale — one name size for every card, no JS resizing.
+   Long names ellipse; tapping the name opens the full summary. */
+.wp-name { font-size:17px; font-weight:700; letter-spacing:-.2px; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; min-width:0; }
+.wp-meta { font-size:12px; color:var(--text2); margin-top:2px; display:flex; align-items:baseline; gap:6px; flex-wrap:wrap; }
 .wp-chips{ display:flex; gap:4px; margin-top:3px; flex-wrap:wrap; }
-.wp-acts { display:flex; gap:5px; margin-top:8px; flex-wrap:wrap; }
-.wp-acts .bb { flex:1 1 auto; text-align:center; padding:8px 10px; font-size:12px; white-space:nowrap; }
+.wp-acts { display:flex; gap:5px; margin-top:8px; flex-wrap:nowrap; }
+.wp-acts .bb { flex:1 1 auto; min-width:0; text-align:center; padding:8px 4px; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .ro-col { display:flex; flex-direction:column; gap:3px; flex-shrink:0; padding-top:4px; }
 .ro { width:20px; height:20px; border:.5px solid var(--border2); border-radius:4px; background:none; cursor:pointer; font-size:10px; color:var(--text2); display:flex; align-items:center; justify-content:center; font-family:inherit; }
 .ro:hover { background:var(--surface2); }
@@ -192,6 +196,12 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 /* ALPHA LIST */
 .alpha-sec { font-size:10px; font-weight:700; color:var(--text3); text-transform:uppercase; letter-spacing:.5px; margin:11px 0 5px; }
 .alpha-row { display:flex; align-items:center; gap:12px; padding:12px 13px; border:.5px solid var(--border); border-radius:var(--r); background:var(--surface); cursor:pointer; margin-bottom:6px; }
+/* v4.62: pt-card modifier = new stacked card (body + footer). Plain
+   .alpha-row keeps the old horizontal layout for the discharged list. */
+.alpha-row.pt-card { flex-direction:column; align-items:stretch; gap:0; padding:0; overflow:hidden; }
+/* v4.62: left location column — ward circle with room number beneath */
+.loc-col  { display:flex; flex-direction:column; align-items:center; gap:2px; flex-shrink:0; min-width:44px; cursor:pointer; }
+.loc-room { font-size:12px; font-weight:700; color:var(--text2); letter-spacing:-.2px; white-space:nowrap; }
 .alpha-row.done { border-color:#7ec49a; background:var(--green-bg); }
 .alpha-row.stranded-card { border-left:3px solid var(--red-t); background:var(--red-bg); border-color:var(--red-t); }
 .alpha-row.handover-card { border-left:3px solid #c9a800; background:#fef9e7; border-color:#c9a800; }
@@ -456,13 +466,14 @@ input[type=file] { display:none; }
 .row-icon-disch:active { background:var(--red-bg); }
 .btn-ghost { background:none; border:none; font-size:14px; cursor:pointer; font-family:inherit; padding:10px; }
 
-/* Patient row name + pencil inline */
-.wp-name-row { display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
+/* Patient row: name first (fills width, ellipses), pencil pinned after it.
+   v4.62: nowrap so the pencil can never wrap onto its own line. */
+.wp-name-row { display:flex; align-items:center; gap:6px; flex-wrap:nowrap; }
 .wp-rm   { font-size:10px; color:var(--text2); font-weight:700; margin-left:2px; }
 
-/* Pencil inline with name */
+/* Pencil follows the name */
 .row-pencil-btn {
-  width:30px; height:30px; flex-shrink:0; order:-1; margin-right:2px;
+  width:28px; height:28px; flex-shrink:0;
   border:.5px solid var(--border2); background:var(--surface); cursor:pointer; padding:0;
   display:inline-flex; align-items:center; justify-content:center;
   border-radius:8px; opacity:1;
@@ -481,30 +492,32 @@ input[type=file] { display:none; }
 .wp-right { display:flex; flex-direction:column; align-items:flex-end; gap:5px; flex-shrink:0; }
 .row-icons { display:flex; gap:4px; align-items:center; justify-content:flex-end; }
 
-/* Stacked Claim Hx / D/C right-side buttons */
-.wp-side-btns {
-  display:flex; flex-direction:column; gap:6px;
-  flex-shrink:0; align-items:stretch; min-width:82px;
+/* v4.62: card footer — Handover / Claim Hx / D/C pills in a fixed order on
+   every card. Slightly darker top border separates card actions from billing
+   buttons. Pills ≥40px tall for reliable one-handed taps. */
+.card-foot {
+  display:flex; gap:6px; padding:7px 11px;
+  border-top:1px solid var(--border2); background:var(--surface2);
 }
-.side-btn {
-  display:flex; flex-direction:row; align-items:center; justify-content:center;
-  gap:5px; padding:7px 4px; border-radius:var(--rsm);
+.foot-btn {
+  flex:1; min-width:0; display:flex; align-items:center; justify-content:center;
+  gap:5px; min-height:40px; padding:4px; border-radius:var(--rpill);
   border:.5px solid var(--border2); background:var(--surface);
-  cursor:pointer; font-family:inherit; font-size:12px; font-weight:700;
+  cursor:pointer; font-family:inherit; font-size:11px; font-weight:700;
   letter-spacing:.2px; line-height:1; white-space:nowrap;
 }
-.side-btn svg { width:16px; height:16px; fill:none; stroke-width:1.8; }
-.side-btn-hx { color:var(--blue-t); border-color:#a8c4e8; background:var(--blue-bg); }
-.side-btn-hx svg { stroke:var(--blue-t); }
-.side-btn-hx:active { opacity:.7; }
-.side-btn-dc { color:var(--red-t); border-color:var(--red-t); }
-.side-btn-dc svg { stroke:var(--red-t); }
-.side-btn-dc:active { background:var(--red-bg); }
-.side-btn-flag { color:#7a6d00; border-color:#c9a800; background:var(--surface); }
-.side-btn-flag svg { stroke:#7a6d00; }
-.side-btn-flag.on { color:#fff; border-color:#c9a800; background:#c9a800; }
-.side-btn-flag.on svg { stroke:#fff; }
-.side-btn-flag:active { opacity:.7; }
+.foot-btn svg { width:14px; height:14px; fill:none; stroke-width:1.8; flex-shrink:0; }
+.foot-hx { color:var(--blue-t); border-color:#a8c4e8; background:var(--blue-bg); }
+.foot-hx svg { stroke:var(--blue-t); }
+.foot-hx:active { opacity:.7; }
+.foot-dc { color:var(--red-t); border-color:var(--red-t); }
+.foot-dc svg { stroke:var(--red-t); }
+.foot-dc:active { background:var(--red-bg); }
+.foot-flag { color:#7a6d00; border-color:#c9a800; }
+.foot-flag svg { stroke:#7a6d00; }
+.foot-flag.on { color:#fff; border-color:#c9a800; background:#c9a800; }
+.foot-flag.on svg { stroke:#fff; }
+.foot-flag:active { opacity:.7; }
 
 /* wp-main replaces wp-info for new layout */
 .wp-main { flex:1; min-width:0; overflow:hidden; }
