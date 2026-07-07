@@ -131,16 +131,10 @@ function handoverSectionHtml(patients) {
 }
 
 function handoverRow(p) {
-  var inner = alphaRow(p);
-  var label = p.handover === 'oncall'
-    ? 'Flag for Handover \u2014 On Call Issue'
-    : 'New Patient \u2014 For Handover';
-  // Wrap the standard alpha row with handover styling + label.
+  // v4.63: no text label above the card \u2014 the yellow handover-card styling
+  // and the solid flag pill in the footer already signal it.
   // Clearing is done via the card's own ⚑ flag button (toggleHandoverFlag).
-  return '<div style="position:relative">' +
-    '<div style="padding:2px 10px 0;font-size:10px;font-weight:700;color:#7a6d00">' + label + '</div>' +
-    inner.replace('class="alpha-row', 'class="alpha-row handover-card') +
-    '</div>';
+  return alphaRow(p).replace('class="alpha-row', 'class="alpha-row handover-card');
 }
 
 function roleChip(p) {
