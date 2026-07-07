@@ -50,20 +50,13 @@ function openDuplicateMergeModal(existing, matchedFields, newData) {
     window._dupSelections[f.key] = newV ? 'new' : 'old';
   });
 
-  // Status badge
-  var isDC = String(existing.discharged || '').toLowerCase() === 'true' || existing.discharged === true;
-  var h = '<div style="margin-bottom:10px">';
-  h += isDC
-    ? '<span class="dup-badge dup-badge-dc">Previously discharged</span>'
-    : '<span class="dup-badge dup-badge-active">Currently on list</span>';
+  // (Status badges removed 2026-07-06 — the "Currently on list" / "Phone Consult"
+  // pills were confusing sitting next to the record-type button wording below.)
+  var h = '';
   var via = existing.addedVia || '';
-  if (via === 'PhoneConsult' || via === 'QuickChart')
-    h += '<span class="dup-badge dup-badge-phone">Phone Consult</span>';
-  h += '</div>';
-  h += '<div style="font-size:11px;color:var(--text3);margin-bottom:6px">Matched on: <b>' +
-       esc(matchedFields.join(' + ')) + '</b></div>';
-
-  // Comparison rows
+  // Comparison rows \u2014 built first so the header can name any inconsistent fields.
+  var rowsHtml = '';
+  var conflictLabels = [];
   demoFields.forEach(function(f) {
     var vals = window._dupFieldVals[f.key];
     var oldV = vals.old, newV = vals['new'];
@@ -71,35 +64,66 @@ function openDuplicateMergeModal(existing, matchedFields, newData) {
     var dispOld = f.key === 'dob' && oldV ? dispDate(oldV) : oldV;
     var dispNew = f.key === 'dob' && newV ? dispDate(newV) : newV;
 
-    h += '<div class="dup-row"><div class="dup-label">' + f.label + '</div>';
+    rowsHtml += '<div class="dup-row"><div class="dup-label">' + f.label + '</div>';
     if (same || (!oldV && !newV)) {
-      h += '<div class="dup-match">\u2713 ' + esc(dispOld || '\u2014') + '</div>';
+      rowsHtml += '<div class="dup-match">\u2713 ' + esc(dispOld || '\u2014') + '</div>';
     } else if (!oldV) {
-      h += '<div class="dup-match">+ ' + esc(dispNew) + '</div>';
+      rowsHtml += '<div class="dup-match">+ ' + esc(dispNew) + '</div>';
     } else if (!newV) {
       window._dupSelections[f.key] = 'old';
-      h += '<div class="dup-match">\u2713 ' + esc(dispOld) + '</div>';
+      rowsHtml += '<div class="dup-match">\u2713 ' + esc(dispOld) + '</div>';
     } else {
+      conflictLabels.push(f.label);
       var sel = window._dupSelections[f.key];
-      h += '<div class="dup-pills">';
-      h += '<button class="dup-pill' + (sel === 'old' ? ' selected' : '') +
+      rowsHtml += '<div class="dup-pills">';
+      rowsHtml += '<button class="dup-pill' + (sel === 'old' ? ' selected' : '') +
            '" data-field="' + f.key + '" data-which="old" onclick="_tapDupPill(this)">' +
            esc(dispOld) + '<span class="dup-pill-tag">existing</span></button>';
-      h += '<button class="dup-pill' + (sel === 'new' ? ' selected' : '') +
+      rowsHtml += '<button class="dup-pill' + (sel === 'new' ? ' selected' : '') +
            '" data-field="' + f.key + '" data-which="new" onclick="_tapDupPill(this)">' +
            esc(dispNew) + '<span class="dup-pill-tag">new</span></button>';
-      h += '</div>';
+      rowsHtml += '</div>';
     }
-    h += '</div>';
+    rowsHtml += '</div>';
   });
+
+  // Header: what linked the two records, then a confirm prompt naming any
+  // fields whose demographics DON'T agree (the ones the doctor must resolve).
+  h += '<div style="font-size:11px;color:var(--text3);margin-bottom:6px">Matched on: <b>' +
+       esc(matchedFields.join(' + ')) + '</b></div>';
+  if (conflictLabels.length) {
+    var cj = conflictLabels.length === 1
+      ? conflictLabels[0]
+      : conflictLabels.slice(0, -1).join(', ') + ' and ' + conflictLabels[conflictLabels.length - 1];
+    h += '<div class="dup-confirm">Inconsistent ' + esc(cj) +
+         ' \u2014 please confirm the correct demographics below.</div>';
+  }
+  h += rowsHtml;
 
   // Claim count
   var cc = st.claims.filter(function(c) { return samePhn(c.phn, existing.phn); }).length;
   if (cc) h += '<div style="font-size:11px;color:var(--text3);margin-top:8px">' +
                cc + ' existing claim' + (cc > 1 ? 's' : '') + ' linked</div>';
 
+  // Button wording reflects WHY the record already exists:
+  //   • ever on the on/off service list      → a true readmission
+  //   • phone-consult stub (never admitted)   → move to active service
+  //   • anything else (procedure/consult-only)→ move to active service
+  // A record that was ever on service wins over the phone-consult check, so a
+  // phone consult who was later admitted still reads as a readmission.
+  var isPhoneConsult = (via === 'PhoneConsult' || via === 'PhoneConsult-Review' || via === 'QuickChart');
+  var wasOnService   = (existing.list === 'on' || existing.list === 'off');
+  var mergeLabel;
+  if (wasOnService) {
+    mergeLabel = 'Readmit to service';                 window._dupIsReadmit = true;
+  } else if (isPhoneConsult) {
+    mergeLabel = 'Move to active service (prior phone consult)'; window._dupIsReadmit = false;
+  } else {
+    mergeLabel = 'Move to active service (procedure)';    window._dupIsReadmit = false;
+  }
+
   h += '<div style="display:flex;gap:8px;margin-top:14px">';
-  h += '<button class="btn btn-p" style="flex:1;margin:0" onclick="_mergeAndReadmit()">Readmit &amp; Merge</button>';
+  h += '<button class="btn btn-p" style="flex:1;margin:0" onclick="_mergeAndReadmit()">' + mergeLabel + '</button>';
   h += '<button class="btn btn-s" style="flex:1;margin:0" onclick="_createNewPatient()">New Patient</button>';
   h += '</div>';
 
@@ -124,7 +148,12 @@ async function _mergeAndReadmit() {
   if (!p) return;
   var addToList = window._apPendingAddToList;
 
-  // Apply selected demographics
+  // Apply selected demographics — write-back over the prior record.
+  // Default is the NEW admission's value (see _dupSelections in the modal), so a
+  // freshly-confirmed last/first/PHN/DOB/sex overwrites the prior (possibly
+  // wrong) value on the existing record. Tapping "existing" keeps the old one.
+  // p is the live st.patients object and is saved via push('savePatient', p)
+  // below, so the corrected demographics persist to the sheet.
   ['last', 'first', 'phn', 'dob', 'sex'].forEach(function(key) {
     var which = window._dupSelections[key] || 'new';
     var val = window._dupFieldVals[key][which];
@@ -183,7 +212,8 @@ async function _mergeAndReadmit() {
       return;
     }
   }
-  logChange(p, 'Readmit (merged)', addToList ? (p.ward + (p.bed ? ' Rm ' + p.bed : '')) : 'Consult only');
+  var mergeVerb = window._dupIsReadmit ? 'Readmit (merged)' : 'Moved to active service (merged)';
+  logChange(p, mergeVerb, addToList ? (p.ward + (p.bed ? ' Rm ' + p.bed : '')) : 'Consult only');
 
   // Create claim — same flow as apSubmit
   if (st.doc) {
@@ -208,7 +238,7 @@ async function _mergeAndReadmit() {
     }
   }
 
-  showToast(p.last + ' readmitted (merged)');
+  showToast(p.last + (window._dupIsReadmit ? ' readmitted (merged)' : ' moved to active service (merged)'));
   _hideSubmitOverlay();
   clearAddForm();
   if (addToList) { nav(0, document.querySelectorAll('.nb')[0]); }

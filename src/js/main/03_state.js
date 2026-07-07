@@ -91,7 +91,24 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // age (grey = plausible 17–105, amber = <17 or >105, red = unparseable)
 // before the claim is submitted. UI-only, additive; no cache-format change,
 // BUILD_ID not bumped. (index.template.html + 14_init.js + 09_patient.js)
-var APP_VERSION = 'v4.59';
+//
+// v4.60 (2026-07-06): Duplicate-patient "Existing patient found" modal —
+// (1) added the missing CSS for its comparison rows (.dup-row/.dup-label/
+// .dup-pills/.dup-pill/.dup-pill-tag/.dup-confirm). The old→new
+// choice pills were previously unstyled and jammed together; they now render
+// as clearly separated, tappable buttons with a highlighted selection.
+// (2) The primary button now names WHY the record already exists: a record
+// ever on the on/off service list → "Readmit to service"; a phone-consult
+// stub → "Move to active service (phone consult)"; anything else (procedure/
+// consult-only) → "Move to active service (procedure)". Toast/log verbs follow.
+// (3) When demographics disagree, a header line now reads "Inconsistent
+// <fields> — please confirm the correct demographics below."; the confirmed
+// (new-admission) values are written back over the prior record on merge.
+// (4) Removed the top "Currently on list" / "Phone Consult" status badges
+// (confusing next to the button wording). Phone-consult button now reads
+// "Move to active service (prior phone consult)". UI-only, additive;
+// BUILD_ID not bumped. (index.template.html + 09_patient.js)
+var APP_VERSION = 'v4.60';
 var APP_BUILT   = '2026-07-06';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
