@@ -82,6 +82,29 @@ function clearHandover(pid) {
   render();
 }
 
+// v4.61: Toggle handover flag on/off directly from a patient card
+function toggleHandoverFlag(pid) {
+  var p = getP(pid);
+  if (!p) return;
+  var wasOn = !!p.handover && p.handover !== 'false';
+  p.handover = wasOn ? false : 'oncall';
+  sv('patients', st.patients);
+  if (SHEETS_URL) push('savePatient', p);
+  logChange(p, wasOn ? 'Handover flag cleared' : 'Flagged for handover', (st.doc && st.doc.alias) || '');
+  render();
+}
+
+// v4.61: Flag side-button for the stacked right-hand controls
+function flagSideBtn(p) {
+  var on = !!p.handover && p.handover !== 'false';
+  return '<button class="side-btn side-btn-flag' + (on ? ' on' : '') + '" data-pid="' + p.id + '"' +
+    ' onclick="event.stopPropagation();toggleHandoverFlag(this.getAttribute(\'data-pid\'))"' +
+    ' title="' + (on ? 'Clear handover flag' : 'Flag for handover') + '">' +
+    '<svg viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>' +
+    '<span>' + (on ? 'Flagged' : 'Flag') + '</span>' +
+    '</button>';
+}
+
 function handoverSectionHtml(patients) {
   if (!patients.length) return '';
   return '<div class="handover-block">' +
@@ -340,10 +363,10 @@ function wardHtml(ward) {
                '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + '</div>' +
                '<div class="wp-acts">' +
                  wardActBtns(p) +
-                 '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
+                 '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Other Claim</button>' +
                '</div>' +
              '</div>' +
-             '<div class="wp-side-btns">' +
+             '<div class="wp-side-btns">' + flagSideBtn(p) +
                '<button class="side-btn side-btn-hx" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'summary\')">' +
                  '<svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>' +
                  '<span>Claim Hx</span>' +
@@ -528,7 +551,7 @@ function lastSeenByGroup(p) {
     color = 'var(--text3)';     weight = '500';   // recent (<= 2 days)
   }
 
-  return '<span style="font-size:10px;color:' + color + ';font-weight:' + weight +
+  return '<span style="font-size:14px;color:' + color + ';font-weight:' + weight +
     ';margin-left:2px;white-space:nowrap">Last seen by ' + esc(alias) + ' ' + label + '</span>';
 }
 
@@ -568,15 +591,15 @@ function offRow(p) {
         '</button>' +
       '</div>' +
       '<div style="display:flex;align-items:baseline;gap:7px;margin-top:1px;margin-bottom:2px">' +
-        '<span style="font-size:11px;font-weight:700;color:var(--text2)">' + roomStr + '</span>' +
+        '<span style="font-size:16px;font-weight:700;color:var(--text2)">' + roomStr + '</span>' +
         lastSeen +
       '</div>' +
       '<div class="wp-meta">' + row3 + '</div>' +
       '<div class="wp-acts">' + quickActBtns(p) +
-        '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
+        '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Other Claim</button>' +
       '</div>' +
     '</div>' +
-    '<div class="wp-side-btns">' +
+    '<div class="wp-side-btns">' + flagSideBtn(p) +
       '<button class="side-btn side-btn-hx" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'summary\')">' +
         '<svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>' +
         '<span>Claim Hx</span>' +
@@ -630,13 +653,13 @@ function alphaRow(p) {
           '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
         '</button>' +
       '</div>' +
-      (roomStr ? '<div style="display:flex;align-items:baseline;gap:7px;margin-top:1px;margin-bottom:2px"><span style="font-size:11px;font-weight:700;color:var(--text2)">' + roomStr + '</span>' + lastSeen + '</div>' : '') +
+      (roomStr ? '<div style="display:flex;align-items:baseline;gap:7px;margin-top:1px;margin-bottom:2px"><span style="font-size:16px;font-weight:700;color:var(--text2)">' + roomStr + '</span>' + lastSeen + '</div>' : '') +
       '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + lastBilledChip(p) + '</div>' +
       '<div class="wp-acts">' + quickActBtns(p) +
-        '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
+        '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Other Claim</button>' +
       '</div>' +
     '</div>' +
-    '<div class="wp-side-btns">' +
+    '<div class="wp-side-btns">' + flagSideBtn(p) +
       '<button class="side-btn side-btn-hx" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'summary\')">' +
         '<svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>' +
         '<span>Claim Hx</span>' +

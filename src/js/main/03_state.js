@@ -108,7 +108,7 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // (confusing next to the button wording). Phone-consult button now reads
 // "Move to active service (prior phone consult)". UI-only, additive;
 // BUILD_ID not bumped. (index.template.html + 09_patient.js)
-var APP_VERSION = 'v4.60';
+var APP_VERSION = 'v4.61';
 var APP_BUILT   = '2026-07-06';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,

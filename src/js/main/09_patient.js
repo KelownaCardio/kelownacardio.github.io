@@ -176,7 +176,9 @@ async function _mergeAndReadmit() {
     p.list = gv('f-list') || 'on';
     p.care = gv('f-care') || 'directive';
     if (p.ward && p.bed) saveCustomRoom(p.ward, p.bed);
-    if (new Date().getHours() >= 17) p.handover = 'new';
+    // v4.61: Auto-flag for handover Mon–Thu after 15:00 (Fri/weekend = manual flag only)
+    var _hd = new Date(), _hdDow = _hd.getDay();
+    if (_hdDow >= 1 && _hdDow <= 4 && _hd.getHours() >= 15) p.handover = 'new';
   } else {
     p.ward = ''; p.bed = ''; p.role = 'consultant';
     p.mrp  = 'Other'; p.list = 'consult-only'; p.care = 'directive';
@@ -1257,8 +1259,9 @@ async function apSubmit(addToList, _skipDupCheck) {
     p.list  = gv('f-list') || 'on';
     p.care  = gv('f-care') || 'directive';
     if (p.ward && p.bed) saveCustomRoom(p.ward, p.bed);
-    // v4.37: Auto-flag for handover when patient added after 17:00
-    if (new Date().getHours() >= 17) p.handover = 'new';
+    // v4.61: Auto-flag for handover Mon–Thu after 15:00 (Fri/weekend = manual flag only)
+    var _hd = new Date(), _hdDow = _hd.getDay();
+    if (_hdDow >= 1 && _hdDow <= 4 && _hd.getHours() >= 15) p.handover = 'new';
   } else {
     // Consult-only patient — not added to rounds; lives in Recently Discharged
     p.ward  = ''; p.bed = ''; p.role = 'consultant';
