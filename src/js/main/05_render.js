@@ -105,6 +105,32 @@ function flagSideBtn(p) {
     '</button>';
 }
 
+// v4.61: Auto-fit patient-name font so long names fill the top row on a
+// single line (next to the pencil) instead of wrapping. Shrinks from the
+// 18px CSS base down to 11px until the name fits the available width.
+function fitCardNames() {
+  if (!window._fitNamesBound) {
+    window._fitNamesBound = true;
+    window.addEventListener('resize', function() { requestAnimationFrame(fitCardNames); });
+  }
+  var rows = document.querySelectorAll('.wp-name-row');
+  for (var i = 0; i < rows.length; i++) {
+    var name = rows[i].querySelector('.wp-name');
+    if (!name) continue;
+    var pencil = rows[i].querySelector('.row-pencil-btn');
+    var avail = rows[i].clientWidth - (pencil ? pencil.offsetWidth + 10 : 0);
+    if (avail <= 0) continue;
+    var size = 18;
+    name.style.fontSize = size + 'px';
+    var guard = 0;
+    while (name.scrollWidth > avail && size > 11 && guard < 40) {
+      size -= 0.5;
+      name.style.fontSize = size + 'px';
+      guard++;
+    }
+  }
+}
+
 function handoverSectionHtml(patients) {
   if (!patients.length) return '';
   return '<div class="handover-block">' +
@@ -168,6 +194,9 @@ function render() {
       (_hoOffN ? ' <span style="color:#7a6d00;font-weight:800">\u2691' + _hoOffN + '</span>' : '') +
       (_strandedN ? ' <span style="color:var(--red-t);font-weight:800">\u26A0' + _strandedN + '</span>' : '');
   }
+
+  // v4.61: after DOM updates, shrink long names to fit their row on one line
+  requestAnimationFrame(fitCardNames);
 
   // Search overrides list selection — show unified results across On + Off Service
   if (_roundsQuery) {
