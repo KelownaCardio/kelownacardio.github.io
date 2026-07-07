@@ -180,8 +180,8 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 .wp-pos-badge { position:absolute; top:-4px; right:-4px; width:11px; height:11px; border-radius:50%; background:var(--green); display:flex; align-items:center; justify-content:center; border:1.5px solid var(--surface); }
 .wp-pos-badge svg { width:6px; height:6px; stroke:#fff; fill:none; stroke-width:3; }
 .wp-info { flex:1; min-width:0; }
-.wp-name { font-size:13px; font-weight:700; letter-spacing:-.1px; line-height:1.25; }
-.wp-meta { font-size:10px; color:var(--text2); margin-top:1px; }
+.wp-name { font-size:18px; font-weight:700; letter-spacing:.5px; line-height:1.2; }
+.wp-meta { font-size:15px; color:var(--text2); margin-top:2px; }
 .wp-chips{ display:flex; gap:4px; margin-top:3px; flex-wrap:wrap; }
 .wp-acts { display:flex; gap:3px; margin-top:5px; flex-wrap:nowrap; }
 .wp-acts .bb { flex:1; min-width:0; text-align:center; padding:4px 2px; font-size:clamp(8px,1.15vw,10px); overflow:hidden; text-overflow:ellipsis; }
@@ -191,7 +191,7 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 
 /* ALPHA LIST */
 .alpha-sec { font-size:10px; font-weight:700; color:var(--text3); text-transform:uppercase; letter-spacing:.5px; margin:11px 0 5px; }
-.alpha-row { display:flex; align-items:center; gap:9px; padding:9px 10px; border:.5px solid var(--border); border-radius:var(--r); background:var(--surface); cursor:pointer; margin-bottom:5px; }
+.alpha-row { display:flex; align-items:center; gap:12px; padding:12px 13px; border:.5px solid var(--border); border-radius:var(--r); background:var(--surface); cursor:pointer; margin-bottom:6px; }
 .alpha-row.done { border-color:#7ec49a; background:var(--green-bg); }
 .alpha-row.stranded-card { border-left:3px solid var(--red-t); background:var(--red-bg); border-color:var(--red-t); }
 .alpha-row.handover-card { border-left:3px solid #c9a800; background:#fef9e7; border-color:#c9a800; }
@@ -462,13 +462,13 @@ input[type=file] { display:none; }
 
 /* Pencil inline with name */
 .row-pencil-btn {
-  width:20px; height:20px; flex-shrink:0;
-  border:none; background:none; cursor:pointer; padding:0;
+  width:30px; height:30px; flex-shrink:0;
+  border:.5px solid var(--border2); background:var(--surface); cursor:pointer; padding:0;
   display:inline-flex; align-items:center; justify-content:center;
-  border-radius:4px; opacity:.55;
+  border-radius:8px; opacity:1;
 }
-.row-pencil-btn svg { width:12px; height:12px; stroke:var(--text2); fill:none; stroke-width:2; }
-.row-pencil-btn:active { opacity:1; background:var(--blue-bg); }
+.row-pencil-btn svg { width:16px; height:16px; stroke:var(--text2); fill:none; stroke-width:2; }
+.row-pencil-btn:active { background:var(--blue-bg); border-color:var(--blue); }
 
 /* D/C button */
 .row-icon-disch {
@@ -483,23 +483,28 @@ input[type=file] { display:none; }
 
 /* Stacked Claim Hx / D/C right-side buttons */
 .wp-side-btns {
-  display:flex; flex-direction:column; gap:4px;
-  flex-shrink:0; align-items:stretch; min-width:58px;
+  display:flex; flex-direction:column; gap:6px;
+  flex-shrink:0; align-items:stretch; min-width:82px;
 }
 .side-btn {
-  display:flex; flex-direction:column; align-items:center; justify-content:center;
-  gap:2px; padding:5px 4px; border-radius:var(--rsm);
+  display:flex; flex-direction:row; align-items:center; justify-content:center;
+  gap:5px; padding:7px 4px; border-radius:var(--rsm);
   border:.5px solid var(--border2); background:var(--surface);
-  cursor:pointer; font-family:inherit; font-size:9px; font-weight:700;
-  letter-spacing:.2px; line-height:1;
+  cursor:pointer; font-family:inherit; font-size:12px; font-weight:700;
+  letter-spacing:.2px; line-height:1; white-space:nowrap;
 }
-.side-btn svg { width:13px; height:13px; fill:none; stroke-width:1.8; }
+.side-btn svg { width:16px; height:16px; fill:none; stroke-width:1.8; }
 .side-btn-hx { color:var(--blue-t); border-color:#a8c4e8; background:var(--blue-bg); }
 .side-btn-hx svg { stroke:var(--blue-t); }
 .side-btn-hx:active { opacity:.7; }
 .side-btn-dc { color:var(--red-t); border-color:var(--red-t); }
 .side-btn-dc svg { stroke:var(--red-t); }
 .side-btn-dc:active { background:var(--red-bg); }
+.side-btn-flag { color:#7a6d00; border-color:#c9a800; background:var(--surface); }
+.side-btn-flag svg { stroke:#7a6d00; }
+.side-btn-flag.on { color:#fff; border-color:#c9a800; background:#c9a800; }
+.side-btn-flag.on svg { stroke:#fff; }
+.side-btn-flag:active { opacity:.7; }
 
 /* wp-main replaces wp-info for new layout */
 .wp-main { flex:1; min-width:0; }
