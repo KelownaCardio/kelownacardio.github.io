@@ -120,7 +120,12 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // (5) Labels: "Directive" / "Combined daily" (no +), "+ Other Claim" →
 // "+ Claim". (05_render.js + index.template.html; discharged-list rows
 // keep the old horizontal .alpha-row layout via the .pt-card modifier.)
-var APP_VERSION = 'v4.62';
+// v4.63 (2026-07-06): card-redesign tweaks after live review — ICU wards no
+// longer compressed in the ward circle (ICUB not ICB); "Last seen by" chip
+// down to 12px/600 to match the meta row (colour still = recency: grey ≤2d,
+// amber 3-4d, red >5d); card border strengthened to 1px so card + footer
+// read as one unit against the page.
+var APP_VERSION = 'v4.63';
 var APP_BUILT   = '2026-07-06';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,

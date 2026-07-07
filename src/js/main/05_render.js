@@ -544,16 +544,14 @@ function lastSeenByGroup(p) {
 
   // Days since — thresholds tied to directive care intervals (2/week ~= every 3-4 days)
   var days = Math.floor((Date.now() - newest.t) / 86400000);
-  var color, weight;
-  if (days > 5) {
-    color = 'var(--red-t)';     weight = '700';   // overdue
-  } else if (days >= 3) {
-    color = 'var(--amber-t)';   weight = '700';   // approaching limit
-  } else {
-    color = 'var(--text3)';     weight = '500';   // recent (<= 2 days)
-  }
+  var color;
+  if (days > 5)       color = 'var(--red-t)';    // overdue
+  else if (days >= 3) color = 'var(--amber-t)';  // approaching limit
+  else                color = 'var(--text3)';    // recent (<= 2 days)
 
-  return '<span style="font-size:14px;color:' + color + ';font-weight:' + weight +
+  // v4.62.1: match the meta-row size (12px), lightly bolded; colour still
+  // encodes recency (grey ≤2d, amber 3-4d, red >5d overdue).
+  return '<span style="font-size:12px;color:' + color + ';font-weight:600' +
     ';margin-left:2px;white-space:nowrap">Last seen by ' + esc(alias) + ' ' + label + '</span>';
 }
 
@@ -576,7 +574,7 @@ function ageGenderShort(p) {
 function offRow(p) {
   var dn       = claimedToday(p);
   // Circle shows ward abbreviation for off-service
-  var wardAbbr = String(wardLabel(p.ward) || '').replace('Ward ', '').replace('ICU ', 'IC').slice(0, 5);
+  var wardAbbr = String(wardLabel(p.ward) || '').replace('Ward ', '').replace('ICU ', 'ICU').slice(0, 5);
   // v4.62: room lives under the ward circle (loc-col); last-seen joins row 3
   var lastSeen = lastSeenByGroup(p);
   // Row 3: Age (Sex) · MRP · Dx
@@ -632,7 +630,7 @@ function alphaRow(p) {
   // v4.34: red border on stranded patient cards for safety visibility
   var _stranded = isStranded(p) ? ' stranded-card' : '';
   // Circle shows ward abbreviation (same as off-service)
-  var wardAbbr = String(wardLabel(p.ward) || '').replace('Ward ', '').replace('ICU ', 'IC').slice(0, 5);
+  var wardAbbr = String(wardLabel(p.ward) || '').replace('Ward ', '').replace('ICU ', 'ICU').slice(0, 5);
   // v4.62: room lives under the ward circle (loc-col); last-seen joins meta row
   var lastSeen = lastSeenByGroup(p);
   return '<div class="alpha-row pt-card' + (dn ? ' done' : '') + _stranded + '">' +
