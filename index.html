@@ -2259,7 +2259,16 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // position) applied (a) to remote patients on every sync merge and (b) to
 // st.patients before the reorder bulk push. Backend mirror: Crud.gs v3.09
 // dedups + ChangeLog-logs inside saveAll itself.
-var APP_VERSION = 'v4.64';
+// v4.65 (2026-07-07): Room-detection decoder fixes from the first week of the
+// Room Detection log (25 rows, only 4 fully correct). (1) LOC_MAP: KELKGHSCCJ
+// → CCU (logged 07-05, corrected to CCU bed 7). (2) ED main-department
+// "KGH-Main-<N>" roomBed now parses to "Main N" (3/3 ED rows needed this).
+// (3) "ACIN" — on every inpatient ADM line, carries NO location info (Kathryn
+// 2026-07-07) — is stripped in parseLocCode, excluded from the learning log
+// when captured alone, and the OCR prompt now tells the engine it is not the
+// locationCode. Decoder block also mirrored into import.html (hand-uploaded).
+// (13_meditech.js + 09_patient.js + import.html.) No cache-format change.
+var APP_VERSION = 'v4.65';
 var APP_BUILT   = '2026-07-07';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -9992,6 +10001,10 @@ var STICKER_PROMPT =
   'On a Meditech chart header the location is one line, e.g.\n' +
   '  "ADM ACIN, KELKGHS2S  KGHS0221 -A"\n' +
   '  → locationCode "KELKGHS2S", roomBed "KGHS0221-A".\n' +
+  'IMPORTANT: "ACIN" is NOT the locationCode — it appears on every\n' +
+  'inpatient chart and carries no location information. The locationCode\n' +
+  'is the KEL… token (or worded unit name) AFTER it. If only "ACIN" is\n' +
+  'visible with no unit code beside it, return locationCode blank.\n' +
   'Return ONLY valid JSON, no markdown, no explanation.';
 
 // v4.42: single timeout for the server-side OCR call. Covers the full
@@ -10463,7 +10476,11 @@ function handleOCRResult(data, bar) {
     // save we compare against the ward/room the doctor actually keeps and log
     // EVERY decode (with a changed flag) to the "Room Detection" sheet, so the
     // LOC_MAP decoder can be improved across users. See apSubmit / logRoomDetection.
-    window._ocrLocDecode = {
+    // v4.65: skip the log when the capture is "ACIN" alone with no room-bed
+    // token — ACIN carries no location info (Kathryn 2026-07-07), so there is
+    // nothing to learn from it (it was 12/25 rows in the log's first week).
+    var _acinOnly = /^[\s,]*ACIN[\s,]*$/i.test(String(p.locationCode || '')) && !p.roomBed;
+    if (!_acinOnly) window._ocrLocDecode = {
       locCode: String(p.locationCode || ''),
       roomBed: String(p.roomBed || ''),
       ocrWard: _loc.ward || '',
@@ -12493,6 +12510,7 @@ document.addEventListener('click', function(e) {
 //   suspect — true when a CCU bed decodes outside 1-8 (needs review).
 var LOC_MAP = {
   SCCU:'CCU',    CCU:'CCU',
+  SCCJ:'CCU',    // KELKGHSCCJ — decodes to CCU (room-detection log 2026-07-05: KGHS2507-A → CCU bed 7; Kathryn 2026-07-07)
   S2W:'2W',      S2S:'2S',
   CSICU:'CSICU', ICSI:'CSICU',
   ICUA:'ICUA',   ICUB:'ICUB',   ICUD:'ICUD',   RICU:'ICUA',
@@ -12514,6 +12532,12 @@ function parseLocCode(locCode, roomBed) {
   var room    = '';
   var suspect = false;
   var loc     = (locCode || '').toUpperCase();
+
+  // "ACIN" appears after "ADM" on every inpatient chart header and carries
+  // NO location information (Kathryn 2026-07-07). Remove it so an ACIN-only
+  // OCR capture decodes like a blank locCode instead of a bogus unit —
+  // 12/25 rows in the first week of the Room Detection log were ACIN-only.
+  loc = loc.replace(/ACIN/g, '');
 
   for (var key in LOC_MAP) {
     if (loc.indexOf(key) !== -1) { ward = LOC_MAP[key]; break; }
@@ -12558,7 +12582,12 @@ function parseLocCode(locCode, roomBed) {
   } else if (ward === 'ED') {
     // ED overflow token "CEDOF<NN>" -> Main bed N (Kathryn 2026-06-29).
     var med = rb.match(/EDOF0*(\d+)/);
+    // ED main department "KGH-Main-<N>" -> rb "KGHMAIN<N>" (KGH prefix is
+    // not stripped before M) -> "Main N" (room-detection log 2026-07-07:
+    // 3/3 ED rows were corrected to exactly this form).
+    var mmn = rb.match(/MAIN0*(\d+)$/);
     if (med) { room = 'Main ' + parseInt(med[1], 10); }
+    else if (mmn) { room = 'Main ' + parseInt(mmn[1], 10); }
     else { var me2 = rb.match(/^0*(\d+)([A-Z]?)$/); if (me2) room = me2[1] + me2[2]; }
   } else if (ward === '3MU') {
     // "3MU<NN>" -> bed N (Kathryn 2026-06-29).
