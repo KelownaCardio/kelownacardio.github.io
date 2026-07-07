@@ -125,11 +125,43 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // down to 12px/600 to match the meta row (colour still = recency: grey ≤2d,
 // amber 3-4d, red >5d); card border strengthened to 1px so card + footer
 // read as one unit against the page.
-var APP_VERSION = 'v4.63';
-var APP_BUILT   = '2026-07-06';
+// v4.64 (2026-07-07): SAME-ID PATIENT DEDUP — fix for the Swite duplicate
+// (two Patients rows, identical id p1781025811483, handover=false vs
+// oncall). Root cause: the bulk savePatients rewrite (fired by reorder)
+// persisted a duplicated local array verbatim — no id-dedup, no logging —
+// and sync then returned both rows, making the duplicate self-sustaining.
+// Fix: new dedupById() (keeps the LAST occurrence = freshest write, at its
+// position) applied (a) to remote patients on every sync merge and (b) to
+// st.patients before the reorder bulk push. Backend mirror: Crud.gs v3.09
+// dedups + ChangeLog-logs inside saveAll itself.
+var APP_VERSION = 'v4.64';
+var APP_BUILT   = '2026-07-07';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
+
+// ── Same-id dedup (v4.64) ──────────────────────────────────────────────────
+// Collapses duplicate ids in a patient array, keeping the LAST
+// occurrence (freshest write) at its position. Guards the sync merge
+// and the bulk savePatients push (reorder) against the self-sustaining
+// duplicate-row loop (Swite, 2026-07-07). Backend mirror: Crud.gs v3.09.
+function dedupById(list) {
+  if (!Array.isArray(list) || list.length < 2) return list;
+  var lastIdx = {};
+  list.forEach(function(o, i) {
+    var id = (o && o.id != null) ? String(o.id) : '';
+    if (id) lastIdx[id] = i;
+  });
+  var out = list.filter(function(o, i) {
+    var id = (o && o.id != null) ? String(o.id) : '';
+    return !id || lastIdx[id] === i;
+  });
+  if (out.length !== list.length) {
+    console.warn('[dedupById] removed ' + (list.length - out.length) +
+                 ' same-id duplicate patient row(s)');
+  }
+  return out;
+}
 
 (function purgeIfBuildChanged() {
   try {
@@ -345,6 +377,7 @@ async function syncFromSheets() {
     // Anything older that isn't on Sheets was deliberately removed — drop it.
     if (d.patients && Array.isArray(d.patients)) {
       window._lastSyncResponse.patientsMergeRan = true;
+      d.patients = dedupById(d.patients);   // v4.64: collapse same-id sheet rows (keep last)
       d.patients.forEach(function(p) {
         // Normalise DOB from Sheets ISO timestamp
         if (p.dob) p.dob = fmtClaimDate(p.dob);

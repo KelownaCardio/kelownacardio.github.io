@@ -726,6 +726,7 @@ function batchRound(ward) {
 
 // ── Reorder ward patients ──────────────────────────────
 function reorder(ward, pid, dir) {
+  st.patients = dedupById(st.patients);   // v4.64: never bulk-push same-id duplicates
   var wPts = st.patients.filter(function(p) { return p.ward === ward && p.list === 'on'; });
   var idx  = wPts.findIndex(function(p) { return p.id === pid; });
   var nIdx = idx + dir;
