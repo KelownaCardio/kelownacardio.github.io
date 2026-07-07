@@ -496,17 +496,19 @@ input[type=file] { display:none; }
    every card. Slightly darker top border separates card actions from billing
    buttons. Pills ≥40px tall for reliable one-handed taps. */
 .card-foot {
-  display:flex; gap:6px; padding:7px 11px;
+  display:flex; gap:6px; padding:6px 11px;
   border-top:1px solid var(--border2); background:var(--surface2);
 }
+/* v4.63: footer pills slightly SMALLER than the daily-use billing pills
+   above them (rarely used — visually subordinate but still tappable) */
 .foot-btn {
   flex:1; min-width:0; display:flex; align-items:center; justify-content:center;
-  gap:5px; min-height:40px; padding:4px; border-radius:var(--rpill);
+  gap:4px; min-height:27px; padding:3px; border-radius:var(--rpill);
   border:.5px solid var(--border2); background:var(--surface);
-  cursor:pointer; font-family:inherit; font-size:11px; font-weight:700;
+  cursor:pointer; font-family:inherit; font-size:10px; font-weight:700;
   letter-spacing:.2px; line-height:1; white-space:nowrap;
 }
-.foot-btn svg { width:14px; height:14px; fill:none; stroke-width:1.8; flex-shrink:0; }
+.foot-btn svg { width:12px; height:12px; fill:none; stroke-width:1.8; flex-shrink:0; }
 .foot-hx { color:var(--blue-t); border-color:#a8c4e8; background:var(--blue-bg); }
 .foot-hx svg { stroke:var(--blue-t); }
 .foot-hx:active { opacity:.7; }
