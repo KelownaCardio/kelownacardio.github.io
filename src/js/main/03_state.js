@@ -108,7 +108,19 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // (confusing next to the button wording). Phone-consult button now reads
 // "Move to active service (prior phone consult)". UI-only, additive;
 // BUILD_ID not bumped. (index.template.html + 09_patient.js)
-var APP_VERSION = 'v4.61';
+// v4.62 (2026-07-06): Patient-card redesign — readability + consistent type.
+// (1) FIXED name size (17px) on every card; removed the v4.61 fitCardNames()
+// JS auto-shrink that produced heterogeneous name sizes. Long names ellipse;
+// tap the name for the full summary. (2) Pencil follows the name on a
+// no-wrap row so it can never drop onto its own line. (3) Handover /
+// Claim Hx / D/C moved from the right-side column into a bordered card
+// footer (fixed order, ≥40px tall). (4) Room number now sits under the
+// ward circle in the left column (alpha + off-service views; geographic
+// view circle already shows the bed). Last-seen chip joined the meta row.
+// (5) Labels: "Directive" / "Combined daily" (no +), "+ Other Claim" →
+// "+ Claim". (05_render.js + index.template.html; discharged-list rows
+// keep the old horizontal .alpha-row layout via the .pt-card modifier.)
+var APP_VERSION = 'v4.62';
 var APP_BUILT   = '2026-07-06';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,

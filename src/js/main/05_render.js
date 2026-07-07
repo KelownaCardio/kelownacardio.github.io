@@ -94,49 +94,27 @@ function toggleHandoverFlag(pid) {
   render();
 }
 
-// v4.61: Flag side-button for the stacked right-hand controls
-function flagSideBtn(p) {
+// v4.62: bordered footer row with the three card-level actions.
+// Fixed order on every card (Handover / Claim Hx / D/C) for muscle memory.
+// Names are a FIXED size in CSS (.wp-name) — the v4.61 JS auto-fit is gone.
+function cardFootHtml(p) {
   var on = !!p.handover && p.handover !== 'false';
-  return '<button class="side-btn side-btn-flag' + (on ? ' on' : '') + '" data-pid="' + p.id + '"' +
-    ' onclick="event.stopPropagation();toggleHandoverFlag(this.getAttribute(\'data-pid\'))"' +
-    ' title="' + (on ? 'Clear handover flag' : 'Flag for handover') + '">' +
-    '<svg viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>' +
-    '<span>Handover</span>' +
-    '</button>';
-}
-
-// v4.61: Keep patient names on a single line without wrapping, and keep
-// them a UNIFORM size across the visible list. Pass 1 finds the smallest
-// size any one name needs to fit its row; pass 2 applies that one size to
-// every name so cards look consistent. Ranges 18px (max) down to 12px.
-function fitCardNames() {
-  if (!window._fitNamesBound) {
-    window._fitNamesBound = true;
-    window.addEventListener('resize', function() { requestAnimationFrame(fitCardNames); });
-  }
-  var rows = document.querySelectorAll('.wp-name-row');
-  if (!rows.length) return;
-  var target = 18;
-  for (var i = 0; i < rows.length; i++) {
-    var name = rows[i].querySelector('.wp-name');
-    if (!name) continue;
-    var pencil = rows[i].querySelector('.row-pencil-btn');
-    var avail = rows[i].clientWidth - (pencil ? pencil.offsetWidth + 10 : 0);
-    if (avail <= 0) continue;               // hidden view / not laid out
-    var size = 18;
-    name.style.fontSize = size + 'px';
-    var guard = 0;
-    while (name.scrollWidth > avail && size > 12 && guard < 40) {
-      size -= 0.5;
-      name.style.fontSize = size + 'px';
-      guard++;
-    }
-    if (size < target) target = size;
-  }
-  for (var j = 0; j < rows.length; j++) {
-    var n2 = rows[j].querySelector('.wp-name');
-    if (n2 && rows[j].clientWidth > 0) n2.style.fontSize = target + 'px';
-  }
+  return '<div class="card-foot">' +
+    '<button class="foot-btn foot-flag' + (on ? ' on' : '') + '" data-pid="' + p.id + '"' +
+      ' onclick="event.stopPropagation();toggleHandoverFlag(this.getAttribute(\'data-pid\'))"' +
+      ' title="' + (on ? 'Clear handover flag' : 'Flag for handover') + '">' +
+      '<svg viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>' +
+      '<span>Handover</span>' +
+    '</button>' +
+    '<button class="foot-btn foot-hx" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'summary\')">' +
+      '<svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>' +
+      '<span>Claim Hx</span>' +
+    '</button>' +
+    '<button class="foot-btn foot-dc" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'disch\')">' +
+      '<svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>' +
+      '<span>D/C</span>' +
+    '</button>' +
+    '</div>';
 }
 
 function handoverSectionHtml(patients) {
@@ -199,9 +177,6 @@ function render() {
       (_hoOffN ? ' <span style="color:#7a6d00;font-weight:800">\u2691' + _hoOffN + '</span>' : '') +
       (_strandedN ? ' <span style="color:var(--red-t);font-weight:800">\u26A0' + _strandedN + '</span>' : '');
   }
-
-  // v4.61: after DOM updates, shrink long names to fit their row on one line
-  requestAnimationFrame(fitCardNames);
 
   // Search overrides list selection — show unified results across On + Off Service
   if (_roundsQuery) {
@@ -382,6 +357,7 @@ function wardHtml(ward) {
                 : isWard ? (p.bed || (i+1))
                 :          (i+1);
         h += '<div class="wp' + (dn ? ' done' : '') + '">' +
+             '<div class="card-body">' +
              '<div class="wp-pos-wrap">' +
                '<div class="wp-pos' + (dn ? ' done' : '') + '" data-pid="' + p.id + '" onclick="openLocationEditEl(this)" title="Tap to move patient">' + esc(String(pos)) + '</div>' +
              '</div>' +
@@ -397,19 +373,11 @@ function wardHtml(ward) {
                '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + '</div>' +
                '<div class="wp-acts">' +
                  wardActBtns(p) +
-                 '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Other Claim</button>' +
+                 '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
                '</div>' +
              '</div>' +
-             '<div class="wp-side-btns">' + flagSideBtn(p) +
-               '<button class="side-btn side-btn-hx" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'summary\')">' +
-                 '<svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>' +
-                 '<span>Claim Hx</span>' +
-               '</button>' +
-               '<button class="side-btn side-btn-dc" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'disch\')">' +
-                 '<svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>' +
-                 '<span>D/C</span>' +
-               '</button>' +
              '</div>' +
+             cardFootHtml(p) +
              '</div>';
       } catch (e) {
         console.error('[wardHtml] failed for', p, e);
@@ -609,14 +577,17 @@ function offRow(p) {
   var dn       = claimedToday(p);
   // Circle shows ward abbreviation for off-service
   var wardAbbr = String(wardLabel(p.ward) || '').replace('Ward ', '').replace('ICU ', 'IC').slice(0, 5);
-  // Row 2: room number (prominent) + last-seen chip
-  var roomStr  = p.bed ? esc(String(p.bed)) : (esc(wardLabel(p.ward) || '—'));
+  // v4.62: room lives under the ward circle (loc-col); last-seen joins row 3
   var lastSeen = lastSeenByGroup(p);
   // Row 3: Age (Sex) · MRP · Dx
   var ageSex   = ageGenderShort(p);
   var row3     = esc(ageSex) + ' &bull; ' + mrpLabel(p) + lastBilledChip(p);
-  return '<div class="alpha-row' + (dn ? ' done' : '') + '">' +
-    '<div class="alpha-av av-off" style="font-size:9px;font-weight:800;letter-spacing:-.3px" data-pid="' + p.id + '" onclick="openLocationEditEl(this)" title="Tap to move patient">' + esc(wardAbbr) + '</div>' +
+  return '<div class="alpha-row pt-card' + (dn ? ' done' : '') + '">' +
+    '<div class="card-body">' +
+    '<div class="loc-col" data-pid="' + p.id + '" onclick="openLocationEditEl(this)" title="Tap to move patient">' +
+      '<div class="alpha-av av-off" style="font-size:9px;font-weight:800;letter-spacing:-.3px">' + esc(wardAbbr) + '</div>' +
+      (p.bed ? '<span class="loc-room">' + esc(String(p.bed)) + '</span>' : '') +
+    '</div>' +
     '<div class="wp-main">' +
       '<div class="wp-name-row">' +
         '<span class="wp-name" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(String(p.last || '')) + ', ' + esc(String(p.first || '')) + '</span>' +
@@ -624,25 +595,13 @@ function offRow(p) {
           '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
         '</button>' +
       '</div>' +
-      '<div style="display:flex;align-items:baseline;gap:7px;margin-top:1px;margin-bottom:2px">' +
-        '<span style="font-size:16px;font-weight:700;color:var(--text2)">' + roomStr + '</span>' +
-        lastSeen +
-      '</div>' +
-      '<div class="wp-meta">' + row3 + '</div>' +
+      '<div class="wp-meta">' + row3 + lastSeen + '</div>' +
       '<div class="wp-acts">' + quickActBtns(p) +
-        '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Other Claim</button>' +
+        '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
       '</div>' +
     '</div>' +
-    '<div class="wp-side-btns">' + flagSideBtn(p) +
-      '<button class="side-btn side-btn-hx" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'summary\')">' +
-        '<svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>' +
-        '<span>Claim Hx</span>' +
-      '</button>' +
-      '<button class="side-btn side-btn-dc" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'disch\')">' +
-        '<svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>' +
-        '<span>D/C</span>' +
-      '</button>' +
     '</div>' +
+    cardFootHtml(p) +
     '</div>';
 }
 
@@ -674,12 +633,14 @@ function alphaRow(p) {
   var _stranded = isStranded(p) ? ' stranded-card' : '';
   // Circle shows ward abbreviation (same as off-service)
   var wardAbbr = String(wardLabel(p.ward) || '').replace('Ward ', '').replace('ICU ', 'IC').slice(0, 5);
-  // Row 2: room number (prominent) + last-seen chip — same structure as offRow.
-  // Room is on its own line so long names never push it off the card.
-  var roomStr  = p.bed ? esc(String(p.bed)) : '';
+  // v4.62: room lives under the ward circle (loc-col); last-seen joins meta row
   var lastSeen = lastSeenByGroup(p);
-  return '<div class="alpha-row' + (dn ? ' done' : '') + _stranded + '">' +
-    '<div class="alpha-av ' + avCls + '" style="font-size:9px;font-weight:800;letter-spacing:-.3px" data-pid="' + p.id + '" onclick="openLocationEditEl(this)" title="Tap to move patient">' + esc(wardAbbr) + '</div>' +
+  return '<div class="alpha-row pt-card' + (dn ? ' done' : '') + _stranded + '">' +
+    '<div class="card-body">' +
+    '<div class="loc-col" data-pid="' + p.id + '" onclick="openLocationEditEl(this)" title="Tap to move patient">' +
+      '<div class="alpha-av ' + avCls + '" style="font-size:9px;font-weight:800;letter-spacing:-.3px">' + esc(wardAbbr) + '</div>' +
+      (p.bed ? '<span class="loc-room">' + esc(String(p.bed)) + '</span>' : '') +
+    '</div>' +
     '<div class="wp-main">' +
       '<div class="wp-name-row">' +
         '<span class="wp-name" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(String(p.last || '')) + ', ' + esc(String(p.first || '')) + '</span>' +
@@ -687,22 +648,13 @@ function alphaRow(p) {
           '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
         '</button>' +
       '</div>' +
-      (roomStr ? '<div style="display:flex;align-items:baseline;gap:7px;margin-top:1px;margin-bottom:2px"><span style="font-size:16px;font-weight:700;color:var(--text2)">' + roomStr + '</span>' + lastSeen + '</div>' : '') +
-      '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + lastBilledChip(p) + '</div>' +
+      '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + lastBilledChip(p) + lastSeen + '</div>' +
       '<div class="wp-acts">' + quickActBtns(p) +
-        '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Other Claim</button>' +
+        '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
       '</div>' +
     '</div>' +
-    '<div class="wp-side-btns">' + flagSideBtn(p) +
-      '<button class="side-btn side-btn-hx" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'summary\')">' +
-        '<svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>' +
-        '<span>Claim Hx</span>' +
-      '</button>' +
-      '<button class="side-btn side-btn-dc" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'disch\')">' +
-        '<svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>' +
-        '<span>D/C</span>' +
-      '</button>' +
     '</div>' +
+    cardFootHtml(p) +
     '</div>';
 }
 
@@ -736,10 +688,10 @@ function wardActBtns(p) {
   var combDone = claimedTodayFee(p, ['33008']);
   return (dirDone
       ? '<button class="bb bb-done" data-pid="' + p.id + '" onclick="event.stopPropagation();quickDirectiveBtn(this)" title="Tap to undo">✓ Directive</button>'
-      : '<button class="bb bb-dir" data-pid="' + p.id + '" onclick="event.stopPropagation();quickDirectiveBtn(this)">+ Directive</button>') +
+      : '<button class="bb bb-dir" data-pid="' + p.id + '" onclick="event.stopPropagation();quickDirectiveBtn(this)">Directive</button>') +
     (combDone
       ? '<button class="bb bb-done" data-pid="' + p.id + '" onclick="event.stopPropagation();quickDailyBtn(this)" title="Tap to undo">✓ Combined daily</button>'
-      : '<button class="bb bb-comb" data-pid="' + p.id + '" onclick="event.stopPropagation();quickDailyBtn(this)">+ Combined daily</button>');
+      : '<button class="bb bb-comb" data-pid="' + p.id + '" onclick="event.stopPropagation();quickDailyBtn(this)">Combined daily</button>');
 }
 
 function showsCCUDaily(p) {
