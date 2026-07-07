@@ -101,33 +101,41 @@ function flagSideBtn(p) {
     ' onclick="event.stopPropagation();toggleHandoverFlag(this.getAttribute(\'data-pid\'))"' +
     ' title="' + (on ? 'Clear handover flag' : 'Flag for handover') + '">' +
     '<svg viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>' +
-    '<span>' + (on ? 'Flagged' : 'Flag') + '</span>' +
+    '<span>Handover</span>' +
     '</button>';
 }
 
-// v4.61: Auto-fit patient-name font so long names fill the top row on a
-// single line (next to the pencil) instead of wrapping. Shrinks from the
-// 18px CSS base down to 11px until the name fits the available width.
+// v4.61: Keep patient names on a single line without wrapping, and keep
+// them a UNIFORM size across the visible list. Pass 1 finds the smallest
+// size any one name needs to fit its row; pass 2 applies that one size to
+// every name so cards look consistent. Ranges 18px (max) down to 12px.
 function fitCardNames() {
   if (!window._fitNamesBound) {
     window._fitNamesBound = true;
     window.addEventListener('resize', function() { requestAnimationFrame(fitCardNames); });
   }
   var rows = document.querySelectorAll('.wp-name-row');
+  if (!rows.length) return;
+  var target = 18;
   for (var i = 0; i < rows.length; i++) {
     var name = rows[i].querySelector('.wp-name');
     if (!name) continue;
     var pencil = rows[i].querySelector('.row-pencil-btn');
     var avail = rows[i].clientWidth - (pencil ? pencil.offsetWidth + 10 : 0);
-    if (avail <= 0) continue;
+    if (avail <= 0) continue;               // hidden view / not laid out
     var size = 18;
     name.style.fontSize = size + 'px';
     var guard = 0;
-    while (name.scrollWidth > avail && size > 11 && guard < 40) {
+    while (name.scrollWidth > avail && size > 12 && guard < 40) {
       size -= 0.5;
       name.style.fontSize = size + 'px';
       guard++;
     }
+    if (size < target) target = size;
+  }
+  for (var j = 0; j < rows.length; j++) {
+    var n2 = rows[j].querySelector('.wp-name');
+    if (n2 && rows[j].clientWidth > 0) n2.style.fontSize = target + 'px';
   }
 }
 
@@ -138,7 +146,7 @@ function handoverSectionHtml(patients) {
       '<div class="ward-lbl" style="color:#7a6d00">\u2691 For Handover (' + patients.length + ')</div>' +
     '</div>' +
     '<div style="padding:0 12px 4px;font-size:10px;color:#7a6d00;line-height:1.4">' +
-      'Tap \u2713 to acknowledge.' +
+      'Tap the \u2691 Handover button to clear.' +
     '</div>' +
     safeRowMap(patients, handoverRow) +
     '</div>';
@@ -149,14 +157,11 @@ function handoverRow(p) {
   var label = p.handover === 'oncall'
     ? 'Flag for Handover \u2014 On Call Issue'
     : 'New Patient \u2014 For Handover';
-  // Wrap the standard alpha row with handover styling + label + acknowledge button
+  // Wrap the standard alpha row with handover styling + label.
+  // Clearing is done via the card's own ⚑ flag button (toggleHandoverFlag).
   return '<div style="position:relative">' +
     '<div style="padding:2px 10px 0;font-size:10px;font-weight:700;color:#7a6d00">' + label + '</div>' +
     inner.replace('class="alpha-row', 'class="alpha-row handover-card') +
-    '<button class="handover-ack-btn" data-pid="' + p.id + '" onclick="event.stopPropagation();clearHandover(this.getAttribute(\'data-pid\'))">' +
-      '<svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2.5"><polyline points="20 6 9 17 4 12"/></svg>' +
-      'Acknowledged' +
-    '</button>' +
     '</div>';
 }
 
