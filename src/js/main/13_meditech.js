@@ -16,6 +16,7 @@
 //   suspect — true when a CCU bed decodes outside 1-8 (needs review).
 var LOC_MAP = {
   SCCU:'CCU',    CCU:'CCU',
+  SCCJ:'CCU',    // KELKGHSCCJ — decodes to CCU (room-detection log 2026-07-05: KGHS2507-A → CCU bed 7; Kathryn 2026-07-07)
   S2W:'2W',      S2S:'2S',
   CSICU:'CSICU', ICSI:'CSICU',
   ICUA:'ICUA',   ICUB:'ICUB',   ICUD:'ICUD',   RICU:'ICUA',
@@ -37,6 +38,12 @@ function parseLocCode(locCode, roomBed) {
   var room    = '';
   var suspect = false;
   var loc     = (locCode || '').toUpperCase();
+
+  // "ACIN" appears after "ADM" on every inpatient chart header and carries
+  // NO location information (Kathryn 2026-07-07). Remove it so an ACIN-only
+  // OCR capture decodes like a blank locCode instead of a bogus unit —
+  // 12/25 rows in the first week of the Room Detection log were ACIN-only.
+  loc = loc.replace(/ACIN/g, '');
 
   for (var key in LOC_MAP) {
     if (loc.indexOf(key) !== -1) { ward = LOC_MAP[key]; break; }
@@ -81,7 +88,12 @@ function parseLocCode(locCode, roomBed) {
   } else if (ward === 'ED') {
     // ED overflow token "CEDOF<NN>" -> Main bed N (Kathryn 2026-06-29).
     var med = rb.match(/EDOF0*(\d+)/);
+    // ED main department "KGH-Main-<N>" -> rb "KGHMAIN<N>" (KGH prefix is
+    // not stripped before M) -> "Main N" (room-detection log 2026-07-07:
+    // 3/3 ED rows were corrected to exactly this form).
+    var mmn = rb.match(/MAIN0*(\d+)$/);
     if (med) { room = 'Main ' + parseInt(med[1], 10); }
+    else if (mmn) { room = 'Main ' + parseInt(mmn[1], 10); }
     else { var me2 = rb.match(/^0*(\d+)([A-Z]?)$/); if (me2) room = me2[1] + me2[2]; }
   } else if (ward === '3MU') {
     // "3MU<NN>" -> bed N (Kathryn 2026-06-29).

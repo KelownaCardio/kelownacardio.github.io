@@ -134,7 +134,16 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // position) applied (a) to remote patients on every sync merge and (b) to
 // st.patients before the reorder bulk push. Backend mirror: Crud.gs v3.09
 // dedups + ChangeLog-logs inside saveAll itself.
-var APP_VERSION = 'v4.64';
+// v4.65 (2026-07-07): Room-detection decoder fixes from the first week of the
+// Room Detection log (25 rows, only 4 fully correct). (1) LOC_MAP: KELKGHSCCJ
+// → CCU (logged 07-05, corrected to CCU bed 7). (2) ED main-department
+// "KGH-Main-<N>" roomBed now parses to "Main N" (3/3 ED rows needed this).
+// (3) "ACIN" — on every inpatient ADM line, carries NO location info (Kathryn
+// 2026-07-07) — is stripped in parseLocCode, excluded from the learning log
+// when captured alone, and the OCR prompt now tells the engine it is not the
+// locationCode. Decoder block also mirrored into import.html (hand-uploaded).
+// (13_meditech.js + 09_patient.js + import.html.) No cache-format change.
+var APP_VERSION = 'v4.65';
 var APP_BUILT   = '2026-07-07';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,

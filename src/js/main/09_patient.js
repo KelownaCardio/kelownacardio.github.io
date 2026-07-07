@@ -1873,6 +1873,10 @@ var STICKER_PROMPT =
   'On a Meditech chart header the location is one line, e.g.\n' +
   '  "ADM ACIN, KELKGHS2S  KGHS0221 -A"\n' +
   '  → locationCode "KELKGHS2S", roomBed "KGHS0221-A".\n' +
+  'IMPORTANT: "ACIN" is NOT the locationCode — it appears on every\n' +
+  'inpatient chart and carries no location information. The locationCode\n' +
+  'is the KEL… token (or worded unit name) AFTER it. If only "ACIN" is\n' +
+  'visible with no unit code beside it, return locationCode blank.\n' +
   'Return ONLY valid JSON, no markdown, no explanation.';
 
 // v4.42: single timeout for the server-side OCR call. Covers the full
@@ -2344,7 +2348,11 @@ function handleOCRResult(data, bar) {
     // save we compare against the ward/room the doctor actually keeps and log
     // EVERY decode (with a changed flag) to the "Room Detection" sheet, so the
     // LOC_MAP decoder can be improved across users. See apSubmit / logRoomDetection.
-    window._ocrLocDecode = {
+    // v4.65: skip the log when the capture is "ACIN" alone with no room-bed
+    // token — ACIN carries no location info (Kathryn 2026-07-07), so there is
+    // nothing to learn from it (it was 12/25 rows in the log's first week).
+    var _acinOnly = /^[\s,]*ACIN[\s,]*$/i.test(String(p.locationCode || '')) && !p.roomBed;
+    if (!_acinOnly) window._ocrLocDecode = {
       locCode: String(p.locationCode || ''),
       roomBed: String(p.roomBed || ''),
       ocrWard: _loc.ward || '',
