@@ -12,6 +12,11 @@
 //   look the number up and fill it in. New "City / hospital / clinic" field
 //   maps to the existing Physicians.city column. Button relabelled "Save to
 //   database". Pairs with backend addPhysician email patch.
+// v4.68 (2026-07-10): the Add-new-physician form now opens in its OWN
+//   bottom-sheet modal (#add-phys-modal) via showModal/hideModal, instead of
+//   rendering inside the referrer dropdown (which was cramped and scrollable
+//   inside the Add-Patient card on iPhone). Needs the #add-phys-modal markup
+//   in index.template.html.
 // ═══════════════════════════════════════════════════════
 
 // ── Tier 1+2: Local search ────────────────────────────
@@ -144,7 +149,10 @@ function refSearch(query, dropdownId, hiddenId, nameId) {
   dd.style.display = 'block';
 }
 
-// ── Inline Add New Physician form ──────────────────────
+// ── Add New Physician form ─────────────────────────────
+// v4.68: renders into its OWN bottom-sheet modal (#add-phys-modal) instead of
+// inside the referrer dropdown, which was cramped/scrollable inside the
+// Add-Patient card on iPhone. Uses the app's standard showModal/hideModal.
 function openAddPhysicianForm(el) {
   if (el && !el.hasAttribute('data-query')) { el = el.closest('.ref-dd-row'); }
   if (!el) return;
@@ -152,8 +160,13 @@ function openAddPhysicianForm(el) {
   var dropdownId = el.getAttribute('data-dd');
   var hiddenId   = el.getAttribute('data-hidden');
   var nameId     = el.getAttribute('data-nameid');
+
+  // Close the referrer dropdown behind the sheet.
   var dd = document.getElementById(dropdownId);
-  if (!dd) return;
+  if (dd) dd.style.display = 'none';
+
+  var body = document.getElementById('add-phys-body');
+  if (!body) return;
 
   // Pre-fill from query text
   var parts = query.trim().split(' ');
@@ -161,19 +174,13 @@ function openAddPhysicianForm(el) {
   var prefFirst = parts.slice(1).join(' ') || '';
 
   // Build form as DOM to avoid all quote issues
-  dd.innerHTML = '';
+  body.innerHTML = '';
   var wrap = document.createElement('div');
-  wrap.style.cssText = 'padding:10px;background:var(--surface)';
-
-  var title = document.createElement('div');
-  title.style.cssText = 'font-size:11px;font-weight:700;color:var(--text2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px';
-  title.textContent = 'Add new physician';
-  wrap.appendChild(title);
 
   function inp(id, placeholder, value, type) {
     var i = document.createElement('input');
     i.id = id; i.placeholder = placeholder; i.value = value || '';
-    i.style.marginBottom = '5px';
+    i.style.cssText = 'width:100%;margin-bottom:8px;box-sizing:border-box';
     i.autocorrect = 'off';
     if (type === 'num') { i.inputMode = 'numeric'; i.autocapitalize = 'none'; }
     else i.autocapitalize = 'words';
@@ -185,15 +192,15 @@ function openAddPhysicianForm(el) {
 
   // Helper under MSP # — explains the preferred vs fallback rule
   var numHint = document.createElement('div');
-  numHint.style.cssText = 'font-size:11px;color:var(--text3);margin:-1px 0 7px;line-height:1.35';
+  numHint.style.cssText = 'font-size:12px;color:var(--text3);margin:-2px 0 10px;line-height:1.4';
   numHint.textContent = 'Preferred. If you don’t know it, fill in both fields below and it will be emailed to Kathryn to look up.';
   wrap.appendChild(numHint);
 
   // Divider — "or, if the MSP # is unknown"
   var divRow = document.createElement('div');
-  divRow.style.cssText = 'display:flex;align-items:center;gap:7px;margin:2px 0 8px';
+  divRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin:2px 0 10px';
   divRow.innerHTML = '<div style="flex:1;height:.5px;background:var(--border2)"></div>' +
-                     '<div style="font-size:10px;color:var(--text3)">or, if the MSP # is unknown</div>' +
+                     '<div style="font-size:11px;color:var(--text3)">or, if the MSP # is unknown</div>' +
                      '<div style="flex:1;height:.5px;background:var(--border2)"></div>';
   wrap.appendChild(divRow);
 
@@ -201,28 +208,31 @@ function openAddPhysicianForm(el) {
   inp('nrp-city',  'City / hospital / clinic', '');
 
   var btnRow = document.createElement('div');
-  btnRow.style.cssText = 'display:flex;gap:6px;margin-top:6px';
+  btnRow.style.cssText = 'display:flex;flex-direction:column;gap:8px;margin-top:12px';
 
   var save = document.createElement('button');
+  save.className = 'btn btn-p';
+  save.style.margin = '0';
   save.textContent = 'Save to database';
-  save.style.cssText = 'flex:1;padding:9px;background:var(--blue);color:white;border:none;border-radius:var(--rsm);cursor:pointer;font-family:inherit;font-weight:700;font-size:12px';
   save.onclick = function() { submitNewPhysician(dropdownId, hiddenId, nameId); };
 
   var cancel = document.createElement('button');
+  cancel.className = 'btn btn-s';
+  cancel.style.margin = '0';
   cancel.textContent = 'Cancel';
-  cancel.style.cssText = 'padding:9px 14px;border:.5px solid var(--border2);background:none;border-radius:var(--rsm);cursor:pointer;font-family:inherit;font-size:12px';
-  cancel.onclick = function() { dd.style.display = 'none'; };
+  cancel.onclick = function() { hideModal('add-phys-modal'); };
 
   btnRow.appendChild(save);
   btnRow.appendChild(cancel);
   wrap.appendChild(btnRow);
-  dd.appendChild(wrap);
-  dd.style.display = 'block';
+  body.appendChild(wrap);
+
+  showModal('add-phys-modal');
 
   setTimeout(function() {
     var f = document.getElementById('nrp-last');
     if (f) { f.focus(); f.select(); }
-  }, 50);
+  }, 100);
 }
 
 function submitNewPhysician(dropdownId, hiddenId, nameId) {
@@ -256,6 +266,7 @@ function submitNewPhysician(dropdownId, hiddenId, nameId) {
   // num may be blank — the referrer is selected by name; the MSP # is filled
   // in later once Kathryn looks it up.
   selectRef(num, display, dropdownId, hiddenId, nameId);
+  hideModal('add-phys-modal'); // v4.68: close the bottom sheet on save
   showToast(num
     ? ('Dr. ' + last + ' added to physician directory')
     : ('Dr. ' + last + ' saved — MSP # will be emailed to Kathryn to look up'));

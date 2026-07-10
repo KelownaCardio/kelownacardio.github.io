@@ -156,7 +156,11 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // existing Physicians.city column; button relabelled "Save to database". Pairs
 // with backend addPhysician email patch. (12_referrers.js.) No cache-format
 // change; BUILD_ID unchanged.
-var APP_VERSION = 'v4.67';
+// v4.68 (2026-07-10): Add-new-physician form moved into its own bottom-sheet
+// modal (#add-phys-modal) so it's not cramped/scrollable inside the Add-Patient
+// card on iPhone. (12_referrers.js + index.template.html.) No cache-format
+// change; BUILD_ID unchanged.
+var APP_VERSION = 'v4.68';
 var APP_BUILT   = '2026-07-10';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
