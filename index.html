@@ -2274,7 +2274,14 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // only two consecutive hits wipe the stored password + prompt. resetUnauthCount
 // clears the counter on any authorized sync and on new-password entry.
 // (03_state.js + 14_init.js.) No cache-format change; BUILD_ID unchanged.
-var APP_VERSION = 'v4.66';
+// v4.67 (2026-07-10): Add-referring-physician — MSP # now optional. A doctor
+// may save a new physician with EITHER the MSP # (preferred) OR both specialty
+// AND city; no-number entries save with a blank num + needsLookup and the
+// backend emails Kathryn to look the number up. New City field maps to the
+// existing Physicians.city column; button relabelled "Save to database". Pairs
+// with backend addPhysician email patch. (12_referrers.js.) No cache-format
+// change; BUILD_ID unchanged.
+var APP_VERSION = 'v4.67';
 var APP_BUILT   = '2026-07-10';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -12177,6 +12184,14 @@ function _renderCategory(title, subtitle, rows, isDollar) {
 // Tier 2: 3,451 Interior BC physicians embedded (2026 College directory, instant, offline)
 // Tier 3: Full 15,819 BC physicians via Google Sheets (async, requires internet)
 //         + inline "Add new physician" form for new grads / anyone not in directory
+//
+// v4.67 (2026-07-10): Add-new-physician no longer hard-requires the MSP #.
+//   A doctor may save with EITHER the MSP # (preferred) OR both specialty AND
+//   city. No-number entries are saved to the Physicians tab with a blank num
+//   and needsLookup:true; the backend (addPhysician) emails Kathryn so she can
+//   look the number up and fill it in. New "City / hospital / clinic" field
+//   maps to the existing Physicians.city column. Button relabelled "Save to
+//   database". Pairs with backend addPhysician email patch.
 // ═══════════════════════════════════════════════════════
 
 // ── Tier 1+2: Local search ────────────────────────────
@@ -12344,16 +12359,32 @@ function openAddPhysicianForm(el) {
     else i.autocapitalize = 'words';
     wrap.appendChild(i);
   }
-  inp('nrp-last',  'Last name *',           prefLast);
-  inp('nrp-first', 'First name',            prefFirst);
-  inp('nrp-num',   'MSP doctor # (required)', '', 'num');
-  inp('nrp-spec',  'Specialty (optional)',   '');
+  inp('nrp-last',  'Last name',            prefLast);
+  inp('nrp-first', 'First name',           prefFirst);
+  inp('nrp-num',   'MSP doctor #',         '', 'num');
+
+  // Helper under MSP # — explains the preferred vs fallback rule
+  var numHint = document.createElement('div');
+  numHint.style.cssText = 'font-size:11px;color:var(--text3);margin:-1px 0 7px;line-height:1.35';
+  numHint.textContent = 'Preferred. If you don’t know it, fill in both fields below and it will be emailed to Kathryn to look up.';
+  wrap.appendChild(numHint);
+
+  // Divider — "or, if the MSP # is unknown"
+  var divRow = document.createElement('div');
+  divRow.style.cssText = 'display:flex;align-items:center;gap:7px;margin:2px 0 8px';
+  divRow.innerHTML = '<div style="flex:1;height:.5px;background:var(--border2)"></div>' +
+                     '<div style="font-size:10px;color:var(--text3)">or, if the MSP # is unknown</div>' +
+                     '<div style="flex:1;height:.5px;background:var(--border2)"></div>';
+  wrap.appendChild(divRow);
+
+  inp('nrp-spec',  'Specialty',            '');
+  inp('nrp-city',  'City / hospital / clinic', '');
 
   var btnRow = document.createElement('div');
   btnRow.style.cssText = 'display:flex;gap:6px;margin-top:6px';
 
   var save = document.createElement('button');
-  save.textContent = 'Save & use';
+  save.textContent = 'Save to database';
   save.style.cssText = 'flex:1;padding:9px;background:var(--blue);color:white;border:none;border-radius:var(--rsm);cursor:pointer;font-family:inherit;font-weight:700;font-size:12px';
   save.onclick = function() { submitNewPhysician(dropdownId, hiddenId, nameId); };
 
@@ -12379,17 +12410,35 @@ function submitNewPhysician(dropdownId, hiddenId, nameId) {
   var first = (document.getElementById('nrp-first') || {}).value || '';
   var num   = (document.getElementById('nrp-num')   || {}).value || '';
   var spec  = (document.getElementById('nrp-spec')  || {}).value || '';
-  last = last.trim(); num = num.trim();
-  if (!last)  { showToast('Last name required'); return; }
-  if (!num)   { showToast('MSP doctor # required'); return; }
-  var existing = st.refs.find(function(r) { return r.num === num; });
-  if (existing) { showToast('Doctor #' + num + ' already saved'); return; }
-  var r = { last:last, first:first.trim(), num:num, spec:spec.trim() };
+  var city  = (document.getElementById('nrp-city')  || {}).value || '';
+  last = last.trim(); num = num.trim(); spec = spec.trim(); city = city.trim();
+
+  // Last name is always required.
+  if (!last) { showToast('Last name required'); return; }
+  // Then EITHER an MSP # (preferred) OR both specialty AND city, so a
+  // no-number entry can be looked up by Kathryn after the fact.
+  if (!num && !(spec && city)) {
+    showToast('Enter the MSP # — or specialty AND city so it can be looked up');
+    return;
+  }
+  // Only dedupe when a number was given (blanks would collide with each other).
+  if (num) {
+    var existing = st.refs.find(function(r) { return r.num === num; });
+    if (existing) { showToast('Doctor #' + num + ' already saved'); return; }
+  }
+
+  var r = { last:last, first:first.trim(), num:num, spec:spec, city:city };
+  if (!num) r.needsLookup = true; // flags the backend to email Kathryn
+
   // Save to Physicians tab so it's available to all doctors permanently
   if (SHEETS_URL) push('addPhysician', r);
   var display = 'Dr. ' + last + (first ? ', ' + first : '');
+  // num may be blank — the referrer is selected by name; the MSP # is filled
+  // in later once Kathryn looks it up.
   selectRef(num, display, dropdownId, hiddenId, nameId);
-  showToast('Dr. ' + last + ' added to physician directory');
+  showToast(num
+    ? ('Dr. ' + last + ' added to physician directory')
+    : ('Dr. ' + last + ' saved — MSP # will be emailed to Kathryn to look up'));
 }
 
 // ── selectRefRow / selectRef ───────────────────────────
