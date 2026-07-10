@@ -2268,8 +2268,14 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // when captured alone, and the OCR prompt now tells the engine it is not the
 // locationCode. Decoder block also mirrored into import.html (hand-uploaded).
 // (13_meditech.js + 09_patient.js + import.html.) No cache-format change.
-var APP_VERSION = 'v4.65';
-var APP_BUILT   = '2026-07-07';
+// v4.66 (2026-07-10): app-password persistence. (1) purgeIfBuildChanged now
+// preserves APP_PW_LS_KEY so a build bump no longer re-prompts every device.
+// (2) handleUnauthorized ignores a single transient 'unauthorized' (flaky wifi);
+// only two consecutive hits wipe the stored password + prompt. resetUnauthCount
+// clears the counter on any authorized sync and on new-password entry.
+// (03_state.js + 14_init.js.) No cache-format change; BUILD_ID unchanged.
+var APP_VERSION = 'v4.66';
+var APP_BUILT   = '2026-07-10';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -2301,8 +2307,10 @@ function dedupById(list) {
   try {
     var stored = localStorage.getItem('kgh5:buildId');
     if (stored !== BUILD_ID) {
-      // Wipe every kgh5:* key EXCEPT user-preference keys that should survive a build bump
-      var preserve = ['kgh5:doc', 'kgh5:recentIcds', 'kgh5:recentRefs', 'kgh5:customWards'];
+      // Wipe every kgh5:* key EXCEPT user-preference keys that should survive a build bump.
+      // v4.66: keep the app password (APP_PW_LS_KEY = 'kgh5:appPw') too — otherwise every
+      // deploy re-prompts every device for the KCA password (2026-07-10).
+      var preserve = ['kgh5:doc', 'kgh5:recentIcds', 'kgh5:recentRefs', 'kgh5:customWards', APP_PW_LS_KEY];
       var toWipe = [];
       for (var i = 0; i < localStorage.length; i++) {
         var k = localStorage.key(i);
@@ -2496,6 +2504,7 @@ async function syncFromSheets() {
     window._lastSyncResponse.ts = new Date().toISOString();
     console.log('[sync] response shape:', window._lastSyncResponse);
     if (d.error === 'unauthorized') { handleUnauthorized().then(function () { syncFromSheets().catch(function(){}); }); return; }
+    if (typeof resetUnauthCount === 'function') resetUnauthCount();  // v4.66: authorized → clear transient-unauth counter
     if (d.error) {
       window._lastSyncError = 'Apps Script: ' + d.error;
       setSyncState('error');
@@ -13205,12 +13214,26 @@ function submitAppPassword() {
   }
   try { localStorage.setItem(APP_PW_LS_KEY, val); } catch (e) {}
   SHARED_KEY = val;
+  if (typeof resetUnauthCount === 'function') resetUnauthCount();  // v4.66: fresh slate for a new password
   var ov = document.getElementById('apppw-modal');
   if (ov) ov.classList.remove('on');
   var r = _appPwResolve; _appPwResolve = null;
   if (r) r();
 }
+// v4.66: guard against a single transient/garbled response (e.g. flaky hospital
+// wifi) wiping a valid stored password. A one-off 'unauthorized' no longer clears
+// the credential or prompts — the caller simply retries. Only two CONSECUTIVE
+// unauthorized responses are treated as a real rejection. resetUnauthCount() is
+// called on any authorized response and when a new password is entered.
+var _unauthCount = 0;
+function resetUnauthCount() { _unauthCount = 0; }
 function handleUnauthorized() {
+  _unauthCount++;
+  if (_unauthCount < 2) {
+    // Likely a transient failure — keep the stored password and let the caller retry.
+    return Promise.resolve();
+  }
+  _unauthCount = 0;
   try { localStorage.removeItem(APP_PW_LS_KEY); } catch (e) {}
   SHARED_KEY = '';
   return promptAppPassword('That password was rejected. Re-enter the current app password.');
