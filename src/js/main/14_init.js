@@ -36,12 +36,26 @@ function submitAppPassword() {
   }
   try { localStorage.setItem(APP_PW_LS_KEY, val); } catch (e) {}
   SHARED_KEY = val;
+  if (typeof resetUnauthCount === 'function') resetUnauthCount();  // v4.66: fresh slate for a new password
   var ov = document.getElementById('apppw-modal');
   if (ov) ov.classList.remove('on');
   var r = _appPwResolve; _appPwResolve = null;
   if (r) r();
 }
+// v4.66: guard against a single transient/garbled response (e.g. flaky hospital
+// wifi) wiping a valid stored password. A one-off 'unauthorized' no longer clears
+// the credential or prompts — the caller simply retries. Only two CONSECUTIVE
+// unauthorized responses are treated as a real rejection. resetUnauthCount() is
+// called on any authorized response and when a new password is entered.
+var _unauthCount = 0;
+function resetUnauthCount() { _unauthCount = 0; }
 function handleUnauthorized() {
+  _unauthCount++;
+  if (_unauthCount < 2) {
+    // Likely a transient failure — keep the stored password and let the caller retry.
+    return Promise.resolve();
+  }
+  _unauthCount = 0;
   try { localStorage.removeItem(APP_PW_LS_KEY); } catch (e) {}
   SHARED_KEY = '';
   return promptAppPassword('That password was rejected. Re-enter the current app password.');
