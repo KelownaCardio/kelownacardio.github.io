@@ -149,7 +149,14 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // only two consecutive hits wipe the stored password + prompt. resetUnauthCount
 // clears the counter on any authorized sync and on new-password entry.
 // (03_state.js + 14_init.js.) No cache-format change; BUILD_ID unchanged.
-var APP_VERSION = 'v4.66';
+// v4.67 (2026-07-10): Add-referring-physician — MSP # now optional. A doctor
+// may save a new physician with EITHER the MSP # (preferred) OR both specialty
+// AND city; no-number entries save with a blank num + needsLookup and the
+// backend emails Kathryn to look the number up. New City field maps to the
+// existing Physicians.city column; button relabelled "Save to database". Pairs
+// with backend addPhysician email patch. (12_referrers.js.) No cache-format
+// change; BUILD_ID unchanged.
+var APP_VERSION = 'v4.67';
 var APP_BUILT   = '2026-07-10';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
