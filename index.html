@@ -2295,8 +2295,24 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // modal (#add-phys-modal) so it's not cramped/scrollable inside the Add-Patient
 // card on iPhone. (12_referrers.js + index.template.html.) No cache-format
 // change; BUILD_ID unchanged.
-var APP_VERSION = 'v4.68';
-var APP_BUILT   = '2026-07-10';
+// v4.69 (2026-07-13): DUP-MODAL REWORK — restoring a patient who only ever had
+// a phone consult was clunky and left bad data behind. (1) Banner is now the
+// plain question "Patient already exists in database — add to list?" (or "— add
+// claim?" on the consult-only path); the Readmit / Move-to-active-service
+// (prior phone consult) / (procedure) button labels are gone. (2) The primary
+// button reads "Update patient info" whenever the demographics disagree, so the
+// tap says what it does. (3) THE DATA FIX: claim rows carry a denormalized copy
+// of last/first/phn/dob/sex and link to the patient by PHN ONLY, so correcting a
+// PHN used to orphan every prior claim under the old number. The merge now posts
+// the confirmed patient + the OLD phn to the new backend route
+// mergePatientDemographics (Crud v3.12 / Router v3.04), which in ONE locked pass
+// dedups the patient row (absorbing any other row on the old/new PHN) and retags
+// every prior claim. The original PHN is stashed on the record (_mergeOldPhn,
+// not a sheet header) until the server confirms, so a failed save can be retried
+// without losing the retag key. (09_patient.js.) Requires backend v3.12 —
+// deploy backend FIRST. No cache-format change; BUILD_ID unchanged.
+var APP_VERSION = 'v4.69';
+var APP_BUILT   = '2026-07-13';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -8263,29 +8279,29 @@ function openDuplicateMergeModal(existing, matchedFields, newData) {
   if (cc) h += '<div style="font-size:11px;color:var(--text3);margin-top:8px">' +
                cc + ' existing claim' + (cc > 1 ? 's' : '') + ' linked</div>';
 
-  // Button wording reflects WHY the record already exists:
-  //   • ever on the on/off service list      → a true readmission
-  //   • phone-consult stub (never admitted)   → move to active service
-  //   • anything else (procedure/consult-only)→ move to active service
-  // A record that was ever on service wins over the phone-consult check, so a
-  // phone consult who was later admitted still reads as a readmission.
-  var isPhoneConsult = (via === 'PhoneConsult' || via === 'PhoneConsult-Review' || via === 'QuickChart');
-  var wasOnService   = (existing.list === 'on' || existing.list === 'off');
-  var mergeLabel;
-  if (wasOnService) {
-    mergeLabel = 'Readmit to service';                 window._dupIsReadmit = true;
-  } else if (isPhoneConsult) {
-    mergeLabel = 'Move to active service (prior phone consult)'; window._dupIsReadmit = false;
-  } else {
-    mergeLabel = 'Move to active service (procedure)';    window._dupIsReadmit = false;
-  }
+  // v4.69: Button wording. The old labels (Readmit to service / Move to active
+  // service (prior phone consult) / (procedure)) made the doctor decode the
+  // record's provenance before they could restore a patient who only ever had
+  // a phone consult. There is only ever one thing to do here, so say it:
+  //   • demographics disagree → the tap ALSO rewrites the record → "Update patient info"
+  //   • demographics agree    → "Add to list" / "Add claim" (consult-only path)
+  // _dupIsReadmit is kept — the ChangeLog verb still distinguishes a true
+  // readmission (ever on/off service) from a phone-consult/procedure restore.
+  var wasOnService = (existing.list === 'on' || existing.list === 'off');
+  window._dupIsReadmit = wasOnService;
+  var _addToList = !!window._apPendingAddToList;
+  var mergeLabel = conflictLabels.length
+    ? 'Update patient info'
+    : (_addToList ? 'Add to list' : 'Add claim');
 
   h += '<div style="display:flex;gap:8px;margin-top:14px">';
   h += '<button class="btn btn-p" style="flex:1;margin:0" onclick="_mergeAndReadmit()">' + mergeLabel + '</button>';
   h += '<button class="btn btn-s" style="flex:1;margin:0" onclick="_createNewPatient()">New Patient</button>';
   h += '</div>';
 
-  document.getElementById('merge-title').textContent = 'Existing patient found';
+  document.getElementById('merge-title').textContent = _addToList
+    ? 'Patient already exists in database — add to list?'
+    : 'Patient already exists in database — add claim?';
   document.getElementById('merge-body').innerHTML = h;
   showModal('merge-modal');
 }
@@ -8306,17 +8322,37 @@ async function _mergeAndReadmit() {
   if (!p) return;
   var addToList = window._apPendingAddToList;
 
+  // v4.69: snapshot the demographics BEFORE the write-back. Claim rows carry a
+  // denormalized copy of last/first/phn/dob/sex and are linked to the patient by
+  // PHN ONLY — so a corrected PHN orphans every prior claim unless we retag them
+  // with the old value as the key. _oldPhn is what those claim rows still hold.
+  //
+  // _mergeOldPhn: if a PREVIOUS merge attempt failed (wifi), the local record
+  // already holds the corrected PHN — re-deriving the key from p.phn would then
+  // lose the claims still sitting on the sheet under the original. So the
+  // original is stashed on the record until the server confirms, and cleared
+  // only on success. It is not a Patients header, so it never reaches the sheet.
+  var _oldPhn  = String(p._mergeOldPhn || p.phn || '').replace(/\D/g, '');
+  var _oldDemo = { last: p.last || '', first: p.first || '', phn: p.phn || '',
+                   dob: p.dob || '', sex: p.sex || '' };
+
   // Apply selected demographics — write-back over the prior record.
   // Default is the NEW admission's value (see _dupSelections in the modal), so a
   // freshly-confirmed last/first/PHN/DOB/sex overwrites the prior (possibly
   // wrong) value on the existing record. Tapping "existing" keeps the old one.
-  // p is the live st.patients object and is saved via push('savePatient', p)
-  // below, so the corrected demographics persist to the sheet.
   ['last', 'first', 'phn', 'dob', 'sex'].forEach(function(key) {
     var which = window._dupSelections[key] || 'new';
     var val = window._dupFieldVals[key][which];
     if (val) p[key] = (key === 'last' || key === 'first') ? fmtName(val) : val;
   });
+
+  // Did anything actually change? Drives which save path we take below.
+  // A stashed _mergeOldPhn means a prior attempt changed something and never
+  // landed — stay on the merge path until it does.
+  var _demoChanged = !!p._mergeOldPhn || ['last', 'first', 'phn', 'dob', 'sex'].some(function(key) {
+    return String(_oldDemo[key] || '').trim() !== String(p[key] || '').trim();
+  });
+  if (_demoChanged && _oldPhn) p._mergeOldPhn = _oldPhn;
 
   // Reactivate
   p.discharged = false;
@@ -8353,18 +8389,64 @@ async function _mergeAndReadmit() {
   p.refbyName = gv('cb-refby-name') || gv('oc-refby-name') || p.refbyName || '';
   p.icd       = gv('cb-icd') || gv('oc-icd') || p.icd || '';
 
-  // Update or add to local state
+  // \u2500\u2500 Update local state \u2014 exactly ONE patient row \u2500\u2500
+  // Drop any other local patient carrying the old or new PHN (a phone-consult
+  // stub with a typo'd PHN can otherwise leave a second card on screen). The
+  // backend does the same to the sheet in mergePatientDemographics.
+  var _pd = String(p.phn || '').replace(/\D/g, '');
+  st.patients = st.patients.filter(function(x) {
+    if (!x || x.id === p.id) return true;
+    var xd = String(x.phn || '').replace(/\D/g, '');
+    return !(xd && (xd === _pd || (_oldPhn && xd === _oldPhn)));
+  });
   var idx = st.patients.findIndex(function(x) { return x && x.id === p.id; });
   if (idx >= 0) { st.patients[idx] = p; } else { st.patients.push(p); }
   sv('patients', st.patients);
+
+  // \u2500\u2500 Retag prior claims locally (the sheet is retagged server-side below) \u2500\u2500
+  // Every claim still carrying the OLD phn belongs to this patient; rewrite its
+  // denormalized demographics so the card, the export and the sheet all agree.
+  var _retagged = 0;
+  if (_demoChanged) {
+    st.claims.forEach(function(c) {
+      if (!c) return;
+      var cd = String(c.phn || '').replace(/\D/g, '');
+      if (!cd) return;
+      if (cd !== _pd && !(_oldPhn && cd === _oldPhn)) return;
+      var hit = false;
+      ['last', 'first', 'phn', 'dob', 'sex'].forEach(function(key) {
+        var want = String(p[key] || '');
+        if (!want.trim()) return;                       // never blank a claim field
+        if (String(c[key] || '') === want) return;
+        c[key] = want;
+        hit = true;
+      });
+      if (hit) _retagged++;
+    });
+    if (_retagged) sv('claims', st.claims);
+  }
 
   // Show overlay and save
   _submitGuard = true;
   _showSubmitOverlay();
 
   if (SHEETS_URL) {
-    var ok = await push('savePatient', p);
+    // v4.69: when demographics changed, take the merge route \u2014 ONE locked pass
+    // that (a) writes the confirmed patient row, (b) absorbs + deletes any other
+    // patient row sharing the old/new PHN, (c) retags every prior claim row.
+    // push() returns false on a server rejection ({ok:false}) so the doctor is
+    // told rather than silently losing the correction.
+    var ok = _demoChanged
+      ? await push('mergePatientDemographics', {
+          id:      p.id,                                  // for the in-flight guard
+          patient: p,
+          oldPhn:  _oldPhn,
+          user:    (st.doc && st.doc.alias) || ''
+        })
+      : await push('savePatient', p);
     if (!ok) {
+      // Keep p._mergeOldPhn stashed so a retry still knows which claim rows to
+      // retag (see the snapshot block above).
       showToast(window._lastPushError
         ? 'Not saved: ' + window._lastPushError
         : 'Could not save patient \u2014 check wifi and try again');
@@ -8372,8 +8454,16 @@ async function _mergeAndReadmit() {
       return;
     }
   }
+  // Landed. Clear the retag key.
+  if (p._mergeOldPhn) { delete p._mergeOldPhn; sv('patients', st.patients); }
+
   var mergeVerb = window._dupIsReadmit ? 'Readmit (merged)' : 'Moved to active service (merged)';
   logChange(p, mergeVerb, addToList ? (p.ward + (p.bed ? ' Rm ' + p.bed : '')) : 'Consult only');
+  if (_demoChanged) {
+    logChange(p, 'Update patient info',
+      'confirmed demographics' + (_oldPhn && _oldPhn !== _pd ? '; PHN ' + _oldPhn + ' \u2192 ' + _pd : '') +
+      (_retagged ? '; ' + _retagged + ' prior claim' + (_retagged > 1 ? 's' : '') + ' retagged' : ''));
+  }
 
   // Create claim — same flow as apSubmit
   if (st.doc) {
@@ -8398,7 +8488,12 @@ async function _mergeAndReadmit() {
     }
   }
 
-  showToast(p.last + (window._dupIsReadmit ? ' readmitted (merged)' : ' moved to active service (merged)'));
+  // v4.69: plain-language toast — say what happened, not which internal path ran.
+  showToast(p.last + (addToList ? ' added to list' : ' added') +
+            (_demoChanged
+              ? ' — info updated' + (_retagged ? ' (' + _retagged + ' prior claim' +
+                  (_retagged > 1 ? 's' : '') + ' corrected)' : '')
+              : ''));
   _hideSubmitOverlay();
   clearAddForm();
   if (addToList) { nav(0, document.querySelectorAll('.nb')[0]); }
