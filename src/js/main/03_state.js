@@ -160,8 +160,24 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // modal (#add-phys-modal) so it's not cramped/scrollable inside the Add-Patient
 // card on iPhone. (12_referrers.js + index.template.html.) No cache-format
 // change; BUILD_ID unchanged.
-var APP_VERSION = 'v4.68';
-var APP_BUILT   = '2026-07-10';
+// v4.69 (2026-07-13): DUP-MODAL REWORK — restoring a patient who only ever had
+// a phone consult was clunky and left bad data behind. (1) Banner is now the
+// plain question "Patient already exists in database — add to list?" (or "— add
+// claim?" on the consult-only path); the Readmit / Move-to-active-service
+// (prior phone consult) / (procedure) button labels are gone. (2) The primary
+// button reads "Update patient info" whenever the demographics disagree, so the
+// tap says what it does. (3) THE DATA FIX: claim rows carry a denormalized copy
+// of last/first/phn/dob/sex and link to the patient by PHN ONLY, so correcting a
+// PHN used to orphan every prior claim under the old number. The merge now posts
+// the confirmed patient + the OLD phn to the new backend route
+// mergePatientDemographics (Crud v3.12 / Router v3.04), which in ONE locked pass
+// dedups the patient row (absorbing any other row on the old/new PHN) and retags
+// every prior claim. The original PHN is stashed on the record (_mergeOldPhn,
+// not a sheet header) until the server confirms, so a failed save can be retried
+// without losing the retag key. (09_patient.js.) Requires backend v3.12 —
+// deploy backend FIRST. No cache-format change; BUILD_ID unchanged.
+var APP_VERSION = 'v4.69';
+var APP_BUILT   = '2026-07-13';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
