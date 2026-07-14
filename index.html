@@ -2311,7 +2311,28 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // not a sheet header) until the server confirms, so a failed save can be retried
 // without losing the retag key. (09_patient.js.) Requires backend v3.12 —
 // deploy backend FIRST. No cache-format change; BUILD_ID unchanged.
-var APP_VERSION = 'v4.69';
+// v4.70 (2026-07-13): "STUCK PULSING YELLOW" FIX. After the v4.69 deploy the app
+// sat on a pulsing amber dot and would not sync. It was not a broken build and not
+// the network: the backend was answering 'unauthorized', and THAT path was the one
+// exit in syncFromSheets that returned without calling setSyncState — so the dot
+// kept the 'syncing' class it was given at the top of the attempt. A rejected
+// password was pixel-identical to a sync in progress. Three fixes:
+//   1. New 'auth' sync state (red + pulsing) with its own banner text ("App
+//      password needed" + an Enter-password button) — the unauthorized branch now
+//      sets it, so this can never again masquerade as a busy sync. (03_state.js,
+//      index.template.html.)
+//   2. handleUnauthorized no longer DELETES the stored password. v4.66 wiped it
+//      after 2 consecutive rejections — which is what locked the device out when an
+//      Apps Script version switch mid-deploy answered unauthorized twice. It now
+//      takes 3 strikes with a 1.5s/3s backoff (a redeploy blip passes in seconds)
+//      and only ever REPLACES the credential, never removes it. (14_init.js.)
+//   3. submitAppPassword VERIFIES the password against the server (ping is behind
+//      the same key gate) before storing it. Previously a typo was written to
+//      localStorage and the modal closed — straight back to a silent pulse.
+//      Wrong password now says so, in the modal, and keeps the old one. Also a
+//      re-entrancy guard so a second prompt can't orphan the first one's promise.
+// No cache-format change; BUILD_ID unchanged.
+var APP_VERSION = 'v4.70';
 var APP_BUILT   = '2026-07-13';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -2470,10 +2491,41 @@ function sanitizeReferrer(obj) {
 }
 
 // ── Google Sheets sync ──
+// v4.70: THREE visible states, not two. Before, an 'unauthorized' response left
+// the dot on whatever it was last set to — 'syncing' — so a rejected password
+// looked identical to a sync in progress: a dot pulsing amber forever, with no
+// banner and no clue that the app was sitting on a password prompt. New 'auth'
+// state: red pulsing dot + its own banner, so "the app needs the password" can
+// never again be mistaken for "the app is busy".
 function setSyncState(s) {
-  document.getElementById('sync-dot').className = 'sync-dot ' + s;
+  var dot = document.getElementById('sync-dot');
+  if (dot) dot.className = 'sync-dot ' + s;
+
   var banner = document.getElementById('wifi-banner');
-  if (banner) banner.style.display = s === 'error' ? 'flex' : 'none';
+  if (!banner) return;
+  var txt = document.getElementById('wifi-banner-text');
+  var btn = document.getElementById('wifi-banner-btn');
+
+  if (s === 'auth') {
+    if (txt) txt.textContent = 'App password needed';
+    if (btn) {
+      btn.textContent = 'Enter password';
+      btn.onclick = function() {
+        promptAppPassword('Re-enter the app password to reconnect.')
+          .then(function() { syncFromSheets().catch(function() {}); });
+      };
+    }
+    banner.style.display = 'flex';
+  } else if (s === 'error') {
+    if (txt) txt.textContent = "Can't connect — switch to cellular data";
+    if (btn) {
+      btn.textContent = 'Retry';
+      btn.onclick = function() { setSyncState('syncing'); syncFromSheets(); };
+    }
+    banner.style.display = 'flex';
+  } else {
+    banner.style.display = 'none';
+  }
 }
 
 var _syncInFlight = false;
@@ -2540,7 +2592,16 @@ async function syncFromSheets() {
     window._lastSyncResponse.keys = Object.keys(d || {});
     window._lastSyncResponse.ts = new Date().toISOString();
     console.log('[sync] response shape:', window._lastSyncResponse);
-    if (d.error === 'unauthorized') { handleUnauthorized().then(function () { syncFromSheets().catch(function(){}); }); return; }
+    // v4.70: show the 'auth' state BEFORE handing off. This is the one exit path
+    // that used to return without touching the dot, leaving it stuck on 'syncing'
+    // (pulsing amber forever). handleUnauthorized() decides whether this is a
+    // transient blip (retry, quietly) or a real rejection (prompt) — either way
+    // the user can now see that the app is waiting on credentials, not on wifi.
+    if (d.error === 'unauthorized') {
+      setSyncState('auth');
+      handleUnauthorized().then(function () { syncFromSheets().catch(function(){}); });
+      return;
+    }
     if (typeof resetUnauthCount === 'function') resetUnauthCount();  // v4.66: authorized → clear transient-unauth counter
     if (d.error) {
       window._lastSyncError = 'Apps Script: ' + d.error;
@@ -13359,8 +13420,14 @@ function ensureAppPassword() {
   return promptAppPassword('This is a new device — you need to authorize it to access patient data.');
 }
 var _appPwResolve = null;
+var _appPwOpen    = false;   // v4.70: re-entrancy guard (see below)
 function promptAppPassword(msg) {
+  // v4.70: if a prompt is already up, do NOT open a second one — the old code
+  // overwrote _appPwResolve, orphaning the first promise so its caller (a queued
+  // sync) never resumed.
+  if (_appPwOpen) return new Promise(function() {});   // never resolves; the open prompt owns the flow
   return new Promise(function(resolve) {
+    _appPwOpen = true;
     _appPwResolve = resolve;
     var sub = document.getElementById('apppw-sub');
     if (sub && msg) sub.textContent = msg;
@@ -13373,39 +13440,83 @@ function promptAppPassword(msg) {
     if (inp) setTimeout(function(){ try { inp.focus(); } catch(e){} }, 60);
   });
 }
-function submitAppPassword() {
+
+// v4.70: VERIFY BEFORE STORING. The old version wrote whatever was typed straight
+// into localStorage and closed the modal — a typo'd password was persisted, every
+// subsequent request came back unauthorized, and the app went back to pulsing with
+// no error shown. Now the password is checked against the server (ping is behind
+// the same key gate as every other action) and only stored if it is accepted.
+async function submitAppPassword() {
   var inp = document.getElementById('apppw-input');
   var err = document.getElementById('apppw-err');
+  var btn = document.getElementById('apppw-btn');
   var val = inp ? (inp.value || '').trim() : '';
-  if (!val) {
-    if (err) { err.textContent = 'Enter the app password to continue.'; err.style.display = 'block'; }
+  var showErr = function(m) { if (err) { err.textContent = m; err.style.display = 'block'; } };
+
+  if (!val) { showErr('Enter the app password to continue.'); return; }
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+  var verdict = 'network';   // 'ok' | 'rejected' | 'network'
+  try {
+    var r = await fetch(SHEETS_URL + '?action=ping&key=' + encodeURIComponent(val) + '&_t=' + Date.now(),
+                        { cache: 'no-store', credentials: 'omit', redirect: 'follow' });
+    if (r.ok) {
+      var d = await r.json();
+      verdict = (d && d.ok) ? 'ok' : (d && d.error === 'unauthorized' ? 'rejected' : 'network');
+    }
+  } catch (e) { verdict = 'network'; }
+  if (btn) { btn.disabled = false; btn.textContent = 'Connect'; }
+
+  if (verdict === 'rejected') {
+    showErr('That password was not accepted. Check it and try again.');
+    return;                                  // modal stays open; stored password untouched
+  }
+  if (verdict === 'network') {
+    showErr("Couldn't reach the server — check your connection and try again.");
     return;
   }
+
+  // Verified.
   try { localStorage.setItem(APP_PW_LS_KEY, val); } catch (e) {}
   SHARED_KEY = val;
-  if (typeof resetUnauthCount === 'function') resetUnauthCount();  // v4.66: fresh slate for a new password
+  resetUnauthCount();
   var ov = document.getElementById('apppw-modal');
   if (ov) ov.classList.remove('on');
-  var r = _appPwResolve; _appPwResolve = null;
-  if (r) r();
+  _appPwOpen = false;
+  var res = _appPwResolve; _appPwResolve = null;
+  if (res) res();
 }
-// v4.66: guard against a single transient/garbled response (e.g. flaky hospital
-// wifi) wiping a valid stored password. A one-off 'unauthorized' no longer clears
-// the credential or prompts — the caller simply retries. Only two CONSECUTIVE
-// unauthorized responses are treated as a real rejection. resetUnauthCount() is
-// called on any authorized response and when a new password is entered.
+
+// ── Unauthorized handling ────────────────────────────────────────────
+// v4.66 treated 2 consecutive 'unauthorized' responses as a real rejection and
+// DELETED the stored password. v4.70 changes both halves of that:
+//
+//   • It never deletes. Deleting bought nothing — the prompt overwrites the
+//     credential on success anyway — but it guaranteed a locked-out device if the
+//     prompt was missed or dismissed, with the dot pulsing amber and no way back.
+//     (This is what happened on 2026-07-13: an Apps Script version switch during
+//     deploy returned unauthorized twice in a row, the valid password was wiped,
+//     and the app sat on a prompt behind a pulsing amber dot.)
+//   • 3 strikes, not 2, with a backoff between them — a redeploy blip is over in
+//     a couple of seconds, so give it those seconds before bothering the doctor.
+//
+// The stored password is only ever REPLACED, by submitAppPassword, and only after
+// the server has confirmed the new one.
 var _unauthCount = 0;
+var UNAUTH_STRIKES = 3;
 function resetUnauthCount() { _unauthCount = 0; }
 function handleUnauthorized() {
   _unauthCount++;
-  if (_unauthCount < 2) {
-    // Likely a transient failure — keep the stored password and let the caller retry.
-    return Promise.resolve();
+  if (_unauthCount < UNAUTH_STRIKES) {
+    // Probably transient (flaky hospital wifi, or a backend deploy swapping
+    // versions mid-request). Keep the credential, wait, let the caller retry.
+    var backoffMs = _unauthCount * 1500;   // 1.5s, then 3s
+    return new Promise(function(resolve) { setTimeout(resolve, backoffMs); });
   }
   _unauthCount = 0;
-  try { localStorage.removeItem(APP_PW_LS_KEY); } catch (e) {}
-  SHARED_KEY = '';
-  return promptAppPassword('That password was rejected. Re-enter the current app password.');
+  // NOTE: deliberately does NOT clear localStorage or SHARED_KEY.
+  return promptAppPassword('The server rejected the saved password. Re-enter it — '
+    + 'or if the app was just updated, wait a moment and tap Connect again.');
 }
 async function init() {
   await ensureAppPassword();
