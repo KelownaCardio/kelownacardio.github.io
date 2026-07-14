@@ -197,8 +197,18 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //      Wrong password now says so, in the modal, and keeps the old one. Also a
 //      re-entrancy guard so a second prompt can't orphan the first one's promise.
 // No cache-format change; BUILD_ID unchanged.
-var APP_VERSION = 'v4.70';
-var APP_BUILT   = '2026-07-13';
+// v4.71 (2026-07-14): "DISCHARGED TODAY" DATE FIX. Both discharge chips (the
+// grey chip on discharged-list cards and the badge on the patient-summary card)
+// computed days-since-discharge as Math.floor((Date.now() - dischargedAt)/86400000)
+// — that is elapsed 24h PERIODS, not calendar days. dischargedAt is a UTC epoch and
+// discharges are entered afternoon/evening Pacific (~22:00-00:00 UTC), so when viewed
+// the next morning <24h had elapsed and yesterday's discharges read "today"; every
+// older count was skewed a day too recent. New shared helper dischargeDaysAgo(p)
+// counts CALENDAR days, preferring the authoritative dischargeDate (DD/MM/YYYY, local)
+// and falling back to dischargedAt reduced to its local date. (06b_discharged.js,
+// 06c_patient_summary.js.) No cache-format change.
+var APP_VERSION = 'v4.71';
+var APP_BUILT   = '2026-07-14';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');

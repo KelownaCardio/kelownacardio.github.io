@@ -219,6 +219,31 @@ function toEpochMs(v) {
   return isNaN(d) ? 0 : d;
 }
 
+// Whole calendar days between a patient's discharge and today.
+// Counts CALENDAR dates (local), not elapsed 24h periods — a patient
+// discharged yesterday evening must read "1 day ago", never "today".
+// Prefers the authoritative dischargeDate (DD/MM/YYYY, local); falls back
+// to the dischargedAt timestamp reduced to its local calendar date.
+// Returns null when neither is present.
+function dischargeDaysAgo(p) {
+  var dcMs = null;
+  if (p && p.dischargeDate) {
+    var pd = parseDMYsafe(p.dischargeDate);      // local midnight of that date
+    if (pd) dcMs = pd;
+  }
+  if (dcMs == null && p && p.dischargedAt) {
+    var ms = parseDischargedAt(p.dischargedAt);
+    if (ms) {
+      var dt = new Date(ms);                     // reduce timestamp to local date
+      dcMs = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).getTime();
+    }
+  }
+  if (dcMs == null) return null;
+  var now = new Date();
+  var todayMid = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  return Math.round((todayMid - dcMs) / 86400000);
+}
+
 // Render one discharged-patient row. Defensive about every field type.
 function dischargedRow(p) {
   var last  = String(p.last  || '');
@@ -232,9 +257,8 @@ function dischargedRow(p) {
   var avCls = isCCU ? 'av-ccu' : (p.list === 'off' ? 'av-off' : 'av-on');
   var ini   = (first.charAt(0) || '') + (last.charAt(0) || '');
 
-  var ms = toEpochMs(p.dischargedAt);
-  var daysAgo = ms ? Math.floor((Date.now() - ms) / 86400000) : null;
-  var daysLabel = daysAgo === null ? '' : daysAgo === 0 ? 'today' : daysAgo === 1 ? '1 day ago' : daysAgo + ' days ago';
+  var daysAgo = dischargeDaysAgo(p);
+  var daysLabel = daysAgo === null ? '' : daysAgo <= 0 ? 'today' : daysAgo === 1 ? '1 day ago' : daysAgo + ' days ago';
   var statusChip = '<span class="chip chip-grey">Discharged' + (daysLabel ? ' ' + daysLabel : '') + '</span>';
 
   var phnDisplay = phn ? 'PHN …' + phn.slice(-4) : '<span class="warn-tag">⚠ no PHN</span>';

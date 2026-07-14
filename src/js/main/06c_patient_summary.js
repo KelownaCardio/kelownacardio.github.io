@@ -135,8 +135,9 @@ function openPatientSummary(pid) {
   html +=   '</div>';
   // Discharge badge if applicable
   if (p.discharged) {
-    var daysAgo = Math.floor((Date.now() - parseDischargedAt(p.dischargedAt)) / 86400000);
-    html += '<span class="chip chip-grey" style="margin-top:3px">Discharged ' + (daysAgo === 0 ? 'today' : daysAgo + 'd ago') + '</span>';
+    var daysAgo = dischargeDaysAgo(p);   // calendar days, prefers dischargeDate
+    var dcLabel = (daysAgo == null) ? '' : (daysAgo <= 0 ? 'today' : daysAgo + 'd ago');
+    html += '<span class="chip chip-grey" style="margin-top:3px">Discharged' + (dcLabel ? ' ' + dcLabel : '') + '</span>';
   }
   html += '</div>';
 
