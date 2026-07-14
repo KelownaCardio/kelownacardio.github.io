@@ -176,7 +176,28 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // not a sheet header) until the server confirms, so a failed save can be retried
 // without losing the retag key. (09_patient.js.) Requires backend v3.12 —
 // deploy backend FIRST. No cache-format change; BUILD_ID unchanged.
-var APP_VERSION = 'v4.69';
+// v4.70 (2026-07-13): "STUCK PULSING YELLOW" FIX. After the v4.69 deploy the app
+// sat on a pulsing amber dot and would not sync. It was not a broken build and not
+// the network: the backend was answering 'unauthorized', and THAT path was the one
+// exit in syncFromSheets that returned without calling setSyncState — so the dot
+// kept the 'syncing' class it was given at the top of the attempt. A rejected
+// password was pixel-identical to a sync in progress. Three fixes:
+//   1. New 'auth' sync state (red + pulsing) with its own banner text ("App
+//      password needed" + an Enter-password button) — the unauthorized branch now
+//      sets it, so this can never again masquerade as a busy sync. (03_state.js,
+//      index.template.html.)
+//   2. handleUnauthorized no longer DELETES the stored password. v4.66 wiped it
+//      after 2 consecutive rejections — which is what locked the device out when an
+//      Apps Script version switch mid-deploy answered unauthorized twice. It now
+//      takes 3 strikes with a 1.5s/3s backoff (a redeploy blip passes in seconds)
+//      and only ever REPLACES the credential, never removes it. (14_init.js.)
+//   3. submitAppPassword VERIFIES the password against the server (ping is behind
+//      the same key gate) before storing it. Previously a typo was written to
+//      localStorage and the modal closed — straight back to a silent pulse.
+//      Wrong password now says so, in the modal, and keeps the old one. Also a
+//      re-entrancy guard so a second prompt can't orphan the first one's promise.
+// No cache-format change; BUILD_ID unchanged.
+var APP_VERSION = 'v4.70';
 var APP_BUILT   = '2026-07-13';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -335,10 +356,41 @@ function sanitizeReferrer(obj) {
 }
 
 // ── Google Sheets sync ──
+// v4.70: THREE visible states, not two. Before, an 'unauthorized' response left
+// the dot on whatever it was last set to — 'syncing' — so a rejected password
+// looked identical to a sync in progress: a dot pulsing amber forever, with no
+// banner and no clue that the app was sitting on a password prompt. New 'auth'
+// state: red pulsing dot + its own banner, so "the app needs the password" can
+// never again be mistaken for "the app is busy".
 function setSyncState(s) {
-  document.getElementById('sync-dot').className = 'sync-dot ' + s;
+  var dot = document.getElementById('sync-dot');
+  if (dot) dot.className = 'sync-dot ' + s;
+
   var banner = document.getElementById('wifi-banner');
-  if (banner) banner.style.display = s === 'error' ? 'flex' : 'none';
+  if (!banner) return;
+  var txt = document.getElementById('wifi-banner-text');
+  var btn = document.getElementById('wifi-banner-btn');
+
+  if (s === 'auth') {
+    if (txt) txt.textContent = 'App password needed';
+    if (btn) {
+      btn.textContent = 'Enter password';
+      btn.onclick = function() {
+        promptAppPassword('Re-enter the app password to reconnect.')
+          .then(function() { syncFromSheets().catch(function() {}); });
+      };
+    }
+    banner.style.display = 'flex';
+  } else if (s === 'error') {
+    if (txt) txt.textContent = "Can't connect — switch to cellular data";
+    if (btn) {
+      btn.textContent = 'Retry';
+      btn.onclick = function() { setSyncState('syncing'); syncFromSheets(); };
+    }
+    banner.style.display = 'flex';
+  } else {
+    banner.style.display = 'none';
+  }
 }
 
 var _syncInFlight = false;
@@ -405,7 +457,16 @@ async function syncFromSheets() {
     window._lastSyncResponse.keys = Object.keys(d || {});
     window._lastSyncResponse.ts = new Date().toISOString();
     console.log('[sync] response shape:', window._lastSyncResponse);
-    if (d.error === 'unauthorized') { handleUnauthorized().then(function () { syncFromSheets().catch(function(){}); }); return; }
+    // v4.70: show the 'auth' state BEFORE handing off. This is the one exit path
+    // that used to return without touching the dot, leaving it stuck on 'syncing'
+    // (pulsing amber forever). handleUnauthorized() decides whether this is a
+    // transient blip (retry, quietly) or a real rejection (prompt) — either way
+    // the user can now see that the app is waiting on credentials, not on wifi.
+    if (d.error === 'unauthorized') {
+      setSyncState('auth');
+      handleUnauthorized().then(function () { syncFromSheets().catch(function(){}); });
+      return;
+    }
     if (typeof resetUnauthCount === 'function') resetUnauthCount();  // v4.66: authorized → clear transient-unauth counter
     if (d.error) {
       window._lastSyncError = 'Apps Script: ' + d.error;
