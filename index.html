@@ -71,6 +71,8 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 .sync-dot.syncing { background:var(--amber); animation:pulse 1s infinite; }
 .sync-dot.synced { background:var(--green); }
 .sync-dot.error { background:var(--red); }
+/* v4.70: 'needs app password' — red AND pulsing, so it can't be read as "busy" */
+.sync-dot.auth { background:var(--red); animation:pulse 1s infinite; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
 /* NAV (directly below header) */
@@ -758,8 +760,10 @@ input[type=file] { display:none; }
     <line x1="1" y1="1" x2="23" y2="23"/>
     <path d="M16.72 11.06A10.94 10.94 0 0119 12.55M5 12.55a10.94 10.94 0 015.17-2.39M10.71 5.05A16 16 0 0122.56 9M1.42 9a15.91 15.91 0 014.7-2.88M8.53 16.11a6 6 0 016.95 0M12 20h.01"/>
   </svg>
-  Can't connect — switch to cellular data
-  <button onclick="setSyncState('syncing');syncFromSheets()" style="margin-left:8px;background:rgba(255,255,255,.25);
+  <!-- v4.70: text + button are set by setSyncState() — this banner now serves BOTH
+       "can't connect" (error) and "app password needed" (auth). -->
+  <span id="wifi-banner-text">Can't connect — switch to cellular data</span>
+  <button id="wifi-banner-btn" onclick="setSyncState('syncing');syncFromSheets()" style="margin-left:8px;background:rgba(255,255,255,.25);
     border:none;color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:4px;cursor:pointer;font-family:inherit">
     Retry
   </button>
@@ -1017,7 +1021,7 @@ input[type=file] { display:none; }
            style="width:100%;box-sizing:border-box;padding:11px 13px;font-size:16px;border:.5px solid var(--border2);border-radius:var(--r);background:var(--surface);margin-bottom:6px"
            placeholder="App password" onkeydown="if(event.key==='Enter')submitAppPassword()">
     <div id="apppw-err" style="display:none;font-size:12px;color:var(--amber-t);background:var(--amber-bg);border-radius:var(--r);padding:8px 11px;margin-bottom:8px"></div>
-    <button class="btn btn-p" style="width:100%;margin-top:6px" onclick="submitAppPassword()">Connect</button>
+    <button class="btn btn-p" id="apppw-btn" style="width:100%;margin-top:6px" onclick="submitAppPassword()">Connect</button>
   </div>
 </div>
 <div class="overlay" id="disch-modal">
