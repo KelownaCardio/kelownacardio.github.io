@@ -2358,8 +2358,44 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // counts CALENDAR days, preferring the authoritative dischargeDate (DD/MM/YYYY, local)
 // and falling back to dischargedAt reduced to its local date. (06b_discharged.js,
 // 06c_patient_summary.js.) No cache-format change.
-var APP_VERSION = 'v4.71';
-var APP_BUILT   = '2026-07-14';
+// v4.72 (2026-07-15): HANDOVER FLAG MULTI-DEVICE FIX (hot-field last-write-
+// wins). During handover two doctors have the app open; every push rebuilds
+// the WHOLE patient row, so a device holding a stale copy (5-min poll) pushed
+// its old handover value back over a flag the other doctor had just cleared —
+// cleared flags "repopulated". Fix, four parts (backend: Crud v3.13 + Config
+// v2.35 add a Patients 'fieldTs' JSON column enforcing the same rule server-
+// side):
+//   1. Every flag/clear (tap, edit sheet, auto-flag) stamps
+//      fieldTs.handover = Date.now() via stampFieldTs().
+//   2. Sync merge: for HOT_FIELDS the NEWER tap wins regardless of which
+//      side (local/remote) is otherwise authoritative; if the local tap is
+//      newer AND the value differs, the winner is re-pushed to Sheets.
+//   3. Pending-push confirmation now also compares handover — it previously
+//      checked only the discharged fields, so a clear was "confirmed" by a
+//      sync snapshot taken BEFORE the clear landed, and remote-wins brought
+//      the flag straight back on the clearing device itself.
+//   4. 14_init: 60s fast poll Mon–Fri 06:50–09:00 + 14:00–15:00 (the real
+//      handover/peak windows) so the other open device sees taps within a
+//      minute instead of five.
+// No cache-format change.
+// v4.73 (2026-07-15): HOT-FIELD PROTECTION EXTENDED (same-day rev of v4.72
+// before deploy) + RESUME SYNC-GUARD + NOTES COLLISION CHECK.
+//   1. Timestamp protection now covers the four things doctors change during
+//      handover, as GROUPS under one tap-timestamp each (see HOT_GROUPS):
+//      handover flag; summary note (+updatedAt/By); location (ward/bed/list);
+//      discharge status (discharged/dischargedAt/dischargeDate/dischargedBy).
+//      A group is stamped ONLY when its values actually change (snapHot /
+//      stampChangedGroups) so an untouched field never wins a conflict by
+//      accident. Backend counterpart: Crud v3.14 HOT_GROUPS_.
+//   2. Resume sync-guard (14_init + index.template): reopening the app after
+//      >2 min away dims the screen with a "Refreshing…" banner and blocks
+//      taps until the first sync lands (8s failsafe) — no more acting on a
+//      stale list in the seconds after resume.
+//   3. Patient-notes collision check (06c): if the summary was edited on
+//      another device while the notes modal was open, Save warns and offers
+//      to show the latest text instead of silently overwriting it.
+var APP_VERSION = 'v4.73';
+var APP_BUILT   = '2026-07-15';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -2554,6 +2590,99 @@ function setSyncState(s) {
   }
 }
 
+// ─── v4.72/v4.73: HOT-FIELD LAST-WRITE-WINS (grouped) ────────────────
+// Field groups protected by per-tap timestamps — fields that travel
+// together move as a group under one timestamp. Keep in sync with
+// HOT_GROUPS_ in the backend Crud.gs (v3.14).
+var HOT_GROUPS = {
+  handover:  ['handover'],
+  summary:   ['summary', 'summaryUpdatedAt', 'summaryUpdatedBy'],
+  location:  ['ward', 'bed', 'list'],
+  discharge: ['discharged', 'dischargedAt', 'dischargeDate', 'dischargedBy']
+};
+
+function _parseFieldTs(v) {
+  if (v && typeof v === 'object') return v;
+  try {
+    var o = JSON.parse(String(v || '') || '{}');
+    return (o && typeof o === 'object') ? o : {};
+  } catch (e) { return {}; }
+}
+
+// Stamp a hot-GROUP change with the tap time. fieldTs is kept as a JSON
+// STRING on the patient object so it round-trips Sheets unchanged.
+function stampFieldTs(p, group) {
+  var fts = _parseFieldTs(p.fieldTs);
+  fts[group] = Date.now();
+  p.fieldTs = JSON.stringify(fts);
+}
+
+// v4.73: snapshot every hot field BEFORE a mutation block, then stamp only
+// the groups whose values actually changed — an untouched field must never
+// win a future conflict just because the patient was saved.
+function snapHot(p) {
+  var snap = {};
+  Object.keys(HOT_GROUPS).forEach(function(g) {
+    HOT_GROUPS[g].forEach(function(f) { snap[f] = p[f]; });
+  });
+  return snap;
+}
+function stampChangedGroups(p, snap) {
+  Object.keys(HOT_GROUPS).forEach(function(g) {
+    var changed = HOT_GROUPS[g].some(function(f) {
+      return String(p[f] == null ? '' : p[f]) !== String(snap[f] == null ? '' : snap[f]);
+    });
+    if (changed) stampFieldTs(p, g);
+  });
+}
+
+// Overlay `other`'s hot groups onto `base` wherever other's tap is newer.
+// Returns true if a hot-field VALUE actually changed on base (i.e. base's
+// copy was stale) — the caller uses that to decide whether to re-push.
+function mergeHotFieldsFrom(base, other) {
+  var bts = _parseFieldTs(base.fieldTs);
+  var ots = _parseFieldTs(other.fieldTs);
+  var valueChanged = false;
+  Object.keys(HOT_GROUPS).forEach(function(g) {
+    if ((Number(ots[g]) || 0) > (Number(bts[g]) || 0)) {
+      HOT_GROUPS[g].forEach(function(f) {
+        if (String(base[f] == null ? '' : base[f]) !== String(other[f] == null ? '' : other[f])) valueChanged = true;
+        base[f] = other[f];
+      });
+      bts[g] = Number(ots[g]);
+    }
+  });
+  base.fieldTs = JSON.stringify(bts);
+  return valueChanged;
+}
+
+// ─── v4.73: RESUME SYNC-GUARD ────────────────────────────────────────
+// Reopening the app shows the pre-suspend screen for the seconds until the
+// resume-sync lands; a doctor tapping a flag/discharge in that window acts
+// on stale data. When the last good sync is >2 min old, dim the app and
+// block taps until the sync completes (8s failsafe so an offline device is
+// never bricked — the wifi banner takes over from there).
+function showSyncGuard() {
+  var g = document.getElementById('sync-guard');
+  if (!g) return;
+  g.style.display = 'flex';
+  clearTimeout(window._syncGuardTimer);
+  window._syncGuardTimer = setTimeout(hideSyncGuard, 8000);
+}
+function hideSyncGuard() {
+  clearTimeout(window._syncGuardTimer);
+  var g = document.getElementById('sync-guard');
+  if (g) g.style.display = 'none';
+}
+function syncWithGuardIfStale() {
+  var stale = !window._lastSyncOkAt ||
+              (Date.now() - window._lastSyncOkAt) > 2 * 60 * 1000;
+  if (stale) showSyncGuard();
+  return syncFromSheets()
+    .catch(function() {})
+    .then(function() { hideSyncGuard(); });
+}
+
 var _syncInFlight = false;
 async function syncFromSheets() {
   if (!SHEETS_URL) return;
@@ -2688,9 +2817,22 @@ async function syncFromSheets() {
         // This prevents discharge / restore / field updates from being clobbered
         // by a stale remote row when sync runs before the push completes.
         var isPending = window._pendingPush && window._pendingPush[lp.id];
-        if (isPending) return Object.assign({}, lp);
-        // Otherwise remote wins.
-        return Object.assign({}, rp);
+        if (isPending) {
+          // v4.72: even while local is pending, a NEWER remote tap on a hot
+          // field (the other doctor flagged/cleared after us) wins that field.
+          var keep = Object.assign({}, lp);
+          mergeHotFieldsFrom(keep, rp);
+          return keep;
+        }
+        // Otherwise remote wins — EXCEPT hot fields where the local tap is
+        // newer (v4.72): our clear/flag hasn't landed on Sheets yet (push
+        // lost, or the getAll snapshot predates it). Keep the newer local
+        // value and re-assert it on Sheets.
+        var out = Object.assign({}, rp);
+        if (mergeHotFieldsFrom(out, lp) && SHEETS_URL) {
+          push('savePatient', out);
+        }
+        return out;
       });
 
       // Clear pending entries ONLY if the remote row reflects the pending update.
@@ -2702,9 +2844,15 @@ async function syncFromSheets() {
         var dischMatch = parseBool(rp.discharged) === parseBool(pending.discharged);
         var dischAtMatch = !pending.dischargedAt ||
           (parseDischargedAt(rp.dischargedAt) === parseDischargedAt(pending.dischargedAt));
+        // v4.72: also require the handover flag to match. Previously only the
+        // discharged fields were compared, so a handover clear was "confirmed"
+        // by a getAll snapshot taken BEFORE the clear landed — remote-wins then
+        // resurrected the flag on the very device that cleared it.
+        var _hoNorm = function(v) { return (!!v && v !== 'false') ? String(v) : ''; };
+        var hoMatch = _hoNorm(rp.handover) === _hoNorm(pending.handover);
         // Generous timeout fallback: clear pending after 60s regardless
         var stale = (Date.now() - (window._pendingPush[rp.id].ts || 0)) > 60000;
-        if ((dischMatch && dischAtMatch) || stale) {
+        if ((dischMatch && dischAtMatch && hoMatch) || stale) {
           delete window._pendingPush[rp.id];
         }
       });
@@ -2886,6 +3034,7 @@ async function syncFromSheets() {
     window._lastSyncResponse.completedAt = new Date().toISOString();
     window._lastSyncResponse.stPatientsFinal = st.patients.length;
     window._lastSyncResponse.stClaimsFinal = st.claims.length;
+    window._lastSyncOkAt = Date.now();   // v4.73: resume-guard staleness marker
     setSyncState('synced');
     render();
     // If user is currently viewing the Recently Discharged pane, refresh it too
@@ -3657,6 +3806,7 @@ function clearHandover(pid) {
   var p = getP(pid);
   if (!p) return;
   p.handover = false;
+  stampFieldTs(p, 'handover');   // v4.72: tap-timestamp — newest tap wins on merge
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
   logChange(p, 'Handover acknowledged', (st.doc && st.doc.alias) || '');
@@ -3669,6 +3819,7 @@ function toggleHandoverFlag(pid) {
   if (!p) return;
   var wasOn = !!p.handover && p.handover !== 'false';
   p.handover = wasOn ? false : 'oncall';
+  stampFieldTs(p, 'handover');   // v4.72: tap-timestamp — newest tap wins on merge
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
   logChange(p, wasOn ? 'Handover flag cleared' : 'Flagged for handover', (st.doc && st.doc.alias) || '');
@@ -5366,12 +5517,14 @@ function _doRestore(pid, list) {
   var p = (st.patients || []).find(function(x) { return x.id === pid; });
   if (!p) return;
   hideModal('merge-modal');
+  var _hotSnap = snapHot(p);   // v4.73
   p.discharged    = false;
   p.dischargedAt  = null;
   p.dischargeDate = null;
   p.dischargedBy  = '';
   p.list          = list;
   if (list === 'on' && !p.ward) p.ward = 'OTHER';
+  stampChangedGroups(p, _hotSnap);   // v4.73: restore = discharge+location tap
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
   logChange(p, 'Restored', 'Returned to ' + (list === 'on' ? 'On Service' : 'Off Service'));
@@ -5438,6 +5591,11 @@ function openPatientNotes(pid) {
           '<button class="btn btn-s" onclick="hideModal(\'pt-notes-modal\')">Close</button>' +
           '</div>';
 
+  // v4.73: remember what the notes looked like when the modal opened, so
+  // Save can detect an edit that landed from another device in the meantime.
+  window._pnOpenSummaryTs = String(p.summaryUpdatedAt || '');
+  window._pnOpenSummary   = String(p.summary || '');
+
   document.getElementById('pt-notes-content').innerHTML = html;
   showModal('pt-notes-modal');
 
@@ -5457,9 +5615,42 @@ function savePatientNotes(pid) {
   var newText = ta.value.trim();
   var alias   = (st.doc && st.doc.alias) || '';
 
+  // v4.73: nothing changed — close without saving (a no-op save would still
+  // restamp attribution and win future conflicts for no reason).
+  if (newText === String(p.summary || '').trim()) {
+    hideModal('pt-notes-modal');
+    return;
+  }
+
+  // v4.73: COLLISION CHECK — someone else's edit landed (via sync) while this
+  // modal was open. Warn instead of silently overwriting their text.
+  var _curTs = String(p.summaryUpdatedAt || '');
+  if (_curTs !== (window._pnOpenSummaryTs || '') &&
+      String(p.summary || '') !== (window._pnOpenSummary || '')) {
+    var _who = p.summaryUpdatedBy || 'another doctor';
+    var _overwrite = confirm('These notes were updated by ' + _who +
+      ' while you were editing.\n\n' +
+      'OK — save YOUR version (replaces theirs)\n' +
+      'Cancel — view their latest version; your draft is kept below it so you can merge, then Save');
+    if (!_overwrite) {
+      var _draft = newText;
+      openPatientNotes(pid);   // re-opens with the latest text + fresh baseline
+      setTimeout(function() {
+        var ta2 = document.getElementById('pn-text');
+        if (ta2) {
+          ta2.value = String(getP(pid).summary || '') +
+            '\n\n----- your unsaved draft (merge above, delete this line, then Save) -----\n' + _draft;
+        }
+      }, 160);
+      return;
+    }
+  }
+
+  var _hotSnap = snapHot(p);   // v4.73
   p.summary          = newText;
   p.summaryUpdatedAt = String(Date.now());
   p.summaryUpdatedBy = alias;
+  stampChangedGroups(p, _hotSnap);   // v4.73: summary group tap timestamp
 
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
@@ -7331,6 +7522,8 @@ function savePatientEdit(pid) {
   var _oldDob   = p.dob   || '';
   var _oldSex   = p.sex   || '';
 
+  var _hotSnap = snapHot(p);   // v4.73: stamp changed hot groups on save
+
   var role = (document.getElementById('pe-role') || {}).value || 'consultant';
   var ward = (document.getElementById('pe-ward') || {}).value || p.ward;
 
@@ -7374,6 +7567,7 @@ function savePatientEdit(pid) {
     // else: unchanged — keep existing value ('new' or 'oncall')
   }
 
+  stampChangedGroups(p, _hotSnap);   // v4.73: handover/location changes get tap timestamps
   saveCustomRoom(p.ward, p.bed);
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
@@ -7504,6 +7698,7 @@ function saveLocationEdit(pid) {
   var oldWard = p.ward;
   var oldBed  = p.bed || '';
   var oldList = p.list;
+  var _hotSnap = snapHot(p);   // v4.73
 
   // v4.39: No forced role/care snaps. Save user's choices directly.
   p.ward = newWard;
@@ -7513,6 +7708,7 @@ function saveLocationEdit(pid) {
   if (newRole) p.role = newRole;
   if (newCare) p.care = newCare;
 
+  stampChangedGroups(p, _hotSnap);   // v4.73: location move gets a tap timestamp
   saveCustomRoom(p.ward, p.bed);
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
@@ -8466,6 +8662,8 @@ async function _mergeAndReadmit() {
   });
   if (_demoChanged && _oldPhn) p._mergeOldPhn = _oldPhn;
 
+  var _hotSnap = snapHot(p);   // v4.73: stamp changed hot groups (readmit path)
+
   // Reactivate
   p.discharged = false;
   p.dischargedAt = '';
@@ -8500,6 +8698,8 @@ async function _mergeAndReadmit() {
   p.refby     = gv('cb-refby') || gv('oc-refby') || p.refby || '';
   p.refbyName = gv('cb-refby-name') || gv('oc-refby-name') || p.refbyName || '';
   p.icd       = gv('cb-icd') || gv('oc-icd') || p.icd || '';
+
+  stampChangedGroups(p, _hotSnap);   // v4.73: readmit = discharge/location/handover taps
 
   // \u2500\u2500 Update local state \u2014 exactly ONE patient row \u2500\u2500
   // Drop any other local patient carrying the old or new PHN (a phone-consult
@@ -9638,6 +9838,8 @@ async function apSubmit(addToList, _skipDupCheck) {
     p.dischargeDate = fmtD(new Date());
     if (!p.dischargedBy && st.doc && st.doc.alias) p.dischargedBy = st.doc.alias;
   }
+
+  stampChangedGroups(p, {});   // v4.73: fresh record — timestamp its initial hot groups
 
   st.patients.push(p);
   sv('patients', st.patients);
@@ -11090,6 +11292,7 @@ function selectLocWard(ward) {
 function confirmLocChange() {
   var p    = getP(_locPid);
   var from = p.ward;
+  var _hotSnap = snapHot(p);   // v4.73
   p.ward   = _locWard;
   p.bed    = gv('loc-room');
   saveCustomRoom(_locWard, p.bed);   // persist an off-list room so it becomes a pill next time
@@ -11104,6 +11307,7 @@ function confirmLocChange() {
     p.mrp  = isMrp ? 'Cardiology' : p.mrp;
   }
 
+  stampChangedGroups(p, _hotSnap);   // v4.73: location move gets a tap timestamp
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
   logChange(p, 'Location changed', from + ' → ' + _locWard);
@@ -11494,11 +11698,13 @@ function removePatient(pid) {
   // v4.26: Safety net — ensure dischargeDate is always set. disch78717() and
   // dischSimple() call removePatient without setting dischargeDate first,
   // which left the calendar span unbounded (gaps shown after discharge).
+  var _hotSnap = snapHot(p);   // v4.73
   if (!p.dischargeDate) p.dischargeDate = TODAY;
   p.dischargedAt = Date.now();
   p.discharged   = true;
   // Capture who discharged (signed-in doctor's initials) — shown in claim history.
   if (!p.dischargedBy && st.doc && st.doc.alias) p.dischargedBy = st.doc.alias;
+  stampChangedGroups(p, _hotSnap);   // v4.73: discharge gets a tap timestamp
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p); // update on sheets too
   render();
@@ -13375,11 +13581,13 @@ function confirmMediteachImport() {
   toDisch.forEach(function(d) {
     var p = st.patients.find(function(pp) { return pp.id === d.pid; });
     if (!p) return;
+    var _hotSnap = snapHot(p);   // v4.73
     p.dischargeDate = TODAY;                                // DD/MM/YYYY display
     p.dischargedAt  = Date.now();                           // epoch ms — drives "recently discharged" sort
     p.discharged    = true;
     if (!p.dischargedBy && st.doc && st.doc.alias) p.dischargedBy = st.doc.alias;
     p.dischargeNote = d.reason;                             // non-billing Sheets note
+    stampChangedGroups(p, _hotSnap);   // v4.73: import discharge = discharge tap
     if (SHEETS_URL) push('savePatient', p);
     logChange(p, 'Discharged via Meditech import', d.reason);
   });
@@ -13395,6 +13603,7 @@ function confirmMediteachImport() {
   toTransition.forEach(function(p) {
     var ep = st.patients.find(function(pp) { return pp.id === p._existingPid; });
     if (!ep) return;
+    var _hotSnap = snapHot(ep);   // v4.73
     var prev = ep.mrp + '/' + ep.list + '/' + ep.role + '/' + ep.care;
     // Always refresh ward/bed from the Meditech list — that's the freshest
     // location signal regardless of transition direction.
@@ -13412,6 +13621,7 @@ function confirmMediteachImport() {
       ep.care = (ep.ward === 'CCU' || ep.ward === 'CSICU' || ep.ward === 'ICUA' || ep.ward === 'ICUB')
                 ? 'ccu' : 'daily';
     }
+    stampChangedGroups(ep, _hotSnap);   // v4.73: ward/bed/list refresh = location tap
     if (SHEETS_URL) push('savePatient', ep);
     logChange(ep, 'MRP transition via Meditech import',
               prev + ' → ' + ep.mrp + '/' + ep.list + '/' + ep.role + '/' + ep.care);
@@ -13647,7 +13857,9 @@ async function init() {
     // v4.39: Auto-refresh every 5 min so other doctors' changes (including
     // handover summaries from the email processor) appear without closing
     // and reopening the app.
-    setInterval(async function() {
+    // v4.72: body extracted to _autoRefreshSync so the handover-hours fast
+    // poll below can share the editing-screen guards.
+    async function _autoRefreshSync(tag) {
       // Skip if any editing screen is open — don't clobber mid-edit state
       var claimOpen = document.getElementById('p-claim') &&
                       document.getElementById('p-claim').classList.contains('on');
@@ -13657,17 +13869,35 @@ async function init() {
                       document.getElementById('disch-modal').classList.contains('on');
       var ocrBusy   = typeof _ocrInFlight !== 'undefined' && _ocrInFlight;
       if (claimOpen || addOpen || dischOpen || ocrBusy) {
-        console.log('[auto-refresh] skipped — editing in progress');
+        console.log('[' + tag + '] skipped — editing in progress');
         return;
       }
       try {
         await syncFromSheets();
         render();
-        console.log('[auto-refresh] synced');
+        console.log('[' + tag + '] synced');
       } catch(e) {
-        console.log('[auto-refresh] failed:', e);
+        console.log('[' + tag + '] failed:', e);
       }
-    }, 5 * 60 * 1000);
+    }
+    setInterval(function() { _autoRefreshSync('auto-refresh'); }, 5 * 60 * 1000);
+
+    // v4.72: HANDOVER-HOURS FAST POLL — sync every 60s during the windows
+    // when multiple doctors have the app open (Kathryn, 2026-07-15):
+    // handover is ~07:00 Mon/Tue/Thu/Fri and ~08:00 Wed; peak multi-device
+    // use is 06:50–09:00 and 14:00–15:00, Mon–Fri. Inside those windows the
+    // other doctor's flag taps/clears appear within a minute instead of up
+    // to five. syncFromSheets' _syncInFlight guard prevents overlap with the
+    // 5-min timer; outside the windows this timer is a no-op.
+    setInterval(function() {
+      var _n = new Date(), _dow = _n.getDay();
+      var _t = _n.getHours() * 60 + _n.getMinutes();
+      var _inWindow = (_t >= 410 && _t <= 540) ||   // 06:50–09:00
+                      (_t >= 840 && _t <= 900);     // 14:00–15:00
+      if (_dow >= 1 && _dow <= 5 && _inWindow) {
+        _autoRefreshSync('handover-poll');
+      }
+    }, 60 * 1000);
   }
 }
 
@@ -14090,7 +14320,8 @@ function showToast(msg, kind) {
 // Re-sync whenever the user switches back to this tab/app
 document.addEventListener('visibilitychange', function() {
   if (document.visibilityState === 'visible' && st.loaded && SHEETS_URL) {
-    syncFromSheets();
+    // v4.73: dim + block taps until the resume-sync lands if data is >2 min old
+    syncWithGuardIfStale();
   }
   // v4.15: when the app returns to the foreground, check whether a newer
   // build has been deployed. Off the critical path (never runs on first
@@ -14172,7 +14403,8 @@ window.addEventListener('pageshow', function(e) {
     }
     // Always trigger a fresh sync on pageshow — defensive against iOS Safari restoring
     // a hung fetch promise from cache
-    syncFromSheets();
+    // v4.73: dim + block taps until it lands if data is >2 min old
+    syncWithGuardIfStale();
   }
 });
 
