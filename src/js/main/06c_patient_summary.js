@@ -56,6 +56,11 @@ function openPatientNotes(pid) {
           '<button class="btn btn-s" onclick="hideModal(\'pt-notes-modal\')">Close</button>' +
           '</div>';
 
+  // v4.73: remember what the notes looked like when the modal opened, so
+  // Save can detect an edit that landed from another device in the meantime.
+  window._pnOpenSummaryTs = String(p.summaryUpdatedAt || '');
+  window._pnOpenSummary   = String(p.summary || '');
+
   document.getElementById('pt-notes-content').innerHTML = html;
   showModal('pt-notes-modal');
 
@@ -75,9 +80,42 @@ function savePatientNotes(pid) {
   var newText = ta.value.trim();
   var alias   = (st.doc && st.doc.alias) || '';
 
+  // v4.73: nothing changed — close without saving (a no-op save would still
+  // restamp attribution and win future conflicts for no reason).
+  if (newText === String(p.summary || '').trim()) {
+    hideModal('pt-notes-modal');
+    return;
+  }
+
+  // v4.73: COLLISION CHECK — someone else's edit landed (via sync) while this
+  // modal was open. Warn instead of silently overwriting their text.
+  var _curTs = String(p.summaryUpdatedAt || '');
+  if (_curTs !== (window._pnOpenSummaryTs || '') &&
+      String(p.summary || '') !== (window._pnOpenSummary || '')) {
+    var _who = p.summaryUpdatedBy || 'another doctor';
+    var _overwrite = confirm('These notes were updated by ' + _who +
+      ' while you were editing.\n\n' +
+      'OK — save YOUR version (replaces theirs)\n' +
+      'Cancel — view their latest version; your draft is kept below it so you can merge, then Save');
+    if (!_overwrite) {
+      var _draft = newText;
+      openPatientNotes(pid);   // re-opens with the latest text + fresh baseline
+      setTimeout(function() {
+        var ta2 = document.getElementById('pn-text');
+        if (ta2) {
+          ta2.value = String(getP(pid).summary || '') +
+            '\n\n----- your unsaved draft (merge above, delete this line, then Save) -----\n' + _draft;
+        }
+      }, 160);
+      return;
+    }
+  }
+
+  var _hotSnap = snapHot(p);   // v4.73
   p.summary          = newText;
   p.summaryUpdatedAt = String(Date.now());
   p.summaryUpdatedBy = alias;
+  stampChangedGroups(p, _hotSnap);   // v4.73: summary group tap timestamp
 
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);

@@ -180,6 +180,8 @@ async function _mergeAndReadmit() {
   });
   if (_demoChanged && _oldPhn) p._mergeOldPhn = _oldPhn;
 
+  var _hotSnap = snapHot(p);   // v4.73: stamp changed hot groups (readmit path)
+
   // Reactivate
   p.discharged = false;
   p.dischargedAt = '';
@@ -214,6 +216,8 @@ async function _mergeAndReadmit() {
   p.refby     = gv('cb-refby') || gv('oc-refby') || p.refby || '';
   p.refbyName = gv('cb-refby-name') || gv('oc-refby-name') || p.refbyName || '';
   p.icd       = gv('cb-icd') || gv('oc-icd') || p.icd || '';
+
+  stampChangedGroups(p, _hotSnap);   // v4.73: readmit = discharge/location/handover taps
 
   // \u2500\u2500 Update local state \u2014 exactly ONE patient row \u2500\u2500
   // Drop any other local patient carrying the old or new PHN (a phone-consult
@@ -1352,6 +1356,8 @@ async function apSubmit(addToList, _skipDupCheck) {
     p.dischargeDate = fmtD(new Date());
     if (!p.dischargedBy && st.doc && st.doc.alias) p.dischargedBy = st.doc.alias;
   }
+
+  stampChangedGroups(p, {});   // v4.73: fresh record — timestamp its initial hot groups
 
   st.patients.push(p);
   sv('patients', st.patients);

@@ -188,7 +188,9 @@ async function init() {
     // v4.39: Auto-refresh every 5 min so other doctors' changes (including
     // handover summaries from the email processor) appear without closing
     // and reopening the app.
-    setInterval(async function() {
+    // v4.72: body extracted to _autoRefreshSync so the handover-hours fast
+    // poll below can share the editing-screen guards.
+    async function _autoRefreshSync(tag) {
       // Skip if any editing screen is open — don't clobber mid-edit state
       var claimOpen = document.getElementById('p-claim') &&
                       document.getElementById('p-claim').classList.contains('on');
@@ -198,17 +200,35 @@ async function init() {
                       document.getElementById('disch-modal').classList.contains('on');
       var ocrBusy   = typeof _ocrInFlight !== 'undefined' && _ocrInFlight;
       if (claimOpen || addOpen || dischOpen || ocrBusy) {
-        console.log('[auto-refresh] skipped — editing in progress');
+        console.log('[' + tag + '] skipped — editing in progress');
         return;
       }
       try {
         await syncFromSheets();
         render();
-        console.log('[auto-refresh] synced');
+        console.log('[' + tag + '] synced');
       } catch(e) {
-        console.log('[auto-refresh] failed:', e);
+        console.log('[' + tag + '] failed:', e);
       }
-    }, 5 * 60 * 1000);
+    }
+    setInterval(function() { _autoRefreshSync('auto-refresh'); }, 5 * 60 * 1000);
+
+    // v4.72: HANDOVER-HOURS FAST POLL — sync every 60s during the windows
+    // when multiple doctors have the app open (Kathryn, 2026-07-15):
+    // handover is ~07:00 Mon/Tue/Thu/Fri and ~08:00 Wed; peak multi-device
+    // use is 06:50–09:00 and 14:00–15:00, Mon–Fri. Inside those windows the
+    // other doctor's flag taps/clears appear within a minute instead of up
+    // to five. syncFromSheets' _syncInFlight guard prevents overlap with the
+    // 5-min timer; outside the windows this timer is a no-op.
+    setInterval(function() {
+      var _n = new Date(), _dow = _n.getDay();
+      var _t = _n.getHours() * 60 + _n.getMinutes();
+      var _inWindow = (_t >= 410 && _t <= 540) ||   // 06:50–09:00
+                      (_t >= 840 && _t <= 900);     // 14:00–15:00
+      if (_dow >= 1 && _dow <= 5 && _inWindow) {
+        _autoRefreshSync('handover-poll');
+      }
+    }, 60 * 1000);
   }
 }
 
@@ -631,7 +651,8 @@ function showToast(msg, kind) {
 // Re-sync whenever the user switches back to this tab/app
 document.addEventListener('visibilitychange', function() {
   if (document.visibilityState === 'visible' && st.loaded && SHEETS_URL) {
-    syncFromSheets();
+    // v4.73: dim + block taps until the resume-sync lands if data is >2 min old
+    syncWithGuardIfStale();
   }
   // v4.15: when the app returns to the foreground, check whether a newer
   // build has been deployed. Off the critical path (never runs on first
@@ -713,7 +734,8 @@ window.addEventListener('pageshow', function(e) {
     }
     // Always trigger a fresh sync on pageshow — defensive against iOS Safari restoring
     // a hung fetch promise from cache
-    syncFromSheets();
+    // v4.73: dim + block taps until it lands if data is >2 min old
+    syncWithGuardIfStale();
   }
 });
 

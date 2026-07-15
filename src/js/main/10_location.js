@@ -90,6 +90,7 @@ function selectLocWard(ward) {
 function confirmLocChange() {
   var p    = getP(_locPid);
   var from = p.ward;
+  var _hotSnap = snapHot(p);   // v4.73
   p.ward   = _locWard;
   p.bed    = gv('loc-room');
   saveCustomRoom(_locWard, p.bed);   // persist an off-list room so it becomes a pill next time
@@ -104,6 +105,7 @@ function confirmLocChange() {
     p.mrp  = isMrp ? 'Cardiology' : p.mrp;
   }
 
+  stampChangedGroups(p, _hotSnap);   // v4.73: location move gets a tap timestamp
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
   logChange(p, 'Location changed', from + ' → ' + _locWard);
@@ -494,11 +496,13 @@ function removePatient(pid) {
   // v4.26: Safety net — ensure dischargeDate is always set. disch78717() and
   // dischSimple() call removePatient without setting dischargeDate first,
   // which left the calendar span unbounded (gaps shown after discharge).
+  var _hotSnap = snapHot(p);   // v4.73
   if (!p.dischargeDate) p.dischargeDate = TODAY;
   p.dischargedAt = Date.now();
   p.discharged   = true;
   // Capture who discharged (signed-in doctor's initials) — shown in claim history.
   if (!p.dischargedBy && st.doc && st.doc.alias) p.dischargedBy = st.doc.alias;
+  stampChangedGroups(p, _hotSnap);   // v4.73: discharge gets a tap timestamp
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p); // update on sheets too
   render();

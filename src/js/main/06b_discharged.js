@@ -316,12 +316,14 @@ function _doRestore(pid, list) {
   var p = (st.patients || []).find(function(x) { return x.id === pid; });
   if (!p) return;
   hideModal('merge-modal');
+  var _hotSnap = snapHot(p);   // v4.73
   p.discharged    = false;
   p.dischargedAt  = null;
   p.dischargeDate = null;
   p.dischargedBy  = '';
   p.list          = list;
   if (list === 'on' && !p.ward) p.ward = 'OTHER';
+  stampChangedGroups(p, _hotSnap);   // v4.73: restore = discharge+location tap
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
   logChange(p, 'Restored', 'Returned to ' + (list === 'on' ? 'On Service' : 'Off Service'));

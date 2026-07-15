@@ -207,8 +207,44 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // counts CALENDAR days, preferring the authoritative dischargeDate (DD/MM/YYYY, local)
 // and falling back to dischargedAt reduced to its local date. (06b_discharged.js,
 // 06c_patient_summary.js.) No cache-format change.
-var APP_VERSION = 'v4.71';
-var APP_BUILT   = '2026-07-14';
+// v4.72 (2026-07-15): HANDOVER FLAG MULTI-DEVICE FIX (hot-field last-write-
+// wins). During handover two doctors have the app open; every push rebuilds
+// the WHOLE patient row, so a device holding a stale copy (5-min poll) pushed
+// its old handover value back over a flag the other doctor had just cleared —
+// cleared flags "repopulated". Fix, four parts (backend: Crud v3.13 + Config
+// v2.35 add a Patients 'fieldTs' JSON column enforcing the same rule server-
+// side):
+//   1. Every flag/clear (tap, edit sheet, auto-flag) stamps
+//      fieldTs.handover = Date.now() via stampFieldTs().
+//   2. Sync merge: for HOT_FIELDS the NEWER tap wins regardless of which
+//      side (local/remote) is otherwise authoritative; if the local tap is
+//      newer AND the value differs, the winner is re-pushed to Sheets.
+//   3. Pending-push confirmation now also compares handover — it previously
+//      checked only the discharged fields, so a clear was "confirmed" by a
+//      sync snapshot taken BEFORE the clear landed, and remote-wins brought
+//      the flag straight back on the clearing device itself.
+//   4. 14_init: 60s fast poll Mon–Fri 06:50–09:00 + 14:00–15:00 (the real
+//      handover/peak windows) so the other open device sees taps within a
+//      minute instead of five.
+// No cache-format change.
+// v4.73 (2026-07-15): HOT-FIELD PROTECTION EXTENDED (same-day rev of v4.72
+// before deploy) + RESUME SYNC-GUARD + NOTES COLLISION CHECK.
+//   1. Timestamp protection now covers the four things doctors change during
+//      handover, as GROUPS under one tap-timestamp each (see HOT_GROUPS):
+//      handover flag; summary note (+updatedAt/By); location (ward/bed/list);
+//      discharge status (discharged/dischargedAt/dischargeDate/dischargedBy).
+//      A group is stamped ONLY when its values actually change (snapHot /
+//      stampChangedGroups) so an untouched field never wins a conflict by
+//      accident. Backend counterpart: Crud v3.14 HOT_GROUPS_.
+//   2. Resume sync-guard (14_init + index.template): reopening the app after
+//      >2 min away dims the screen with a "Refreshing…" banner and blocks
+//      taps until the first sync lands (8s failsafe) — no more acting on a
+//      stale list in the seconds after resume.
+//   3. Patient-notes collision check (06c): if the summary was edited on
+//      another device while the notes modal was open, Save warns and offers
+//      to show the latest text instead of silently overwriting it.
+var APP_VERSION = 'v4.73';
+var APP_BUILT   = '2026-07-15';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -403,6 +439,99 @@ function setSyncState(s) {
   }
 }
 
+// ─── v4.72/v4.73: HOT-FIELD LAST-WRITE-WINS (grouped) ────────────────
+// Field groups protected by per-tap timestamps — fields that travel
+// together move as a group under one timestamp. Keep in sync with
+// HOT_GROUPS_ in the backend Crud.gs (v3.14).
+var HOT_GROUPS = {
+  handover:  ['handover'],
+  summary:   ['summary', 'summaryUpdatedAt', 'summaryUpdatedBy'],
+  location:  ['ward', 'bed', 'list'],
+  discharge: ['discharged', 'dischargedAt', 'dischargeDate', 'dischargedBy']
+};
+
+function _parseFieldTs(v) {
+  if (v && typeof v === 'object') return v;
+  try {
+    var o = JSON.parse(String(v || '') || '{}');
+    return (o && typeof o === 'object') ? o : {};
+  } catch (e) { return {}; }
+}
+
+// Stamp a hot-GROUP change with the tap time. fieldTs is kept as a JSON
+// STRING on the patient object so it round-trips Sheets unchanged.
+function stampFieldTs(p, group) {
+  var fts = _parseFieldTs(p.fieldTs);
+  fts[group] = Date.now();
+  p.fieldTs = JSON.stringify(fts);
+}
+
+// v4.73: snapshot every hot field BEFORE a mutation block, then stamp only
+// the groups whose values actually changed — an untouched field must never
+// win a future conflict just because the patient was saved.
+function snapHot(p) {
+  var snap = {};
+  Object.keys(HOT_GROUPS).forEach(function(g) {
+    HOT_GROUPS[g].forEach(function(f) { snap[f] = p[f]; });
+  });
+  return snap;
+}
+function stampChangedGroups(p, snap) {
+  Object.keys(HOT_GROUPS).forEach(function(g) {
+    var changed = HOT_GROUPS[g].some(function(f) {
+      return String(p[f] == null ? '' : p[f]) !== String(snap[f] == null ? '' : snap[f]);
+    });
+    if (changed) stampFieldTs(p, g);
+  });
+}
+
+// Overlay `other`'s hot groups onto `base` wherever other's tap is newer.
+// Returns true if a hot-field VALUE actually changed on base (i.e. base's
+// copy was stale) — the caller uses that to decide whether to re-push.
+function mergeHotFieldsFrom(base, other) {
+  var bts = _parseFieldTs(base.fieldTs);
+  var ots = _parseFieldTs(other.fieldTs);
+  var valueChanged = false;
+  Object.keys(HOT_GROUPS).forEach(function(g) {
+    if ((Number(ots[g]) || 0) > (Number(bts[g]) || 0)) {
+      HOT_GROUPS[g].forEach(function(f) {
+        if (String(base[f] == null ? '' : base[f]) !== String(other[f] == null ? '' : other[f])) valueChanged = true;
+        base[f] = other[f];
+      });
+      bts[g] = Number(ots[g]);
+    }
+  });
+  base.fieldTs = JSON.stringify(bts);
+  return valueChanged;
+}
+
+// ─── v4.73: RESUME SYNC-GUARD ────────────────────────────────────────
+// Reopening the app shows the pre-suspend screen for the seconds until the
+// resume-sync lands; a doctor tapping a flag/discharge in that window acts
+// on stale data. When the last good sync is >2 min old, dim the app and
+// block taps until the sync completes (8s failsafe so an offline device is
+// never bricked — the wifi banner takes over from there).
+function showSyncGuard() {
+  var g = document.getElementById('sync-guard');
+  if (!g) return;
+  g.style.display = 'flex';
+  clearTimeout(window._syncGuardTimer);
+  window._syncGuardTimer = setTimeout(hideSyncGuard, 8000);
+}
+function hideSyncGuard() {
+  clearTimeout(window._syncGuardTimer);
+  var g = document.getElementById('sync-guard');
+  if (g) g.style.display = 'none';
+}
+function syncWithGuardIfStale() {
+  var stale = !window._lastSyncOkAt ||
+              (Date.now() - window._lastSyncOkAt) > 2 * 60 * 1000;
+  if (stale) showSyncGuard();
+  return syncFromSheets()
+    .catch(function() {})
+    .then(function() { hideSyncGuard(); });
+}
+
 var _syncInFlight = false;
 async function syncFromSheets() {
   if (!SHEETS_URL) return;
@@ -537,9 +666,22 @@ async function syncFromSheets() {
         // This prevents discharge / restore / field updates from being clobbered
         // by a stale remote row when sync runs before the push completes.
         var isPending = window._pendingPush && window._pendingPush[lp.id];
-        if (isPending) return Object.assign({}, lp);
-        // Otherwise remote wins.
-        return Object.assign({}, rp);
+        if (isPending) {
+          // v4.72: even while local is pending, a NEWER remote tap on a hot
+          // field (the other doctor flagged/cleared after us) wins that field.
+          var keep = Object.assign({}, lp);
+          mergeHotFieldsFrom(keep, rp);
+          return keep;
+        }
+        // Otherwise remote wins — EXCEPT hot fields where the local tap is
+        // newer (v4.72): our clear/flag hasn't landed on Sheets yet (push
+        // lost, or the getAll snapshot predates it). Keep the newer local
+        // value and re-assert it on Sheets.
+        var out = Object.assign({}, rp);
+        if (mergeHotFieldsFrom(out, lp) && SHEETS_URL) {
+          push('savePatient', out);
+        }
+        return out;
       });
 
       // Clear pending entries ONLY if the remote row reflects the pending update.
@@ -551,9 +693,15 @@ async function syncFromSheets() {
         var dischMatch = parseBool(rp.discharged) === parseBool(pending.discharged);
         var dischAtMatch = !pending.dischargedAt ||
           (parseDischargedAt(rp.dischargedAt) === parseDischargedAt(pending.dischargedAt));
+        // v4.72: also require the handover flag to match. Previously only the
+        // discharged fields were compared, so a handover clear was "confirmed"
+        // by a getAll snapshot taken BEFORE the clear landed — remote-wins then
+        // resurrected the flag on the very device that cleared it.
+        var _hoNorm = function(v) { return (!!v && v !== 'false') ? String(v) : ''; };
+        var hoMatch = _hoNorm(rp.handover) === _hoNorm(pending.handover);
         // Generous timeout fallback: clear pending after 60s regardless
         var stale = (Date.now() - (window._pendingPush[rp.id].ts || 0)) > 60000;
-        if ((dischMatch && dischAtMatch) || stale) {
+        if ((dischMatch && dischAtMatch && hoMatch) || stale) {
           delete window._pendingPush[rp.id];
         }
       });
@@ -735,6 +883,7 @@ async function syncFromSheets() {
     window._lastSyncResponse.completedAt = new Date().toISOString();
     window._lastSyncResponse.stPatientsFinal = st.patients.length;
     window._lastSyncResponse.stClaimsFinal = st.claims.length;
+    window._lastSyncOkAt = Date.now();   // v4.73: resume-guard staleness marker
     setSyncState('synced');
     render();
     // If user is currently viewing the Recently Discharged pane, refresh it too

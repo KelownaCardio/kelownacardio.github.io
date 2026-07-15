@@ -591,11 +591,13 @@ function confirmMediteachImport() {
   toDisch.forEach(function(d) {
     var p = st.patients.find(function(pp) { return pp.id === d.pid; });
     if (!p) return;
+    var _hotSnap = snapHot(p);   // v4.73
     p.dischargeDate = TODAY;                                // DD/MM/YYYY display
     p.dischargedAt  = Date.now();                           // epoch ms — drives "recently discharged" sort
     p.discharged    = true;
     if (!p.dischargedBy && st.doc && st.doc.alias) p.dischargedBy = st.doc.alias;
     p.dischargeNote = d.reason;                             // non-billing Sheets note
+    stampChangedGroups(p, _hotSnap);   // v4.73: import discharge = discharge tap
     if (SHEETS_URL) push('savePatient', p);
     logChange(p, 'Discharged via Meditech import', d.reason);
   });
@@ -611,6 +613,7 @@ function confirmMediteachImport() {
   toTransition.forEach(function(p) {
     var ep = st.patients.find(function(pp) { return pp.id === p._existingPid; });
     if (!ep) return;
+    var _hotSnap = snapHot(ep);   // v4.73
     var prev = ep.mrp + '/' + ep.list + '/' + ep.role + '/' + ep.care;
     // Always refresh ward/bed from the Meditech list — that's the freshest
     // location signal regardless of transition direction.
@@ -628,6 +631,7 @@ function confirmMediteachImport() {
       ep.care = (ep.ward === 'CCU' || ep.ward === 'CSICU' || ep.ward === 'ICUA' || ep.ward === 'ICUB')
                 ? 'ccu' : 'daily';
     }
+    stampChangedGroups(ep, _hotSnap);   // v4.73: ward/bed/list refresh = location tap
     if (SHEETS_URL) push('savePatient', ep);
     logChange(ep, 'MRP transition via Meditech import',
               prev + ' → ' + ep.mrp + '/' + ep.list + '/' + ep.role + '/' + ep.care);

@@ -182,6 +182,8 @@ function savePatientEdit(pid) {
   var _oldDob   = p.dob   || '';
   var _oldSex   = p.sex   || '';
 
+  var _hotSnap = snapHot(p);   // v4.73: stamp changed hot groups on save
+
   var role = (document.getElementById('pe-role') || {}).value || 'consultant';
   var ward = (document.getElementById('pe-ward') || {}).value || p.ward;
 
@@ -225,6 +227,7 @@ function savePatientEdit(pid) {
     // else: unchanged — keep existing value ('new' or 'oncall')
   }
 
+  stampChangedGroups(p, _hotSnap);   // v4.73: handover/location changes get tap timestamps
   saveCustomRoom(p.ward, p.bed);
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
@@ -355,6 +358,7 @@ function saveLocationEdit(pid) {
   var oldWard = p.ward;
   var oldBed  = p.bed || '';
   var oldList = p.list;
+  var _hotSnap = snapHot(p);   // v4.73
 
   // v4.39: No forced role/care snaps. Save user's choices directly.
   p.ward = newWard;
@@ -364,6 +368,7 @@ function saveLocationEdit(pid) {
   if (newRole) p.role = newRole;
   if (newCare) p.care = newCare;
 
+  stampChangedGroups(p, _hotSnap);   // v4.73: location move gets a tap timestamp
   saveCustomRoom(p.ward, p.bed);
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);

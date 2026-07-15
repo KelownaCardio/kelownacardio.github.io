@@ -76,6 +76,7 @@ function clearHandover(pid) {
   var p = getP(pid);
   if (!p) return;
   p.handover = false;
+  stampFieldTs(p, 'handover');   // v4.72: tap-timestamp — newest tap wins on merge
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
   logChange(p, 'Handover acknowledged', (st.doc && st.doc.alias) || '');
@@ -88,6 +89,7 @@ function toggleHandoverFlag(pid) {
   if (!p) return;
   var wasOn = !!p.handover && p.handover !== 'false';
   p.handover = wasOn ? false : 'oncall';
+  stampFieldTs(p, 'handover');   // v4.72: tap-timestamp — newest tap wins on merge
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
   logChange(p, wasOn ? 'Handover flag cleared' : 'Flagged for handover', (st.doc && st.doc.alias) || '');
