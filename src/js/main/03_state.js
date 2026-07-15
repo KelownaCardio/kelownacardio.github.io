@@ -243,7 +243,14 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   3. Patient-notes collision check (06c): if the summary was edited on
 //      another device while the notes modal was open, Save warns and offers
 //      to show the latest text instead of silently overwriting it.
-var APP_VERSION = 'v4.73';
+// v4.74 (2026-07-15): NOTES REFRESH-ON-OPEN. Opening the patient notes
+// shows the saved LOCAL version immediately with a "Checking for newer
+// notes…" banner while a background sync runs. If a newer version exists:
+// untouched textarea → swapped in + re-baselined ("Updated — latest version
+// by X"); doctor already typing → draft left alone, amber banner, and the
+// v4.73 collision warning handles the merge on Save. (06c + banner CSS in
+// index.template.html.) No cache-format change.
+var APP_VERSION = 'v4.74';
 var APP_BUILT   = '2026-07-15';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,

@@ -44,6 +44,11 @@ function openPatientNotes(pid) {
 
   html += '<div class="pn-header">' + displayName + '</div>';
 
+  // v4.74: refresh-on-open — the LOCAL saved version is shown immediately;
+  // this banner tells the doctor a background refresh is checking Sheets for
+  // a newer version (see _pnRefreshOnOpen below).
+  html += '<div id="pn-refresh" class="pn-refresh" style="display:none"></div>';
+
   html += '<textarea class="pn-textarea" id="pn-text" placeholder="Add clinical notes…">' +
           esc(summary) + '</textarea>';
 
@@ -69,6 +74,63 @@ function openPatientNotes(pid) {
     var ta = document.getElementById('pn-text');
     if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
   }, 120);
+
+  // v4.74: background refresh so the doctor is almost always reading the
+  // latest blurb — collision warning on Save becomes the rare last resort.
+  if (SHEETS_URL) _pnRefreshOnOpen(pid);
+}
+
+// ── v4.74: notes refresh-on-open ─────────────────────────────────────
+// Shows "Checking for newer notes…", runs a sync, then:
+//   • nothing newer            → banner disappears
+//   • newer + doctor NOT typing → swap in the new text + attribution,
+//     re-baseline, brief "Updated — latest version by X" banner
+//   • newer + doctor IS typing  → leave their draft alone, persistent
+//     amber banner (Save's collision warning will handle the merge)
+function _pnSetRefreshBanner(txt, tone) {
+  var b = document.getElementById('pn-refresh');
+  if (!b) return;
+  if (!txt) { b.style.display = 'none'; return; }
+  b.style.display = 'block';
+  b.className = 'pn-refresh' + (tone ? ' pn-refresh-' + tone : '');
+  b.textContent = txt;
+}
+function _pnRefreshOnOpen(pid) {
+  var openTs = window._pnOpenSummaryTs || '';
+  _pnSetRefreshBanner('\u27F3 Checking for newer notes\u2026');
+  var applied = false;
+  function check(final) {
+    if (applied) return;
+    var modal = document.getElementById('pt-notes-modal');
+    var ta = document.getElementById('pn-text');
+    if (!modal || !modal.classList.contains('on') || !ta) { applied = true; return; }
+    var p = getP(pid);
+    if (!p) { _pnSetRefreshBanner(''); applied = true; return; }
+    var curTs = String(p.summaryUpdatedAt || '');
+    if (curTs === openTs) {                     // nothing newer arrived
+      if (final) { _pnSetRefreshBanner(''); applied = true; }
+      return;
+    }
+    applied = true;
+    var who = p.summaryUpdatedBy ? String(p.summaryUpdatedBy) : 'another doctor';
+    var untouched = ta.value.trim() === String(window._pnOpenSummary || '').trim();
+    if (untouched) {
+      ta.value = String(p.summary || '');       // swap in the newer version
+      window._pnOpenSummaryTs = curTs;          // re-baseline so Save doesn't false-warn
+      window._pnOpenSummary   = String(p.summary || '');
+      _pnSetRefreshBanner('Updated \u2014 latest version by ' + who, 'ok');
+      setTimeout(function() { if (String(window._pnOpenSummaryTs) === curTs) _pnSetRefreshBanner(''); }, 4000);
+    } else {
+      // Doctor already typing — never clobber a draft. Save will warn.
+      _pnSetRefreshBanner('\u26A0 ' + who + ' saved a newer version \u2014 you\u2019ll be asked to merge on Save', 'warn');
+    }
+  }
+  syncFromSheets().catch(function(){}).then(function() {
+    check(false);
+    // A sync already in flight makes the call above a no-op skip — check
+    // again after it has had time to land.
+    setTimeout(function() { check(true); }, 3000);
+  });
 }
 
 function savePatientNotes(pid) {
