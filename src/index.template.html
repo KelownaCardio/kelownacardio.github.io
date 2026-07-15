@@ -721,6 +721,12 @@ input[type=file] { display:none; }
 .dup-pill-tag { font-size:9px; font-weight:600; text-transform:uppercase; letter-spacing:.4px; color:var(--text3); }
 .dup-pill.selected .dup-pill-tag { color:var(--blue); }
 
+/* ─── v4.74: notes refresh-on-open banner ─── */
+.pn-refresh{margin:6px 0 8px;padding:7px 12px;border-radius:10px;font-size:12.5px;
+  font-weight:600;color:var(--text2,#666);background:rgba(26,95,168,.08)}
+.pn-refresh-ok{color:#1a7f37;background:rgba(26,127,55,.10)}
+.pn-refresh-warn{color:#8a5a00;background:rgba(255,171,0,.16)}
+
 /* ─── v4.73: resume sync-guard — dims the app and blocks taps until the
    first sync after resume lands (shown only when data is >2 min stale) ─── */
 #sync-guard{position:fixed;inset:0;z-index:11000;display:none;align-items:flex-start;
