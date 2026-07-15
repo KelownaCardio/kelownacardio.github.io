@@ -213,22 +213,38 @@ async function init() {
     }
     setInterval(function() { _autoRefreshSync('auto-refresh'); }, 5 * 60 * 1000);
 
-    // v4.72: HANDOVER-HOURS FAST POLL — sync every 60s during the windows
-    // when multiple doctors have the app open (Kathryn, 2026-07-15):
-    // handover is ~07:00 Mon/Tue/Thu/Fri and ~08:00 Wed; peak multi-device
-    // use is 06:50–09:00 and 14:00–15:00, Mon–Fri. Inside those windows the
-    // other doctor's flag taps/clears appear within a minute instead of up
-    // to five. syncFromSheets' _syncInFlight guard prevents overlap with the
-    // 5-min timer; outside the windows this timer is a no-op.
+    // v4.75: PING SYNC — replaces the v4.72 handover-window fast poll.
+    // Every 30s (app visible only) hit the cheap `ping` action (~0.3s, no
+    // sheet reads) and compare its lastWriteAt marker; a change means
+    // someone saved something → run a full guarded sync. Result: other
+    // doctors' changes appear within ~30-45s ALL DAY, and the server does
+    // full-dataset work only when something actually changed. Graceful on
+    // an old backend (no lastWriteAt in the response → no-op; the 5-min
+    // full sync above still runs as the safety net — it also covers the
+    // PhoneAdvice project + email processor, which don't stamp the marker).
+    async function _pingForChanges() {
+      if (!SHEETS_URL) return;
+      try {
+        var r = await fetch(SHEETS_URL + '?action=ping&key=' + SHARED_KEY +
+                            '&_t=' + Date.now(), { cache: 'no-store' });
+        if (!r.ok) return;
+        var d = await r.json();
+        if (!d || !d.lastWriteAt) return;          // old backend / no writes yet
+        var seen = window._lastSeenWriteAt;
+        if (seen === undefined || seen === null) { // first tick — baseline only
+          window._lastSeenWriteAt = String(d.lastWriteAt);
+          return;
+        }
+        if (String(d.lastWriteAt) !== String(seen)) {
+          window._lastSeenWriteAt = String(d.lastWriteAt);
+          _autoRefreshSync('ping-sync');           // guarded full pull + render
+        }
+      } catch (e) { /* silent — next tick retries */ }
+    }
     setInterval(function() {
-      var _n = new Date(), _dow = _n.getDay();
-      var _t = _n.getHours() * 60 + _n.getMinutes();
-      var _inWindow = (_t >= 410 && _t <= 540) ||   // 06:50–09:00
-                      (_t >= 840 && _t <= 900);     // 14:00–15:00
-      if (_dow >= 1 && _dow <= 5 && _inWindow) {
-        _autoRefreshSync('handover-poll');
-      }
-    }, 60 * 1000);
+      if (document.visibilityState !== 'visible') return;
+      _pingForChanges();
+    }, 30 * 1000);
   }
 }
 

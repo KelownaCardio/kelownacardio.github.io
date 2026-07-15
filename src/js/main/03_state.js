@@ -250,7 +250,20 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // by X"); doctor already typing → draft left alone, amber banner, and the
 // v4.73 collision warning handles the merge on Save. (06c + banner CSS in
 // index.template.html.) No cache-format change.
-var APP_VERSION = 'v4.74';
+// v4.75 (2026-07-15): PING SYNC — all-day sub-minute updates at lower server
+// cost. Backend (Router v3.05 / Crud v3.15) stamps lastWriteAt on every data
+// write and returns it from the cheap `ping` action (no sheet reads, ~0.3s).
+// 14_init now pings every 30s whenever the app is visible and triggers a
+// full sync ONLY when the marker changed; the Mon–Fri handover-window fast
+// poll is retired (superseded — this is faster and runs all day). The 5-min
+// full sync stays as the safety net for writers that don't stamp the marker
+// (PhoneAdvice project, email processor). getAll responses are additionally
+// served from a 10s server-side cache, so a burst of devices pulling after
+// one save costs one sheet read. Graceful on an un-upgraded backend: ping
+// returns no lastWriteAt → loop no-ops, 5-min sync carries on. Also: every
+// request is counted server-side; nightly job archives per-day totals to
+// the new Stats sheet (the daily execution ledger the dashboard lacks).
+var APP_VERSION = 'v4.75';
 var APP_BUILT   = '2026-07-15';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -891,6 +904,7 @@ async function syncFromSheets() {
     window._lastSyncResponse.stPatientsFinal = st.patients.length;
     window._lastSyncResponse.stClaimsFinal = st.claims.length;
     window._lastSyncOkAt = Date.now();   // v4.73: resume-guard staleness marker
+    if (d.lastWriteAt) window._lastSeenWriteAt = String(d.lastWriteAt);   // v4.75: ping-sync re-baseline
     setSyncState('synced');
     render();
     // If user is currently viewing the Recently Discharged pane, refresh it too
