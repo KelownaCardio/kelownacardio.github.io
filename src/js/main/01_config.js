@@ -32,6 +32,11 @@ var WARDS = {
   CCU:  { label:'CICU',     list:'on',  care:'ccu',      role:'mrp',       rooms:['1','2','3','4','5','6','7','8'] },
   '2S': { label:'2S',       list:'on',  care:'daily',    role:'mrp',     rooms:['217','218','219','220','221','222','223','224','225A','225B','226A','226B','227','228','229','230','231','232','233','234','Hallway A','Hallway B'] },
   '2W': { label:'2W',       list:'on',  care:'daily',    role:'mrp',     rooms:['201','202','203','204','205','206','207','208','209','210','211','212','213','214','215','216','Hallway'] },
+  // v4.76: holding areas where patients wait for a bed. Neutral defaults on
+  // purpose (Kathryn 2026-07-16: "MD will pick one manually") — same pattern
+  // as the other non-core wards; the MD sets list/care/role per patient.
+  RACE: { label:'Race Admit', list:'off', care:'directive', role:'consultant', rooms:[] },
+  PCATH:{ label:'Post Cath',  list:'off', care:'directive', role:'consultant', rooms:[] },
   CSICU:{ label:'CSICU',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
   ICUA: { label:'ICU A',    list:'off', care:'combined',  role:'consultant',  rooms:[] },
   ICUB: { label:'ICU B',    list:'off', care:'combined',  role:'consultant',  rooms:[] },

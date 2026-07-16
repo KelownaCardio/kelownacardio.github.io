@@ -263,8 +263,15 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // returns no lastWriteAt → loop no-ops, 5-min sync carries on. Also: every
 // request is counted server-side; nightly job archives per-day totals to
 // the new Stats sheet (the daily execution ledger the dashboard lacks).
-var APP_VERSION = 'v4.75';
-var APP_BUILT   = '2026-07-15';
+// v4.76 (2026-07-16): (1) push() now treats ANY response carrying `error` as
+// a failure — closes the hole where a thrown backend exception (bare {error},
+// no ok:false) masqueraded as success and silently ate the Kluserits readmit.
+// Pairs with Router v3.06 (ok:false in catch) and v3.07 (transient flag →
+// lock timeouts stay in the pending queue and auto-retry; validation rejects
+// are dropped as before). (2) New WARDS: Race Admit + Post Cath — holding
+// areas where patients wait for a bed (neutral defaults, MD picks list/care).
+var APP_VERSION = 'v4.76';
+var APP_BUILT   = '2026-07-16';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -1009,14 +1016,24 @@ async function push(action, body) {
     // row never landed, and the orphan-claim healer then rebuilt it blank.
     var data = null;
     try { data = await resp.json(); } catch (_) { data = null; }
-    if (data && data.ok === false) {
-      // Permanent server-side rejection (validation failure). It will never
-      // succeed on retry, so drop it from the pending-retry queue and report.
+    // v4.76: a response carrying `error` is a FAILURE even without ok:false.
+    // Router ≤v3.05 returned bare {error} for thrown backend exceptions (lock
+    // timeout) and this branch missed it — the app treated the failed save as
+    // success (Kluserits case, 2026-07-16). Router v3.06+ adds ok:false; v3.07
+    // adds transient:true on thrown exceptions so we can tell "retry will
+    // work" (lock timeout) from "retry can never work" (validation reject).
+    if (data && (data.ok === false || (data.error && data.ok !== true))) {
       window._lastPushError = data.error || 'Server rejected the save';
-      if (action === 'savePatient' || action === 'saveClaim') {
+      // Permanent validation rejection → never succeeds on retry → drop it
+      // from the pending-retry queue. Transient (thrown exception / bare
+      // {error} from an old Router — assume transient) → KEEP it pending so
+      // the next sync cycle retries automatically.
+      var _transient = !!(data.transient || data.ok === undefined);
+      if ((action === 'savePatient' || action === 'saveClaim') && !_transient) {
         delete window._pendingPush[body.id];
       }
-      console.warn('push rejected by server — ' + action + ': ' + window._lastPushError);
+      console.warn('push rejected by server — ' + action + ': ' + window._lastPushError +
+                    (_transient ? ' (transient — will retry)' : ' (permanent)'));
       // Connection is fine — we got a clean 200 + JSON. This is a data
       // rejection, not a connectivity failure, so do NOT raise the wifi
       // banner; the caller surfaces the specific error to the user.
