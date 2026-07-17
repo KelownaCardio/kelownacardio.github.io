@@ -2437,7 +2437,14 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // + red Off Regular Wards block). While flagged: yellow only. Once the ⚑ flag
 // is acknowledged: red (or normal list position). Frontend-only, no BUILD_ID
 // bump (no cache-format change, no re-login).
-var APP_VERSION = 'v4.77';
+// v4.78 (2026-07-17): OOP/Private-Pay survives the "patient already exists"
+// path. apSubmit only read f-oop/f-home-* in its NEW-patient branch, so when
+// the duplicate modal fired, _mergeAndReadmit dropped every OOP field the
+// doctor had typed (Rivard, QC — Dr Massie's address/billing data discarded
+// silently). _mergeAndReadmit now carries those form fields, additively
+// (an untouched checkbox never clears existing data; clearing stays in the
+// Edit Patient modal). Frontend-only, no BUILD_ID bump.
+var APP_VERSION = 'v4.78';
 var APP_BUILT   = '2026-07-17';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -8819,6 +8826,25 @@ async function _mergeAndReadmit() {
   p.refby     = gv('cb-refby') || gv('oc-refby') || p.refby || '';
   p.refbyName = gv('cb-refby-name') || gv('oc-refby-name') || p.refbyName || '';
   p.icd       = gv('cb-icd') || gv('oc-icd') || p.icd || '';
+
+  // v4.77: carry OOP / Private-Pay entries from the Add form onto the merged
+  // patient. Previously ONLY the new-patient branch of apSubmit read these
+  // fields, so on the "patient already exists" path every keystroke of home
+  // province / health number / address was silently discarded (Rivard,
+  // 2026-07-17). Additive only: an UNTICKED box here does NOT clear existing
+  // OOP/private data — the box may simply be untouched on a re-add; clearing
+  // stays where it is deliberate, in the Edit Patient modal.
+  if (!!((document.getElementById('f-oop') || {}).checked)) {
+    p.oop          = true;
+    p.homeProvince = gv('f-home-province') || p.homeProvince || '';
+    p.homeHCN      = gv('f-home-hcn')      || p.homeHCN      || '';
+    p.homeAddress  = gv('f-home-address')  || p.homeAddress  || '';
+    p.privatePay = false; p.rateMode = '';
+  } else if (!!((document.getElementById('f-private') || {}).checked)) {
+    p.privatePay = true;
+    p.rateMode   = gv('f-private-rate') || p.rateMode || 'BCMA';
+    p.oop = false; p.homeProvince = ''; p.homeHCN = ''; p.homeAddress = '';
+  }
 
   stampChangedGroups(p, _hotSnap);   // v4.73: readmit = discharge/location/handover taps
 
