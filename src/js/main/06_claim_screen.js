@@ -364,6 +364,30 @@ function submitOtherClaimFor(p, alias) {
   var dateFmt = fmtD(parseISODate(dateISO));
   // Units are always 1 for an Other claim.
   var pClone  = Object.assign({}, p, { icd: icd, refby: refby, refbyName: refName });
+
+  // v4.79: Echo bundles — one tap creates each component claim with its
+  // professional-fee amount stamped. Restricted to OOP / Private-Pay
+  // patients (that is what these rates are built for; MSP in-patients
+  // keep using the existing individual codes).
+  if (typeof ECHO_BUNDLES !== 'undefined' && ECHO_BUNDLES[fee]) {
+    var _isOop  = (p.oop === true        || String(p.oop).toLowerCase()        === 'true');
+    var _isPriv = (p.privatePay === true || String(p.privatePay).toLowerCase() === 'true');
+    if (!_isOop && !_isPriv) {
+      showToast(ECHO_BUNDLES[fee].label + ' is for Out-of-Province or Private-Pay patients only — set coverage via Edit Patient first');
+      return false;
+    }
+    var _made = 0;
+    ECHO_BUNDLES[fee].parts.forEach(function(part) {
+      var r = addClaim(pClone, part.code, part.code, 1, dateFmt, loc, start, notes,
+                       endTime || '', alias, { feeAmount: part.msp });
+      if (r) _made++;
+    });
+    if (!_made) return false;   // every component blocked as duplicate — toast already shown
+    sv('claims', st.claims);
+    showToast(ECHO_BUNDLES[fee].label + ' — ' + _made + ' claim' + (_made > 1 ? 's' : '') + ' added');
+    return true;
+  }
+
   var result  = addClaim(pClone, fee, fee, 1, dateFmt, loc, start, notes, endTime || '', alias);
   if (!result) return false;  // dedup blocked — stay on form, error toast visible
   sv('claims', st.claims);

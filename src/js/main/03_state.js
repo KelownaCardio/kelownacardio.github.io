@@ -282,7 +282,14 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // silently). _mergeAndReadmit now carries those form fields, additively
 // (an untouched checkbox never clears existing data; clearing stays in the
 // Edit Patient modal). Frontend-only, no BUILD_ID bump.
-var APP_VERSION = 'v4.78';
+// v4.79 (2026-07-17): Echo bundles for OOP / Private-Pay billing. New
+// Diagnostics picker entries "Echo with Doppler" (33091 + 08679) and
+// "Stress Echo" (08662 + 08679) — one tap creates both component claims,
+// each stamped with its MSP professional-only feeAmount (bundle totals
+// $90.00 / $122.57 per Kathryn 2026-07-17). Restricted to OOP/private
+// patients. Backend pair: Invoice.gs v1.1 adds the 3 codes to BCMA_RATES,
+// INV_MSP_FALLBACK and FEE_DESC. addClaim gains overrides.feeAmount.
+var APP_VERSION = 'v4.79';
 var APP_BUILT   = '2026-07-17';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,

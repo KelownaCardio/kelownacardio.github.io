@@ -273,6 +273,12 @@ var FEES = [
   { code:'33018', desc:'ECG Professional Fee',                                          amount:'$9.01',   cat:'Diagnostics', clr:'chip-teal'  },
   { code:'33047', desc:'Holter Monitor Professional Fee',                               amount:'$67.63',  cat:'Diagnostics', clr:'chip-teal'  },
   { code:'33093', desc:'Level 3 Echo Complex Assessment (Overread)',                     amount:'$252.39', cat:'Diagnostics', clr:'chip-teal'  },
+  // v4.79: Echo bundles — OOP / Private-Pay only. Pseudo-codes expanded into
+  // their component claims in submitOtherClaimFor; never written to a claim
+  // row. Shown amount = MSP professional-only bundle total (Kathryn
+  // 2026-07-17); private BCMA invoices are priced per component in Invoice.gs.
+  { code:'ECHODOP', desc:'Echo with Doppler (33091 + 08679) — OOP / Private only',       amount:'$90.00',  cat:'Diagnostics', clr:'chip-teal'  },
+  { code:'STRECHO', desc:'Stress Echo (08662 + 08679) — OOP / Private only',             amount:'$122.57', cat:'Diagnostics', clr:'chip-teal'  },
 
   // ── Discharge / planning ────────────────────────────────────────
   { code:'78717',  desc:'Specialist discharge care plan for complex patients (extra)',    amount:'$82.19',  cat:'Discharge', clr:'chip-green' },
@@ -292,6 +298,23 @@ var FEES = [
   { code:'1206',   desc:'Night call — increment per 30 min',                              amount:'$99.40',  cat:'Modifier',  clr:'chip-blue' },
   { code:'1207',   desc:'Weekend/stat call — increment per 30 min',                       amount:'$72.69',  cat:'Modifier',  clr:'chip-blue' }
 ];
+
+// ── v4.79: Echo bundle definitions (OOP / Private-Pay) ─────────────────
+// Pseudo-codes ECHODOP / STRECHO in the FEES picker expand into their
+// component claims in submitOtherClaimFor — the pseudo-code itself is never
+// written to a claim row. `msp` = professional-only portion stamped as
+// feeAmount (Kathryn 2026-07-17: bundle totals $90.00 and $122.57, of which
+// 08679 professional = $18.50). Private-pay BCMA invoices ignore feeAmount —
+// Invoice.gs prices each component from BCMA_RATES (33091 $691, 08679 $148,
+// 08662 $789, April 2026 catalogue).
+var ECHO_BUNDLES = {
+  ECHODOP: { label: 'Echo with Doppler',
+             parts: [ { code: '33091', msp: 71.50  },
+                      { code: '08679', msp: 18.50  } ] },
+  STRECHO: { label: 'Stress Echo',
+             parts: [ { code: '08662', msp: 104.07 },
+                      { code: '08679', msp: 18.50  } ] }
+};
 
 // ── Derive FEE_RATES from the FEES catalogue ───────────────────────────
 // FEES (above) is the single source of truth for fee amounts. This builds

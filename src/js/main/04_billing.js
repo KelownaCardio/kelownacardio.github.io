@@ -436,6 +436,12 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, 
     createdBy: (st.doc && st.doc.alias) || '',
     createdAt: Date.now()
   };
+  // v4.79: optional per-claim dollar amount (echo bundles stamp the
+  // professional-only portion here). Lands in the Claims 'feeAmount' column;
+  // Invoice.gs uses it as the authoritative MSP-value rate for that claim.
+  if (overrides.feeAmount != null && overrides.feeAmount !== '') {
+    c.feeAmount = overrides.feeAmount;
+  }
   // Dedup guard: never create two claims with same phn+date+fee+alias.
   // v4.21: CCU family comparison — treat CCU_DAILY/1411/1421/1431 as the
   // same fee for dedup purposes (a manual 1421 should not bypass an
