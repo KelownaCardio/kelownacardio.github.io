@@ -267,9 +267,14 @@ function renderGeo() {
 // them above CCU when any exist and is suppressed when empty.
 // v4.32: split into stranded (MRP Cardiology → red) and other (amber).
 // Stranded patients also appear on the off-service list for rounding safety.
+// v4.77: handover-flagged patients are excluded here — they're already pinned
+// in the yellow handover block at the very top of the geo view, so they were
+// showing twice (yellow then red). Once the ⚑ flag is acknowledged/cleared,
+// isHandover() goes false and they drop back into the red/amber block below.
+// (Alphabetical view already worked this way — this matches it.)
 function otherLocationsHtml() {
   var pts = st.patients.filter(function(p) {
-    return p.list === 'on' && !p.discharged &&
+    return p.list === 'on' && !p.discharged && !isHandover(p) &&
            p.ward !== 'CCU' && p.ward !== '2S' && p.ward !== '2W';
   });
   if (!pts.length) return '';

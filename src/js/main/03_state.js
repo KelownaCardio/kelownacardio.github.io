@@ -270,8 +270,13 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // lock timeouts stay in the pending queue and auto-retry; validation rejects
 // are dropped as before). (2) New WARDS: Race Admit + Post Cath — holding
 // areas where patients wait for a bed (neutral defaults, MD picks list/care).
-var APP_VERSION = 'v4.76';
-var APP_BUILT   = '2026-07-16';
+// v4.77 (2026-07-17): geo-view dedup — a patient flagged for handover AND on
+// an off-site location no longer shows twice at the top (yellow handover block
+// + red Off Regular Wards block). While flagged: yellow only. Once the ⚑ flag
+// is acknowledged: red (or normal list position). Frontend-only, no BUILD_ID
+// bump (no cache-format change, no re-login).
+var APP_VERSION = 'v4.77';
+var APP_BUILT   = '2026-07-17';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
