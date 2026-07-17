@@ -217,6 +217,25 @@ async function _mergeAndReadmit() {
   p.refbyName = gv('cb-refby-name') || gv('oc-refby-name') || p.refbyName || '';
   p.icd       = gv('cb-icd') || gv('oc-icd') || p.icd || '';
 
+  // v4.77: carry OOP / Private-Pay entries from the Add form onto the merged
+  // patient. Previously ONLY the new-patient branch of apSubmit read these
+  // fields, so on the "patient already exists" path every keystroke of home
+  // province / health number / address was silently discarded (Rivard,
+  // 2026-07-17). Additive only: an UNTICKED box here does NOT clear existing
+  // OOP/private data — the box may simply be untouched on a re-add; clearing
+  // stays where it is deliberate, in the Edit Patient modal.
+  if (!!((document.getElementById('f-oop') || {}).checked)) {
+    p.oop          = true;
+    p.homeProvince = gv('f-home-province') || p.homeProvince || '';
+    p.homeHCN      = gv('f-home-hcn')      || p.homeHCN      || '';
+    p.homeAddress  = gv('f-home-address')  || p.homeAddress  || '';
+    p.privatePay = false; p.rateMode = '';
+  } else if (!!((document.getElementById('f-private') || {}).checked)) {
+    p.privatePay = true;
+    p.rateMode   = gv('f-private-rate') || p.rateMode || 'BCMA';
+    p.oop = false; p.homeProvince = ''; p.homeHCN = ''; p.homeAddress = '';
+  }
+
   stampChangedGroups(p, _hotSnap);   // v4.73: readmit = discharge/location/handover taps
 
   // \u2500\u2500 Update local state \u2014 exactly ONE patient row \u2500\u2500

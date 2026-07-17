@@ -275,7 +275,14 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // + red Off Regular Wards block). While flagged: yellow only. Once the ⚑ flag
 // is acknowledged: red (or normal list position). Frontend-only, no BUILD_ID
 // bump (no cache-format change, no re-login).
-var APP_VERSION = 'v4.77';
+// v4.78 (2026-07-17): OOP/Private-Pay survives the "patient already exists"
+// path. apSubmit only read f-oop/f-home-* in its NEW-patient branch, so when
+// the duplicate modal fired, _mergeAndReadmit dropped every OOP field the
+// doctor had typed (Rivard, QC — Dr Massie's address/billing data discarded
+// silently). _mergeAndReadmit now carries those form fields, additively
+// (an untouched checkbox never clears existing data; clearing stays in the
+// Edit Patient modal). Frontend-only, no BUILD_ID bump.
+var APP_VERSION = 'v4.78';
 var APP_BUILT   = '2026-07-17';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
