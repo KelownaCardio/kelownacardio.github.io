@@ -279,6 +279,9 @@ var FEES = [
   // 2026-07-17); private BCMA invoices are priced per component in Invoice.gs.
   { code:'ECHODOP', desc:'Echo with Doppler (33091 + 08679) — OOP / Private only',       amount:'$90.00',  cat:'Diagnostics', clr:'chip-teal'  },
   { code:'STRECHO', desc:'Stress Echo (08662 + 08679) — OOP / Private only',             amount:'$122.57', cat:'Diagnostics', clr:'chip-teal'  },
+  // v4.80: TEE bundles — same OOP / Private-Pay restriction.
+  { code:'TEECARD', desc:'TEE by Cardiology (08679 + 08638 + 33057) — OOP / Private only', amount:'$231.22', cat:'Diagnostics', clr:'chip-teal'  },
+  { code:'TEEINT',  desc:'TEE interp only, anaesthesia (08679 + 08638) — OOP / Private only', amount:'$62.02',  cat:'Diagnostics', clr:'chip-teal'  },
 
   // ── Discharge / planning ────────────────────────────────────────
   { code:'78717',  desc:'Specialist discharge care plan for complex patients (extra)',    amount:'$82.19',  cat:'Discharge', clr:'chip-green' },
@@ -307,13 +310,26 @@ var FEES = [
 // 08679 professional = $18.50). Private-pay BCMA invoices ignore feeAmount —
 // Invoice.gs prices each component from BCMA_RATES (33091 $691, 08679 $148,
 // 08662 $789, April 2026 catalogue).
+// v4.80: TEE bundles. Cluster totals $231.22 (08679C) and $62.02 (08679F)
+// per Kathryn 2026-07-17; per-component MSP split holds 08679 = $18.50 (as
+// in the two bundles above), leaving 08638 = $43.52 and 33057 = $169.20 so
+// the parts sum to the cluster total exactly. BCMA (Invoice.gs) prices each
+// component from the April 2026 catalogue: 08679 $148 + 08638 $325 + 33057
+// $525 = $998; 08679 $148 + 08638 $325 = $473.
 var ECHO_BUNDLES = {
   ECHODOP: { label: 'Echo with Doppler',
              parts: [ { code: '33091', msp: 71.50  },
                       { code: '08679', msp: 18.50  } ] },
   STRECHO: { label: 'Stress Echo',
              parts: [ { code: '08662', msp: 104.07 },
-                      { code: '08679', msp: 18.50  } ] }
+                      { code: '08679', msp: 18.50  } ] },
+  TEECARD: { label: 'TEE by Cardiology',
+             parts: [ { code: '08679', msp: 18.50  },
+                      { code: '08638', msp: 43.52  },
+                      { code: '33057', msp: 169.20 } ] },
+  TEEINT:  { label: 'TEE interp only',
+             parts: [ { code: '08679', msp: 18.50  },
+                      { code: '08638', msp: 43.52  } ] }
 };
 
 // ── Derive FEE_RATES from the FEES catalogue ───────────────────────────

@@ -289,7 +289,14 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // $90.00 / $122.57 per Kathryn 2026-07-17). Restricted to OOP/private
 // patients. Backend pair: Invoice.gs v1.1 adds the 3 codes to BCMA_RATES,
 // INV_MSP_FALLBACK and FEE_DESC. addClaim gains overrides.feeAmount.
-var APP_VERSION = 'v4.79';
+// v4.80 (2026-07-17): two more echo bundles — "TEE by Cardiology"
+// (08679 + 08638 + 33057, MSP prof total $231.22 / BCMA $998) and
+// "TEE interp only" done by anaesthesia (08679 + 08638, MSP prof total
+// $62.02 / BCMA $473). Per-component MSP split holds 08679 = $18.50
+// (as in the existing bundles); the $231.22/$62.02 cluster totals and the
+// component BCMA rates (08638 $325, 33057 $525, April 2026 catalogue) are
+// Kathryn 2026-07-17. Backend pair: Invoice.gs v1.2 adds 08638 + 33057.
+var APP_VERSION = 'v4.80';
 var APP_BUILT   = '2026-07-17';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
