@@ -1151,6 +1151,15 @@ input[type=file] { display:none; }
   </div>
 </div>
 
+<!-- ═══ PHONE ADVICE MODAL (v4.80 BETA — opened by the hidden 📞 in the
+     footer build stamp; form body is built by 13b_phoneadvice.js) ═══ -->
+<div class="overlay" id="pa-modal">
+  <div class="modal" style="max-width:420px;margin:auto">
+    <div class="modal-handle"></div>
+    <div id="pa-content"></div>
+  </div>
+</div>
+
 <div class="overlay" id="qc-modal">
   <div class="modal" style="max-width:360px;margin:auto">
     <div class="modal-handle"></div>
@@ -1168,6 +1177,11 @@ input[type=file] { display:none; }
     font-size:10px; color:#8e8e93; font-family:ui-monospace,'SF Mono',monospace;
     user-select:text; -webkit-user-select:text; opacity:.7;">
   KGH Cardiology Billing · <span id="kgh-build-stamp-text"></span>
+  <!-- v4.80: hidden Phone Advice (beta) launcher — deliberately unlabelled,
+       tiny, footer-only, for tester use. Remove the "hidden" styling when
+       the feature graduates to a real tab. -->
+  <span onclick="openPhoneAdvice()" title="Phone advice (beta)"
+        style="cursor:pointer;padding:0 8px;user-select:none">&#128222;</span>
 </div>
 <script>
 (function () {
