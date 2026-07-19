@@ -2510,7 +2510,28 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // Endpoint URL is pasted once per device (localStorage kgh5:paUrl). The
 // standalone webform is untouched and stays live. Frontend-only in THIS
 // repo (new node 13b_phoneadvice.js); no BUILD_ID bump (no cache change).
-var APP_VERSION = 'v4.80';
+// v4.81 (2026-07-19): Phone Advice tab polish (Kathryn, same day):
+// (1) Calling physician now uses the consult card's 3-tier directory
+// search (refSearchEl incl. "+ Add new physician"); a selected match
+// sends its MSP # as manualRefNum so the claim is matched without
+// server-side name guessing, and OCR drops the caller into the search
+// box with the match list open. (2) ICD-9 free-text replaced by the
+// webform's 12 quick-tap pills (first tap = primary) + two optional
+// icdSearchEl fields; ≥1 diagnosis required. (3) Background + Advice
+// merged into one "Summary of Phone Advice" box (sent as adviceGiven,
+// background blank). Frontend-only: 13b_phoneadvice.js, 12_referrers
+// (dropdown outside-click whitelist), no BUILD_ID bump.
+// v4.82 (2026-07-19): DISCHARGE FLOW REORDER (Kathryn). The doctor now
+// confirms the DISCHARGE DATE first; complex-discharge (78717) screening
+// runs after, with LOS measured to the confirmed date (retroactive
+// discharges now screen correctly). Checklist header shows the ACTUAL
+// stay-day count inclusive of admission day ("LOS 5 days · admission day
+// = day 1"); eligibility = stay >= 5 days, numerically identical to the
+// old losdays() >= 4 when discharging today. The 78717 claim is dated to
+// the confirmed discharge date (was: today). Short stays (<5 days)
+// discharge in one tap from the date screen; checklist gains a "Back —
+// change discharge date" button. Frontend-only: 10_location.js.
+var APP_VERSION = 'v4.82';
 var APP_BUILT   = '2026-07-19';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -11445,16 +11466,17 @@ function buildOCRCorrections(savedPatient) {
 }
 // 10_location.js — Location change screen + discharge modal
 // ═══════════════════════════════════════════════════════
-// LOS helper — days since admission (using first claim date or addedAt)
-function losdays(p) {
-  var patClaims = st.claims.filter(function(c) { return c.phn && samePhn(c.phn, p.phn); });
-
+// LOS helpers — v4.82 refactor: admitMs(p) resolves the admission timestamp
+// once (same priority order as before); losdays(p) keeps its old meaning
+// (whole days elapsed since admission, admission day = day 0).
+function admitMs(p) {
   // Priority 1: explicit admitDate on patient record
   if (p.admitDate) {
     var ad = parseDMYsafe(fmtClaimDate(p.admitDate));
-    if (ad) return Math.floor((Date.now() - ad) / 86400000);
+    if (ad) return ad;
   }
 
+  var patClaims = st.claims.filter(function(c) { return c.phn && samePhn(c.phn, p.phn); });
   if (!patClaims.length) return 0;
   patClaims.sort(function(a, b) { return parseDMYsafe(a.date) - parseDMYsafe(b.date); });
 
@@ -11464,13 +11486,29 @@ function losdays(p) {
   });
   if (consultClaims.length) {
     var consultFirst = parseDMYsafe(consultClaims[0].date);
-    if (consultFirst) return Math.floor((Date.now() - consultFirst) / 86400000);
+    if (consultFirst) return consultFirst;
   }
 
   // Priority 3: earliest claim of any type
-  var first = parseDMYsafe(patClaims[0].date);
-  if (!first) return 0;
-  return Math.floor((Date.now() - first) / 86400000);
+  return parseDMYsafe(patClaims[0].date) || 0;
+}
+
+function losdays(p) {
+  var a = admitMs(p);
+  return a ? Math.floor((Date.now() - a) / 86400000) : 0;
+}
+
+// v4.82: length of stay in CALENDAR DAYS INCLUSIVE of the admission day,
+// measured to a specific discharge date (ms at midnight). Admission day = day 1,
+// so admitted Monday & discharged Friday = 5 days. This is the number shown on
+// (and gating) the Complex Discharge checklist: eligible when stay >= 5 days —
+// same threshold as the old losdays() >= 4, but now anchored to the discharge
+// date the doctor just confirmed instead of "today".
+function stayDaysAt(p, dischMs) {
+  var a = admitMs(p);
+  if (!a || !dischMs) return 0;
+  var d = Math.round((dischMs - a) / 86400000);
+  return d < 0 ? 0 : d + 1;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -11575,10 +11613,13 @@ function toggleLocRole(role) {
 }
 
 // ── Discharge Modal ────────────────────────────────────
-// Flow:
-//   Step 1 — if no visit billed today: offer visit type buttons (default by ward/role)
-//   Step 2 — if LOS >= 4 (admit day=1, losdays>=4): complex discharge criteria checklist
-//   Step 3 — Confirm discharge date & remove from list
+// Flow (v4.82 — date FIRST, then complex d/c):
+//   Step 0 — billing-gap gate (unchanged)
+//   Step 1 — doctor confirms the DISCHARGE DATE
+//   Step 2 — if stay >= 5 days measured to that date (admission day = day 1):
+//            complex discharge (78717) criteria checklist, showing actual LOS days
+//   Finalize — patient removed from list; 78717 (if added) is dated to the
+//            confirmed discharge date
 //
 function openDischModal(pid) {
   _claimPid = pid;
@@ -11616,7 +11657,8 @@ function _cvProceedDischarge(pid) {
   hideModal('cv-picker-modal');
   hideModal('pt-summary-modal');
   document.getElementById('disch-title').textContent = p.last + ', ' + p.first;
-  _dischStep2(pid);
+  _dischDate = '';                // fresh open — default the date picker to today
+  _dischStepDate(pid);            // v4.82: confirm discharge date FIRST
   showModal('disch-modal');
 }
 
@@ -11692,7 +11734,10 @@ function _cvConfirmAllGapNote(btn) {
 }
 
 // ── Complex Discharge (78717) — criteria checklist ──────
-// Qualifies when LOS > 4 (admit day = day 1, so losdays() >= 4) AND Cardiology MRP AND clinical criteria:
+// v4.82: shown AFTER the discharge date is confirmed. Qualifies when the stay is
+// >= 5 calendar days incl. admission day, measured to the CONFIRMED discharge
+// date (stayDaysAt >= 5 — same threshold as the old losdays() >= 4), AND
+// Cardiology MRP AND clinical criteria:
 //   (2 from A) OR (1 from A + 1 from B) OR (1 from A + C)
 // Note written to the 78717 claim mirrors the clerk's format:
 //   "Complex Discharge: CHF, BMI > 35, Age > 75"
@@ -11727,6 +11772,8 @@ var CD_ICD_MAP = {
 };
 var _cdState = {};   // { criterionId: true } — ticked boxes
 var _cdPid   = '';   // patient id the checklist is open for
+var _cdStay  = 0;    // v4.82: stay days (incl. admission day) to confirmed d/c date
+var _dischDate = ''; // v4.82: confirmed discharge date DD/MM/YYYY (set in step 1)
 
 // Age in whole years from DOB (DD/MM/YYYY storage format)
 function _cdAge(p) {
@@ -11760,11 +11807,12 @@ function _cdNote() {
 
 function _cdToggle(id) {
   _cdState[id] = !_cdState[id];
-  _cdRender(losdays(getP(_cdPid)));
+  _cdRender(_cdStay);   // v4.82: stay is fixed to the confirmed d/c date
 }
 
 // Render the criteria checklist into the discharge modal body
-function _cdRender(los) {
+// stay = actual LOS in days INCLUSIVE of admission day, to the confirmed d/c date
+function _cdRender(stay) {
   var ev = _cdEvaluate();
 
   function chip(x) {
@@ -11801,13 +11849,15 @@ function _cdRender(los) {
 
   var addBtn = ev.qualifies
     ? '<button class="btn btn-g" style="margin:0" data-pid="' + _cdPid + '" ' +
-      'onclick="dischComplex(this)">Add 78717 &amp; continue</button>'
+      'onclick="dischComplex(this)">Add 78717 &amp; discharge</button>'
     : '<button class="btn btn-g" style="margin:0;opacity:.4;pointer-events:none">' +
-      'Add 78717 &amp; continue</button>';
+      'Add 78717 &amp; discharge</button>';
 
   var h =
     '<div style="font-size:15px;font-weight:700;color:var(--text1);margin-bottom:2px">' +
-      'Age ' + _cdAge(getP(_cdPid)) + ' · LOS ' + los + ' days</div>' +
+      'Age ' + _cdAge(getP(_cdPid)) + ' · LOS ' + stay + ' day' + (stay === 1 ? '' : 's') + '</div>' +
+    '<div style="font-size:11px;color:var(--text3);margin-bottom:2px">' +
+      'Admission day = day 1 · discharge date ' + esc(_dischDate) + '</div>' +
     '<div style="font-size:13px;color:var(--amber-t);font-weight:700;margin-bottom:4px">' +
       '\u26a0 Review for Complex D/C criteria</div>' +
     '<div style="font-size:11px;color:var(--text3);margin-bottom:8px">' +
@@ -11823,71 +11873,98 @@ function _cdRender(los) {
       addBtn +
       '<button class="btn btn-s" style="margin:0" data-pid="' + _cdPid + '" ' +
       'onclick="dischConfirmRemove(this)">Doesn\'t qualify — discharge without surcharge</button>' +
+      '<button class="btn btn-s" style="margin:0" data-pid="' + _cdPid + '" ' +
+      'onclick="_dischStepDate(this.getAttribute(\'data-pid\'))">‹ Back — change discharge date</button>' +
       '<button class="btn btn-s" style="margin:0" ' +
       'onclick="hideModal(\'disch-modal\')">Cancel — exit to review chart</button>' +
     '</div>';
   document.getElementById('disch-body').innerHTML = h;
 }
 
-// Step 2: Complex discharge — any patient with LOS >= 4 gets criteria checklist
-function _dischStep2(pid) {
-  var p   = getP(pid);
-  var los = losdays(p);
-  if (los >= 4) {
-    _cdPid   = pid;
-    _cdState = {};
-    // Pre-tick only what the app can determine itself — MD still confirms each box
-    if (_cdAge(p) > 75) _cdState['age75'] = true;
-    var icdKey = String(p.icd || '').trim().toUpperCase();
-    if (CD_ICD_MAP[icdKey]) _cdState[CD_ICD_MAP[icdKey]] = true;
-    _cdRender(los);
-  } else {
-    _dischStep3(pid);
-  }
-}
-
-// Add 78717 with the criteria note, then go to step 3
-function dischComplex(btn) {
-  var pid = btn.getAttribute('data-pid');
-  var p   = getP(pid);
-  if (!checkDoc()) return;
-  addClaim(p, '78717', '78717', 1, TODAY, 'I', null, _cdNote());
-  sv('claims', st.claims);
-  _dischStep3(pid);
-}
-
-// Step 3: Final confirm — date picker + remove from list
-function _dischStep3(pid) {
+// Step 1 (v4.82): the doctor confirms the DISCHARGE DATE first. Complex-
+// discharge eligibility is then assessed against the confirmed date. The date
+// defaults to today; if the discharge is entered retroactively the LOS and the
+// 78717 claim both follow the chosen date.
+function _dischStepDate(pid) {
   var todayISO = (function() {
     var p = TODAY.split('/'); return p[2] + '-' + p[1] + '-' + p[0];
   })();
+  // Preserve an already-confirmed date if the doctor taps "Back" from the checklist
+  var curISO = todayISO;
+  if (_dischDate) {
+    var cp = _dischDate.split('/');
+    if (cp.length === 3) curISO = cp[2] + '-' + cp[1] + '-' + cp[0];
+  }
   var h = '<div style="margin-bottom:10px">' +
     '<label style="font-size:11px;font-weight:700;color:var(--text2);display:block;margin-bottom:4px">Discharge date</label>' +
-    '<input type="date" id="disch-date-input" value="' + todayISO + '" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px">' +
+    '<input type="date" id="disch-date-input" value="' + curISO + '" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px">' +
+    '<div style="font-size:11px;color:var(--text3);margin-top:5px">Stays of 5+ days (admission day = day 1) are screened for Complex Discharge (78717) next; shorter stays discharge immediately.</div>' +
     '</div>' +
     '<div style="display:flex;flex-direction:column;gap:8px">' +
     '<button class="btn btn-p" style="margin:0" data-pid="' + pid + '" ' +
-    'onclick="dischConfirmRemove(this)">Remove from list</button>' +
+    'onclick="dischDateConfirmed(this)">Confirm date &amp; discharge ›</button>' +
     '<button class="btn btn-s" style="margin:0" onclick="hideModal(\'disch-modal\')">Cancel</button>' +
     '</div>';
   document.getElementById('disch-body').innerHTML = h;
 }
 
-function dischConfirmRemove(btn) {
+// Date confirmed → compute stay to that date. 5+ days (incl. admission day)
+// → complex-discharge checklist (Step 2); otherwise finalize immediately.
+function dischDateConfirmed(btn) {
   var pid = btn.getAttribute('data-pid');
   var p   = getP(pid);
+  if (!p) return;
   var dateInput = document.getElementById('disch-date-input');
   var dcDate = TODAY;
   if (dateInput && dateInput.value) {
     var dp = dateInput.value.split('-');
     if (dp.length === 3) dcDate = dp[2] + '/' + dp[1] + '/' + dp[0];
   }
+  _dischDate = dcDate;
+  var stay = stayDaysAt(p, parseDMYsafe(dcDate));
+  if (stay >= 5) {
+    // Step 2: complex-discharge criteria checklist, LOS anchored to confirmed date
+    _cdPid   = pid;
+    _cdStay  = stay;
+    _cdState = {};
+    // Pre-tick only what the app can determine itself — MD still confirms each box
+    if (_cdAge(p) > 75) _cdState['age75'] = true;
+    var icdKey = String(p.icd || '').trim().toUpperCase();
+    if (CD_ICD_MAP[icdKey]) _cdState[CD_ICD_MAP[icdKey]] = true;
+    _cdRender(stay);
+  } else {
+    _dischFinalize(pid);
+  }
+}
+
+// Add 78717 (dated to the confirmed discharge date) with the criteria note,
+// then finalize the discharge.
+function dischComplex(btn) {
+  var pid = btn.getAttribute('data-pid');
+  var p   = getP(pid);
+  if (!checkDoc()) return;
+  addClaim(p, '78717', '78717', 1, _dischDate || TODAY, 'I', null, _cdNote());
+  sv('claims', st.claims);
+  _dischFinalize(pid);
+}
+
+// Finalize: stamp the confirmed discharge date + remove from list.
+function _dischFinalize(pid) {
+  var p = getP(pid);
+  if (!p) return;
+  var dcDate = _dischDate || TODAY;
+  _dischDate = '';
   p.dischargeDate = dcDate;   // DD/MM/YYYY — human-readable, pushed to Sheets
   logChange(p, 'Discharged', 'D/C ' + dcDate);
   removePatient(pid);
   hideModal('disch-modal');
   closeClaimScreen();
   showToast(p.last + ' discharged');
+}
+
+// Kept for compatibility with button handlers (checklist "Doesn't qualify")
+function dischConfirmRemove(btn) {
+  _dischFinalize(btn.getAttribute('data-pid'));
 }
 
 function dopt(color, label, sub, fn) {
