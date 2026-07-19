@@ -289,15 +289,19 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // $90.00 / $122.57 per Kathryn 2026-07-17). Restricted to OOP/private
 // patients. Backend pair: Invoice.gs v1.1 adds the 3 codes to BCMA_RATES,
 // INV_MSP_FALLBACK and FEE_DESC. addClaim gains overrides.feeAmount.
-// v4.80 (2026-07-17): two more echo bundles — "TEE by Cardiology"
-// (08679 + 08638 + 33057, MSP prof total $231.22 / BCMA $998) and
-// "TEE interp only" done by anaesthesia (08679 + 08638, MSP prof total
-// $62.02 / BCMA $473). Per-component MSP split holds 08679 = $18.50
-// (as in the existing bundles); the $231.22/$62.02 cluster totals and the
-// component BCMA rates (08638 $325, 33057 $525, April 2026 catalogue) are
-// Kathryn 2026-07-17. Backend pair: Invoice.gs v1.2 adds 08638 + 33057.
+// v4.80 (2026-07-19): Phone Advice tab (BETA, hidden). Tiny 📞 in the footer
+// build stamp opens a phone-advice form: MBMD screenshot → OCR auto-fill
+// (caller, facility, call-back #, patient, PHN) via the existing ocrSticker
+// action with a new prompt; tap-to-dial tel: link; dictation-friendly advice
+// field. Submits to the PhoneAdvice(Personal) web app's NEW doPost JSON
+// endpoint (PhoneAdviceApi.gs v1.0) which reuses processWebFormSubmission —
+// identical downstream pipeline to the standalone webform (claim + patient
+// stub + PdfQueue → letter PDF → email + EMR SFTP + iClinic CSV billing).
+// Endpoint URL is pasted once per device (localStorage kgh5:paUrl). The
+// standalone webform is untouched and stays live. Frontend-only in THIS
+// repo (new node 13b_phoneadvice.js); no BUILD_ID bump (no cache change).
 var APP_VERSION = 'v4.80';
-var APP_BUILT   = '2026-07-17';
+var APP_BUILT   = '2026-07-19';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
