@@ -300,7 +300,28 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // Endpoint URL is pasted once per device (localStorage kgh5:paUrl). The
 // standalone webform is untouched and stays live. Frontend-only in THIS
 // repo (new node 13b_phoneadvice.js); no BUILD_ID bump (no cache change).
-var APP_VERSION = 'v4.80';
+// v4.81 (2026-07-19): Phone Advice tab polish (Kathryn, same day):
+// (1) Calling physician now uses the consult card's 3-tier directory
+// search (refSearchEl incl. "+ Add new physician"); a selected match
+// sends its MSP # as manualRefNum so the claim is matched without
+// server-side name guessing, and OCR drops the caller into the search
+// box with the match list open. (2) ICD-9 free-text replaced by the
+// webform's 12 quick-tap pills (first tap = primary) + two optional
+// icdSearchEl fields; ≥1 diagnosis required. (3) Background + Advice
+// merged into one "Summary of Phone Advice" box (sent as adviceGiven,
+// background blank). Frontend-only: 13b_phoneadvice.js, 12_referrers
+// (dropdown outside-click whitelist), no BUILD_ID bump.
+// v4.82 (2026-07-19): DISCHARGE FLOW REORDER (Kathryn). The doctor now
+// confirms the DISCHARGE DATE first; complex-discharge (78717) screening
+// runs after, with LOS measured to the confirmed date (retroactive
+// discharges now screen correctly). Checklist header shows the ACTUAL
+// stay-day count inclusive of admission day ("LOS 5 days · admission day
+// = day 1"); eligibility = stay >= 5 days, numerically identical to the
+// old losdays() >= 4 when discharging today. The 78717 claim is dated to
+// the confirmed discharge date (was: today). Short stays (<5 days)
+// discharge in one tap from the date screen; checklist gains a "Back —
+// change discharge date" button. Frontend-only: 10_location.js.
+var APP_VERSION = 'v4.82';
 var APP_BUILT   = '2026-07-19';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
