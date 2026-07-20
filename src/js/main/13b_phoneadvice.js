@@ -25,9 +25,39 @@
 //
 // Deliberately NOT in this beta (use the full webform instead):
 // Out-of-Province, RACE referrals, allied-health callers.
+//
+// v4.81 (2026-07-19, Kathryn feedback after deploy):
+//   (1) Calling physician is now DIRECTORY-LINKED — the same 3-tier
+//       search the consult card uses (refSearchEl → saved refs +
+//       embedded BC directory + remote Sheets, incl. "+ Add new
+//       physician"). A selected match puts the MSP # straight on the
+//       claim via manualRefNum, so billing no longer depends on the
+//       server-side name match. Free text still allowed (server
+//       matches/holds as before) but the confirm dialog warns.
+//   (2) ICD-9 free-text fields replaced by the webform's 12 quick-tap
+//       pills (same codes/labels as kelownacardio.com/md) + two
+//       optional directory-search fields (icdSearchEl) for anything
+//       else. At least one diagnosis is required; no free typing.
 // ═══════════════════════════════════════════════════════════════════
 
 var PA_URL_LS_KEY = 'kgh5:paUrl';
+
+// v4.81: quick-tap ICD pills — same codes/labels as the phone advice
+// webform's #icd-quick block (kelownacardio.com/md).
+var PA_ICD_PILLS = [
+  { code:'7865', desc:'Chest pain',                    label:'Chest Pain' },
+  { code:'411',  desc:'Unstable angina',               label:'U/A' },
+  { code:'4100', desc:'Acute MI',                      label:'NSTEMI/STEMI' },
+  { code:'4280', desc:'Congestive heart failure',      label:'Heart Failure' },
+  { code:'4254', desc:'Primary cardiomyopathy',        label:'Cardiomyopathy' },
+  { code:'4273', desc:'Atrial fibrillation / flutter', label:'AFib' },
+  { code:'427',  desc:'Cardiac dysrhythmia',           label:'Arrhythmia' },
+  { code:'4261', desc:'AV block',                      label:'Heart Block' },
+  { code:'7802', desc:'Syncope',                       label:'Syncope' },
+  { code:'420',  desc:'Acute pericarditis',            label:'Pericarditis' },
+  { code:'4019', desc:'Essential hypertension',        label:'HTN' },
+  { code:'4140', desc:'Coronary atherosclerosis',      label:'CAD' }
+];
 
 // OCR prompt for MBMD call-request message screenshots.
 var PA_MBMD_PROMPT =
@@ -129,14 +159,21 @@ function paRenderForm() {
     '<input type="file" id="pa-photo" accept="image/*" style="display:none" onchange="paPhoto(this)">' +
     '<div class="ocr-bar" id="pa-ocr-bar" style="display:none"></div>' +
 
-    // ── Caller ──
+    // ── Caller ── (v4.81: directory-linked, same machinery as the
+    // consult card's Referring MD — selected match → MSP # on the claim)
     '<div style="font-size:12px;font-weight:800;color:var(--text3);margin:10px 0 2px">CALLER</div>' +
-    '<div class="fl">' +
-      '<div class="f1"><label>Calling physician</label>' +
-        '<input id="pa-caller" autocorrect="off" autocapitalize="words" placeholder="e.g. Veale"></div>' +
-      '<div class="f1"><label>MSP # (optional)</label>' +
-        '<input id="pa-refnum" inputmode="numeric" placeholder="blank = auto-match"></div>' +
+    '<label>Calling physician</label>' +
+    '<div style="position:relative">' +
+      '<input id="pa-ref-search" placeholder="Type name or doctor #..." autocorrect="off" autocomplete="off" style="padding-right:32px" ' +
+        'data-dd="pa-ref-dd" data-hidden="pa-ref-num" data-name="pa-ref-name" ' +
+        'oninput="paRefTyped(this)" onfocus="refSearchEl(this)">' +
+      '<button type="button" tabindex="-1" onclick="clearSearchField(\'pa-ref-search\',\'pa-ref-num\',\'pa-ref-name\',\'pa-ref-dd\')" ' +
+        'onpointerdown="event.preventDefault();clearSearchField(\'pa-ref-search\',\'pa-ref-num\',\'pa-ref-name\',\'pa-ref-dd\')" ' +
+        'style="position:absolute;right:8px;top:9px;background:none;border:none;font-size:18px;line-height:1;color:var(--text3);cursor:pointer;padding:2px 4px;z-index:5">&times;</button>' +
     '</div>' +
+    '<div class="ref-dd" id="pa-ref-dd"></div>' +
+    '<input id="pa-ref-num"  type="hidden" value="">' +
+    '<input id="pa-ref-name" type="hidden" value="">' +
     '<label>Calling from</label>' +
     '<input id="pa-from" autocorrect="off" placeholder="e.g. QVH - Revelstoke">' +
     '<label>Call-back number</label>' +
@@ -183,20 +220,36 @@ function paRenderForm() {
     '<select id="pa-doc" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);' +
       'font-size:14px;font-family:inherit;background:#fff">' + docOpts + '</select>' +
 
-    // ── Clinical ──
+    // ── Clinical ── (v4.81: webform quick-tap pills + directory search,
+    // no free-text ICD entry)
     '<div style="font-size:12px;font-weight:800;color:var(--text3);margin:10px 0 2px">CLINICAL</div>' +
-    '<div class="fl">' +
-      '<div class="f1"><label>ICD-9 (primary)</label><input id="pa-icd1" autocorrect="off" placeholder="e.g. 427.31"></div>' +
-      '<div class="f1"><label>ICD-9 (optional)</label><input id="pa-icd2" autocorrect="off"></div>' +
+    '<label>Diagnosis — tap all that apply (first tap = primary)</label>' +
+    '<div id="pa-icd-quick" style="display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 6px">' +
+      PA_ICD_PILLS.map(function(p) {
+        return '<button type="button" class="ap-list-pill" id="pa-pill-' + p.code + '" ' +
+               'onclick="paTogglePill(\'' + p.code + '\')">' + p.label + '</button>';
+      }).join('') +
     '</div>' +
-    '<label>Background</label>' +
-    '<textarea id="pa-bg" rows="2" style="width:100%;padding:8px;border:.5px solid var(--border2);' +
+    '<div class="fl">' +
+      '<div class="f1" style="position:relative"><label>Other Dx 1 (optional)</label>' +
+        '<input id="pa-icd2-search" placeholder="Type to search ICD-9" autocorrect="off" autocomplete="off" ' +
+          'data-dd="pa-icd2-dd" data-hidden="pa-icd2-code" ' +
+          'oninput="icdSearchEl(this)" onfocus="icdSearchEl(this)">' +
+        '<div class="ref-dd" id="pa-icd2-dd"></div>' +
+        '<input id="pa-icd2-code" type="hidden" value=""></div>' +
+      '<div class="f1" style="position:relative"><label>Other Dx 2 (optional)</label>' +
+        '<input id="pa-icd3-search" placeholder="Type to search ICD-9" autocorrect="off" autocomplete="off" ' +
+          'data-dd="pa-icd3-dd" data-hidden="pa-icd3-code" ' +
+          'oninput="icdSearchEl(this)" onfocus="icdSearchEl(this)">' +
+        '<div class="ref-dd" id="pa-icd3-dd"></div>' +
+        '<input id="pa-icd3-code" type="hidden" value=""></div>' +
+    '</div>' +
+    // v4.81: single compact box (Kathryn) — feeds the letter's ADVICE
+    // GIVEN section; the separate Background field was dropped.
+    '<label>Summary of Phone Advice</label>' +
+    '<textarea id="pa-advice" rows="5" style="width:100%;padding:8px;border:.5px solid var(--border2);' +
       'border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical" ' +
-      'placeholder="Brief clinical context"></textarea>' +
-    '<label>Advice given</label>' +
-    '<textarea id="pa-advice" rows="4" style="width:100%;padding:8px;border:.5px solid var(--border2);' +
-      'border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical" ' +
-      'placeholder="Tap the mic on your keyboard to dictate the advice given"></textarea>' +
+      'placeholder="Tap the mic on your keyboard to dictate the summary and advice given"></textarea>' +
 
     '<div style="margin:8px 0 4px;font-size:11px;color:var(--text3);line-height:1.5">' +
       'Out-of-Province or RACE case? Use the full phone advice webform — this beta form is BC/MSP only.</div>' +
@@ -206,7 +259,52 @@ function paRenderForm() {
     '<div id="pa-status" style="display:none;margin-top:8px;padding:8px 10px;border-radius:6px;' +
       'font-size:13px;font-weight:600;line-height:1.4"></div>';
 
+  window._paPillOrder = [];   // v4.81: ICD pill codes in tap order
   paPhoneLink();
+}
+
+// ── v4.81: caller directory search ─────────────────────────────────
+// Typing clears any previously selected MSP # (the text no longer
+// matches the selection), then runs the normal 3-tier search.
+function paRefTyped(inputEl) {
+  var n = document.getElementById('pa-ref-num');
+  if (n) n.value = '';
+  var nm = document.getElementById('pa-ref-name');
+  if (nm) nm.value = '';
+  refSearchEl(inputEl);
+}
+
+// ── v4.81: ICD quick pills ─────────────────────────────────────────
+function paTogglePill(code) {
+  var btn = document.getElementById('pa-pill-' + code);
+  if (!btn) return;
+  var order = window._paPillOrder = window._paPillOrder || [];
+  var idx = order.indexOf(code);
+  if (idx >= 0) { order.splice(idx, 1); btn.classList.remove('on'); }
+  else          { order.push(code);     btn.classList.add('on'); }
+}
+
+// All selected diagnoses as "code - description" strings (webform
+// format — the server takes the code from before the dash): pills in
+// tap order first, then the two optional search fields.
+function paIcdList() {
+  var icds = [];
+  (window._paPillOrder || []).forEach(function(code) {
+    for (var i = 0; i < PA_ICD_PILLS.length; i++) {
+      if (PA_ICD_PILLS[i].code === code) {
+        icds.push(code + ' - ' + PA_ICD_PILLS[i].desc);
+        break;
+      }
+    }
+  });
+  ['pa-icd2', 'pa-icd3'].forEach(function(base) {
+    var code = paV(base + '-code');
+    if (!code) return;
+    // Directory label is "Description (code)" — rebuild as "code - Description".
+    var label = paV(base + '-search').replace(/\s*\([^)]*\)\s*$/, '').trim();
+    icds.push(code + (label ? ' - ' + label : ''));
+  });
+  return icds;
 }
 
 // ── Small UI helpers ───────────────────────────────────────────────
@@ -325,7 +423,6 @@ function paFillFromOCR(p, bar) {
     var el = document.getElementById(id);
     if (el) el.value = String(val).trim();
   };
-  set('pa-caller', p.callerName);
   set('pa-from',   p.facility);
   set('pa-phone',  p.phone);
   set('pa-last',   p.patientLast);
@@ -334,25 +431,39 @@ function paFillFromOCR(p, bar) {
   if (p.dob && /^\d{4}-\d{2}-\d{2}$/.test(String(p.dob).trim())) set('pa-dob', String(p.dob).trim());
   paPhnLive();
   paPhoneLink();
-  var got = ['pa-caller', 'pa-phone', 'pa-last', 'pa-phn'].filter(function(id) { return paV(id); }).length;
+  // v4.81: caller goes into the DIRECTORY SEARCH box and the match list
+  // opens immediately — one tap links the MSP # to the claim.
+  var caller = String(p.callerName || '').trim();
+  if (caller) {
+    set('pa-ref-search', caller);
+    try { refSearch(caller, 'pa-ref-dd', 'pa-ref-num', 'pa-ref-name'); } catch (e) {}
+  }
+  var got = ['pa-ref-search', 'pa-phone', 'pa-last', 'pa-phn'].filter(function(id) { return paV(id); }).length;
   if (bar) {
     bar.className = 'ocr-bar ' + (got >= 2 ? 'ocr-ok' : 'ocr-warn');
     bar.textContent = got >= 2
-      ? '✓ Extracted — check every field against the screenshot before calling'
+      ? '✓ Extracted — tap the caller in the list to link them, and check every field'
       : '⚠️ Little data found — type the details from the screenshot';
   }
 }
 
 // ── Submit ─────────────────────────────────────────────────────────
 function paSubmit() {
+  // v4.81: caller from the directory search; ICDs from pills + search.
+  var callerNum  = paV('pa-ref-num');                              // MSP # when matched
+  var callerName = (paV('pa-ref-name') || paV('pa-ref-search'))
+                     .replace(/^Dr\.?\s*/i, '').trim();
+  var icds = paIcdList();
+
   var errs = [];
   if (!paV('pa-last'))   errs.push('Patient last name is required');
   if (!paV('pa-first'))  errs.push('Patient first name is required');
-  if (!paV('pa-caller')) errs.push('Calling physician is required');
+  if (!callerName)       errs.push('Calling physician is required — search the directory');
+  if (!icds.length)      errs.push('Tap at least one diagnosis pill (or search Other Dx)');
   if (!paV('pa-date'))   errs.push('Date of call is required');
   if (!paV('pa-time'))   errs.push('Time of call is required');
   if (!paV('pa-sex'))    errs.push('Sex is required');
-  if (!paV('pa-advice')) errs.push('Advice given is required — it becomes the letter');
+  if (!paV('pa-advice')) errs.push('Summary of Phone Advice is required — it becomes the letter');
   var phn = paV('pa-phn');
   if (phn && (phn.length !== 10 || !paIsValidPHN(phn)))
     errs.push('PHN must be 10 digits with a valid check digit (or leave blank)');
@@ -365,7 +476,11 @@ function paSubmit() {
     'Submit phone advice?\n\n' +
     'Patient: ' + paV('pa-last').toUpperCase() + ', ' + paV('pa-first') +
     (phn ? '  PHN ' + phn : '  ⚠️ NO PHN — will be flagged for billing review') + '\n' +
-    'Caller: Dr. ' + paV('pa-caller') + (paV('pa-from') ? ' (' + paV('pa-from') + ')' : '') + '\n' +
+    'Caller: Dr. ' + callerName +
+    (callerNum ? '  ✓ MSP #' + callerNum
+               : '  ⚠️ NOT matched to directory — billing will need review') +
+    (paV('pa-from') ? '\nFrom: ' + paV('pa-from') : '') + '\n' +
+    'Dx: ' + icds.join('; ') + '\n' +
     'Fee: ' + paV('pa-fee') + '  ·  ' + paV('pa-date') + ' ' + paV('pa-time') + '\n' +
     'Discussed with: ' + paV('pa-doc') + '\n\n' +
     'This creates the claim AND queues the letter to the EMR.';
@@ -382,19 +497,21 @@ function paSubmit() {
     oop:          false,
     homeProvince: '',
     homeHCN:      '',
-    callingPhysician: paV('pa-caller'),
+    callingPhysician: callerName,
     callingFrom:  paV('pa-from') +
                   (paV('pa-phone') ? (paV('pa-from') ? ' | ' : '') + 'Call-back ' + paV('pa-phone') : ''),
     discussedWith: paV('pa-doc'),
-    background:   paV('pa-bg'),
+    background:   '',                                  // v4.81: single-box form
     adviceGiven:  paV('pa-advice'),
-    icd1:         paV('pa-icd1'),
-    icd2:         paV('pa-icd2'),
-    icd3:         '',
-    icdExtra:     '',
+    icd1:         icds[0] || '',
+    icd2:         icds[1] || '',
+    icd3:         icds[2] || '',
+    icdExtra:     icds.slice(3).join('; '),
     feeCode:      paV('pa-fee') || '10001',
-    manualRefName: paV('pa-refnum') ? paV('pa-caller') : '',
-    manualRefNum:  paV('pa-refnum'),
+    // Directory match → MSP # straight onto the claim (server uses
+    // manualRefNum verbatim). Unmatched → server name-match as before.
+    manualRefName: callerNum ? callerName : '',
+    manualRefNum:  callerNum,
     raceApproved: false,
     raceDetails:  '',
     source:       'BillingAppTab'

@@ -477,6 +477,19 @@ function locWardChange(prefix, opts) {
   locSyncListPills(X);
   locSyncRolePills(X);
   leUpdateRuleHint();
+
+  // v4.83: RACE admit — picking the Race Admit ward on the Add-Patient screen
+  // auto-selects the consult card's RACE mode (consult billed in clinic, no
+  // fee). Changing to any other ward while RACE mode is selected reverts to
+  // 33010 so a real consult fee is never silently skipped. Add-Patient only
+  // (prefix 'f'); the doctor can still override either way by tapping.
+  if (X === 'f') {
+    var _rBtn = document.getElementById('cb-race');
+    if (_rBtn) {
+      if (w === 'RACE') toggleConsultCode('RACE');
+      else if (_rBtn.classList.contains('ct-on-consult')) toggleConsultCode('33010');
+    }
+  }
 }
 
 // MRP service change — v4.39: no longer snaps role or care.
@@ -1485,6 +1498,8 @@ function initAddPatientConsult() {
     area.innerHTML = buildConsultForm({}, { withSubmit: false });
   }
   consultFormOpened();
+  // v4.83: ward may already be Race Admit when the consult area (re)builds
+  if (gv('f-ward') === 'RACE') toggleConsultCode('RACE');
 }
 
 

@@ -440,6 +440,9 @@ function selCT(type) {
   if (type === 'consult') {
     _consultCtx = 'claim';
     consultFormOpened();
+    // v4.83: +Claim consult on a Race Admit patient defaults to RACE mode
+    // (consult billed in clinic — no fee); tap 33010/33012 to override.
+    if (p && p.ward === 'RACE') toggleConsultCode('RACE');
   }
 }
 

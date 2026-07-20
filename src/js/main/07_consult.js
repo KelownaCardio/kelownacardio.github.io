@@ -77,6 +77,17 @@ function buildConsultForm(p, opts) {
        '<button id="cb-33012" class="ct-btn" style="flex:1" onclick="toggleConsultCode(\'33012\')">33012 — Limited</button>' +
        '</div>';
 
+  // v4.83: RACE admit — the consult was billed in the RACE clinic, so this
+  // mode adds NO consult fee. Full workflow otherwise (referring MD, dx,
+  // location, list); the MOST button below still adds the 78720.
+  // Auto-selected when the ward is Race Admit (locWardChange / selCT hooks).
+  h += '<button id="cb-race" class="ct-btn" style="width:100%;margin-bottom:9px" onclick="toggleConsultCode(\'RACE\')">' +
+       'RACE admit — consult billed in clinic (no consult fee)</button>';
+  h += '<div id="cb-race-note" style="display:none;font-size:11px;color:var(--text3);' +
+       'border:.5px solid var(--border2);border-radius:var(--rsm);padding:7px 9px;margin-bottom:9px">' +
+       'No 33010/33012 will be added — the consult is billed through the RACE clinic. ' +
+       'Referring MD and diagnosis below ride on the MOST (78720) claim.</div>';
+
   // MOST button
   h += '<button class="most-btn on" id="cb-most" onclick="toggleMost()">' +
        '<svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>' +
@@ -91,13 +102,13 @@ function buildConsultForm(p, opts) {
   h += '<div class="fl">' +
        '<div class="f1"><label>Date</label>' +
        '<input type="date" id="cb-date" value="' + todayISO + '" oninput="updateConsultUI()"></div>' +
-       '<div class="f1"><label>Start time</label>' +
+       '<div class="f1" id="cb-start-wrap"><label>Start time</label>' +
        _cbTimeRow('start', sV) +
        '</div>' +
        '</div>';
 
   // End time — defaults to start + 50, doctor adjusts if shorter
-  h += '<div class="fl" style="margin-bottom:9px">' +
+  h += '<div class="fl" id="cb-end-row" style="margin-bottom:9px">' +
        '<div class="f1"><label>End time' +
        '<span style="font-size:10px;color:var(--text3)"> — defaults to 50 min, adjust as needed</span></label>' +
        _cbTimeRow('end', eV) +
@@ -243,9 +254,21 @@ function cbTimeBlur(which) {
 
 
 function toggleConsultCode(code) {
+  // v4.83: third mode 'RACE' — no consult fee (billed in the RACE clinic).
+  // Hides the time fields + modifier banner (nothing here carries times);
+  // the date stays because it dates the MOST claim.
+  var race = (code === 'RACE');
   cEl('cb-33010').className = 'ct-btn' + (code === '33010' ? ' ct-on-consult' : '');
   cEl('cb-33012').className = 'ct-btn' + (code === '33012' ? ' ct-on-consult' : '');
-  updateConsultUI();
+  var rBtn = cEl('cb-race');
+  if (rBtn) rBtn.className = 'ct-btn' + (race ? ' ct-on-consult' : '');
+  ['cb-start-wrap', 'cb-end-row', 'cb-mod'].forEach(function(id) {
+    var el = cEl(id);
+    if (el) el.style.display = race ? 'none' : '';
+  });
+  var note = cEl('cb-race-note');
+  if (note) note.style.display = race ? 'block' : 'none';
+  if (!race) updateConsultUI();
 }
 
 function toggleMost() {
@@ -401,13 +424,16 @@ function claimSubmitOnce(fn) {
 // rows as a per-claim override — they do NOT modify the patient record.
 // CCFPP detection runs here, so it now fires from BOTH entry points.
 function submitConsultClaims(p, alias, locOverride) {
+  // v4.83: RACE mode — read from the button (same pattern as the 33010 read)
+  // so a stale global can never desync from what the doctor sees selected.
+  var isRace  = !!(cEl('cb-race') && cEl('cb-race').classList.contains('ct-on-consult'));
   var code    = cEl('cb-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
   var dateISO = cVal('cb-date');
   var start   = consultTime24('start');
   var end     = consultTime24('end');
   if (!dateISO) { showToast('Enter consult date'); return false; }
-  if (!start)   { showToast('Start time required for ' + code); return false; }
-  if (!end)     { showToast('End time required for ' + code); return false; }
+  if (!isRace && !start) { showToast('Start time required for ' + code); return false; }
+  if (!isRace && !end)   { showToast('End time required for ' + code); return false; }
 
   var dateFmt = fmtD(parseISODate(dateISO));
   var loc     = locOverride || (p.ward === 'ED' ? 'E' : 'I');
@@ -421,6 +447,27 @@ function submitConsultClaims(p, alias, locOverride) {
   };
 
   var userNote  = (cVal('cb-notes') || '').trim();
+
+  // ── v4.83 RACE admit — no consult fee, no times, no modifiers, no CCFPP ──
+  // The consult itself is billed through the RACE clinic. All that is added
+  // here is the MOST (78720, if toggled on) carrying the referring MD /
+  // diagnosis override — plus the doctor's note, which would otherwise ride
+  // on the consult row. admitVia='RACE' is stamped on the patient so
+  // DataCheck's MISSING_CONSULT rule (v2.36) knows the consult exists
+  // elsewhere and never flags this patient's dailies.
+  if (isRace) {
+    if (!_mostOn && !confirm('No MOST selected.\n\nThe consult is billed in the ' +
+        'RACE clinic, so this will add the patient with NO claims at all. Continue?')) {
+      return false;
+    }
+    if (_mostOn) addClaim(p, '78720', '78720', 1, dateFmt, loc, null, userNote || null, null, alias, ov);
+    p.admitVia = 'RACE';
+    sv('patients', st.patients);
+    sv('claims', st.claims);
+    showToast(_mostOn ? 'RACE admit — MOST (78720) added, no consult fee'
+                      : 'RACE admit — no claims added (consult billed in RACE clinic)');
+    return true;
+  }
   // CCFPP — one-directional detection (single most-recent overlapping
   // predecessor). v4.50 FIX: compute the note HERE, BEFORE the first
   // saveClaim push, and bake it onto the consult + 120x rows so it persists

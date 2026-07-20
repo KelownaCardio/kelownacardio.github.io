@@ -321,7 +321,17 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // the confirmed discharge date (was: today). Short stays (<5 days)
 // discharge in one tap from the date screen; checklist gains a "Back —
 // change discharge date" button. Frontend-only: 10_location.js.
-var APP_VERSION = 'v4.82';
+// v4.83 (2026-07-19): RACE ADMIT workflow (Kathryn). Patients admitted from
+// the RACE clinic had their consult billed there, but still need the full
+// admit workflow (referring MD, dx, location, list) plus a MOST. New third
+// consult-card mode "RACE admit — consult billed in clinic": no 33010/33012,
+// no times/modifiers/CCFPP; MOST (78720) togglable as usual and carries the
+// referrer/dx override + doctor's note. Auto-selected when ward = Race Admit
+// (Add-Patient locWardChange + +Claim selCT hooks); switching to another ward
+// reverts to 33010 so a real consult fee is never silently skipped. Stamps
+// admitVia='RACE' on the patient row (Config v2.37 column) so DataCheck
+// v2.36 MISSING_CONSULT skips these patients.
+var APP_VERSION = 'v4.83';
 var APP_BUILT   = '2026-07-19';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,

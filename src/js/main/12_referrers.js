@@ -376,7 +376,9 @@ document.addEventListener('click', function(e) {
         t.id === 'cb-icd-search' || t.id === 'pe-icd-search' ||
         t.id === 'ce-icd-search' || t.id === 'ce-ref-search' || t.id === 'oc-icd-search' ||
         t.id === 'oc-ref-search' ||
-        t.id === 'oc-fee-search') return;
+        t.id === 'oc-fee-search' ||
+        // v4.81: Phone Advice tab search fields
+        t.id === 'pa-ref-search' || t.id === 'pa-icd2-search' || t.id === 'pa-icd3-search') return;
     document.querySelectorAll('.ref-dd').forEach(function(dd) { dd.style.display = 'none'; });
   } catch(e2) {}
 });
