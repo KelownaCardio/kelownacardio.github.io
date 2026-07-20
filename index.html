@@ -2531,7 +2531,17 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // the confirmed discharge date (was: today). Short stays (<5 days)
 // discharge in one tap from the date screen; checklist gains a "Back —
 // change discharge date" button. Frontend-only: 10_location.js.
-var APP_VERSION = 'v4.82';
+// v4.83 (2026-07-19): RACE ADMIT workflow (Kathryn). Patients admitted from
+// the RACE clinic had their consult billed there, but still need the full
+// admit workflow (referring MD, dx, location, list) plus a MOST. New third
+// consult-card mode "RACE admit — consult billed in clinic": no 33010/33012,
+// no times/modifiers/CCFPP; MOST (78720) togglable as usual and carries the
+// referrer/dx override + doctor's note. Auto-selected when ward = Race Admit
+// (Add-Patient locWardChange + +Claim selCT hooks); switching to another ward
+// reverts to 33010 so a real consult fee is never silently skipped. Stamps
+// admitVia='RACE' on the patient row (Config v2.37 column) so DataCheck
+// v2.36 MISSING_CONSULT skips these patients.
+var APP_VERSION = 'v4.83';
 var APP_BUILT   = '2026-07-19';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -5333,6 +5343,9 @@ function selCT(type) {
   if (type === 'consult') {
     _consultCtx = 'claim';
     consultFormOpened();
+    // v4.83: +Claim consult on a Race Admit patient defaults to RACE mode
+    // (consult billed in clinic — no fee); tap 33010/33012 to override.
+    if (p && p.ward === 'RACE') toggleConsultCode('RACE');
   }
 }
 
@@ -8052,6 +8065,17 @@ function buildConsultForm(p, opts) {
        '<button id="cb-33012" class="ct-btn" style="flex:1" onclick="toggleConsultCode(\'33012\')">33012 — Limited</button>' +
        '</div>';
 
+  // v4.83: RACE admit — the consult was billed in the RACE clinic, so this
+  // mode adds NO consult fee. Full workflow otherwise (referring MD, dx,
+  // location, list); the MOST button below still adds the 78720.
+  // Auto-selected when the ward is Race Admit (locWardChange / selCT hooks).
+  h += '<button id="cb-race" class="ct-btn" style="width:100%;margin-bottom:9px" onclick="toggleConsultCode(\'RACE\')">' +
+       'RACE admit — consult billed in clinic (no consult fee)</button>';
+  h += '<div id="cb-race-note" style="display:none;font-size:11px;color:var(--text3);' +
+       'border:.5px solid var(--border2);border-radius:var(--rsm);padding:7px 9px;margin-bottom:9px">' +
+       'No 33010/33012 will be added — the consult is billed through the RACE clinic. ' +
+       'Referring MD and diagnosis below ride on the MOST (78720) claim.</div>';
+
   // MOST button
   h += '<button class="most-btn on" id="cb-most" onclick="toggleMost()">' +
        '<svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>' +
@@ -8066,13 +8090,13 @@ function buildConsultForm(p, opts) {
   h += '<div class="fl">' +
        '<div class="f1"><label>Date</label>' +
        '<input type="date" id="cb-date" value="' + todayISO + '" oninput="updateConsultUI()"></div>' +
-       '<div class="f1"><label>Start time</label>' +
+       '<div class="f1" id="cb-start-wrap"><label>Start time</label>' +
        _cbTimeRow('start', sV) +
        '</div>' +
        '</div>';
 
   // End time — defaults to start + 50, doctor adjusts if shorter
-  h += '<div class="fl" style="margin-bottom:9px">' +
+  h += '<div class="fl" id="cb-end-row" style="margin-bottom:9px">' +
        '<div class="f1"><label>End time' +
        '<span style="font-size:10px;color:var(--text3)"> — defaults to 50 min, adjust as needed</span></label>' +
        _cbTimeRow('end', eV) +
@@ -8218,9 +8242,21 @@ function cbTimeBlur(which) {
 
 
 function toggleConsultCode(code) {
+  // v4.83: third mode 'RACE' — no consult fee (billed in the RACE clinic).
+  // Hides the time fields + modifier banner (nothing here carries times);
+  // the date stays because it dates the MOST claim.
+  var race = (code === 'RACE');
   cEl('cb-33010').className = 'ct-btn' + (code === '33010' ? ' ct-on-consult' : '');
   cEl('cb-33012').className = 'ct-btn' + (code === '33012' ? ' ct-on-consult' : '');
-  updateConsultUI();
+  var rBtn = cEl('cb-race');
+  if (rBtn) rBtn.className = 'ct-btn' + (race ? ' ct-on-consult' : '');
+  ['cb-start-wrap', 'cb-end-row', 'cb-mod'].forEach(function(id) {
+    var el = cEl(id);
+    if (el) el.style.display = race ? 'none' : '';
+  });
+  var note = cEl('cb-race-note');
+  if (note) note.style.display = race ? 'block' : 'none';
+  if (!race) updateConsultUI();
 }
 
 function toggleMost() {
@@ -8376,13 +8412,16 @@ function claimSubmitOnce(fn) {
 // rows as a per-claim override — they do NOT modify the patient record.
 // CCFPP detection runs here, so it now fires from BOTH entry points.
 function submitConsultClaims(p, alias, locOverride) {
+  // v4.83: RACE mode — read from the button (same pattern as the 33010 read)
+  // so a stale global can never desync from what the doctor sees selected.
+  var isRace  = !!(cEl('cb-race') && cEl('cb-race').classList.contains('ct-on-consult'));
   var code    = cEl('cb-33010').classList.contains('ct-on-consult') ? '33010' : '33012';
   var dateISO = cVal('cb-date');
   var start   = consultTime24('start');
   var end     = consultTime24('end');
   if (!dateISO) { showToast('Enter consult date'); return false; }
-  if (!start)   { showToast('Start time required for ' + code); return false; }
-  if (!end)     { showToast('End time required for ' + code); return false; }
+  if (!isRace && !start) { showToast('Start time required for ' + code); return false; }
+  if (!isRace && !end)   { showToast('End time required for ' + code); return false; }
 
   var dateFmt = fmtD(parseISODate(dateISO));
   var loc     = locOverride || (p.ward === 'ED' ? 'E' : 'I');
@@ -8396,6 +8435,27 @@ function submitConsultClaims(p, alias, locOverride) {
   };
 
   var userNote  = (cVal('cb-notes') || '').trim();
+
+  // ── v4.83 RACE admit — no consult fee, no times, no modifiers, no CCFPP ──
+  // The consult itself is billed through the RACE clinic. All that is added
+  // here is the MOST (78720, if toggled on) carrying the referring MD /
+  // diagnosis override — plus the doctor's note, which would otherwise ride
+  // on the consult row. admitVia='RACE' is stamped on the patient so
+  // DataCheck's MISSING_CONSULT rule (v2.36) knows the consult exists
+  // elsewhere and never flags this patient's dailies.
+  if (isRace) {
+    if (!_mostOn && !confirm('No MOST selected.\n\nThe consult is billed in the ' +
+        'RACE clinic, so this will add the patient with NO claims at all. Continue?')) {
+      return false;
+    }
+    if (_mostOn) addClaim(p, '78720', '78720', 1, dateFmt, loc, null, userNote || null, null, alias, ov);
+    p.admitVia = 'RACE';
+    sv('patients', st.patients);
+    sv('claims', st.claims);
+    showToast(_mostOn ? 'RACE admit — MOST (78720) added, no consult fee'
+                      : 'RACE admit — no claims added (consult billed in RACE clinic)');
+    return true;
+  }
   // CCFPP — one-directional detection (single most-recent overlapping
   // predecessor). v4.50 FIX: compute the note HERE, BEFORE the first
   // saveClaim push, and bake it onto the consult + 120x rows so it persists
@@ -9204,6 +9264,19 @@ function locWardChange(prefix, opts) {
   locSyncListPills(X);
   locSyncRolePills(X);
   leUpdateRuleHint();
+
+  // v4.83: RACE admit — picking the Race Admit ward on the Add-Patient screen
+  // auto-selects the consult card's RACE mode (consult billed in clinic, no
+  // fee). Changing to any other ward while RACE mode is selected reverts to
+  // 33010 so a real consult fee is never silently skipped. Add-Patient only
+  // (prefix 'f'); the doctor can still override either way by tapping.
+  if (X === 'f') {
+    var _rBtn = document.getElementById('cb-race');
+    if (_rBtn) {
+      if (w === 'RACE') toggleConsultCode('RACE');
+      else if (_rBtn.classList.contains('ct-on-consult')) toggleConsultCode('33010');
+    }
+  }
 }
 
 // MRP service change — v4.39: no longer snaps role or care.
@@ -10212,6 +10285,8 @@ function initAddPatientConsult() {
     area.innerHTML = buildConsultForm({}, { withSubmit: false });
   }
   consultFormOpened();
+  // v4.83: ward may already be Race Admit when the consult area (re)builds
+  if (gv('f-ward') === 'RACE') toggleConsultCode('RACE');
 }
 
 
@@ -13303,7 +13378,9 @@ document.addEventListener('click', function(e) {
         t.id === 'cb-icd-search' || t.id === 'pe-icd-search' ||
         t.id === 'ce-icd-search' || t.id === 'ce-ref-search' || t.id === 'oc-icd-search' ||
         t.id === 'oc-ref-search' ||
-        t.id === 'oc-fee-search') return;
+        t.id === 'oc-fee-search' ||
+        // v4.81: Phone Advice tab search fields
+        t.id === 'pa-ref-search' || t.id === 'pa-icd2-search' || t.id === 'pa-icd3-search') return;
     document.querySelectorAll('.ref-dd').forEach(function(dd) { dd.style.display = 'none'; });
   } catch(e2) {}
 });
@@ -14014,9 +14091,39 @@ function confirmMediteachImport() {
 //
 // Deliberately NOT in this beta (use the full webform instead):
 // Out-of-Province, RACE referrals, allied-health callers.
+//
+// v4.81 (2026-07-19, Kathryn feedback after deploy):
+//   (1) Calling physician is now DIRECTORY-LINKED — the same 3-tier
+//       search the consult card uses (refSearchEl → saved refs +
+//       embedded BC directory + remote Sheets, incl. "+ Add new
+//       physician"). A selected match puts the MSP # straight on the
+//       claim via manualRefNum, so billing no longer depends on the
+//       server-side name match. Free text still allowed (server
+//       matches/holds as before) but the confirm dialog warns.
+//   (2) ICD-9 free-text fields replaced by the webform's 12 quick-tap
+//       pills (same codes/labels as kelownacardio.com/md) + two
+//       optional directory-search fields (icdSearchEl) for anything
+//       else. At least one diagnosis is required; no free typing.
 // ═══════════════════════════════════════════════════════════════════
 
 var PA_URL_LS_KEY = 'kgh5:paUrl';
+
+// v4.81: quick-tap ICD pills — same codes/labels as the phone advice
+// webform's #icd-quick block (kelownacardio.com/md).
+var PA_ICD_PILLS = [
+  { code:'7865', desc:'Chest pain',                    label:'Chest Pain' },
+  { code:'411',  desc:'Unstable angina',               label:'U/A' },
+  { code:'4100', desc:'Acute MI',                      label:'NSTEMI/STEMI' },
+  { code:'4280', desc:'Congestive heart failure',      label:'Heart Failure' },
+  { code:'4254', desc:'Primary cardiomyopathy',        label:'Cardiomyopathy' },
+  { code:'4273', desc:'Atrial fibrillation / flutter', label:'AFib' },
+  { code:'427',  desc:'Cardiac dysrhythmia',           label:'Arrhythmia' },
+  { code:'4261', desc:'AV block',                      label:'Heart Block' },
+  { code:'7802', desc:'Syncope',                       label:'Syncope' },
+  { code:'420',  desc:'Acute pericarditis',            label:'Pericarditis' },
+  { code:'4019', desc:'Essential hypertension',        label:'HTN' },
+  { code:'4140', desc:'Coronary atherosclerosis',      label:'CAD' }
+];
 
 // OCR prompt for MBMD call-request message screenshots.
 var PA_MBMD_PROMPT =
@@ -14118,14 +14225,21 @@ function paRenderForm() {
     '<input type="file" id="pa-photo" accept="image/*" style="display:none" onchange="paPhoto(this)">' +
     '<div class="ocr-bar" id="pa-ocr-bar" style="display:none"></div>' +
 
-    // ── Caller ──
+    // ── Caller ── (v4.81: directory-linked, same machinery as the
+    // consult card's Referring MD — selected match → MSP # on the claim)
     '<div style="font-size:12px;font-weight:800;color:var(--text3);margin:10px 0 2px">CALLER</div>' +
-    '<div class="fl">' +
-      '<div class="f1"><label>Calling physician</label>' +
-        '<input id="pa-caller" autocorrect="off" autocapitalize="words" placeholder="e.g. Veale"></div>' +
-      '<div class="f1"><label>MSP # (optional)</label>' +
-        '<input id="pa-refnum" inputmode="numeric" placeholder="blank = auto-match"></div>' +
+    '<label>Calling physician</label>' +
+    '<div style="position:relative">' +
+      '<input id="pa-ref-search" placeholder="Type name or doctor #..." autocorrect="off" autocomplete="off" style="padding-right:32px" ' +
+        'data-dd="pa-ref-dd" data-hidden="pa-ref-num" data-name="pa-ref-name" ' +
+        'oninput="paRefTyped(this)" onfocus="refSearchEl(this)">' +
+      '<button type="button" tabindex="-1" onclick="clearSearchField(\'pa-ref-search\',\'pa-ref-num\',\'pa-ref-name\',\'pa-ref-dd\')" ' +
+        'onpointerdown="event.preventDefault();clearSearchField(\'pa-ref-search\',\'pa-ref-num\',\'pa-ref-name\',\'pa-ref-dd\')" ' +
+        'style="position:absolute;right:8px;top:9px;background:none;border:none;font-size:18px;line-height:1;color:var(--text3);cursor:pointer;padding:2px 4px;z-index:5">&times;</button>' +
     '</div>' +
+    '<div class="ref-dd" id="pa-ref-dd"></div>' +
+    '<input id="pa-ref-num"  type="hidden" value="">' +
+    '<input id="pa-ref-name" type="hidden" value="">' +
     '<label>Calling from</label>' +
     '<input id="pa-from" autocorrect="off" placeholder="e.g. QVH - Revelstoke">' +
     '<label>Call-back number</label>' +
@@ -14172,20 +14286,36 @@ function paRenderForm() {
     '<select id="pa-doc" style="width:100%;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);' +
       'font-size:14px;font-family:inherit;background:#fff">' + docOpts + '</select>' +
 
-    // ── Clinical ──
+    // ── Clinical ── (v4.81: webform quick-tap pills + directory search,
+    // no free-text ICD entry)
     '<div style="font-size:12px;font-weight:800;color:var(--text3);margin:10px 0 2px">CLINICAL</div>' +
-    '<div class="fl">' +
-      '<div class="f1"><label>ICD-9 (primary)</label><input id="pa-icd1" autocorrect="off" placeholder="e.g. 427.31"></div>' +
-      '<div class="f1"><label>ICD-9 (optional)</label><input id="pa-icd2" autocorrect="off"></div>' +
+    '<label>Diagnosis — tap all that apply (first tap = primary)</label>' +
+    '<div id="pa-icd-quick" style="display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 6px">' +
+      PA_ICD_PILLS.map(function(p) {
+        return '<button type="button" class="ap-list-pill" id="pa-pill-' + p.code + '" ' +
+               'onclick="paTogglePill(\'' + p.code + '\')">' + p.label + '</button>';
+      }).join('') +
     '</div>' +
-    '<label>Background</label>' +
-    '<textarea id="pa-bg" rows="2" style="width:100%;padding:8px;border:.5px solid var(--border2);' +
+    '<div class="fl">' +
+      '<div class="f1" style="position:relative"><label>Other Dx 1 (optional)</label>' +
+        '<input id="pa-icd2-search" placeholder="Type to search ICD-9" autocorrect="off" autocomplete="off" ' +
+          'data-dd="pa-icd2-dd" data-hidden="pa-icd2-code" ' +
+          'oninput="icdSearchEl(this)" onfocus="icdSearchEl(this)">' +
+        '<div class="ref-dd" id="pa-icd2-dd"></div>' +
+        '<input id="pa-icd2-code" type="hidden" value=""></div>' +
+      '<div class="f1" style="position:relative"><label>Other Dx 2 (optional)</label>' +
+        '<input id="pa-icd3-search" placeholder="Type to search ICD-9" autocorrect="off" autocomplete="off" ' +
+          'data-dd="pa-icd3-dd" data-hidden="pa-icd3-code" ' +
+          'oninput="icdSearchEl(this)" onfocus="icdSearchEl(this)">' +
+        '<div class="ref-dd" id="pa-icd3-dd"></div>' +
+        '<input id="pa-icd3-code" type="hidden" value=""></div>' +
+    '</div>' +
+    // v4.81: single compact box (Kathryn) — feeds the letter's ADVICE
+    // GIVEN section; the separate Background field was dropped.
+    '<label>Summary of Phone Advice</label>' +
+    '<textarea id="pa-advice" rows="5" style="width:100%;padding:8px;border:.5px solid var(--border2);' +
       'border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical" ' +
-      'placeholder="Brief clinical context"></textarea>' +
-    '<label>Advice given</label>' +
-    '<textarea id="pa-advice" rows="4" style="width:100%;padding:8px;border:.5px solid var(--border2);' +
-      'border-radius:var(--rsm);font-size:14px;font-family:inherit;resize:vertical" ' +
-      'placeholder="Tap the mic on your keyboard to dictate the advice given"></textarea>' +
+      'placeholder="Tap the mic on your keyboard to dictate the summary and advice given"></textarea>' +
 
     '<div style="margin:8px 0 4px;font-size:11px;color:var(--text3);line-height:1.5">' +
       'Out-of-Province or RACE case? Use the full phone advice webform — this beta form is BC/MSP only.</div>' +
@@ -14195,7 +14325,52 @@ function paRenderForm() {
     '<div id="pa-status" style="display:none;margin-top:8px;padding:8px 10px;border-radius:6px;' +
       'font-size:13px;font-weight:600;line-height:1.4"></div>';
 
+  window._paPillOrder = [];   // v4.81: ICD pill codes in tap order
   paPhoneLink();
+}
+
+// ── v4.81: caller directory search ─────────────────────────────────
+// Typing clears any previously selected MSP # (the text no longer
+// matches the selection), then runs the normal 3-tier search.
+function paRefTyped(inputEl) {
+  var n = document.getElementById('pa-ref-num');
+  if (n) n.value = '';
+  var nm = document.getElementById('pa-ref-name');
+  if (nm) nm.value = '';
+  refSearchEl(inputEl);
+}
+
+// ── v4.81: ICD quick pills ─────────────────────────────────────────
+function paTogglePill(code) {
+  var btn = document.getElementById('pa-pill-' + code);
+  if (!btn) return;
+  var order = window._paPillOrder = window._paPillOrder || [];
+  var idx = order.indexOf(code);
+  if (idx >= 0) { order.splice(idx, 1); btn.classList.remove('on'); }
+  else          { order.push(code);     btn.classList.add('on'); }
+}
+
+// All selected diagnoses as "code - description" strings (webform
+// format — the server takes the code from before the dash): pills in
+// tap order first, then the two optional search fields.
+function paIcdList() {
+  var icds = [];
+  (window._paPillOrder || []).forEach(function(code) {
+    for (var i = 0; i < PA_ICD_PILLS.length; i++) {
+      if (PA_ICD_PILLS[i].code === code) {
+        icds.push(code + ' - ' + PA_ICD_PILLS[i].desc);
+        break;
+      }
+    }
+  });
+  ['pa-icd2', 'pa-icd3'].forEach(function(base) {
+    var code = paV(base + '-code');
+    if (!code) return;
+    // Directory label is "Description (code)" — rebuild as "code - Description".
+    var label = paV(base + '-search').replace(/\s*\([^)]*\)\s*$/, '').trim();
+    icds.push(code + (label ? ' - ' + label : ''));
+  });
+  return icds;
 }
 
 // ── Small UI helpers ───────────────────────────────────────────────
@@ -14314,7 +14489,6 @@ function paFillFromOCR(p, bar) {
     var el = document.getElementById(id);
     if (el) el.value = String(val).trim();
   };
-  set('pa-caller', p.callerName);
   set('pa-from',   p.facility);
   set('pa-phone',  p.phone);
   set('pa-last',   p.patientLast);
@@ -14323,25 +14497,39 @@ function paFillFromOCR(p, bar) {
   if (p.dob && /^\d{4}-\d{2}-\d{2}$/.test(String(p.dob).trim())) set('pa-dob', String(p.dob).trim());
   paPhnLive();
   paPhoneLink();
-  var got = ['pa-caller', 'pa-phone', 'pa-last', 'pa-phn'].filter(function(id) { return paV(id); }).length;
+  // v4.81: caller goes into the DIRECTORY SEARCH box and the match list
+  // opens immediately — one tap links the MSP # to the claim.
+  var caller = String(p.callerName || '').trim();
+  if (caller) {
+    set('pa-ref-search', caller);
+    try { refSearch(caller, 'pa-ref-dd', 'pa-ref-num', 'pa-ref-name'); } catch (e) {}
+  }
+  var got = ['pa-ref-search', 'pa-phone', 'pa-last', 'pa-phn'].filter(function(id) { return paV(id); }).length;
   if (bar) {
     bar.className = 'ocr-bar ' + (got >= 2 ? 'ocr-ok' : 'ocr-warn');
     bar.textContent = got >= 2
-      ? '✓ Extracted — check every field against the screenshot before calling'
+      ? '✓ Extracted — tap the caller in the list to link them, and check every field'
       : '⚠️ Little data found — type the details from the screenshot';
   }
 }
 
 // ── Submit ─────────────────────────────────────────────────────────
 function paSubmit() {
+  // v4.81: caller from the directory search; ICDs from pills + search.
+  var callerNum  = paV('pa-ref-num');                              // MSP # when matched
+  var callerName = (paV('pa-ref-name') || paV('pa-ref-search'))
+                     .replace(/^Dr\.?\s*/i, '').trim();
+  var icds = paIcdList();
+
   var errs = [];
   if (!paV('pa-last'))   errs.push('Patient last name is required');
   if (!paV('pa-first'))  errs.push('Patient first name is required');
-  if (!paV('pa-caller')) errs.push('Calling physician is required');
+  if (!callerName)       errs.push('Calling physician is required — search the directory');
+  if (!icds.length)      errs.push('Tap at least one diagnosis pill (or search Other Dx)');
   if (!paV('pa-date'))   errs.push('Date of call is required');
   if (!paV('pa-time'))   errs.push('Time of call is required');
   if (!paV('pa-sex'))    errs.push('Sex is required');
-  if (!paV('pa-advice')) errs.push('Advice given is required — it becomes the letter');
+  if (!paV('pa-advice')) errs.push('Summary of Phone Advice is required — it becomes the letter');
   var phn = paV('pa-phn');
   if (phn && (phn.length !== 10 || !paIsValidPHN(phn)))
     errs.push('PHN must be 10 digits with a valid check digit (or leave blank)');
@@ -14354,7 +14542,11 @@ function paSubmit() {
     'Submit phone advice?\n\n' +
     'Patient: ' + paV('pa-last').toUpperCase() + ', ' + paV('pa-first') +
     (phn ? '  PHN ' + phn : '  ⚠️ NO PHN — will be flagged for billing review') + '\n' +
-    'Caller: Dr. ' + paV('pa-caller') + (paV('pa-from') ? ' (' + paV('pa-from') + ')' : '') + '\n' +
+    'Caller: Dr. ' + callerName +
+    (callerNum ? '  ✓ MSP #' + callerNum
+               : '  ⚠️ NOT matched to directory — billing will need review') +
+    (paV('pa-from') ? '\nFrom: ' + paV('pa-from') : '') + '\n' +
+    'Dx: ' + icds.join('; ') + '\n' +
     'Fee: ' + paV('pa-fee') + '  ·  ' + paV('pa-date') + ' ' + paV('pa-time') + '\n' +
     'Discussed with: ' + paV('pa-doc') + '\n\n' +
     'This creates the claim AND queues the letter to the EMR.';
@@ -14371,19 +14563,21 @@ function paSubmit() {
     oop:          false,
     homeProvince: '',
     homeHCN:      '',
-    callingPhysician: paV('pa-caller'),
+    callingPhysician: callerName,
     callingFrom:  paV('pa-from') +
                   (paV('pa-phone') ? (paV('pa-from') ? ' | ' : '') + 'Call-back ' + paV('pa-phone') : ''),
     discussedWith: paV('pa-doc'),
-    background:   paV('pa-bg'),
+    background:   '',                                  // v4.81: single-box form
     adviceGiven:  paV('pa-advice'),
-    icd1:         paV('pa-icd1'),
-    icd2:         paV('pa-icd2'),
-    icd3:         '',
-    icdExtra:     '',
+    icd1:         icds[0] || '',
+    icd2:         icds[1] || '',
+    icd3:         icds[2] || '',
+    icdExtra:     icds.slice(3).join('; '),
     feeCode:      paV('pa-fee') || '10001',
-    manualRefName: paV('pa-refnum') ? paV('pa-caller') : '',
-    manualRefNum:  paV('pa-refnum'),
+    // Directory match → MSP # straight onto the claim (server uses
+    // manualRefNum verbatim). Unmatched → server name-match as before.
+    manualRefName: callerNum ? callerName : '',
+    manualRefNum:  callerNum,
     raceApproved: false,
     raceDetails:  '',
     source:       'BillingAppTab'
