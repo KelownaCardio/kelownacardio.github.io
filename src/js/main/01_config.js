@@ -6,25 +6,32 @@ var APP_PW_LS_KEY = 'kgh5:appPw';
 var SHARED_KEY = '';
 try { SHARED_KEY = localStorage.getItem(APP_PW_LS_KEY) || ''; } catch (e) { SHARED_KEY = ''; }
 
+// v4.85: in-app aliases standardized to first-initial-lastname. The iClinic
+// payee alias is applied only at CSV export (backend canonAlias_ /
+// DOCTOR_ALIAS_CANON). NOTE: ALIAS_MAP is not currently referenced anywhere;
+// kept aligned to the standard so it stays correct if ever wired up.
 var ALIAS_MAP = {
-  FH:'FH', LH:'LH', DP:'DPatton', KB:'KBrown', JKT:'KT',
-  JW:'JW', KH:'KHoskin', AS:'ASodhi', AK:'AKhosla', EM:'EMMassie', SB:'SB'
+  FH:'FHalperin', LH:'LHalperin', DP:'DPatton', KB:'KBrown', JKT:'KTodd',
+  JW:'JWebber', KH:'KHoskin', AS:'ASodhi', AK:'AKhosla', EM:'EMMassie',
+  SB:'SBaker', KP:'KPistawka'
 };
 
-// Pre-loaded doctor profiles — shown in sign-in screen on first launch
-// num = MSP billing number (fill in if not already in the app)
+// Pre-loaded doctor profiles — shown in sign-in screen on first launch only
+// (overwritten by the live Doctors tab on first sync). Aliases follow the
+// first-initial-lastname standard; iClinic codes live in the backend canon map.
 var DOCTORS_SEED = [
-  { alias:'FH',      name:'Dr. Frank Halperin'  },
-  { alias:'LH',      name:'Dr. Laura Halperin'  },
-  { alias:'DPatton', name:'Dr. Daniel Patton'   },
-  { alias:'KBrown',  name:'Dr. Kathryn Brown'   },
-  { alias:'KT',      name:'Dr. Keith Todd'      },
-  { alias:'JW',      name:'Dr. Jordan Webber'   },
-  { alias:'KHoskin', name:'Dr. Kurt Hoskin'     },
-  { alias:'ASodhi',  name:'Dr. Amit Sodhi'      },
-  { alias:'AKhosla', name:'Dr. Amit Khosla'     },
-  { alias:'EMMassie',name:'Dr. Emma Massie'     },
-  { alias:'SB',      name:'Dr. Sandy Baker'     },
+  { alias:'FHalperin', name:'Dr. Frank Halperin'  },
+  { alias:'LHalperin', name:'Dr. Laura Halperin'  },
+  { alias:'DPatton',   name:'Dr. Daniel Patton'   },
+  { alias:'KBrown',    name:'Dr. Kathryn Brown'   },
+  { alias:'KTodd',     name:'Dr. Keith Todd'      },
+  { alias:'JWebber',   name:'Dr. Jordan Webber'   },
+  { alias:'KHoskin',   name:'Dr. Kurt Hoskin'     },
+  { alias:'ASodhi',    name:'Dr. Amit Sodhi'      },
+  { alias:'AKhosla',   name:'Dr. Amit Khosla'     },
+  { alias:'EMMassie',  name:'Dr. Emma Massie'     },
+  { alias:'SBaker',    name:'Dr. Sandy Baker'     },
+  { alias:'KPistawka', name:'Dr. Kevin Pistawka'  },
 ];
 
 // Ward definitions: label, default list, default care type, preset rooms
