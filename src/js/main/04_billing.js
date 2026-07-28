@@ -321,6 +321,36 @@ function consultIncUnits(startTimeStr, endTimeStr) {
   return units;
 }
 
+// v4.86 — 08:00 cut-off applied to INCREMENT periods (weekdays only).
+// A call-out premium block (base OR increment) may only be added when its
+// 30-min period STARTS at least 15 min before the 08:00 night-window cut-off
+// (i.e. by 07:45) — the same "major portion of 30 min" rule used for the base.
+// This caps the increment-unit count so no increment period begins at 07:46 or
+// later, EVEN when the consult runs well past 45 min (e.g. a 07:15 consult that
+// runs to 09:00 bills 1201 + one 1206 only; the 08:15 period is not billable).
+// Only the night tier on weekdays has an 08:00 loss boundary; weekends/stats
+// (whole day is designated time) and the evening tier (rolls into night at
+// 23:00) have no such boundary and are left uncapped.
+function calloutIncUnitsCapped(startTimeStr, dateStr, rawUnits) {
+  if (!rawUnits || rawUnits < 1) return 0;
+  var mod = getModifier(startTimeStr, dateStr);
+  if (!mod || mod.type !== 'night') return rawUnits;   // no 08:00 loss boundary
+  if (isWeekendOrStat(dateStr))       return rawUnits;   // weekend night = billable all day
+  var startM = t2m(startTimeStr);
+  var CUT = 8 * 60, WIN = 15;                            // 08:00 cut-off; need ≥15 min in-window
+  var allowed = 0;
+  for (var n = 1; n <= rawUnits; n++) {
+    var pStart = (startM + 30 * n) % (24 * 60);          // clock start of increment period n
+    // Billable only if the period starts by 07:45 (≥15 min before 08:00).
+    // A start in 07:46–07:59, or at/after 08:00 into daytime, is not billable.
+    var inMorningCut = (pStart > (CUT - WIN) && pStart < CUT);   // 07:46–07:59
+    var inDaytime    = (pStart >= CUT && pStart < 18 * 60);      // 08:00–17:59
+    if (inMorningCut || inDaytime) break;                        // periods are sequential
+    allowed = n;
+  }
+  return allowed;
+}
+
 // ── Directive Weekly Limit (Sun–Sat) ───────────────────
 // Returns number of 33006 claims already billed in the Sun–Sat week that
 // contains isoDate (YYYY-MM-DD). If isoDate is omitted, uses today.

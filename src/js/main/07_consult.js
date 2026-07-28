@@ -293,7 +293,9 @@ function updateConsultUI() {
   var modBase  = getModifier(start, dateISO);
   var hasInc   = consultHasIncrement(start, end);
   var modInc   = hasInc ? getModifierForIncrement(start, dateISO) : null;
-  var incUnits = consultIncUnits(start, end);
+  var incRaw   = consultIncUnits(start, end);
+  // v4.86: drop increment periods that start after the 07:45 cut-off.
+  var incUnits = calloutIncUnitsCapped(start, dateISO, incRaw);
   var modEl    = cEl('cb-mod');
 
   if (modBase) {
@@ -303,10 +305,19 @@ function updateConsultUI() {
       '</div>';
     if (incUnits > 0) {
       var incMod = modInc || modBase;
+      var _capNote = (incUnits < incRaw)
+        ? '<span style="font-size:9px;opacity:.7;margin-left:6px">(+' + (incRaw - incUnits) + ' after 08:00 not billable)</span>'
+        : '';
       banner += '<div class="mod-box ' + incMod.cls + '" style="margin-top:1px;border-radius:0 0 var(--rsm) var(--rsm);opacity:.85">' +
         '<span>Consult time &gt; 45 min</span>' +
-        '<span style="font-size:10px;font-weight:700;margin-left:6px">' + incMod.inc + ' ×' + incUnits + '</span>' +
+        '<span style="font-size:10px;font-weight:700;margin-left:6px">' + incMod.inc + ' ×' + incUnits + '</span>' + _capNote +
         '</div>';
+    } else if (incRaw > 0) {
+      // Consult IS > 45 min but the increment period starts after the 08:00
+      // cut-off, so no increment is billable.
+      banner += '<div style="font-size:11px;padding:5px 10px;color:var(--text3);' +
+        'border:.5px solid var(--border);border-top:none;border-radius:0 0 var(--rsm) var(--rsm);' +
+        'background:var(--surface2)">Increment starts after 08:00 — not billable</div>';
     } else {
       banner += '<div style="font-size:11px;padding:5px 10px;color:var(--text3);' +
         'border:.5px solid var(--border);border-top:none;border-radius:0 0 var(--rsm) var(--rsm);' +
@@ -486,7 +497,9 @@ function submitConsultClaims(p, alias, locOverride) {
   var _sM  = t2m(start), _eM = t2m(end);
   var _dur = _eM - _sM; if (_dur < 0) _dur += 24 * 60;      // cross-midnight aware
   var modBase  = getModifier(start, dateISO);
-  var incUnits = consultIncUnits(start, end);
+  var incRaw   = consultIncUnits(start, end);
+  // v4.86: cap increments so no half-hour period starts after the 07:45 cut-off.
+  var incUnits = calloutIncUnitsCapped(start, dateISO, incRaw);
 
   // (Harris) Midnight / abnormally long end. end==00:00 is the classic
   // 12am-vs-12pm meridiem slip; a span > 180 min is implausibly long.
@@ -507,19 +520,18 @@ function submitConsultClaims(p, alias, locOverride) {
           : '') + 'Save this duration as entered?')) return false;
   }
 
-  // (White) Increment period crosses the after-hours boundary. The 30-min base
-  // pushes the increment start into a different rate window (or out of the
-  // after-hours window entirely). We now bill the increment at the BASE tier
-  // (see modInc below) rather than dropping it — but flag it for confirmation.
-  if (modBase && incUnits > 0) {
-    var _reclk = getModifierForIncrement(start, dateISO);
-    if (!_reclk || _reclk.base !== modBase.base) {
-      if (!confirm('Check the call-out TIMES.\n\n' + modBase.label + ':  ' +
-          start + '–' + end + '\n\nThe 30-min base ends at ' +
-          minsToTime((_sM + 30) % (24 * 60)) + ', which crosses into a different ' +
-          'rate window. The increment will be billed at the ' + modBase.label +
-          ' rate. Confirm the times are correct?')) return false;
-    }
+  // (White) Increment period runs past the 08:00 cut-off. v4.86: increment
+  // half-hours whose period STARTS after 07:45 are no longer billable
+  // (calloutIncUnitsCapped drops them). When that drops one or more units,
+  // surface it so the doctor verifies the times — cancelling aborts the save.
+  if (modBase && incRaw > incUnits) {
+    var _dropped = incRaw - incUnits;
+    if (!confirm('Call-out runs past 08:00.\n\n' + modBase.label + ':  ' +
+        start + '–' + end + '\n\nThe 30-min base' +
+        (incUnits > 0 ? ' and ' + incUnits + ' increment half-hour' + (incUnits > 1 ? 's' : '') : '') +
+        ' before 08:00 will be billed. ' + _dropped + ' later half-hour' +
+        (_dropped > 1 ? 's' : '') + ' cannot be billed — call-out premiums end at ' +
+        '08:00. Save?')) return false;
   }
 
   // Base consult — doctor's note + CCFPP (v4.49b: stamped on 33010/33012 too)
@@ -539,7 +551,12 @@ function submitConsultClaims(p, alias, locOverride) {
     addClaim(p, modBase.base, modBase.base, 1, dateFmt, loc, start, ccNote, modBaseEnd, alias, ov);
     if (modInc) {
       var incStart = minsToTime((_sM + 30) % (24 * 60));
-      addClaim(p, modInc, modInc, incUnits, dateFmt, loc, incStart, ccNote, end, alias, ov);
+      // v4.86: when later half-hours are dropped at the 08:00 cut-off, end the
+      // increment claim at the last billable period rather than the raw end.
+      var incEnd = (incUnits < incRaw)
+        ? minsToTime((_sM + 30 + 30 * incUnits) % (24 * 60))
+        : end;
+      addClaim(p, modInc, modInc, incUnits, dateFmt, loc, incStart, ccNote, incEnd, alias, ov);
     }
   }
   sv('claims', st.claims);
