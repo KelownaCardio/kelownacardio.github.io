@@ -243,6 +243,20 @@ function ccfppRecomputeAround_(alias, dateFmt) {
 //   2. Weekend / stat holiday — entire day, any time
 //   3. Evening (18:00–22:59) — time check
 // Returns null or { type, base, inc, label, cls }
+//
+// v4.86 — 08:00 majority-portion cutoff (WEEKDAYS only).
+// A call-out stipend covers a 30-min block "or the major portion thereof",
+// which MSP treats as ≥15 min (see the Out-of-Office Hours Premiums guide:
+// a service crossing a designated-time boundary is payable only if ≥15 min
+// falls inside the window). A weekday night call-out that STARTS at 07:46 or
+// later leaves ≤14 min before the 08:00 cutoff — less than the majority of
+// the 30-min block sits inside the 1800–0800 window — so no call-out premium
+// may be added. 07:45 (exactly 15 min) still qualifies.
+// This applies ONLY on weekdays: on weekends/stat holidays the ENTIRE day is
+// designated time (1800–0800 hours, weekends, and statutory holidays), so the
+// 08:00 cutoff does not apply and an early-morning call-out stays billable.
+var CALLOUT_AM_CUTOFF_MIN = 8 * 60;          // 08:00 — end of the night window
+var CALLOUT_MIN_WINDOW    = 15;              // majority of a 30-min block
 function getModifier(timeStr, dateStr) {
   if (!dateStr) return null;
   var mins = -1;
@@ -250,9 +264,16 @@ function getModifier(timeStr, dateStr) {
     var parts = timeStr.split(':');
     mins = parseInt(parts[0]) * 60 + parseInt(parts[1] || 0);
   }
-  if (mins >= 0 && (mins >= 23*60 || mins < 8*60))
+  var weekendStat = isWeekendOrStat(dateStr);
+  // Weekday-only: suppress the night tier when the start is in the final
+  // <15 min before 08:00 (i.e. 07:46–07:59). On weekends/stats this window is
+  // still fully designated time, so the tier is NOT suppressed there.
+  var nightTooLateWeekday = !weekendStat &&
+        mins >  (CALLOUT_AM_CUTOFF_MIN - CALLOUT_MIN_WINDOW) &&   // > 07:45
+        mins <   CALLOUT_AM_CUTOFF_MIN;                            // < 08:00
+  if (mins >= 0 && (mins >= 23*60 || mins < 8*60) && !nightTooLateWeekday)
     return { type:'night',   base:'1201', inc:'1206', label:'Night call (23:00–07:59)',   cls:'mod-night'   };
-  if (isWeekendOrStat(dateStr))
+  if (weekendStat)
     return { type:'weekend', base:'1202', inc:'1207', label:'Weekend / stat holiday',     cls:'mod-weekend' };
   if (mins >= 0 && mins >= 18*60)
     return { type:'evening', base:'1200', inc:'1205', label:'Evening call (18:00–22:59)', cls:'mod-evening' };

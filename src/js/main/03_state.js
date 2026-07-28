@@ -331,8 +331,8 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // reverts to 33010 so a real consult fee is never silently skipped. Stamps
 // admitVia='RACE' on the patient row (Config v2.37 column) so DataCheck
 // v2.36 MISSING_CONSULT skips these patients.
-var APP_VERSION = 'v4.85';
-var APP_BUILT   = '2026-07-27';
+var APP_VERSION = 'v4.86';
+var APP_BUILT   = '2026-07-28';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
