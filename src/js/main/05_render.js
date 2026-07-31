@@ -523,6 +523,17 @@ function renderOff() {
   document.getElementById('off-list').innerHTML = h;
 }
 
+// Ranks claim `a` as a more recent "last seen" than `b`. Precedence:
+// (1) later calendar day, (2) same day -> in-person beats a phone consult,
+// (3) same day + same type -> later encounter time (a claim with a startTime
+// beats one without), (4) later entry order (createdAt). See lastSeenByGroup.
+function lastSeenIsMoreRecent(a, b) {
+  if (a.t !== b.t)                 return a.t > b.t;
+  if (a.inPerson !== b.inPerson)   return a.inPerson;
+  if (a.startTime !== b.startTime) return a.startTime > b.startTime;
+  return a.createdAt > b.createdAt;
+}
+
 // Find the most recent claim for this patient by any cardiologist in the group.
 // Returns chip HTML like "Last seen by KB May 1" or empty string if never billed.
 function lastSeenByGroup(p) {
@@ -534,7 +545,18 @@ function lastSeenByGroup(p) {
     if (!c.date) continue;
     var t = parseDMYsafe(c.date);
     if (!t) continue;
-    if (!newest || t > newest.t) newest = { t: t, claim: c };
+    // v4.86: pick the most recent *visit*, not merely the newest date. On a
+    // same-day tie an in-person consult outranks a phone consult; if both are
+    // the same type, the later encounter time wins (startTime, then entry
+    // order). Fixes an early phone consult masking a later in-person visit.
+    var cand = {
+      t: t,
+      inPerson: !isPhoneAdviceClaim(c),
+      startTime: String(c.startTime || ''),
+      createdAt: Number(c.createdAt) || 0,
+      claim: c
+    };
+    if (!newest || lastSeenIsMoreRecent(cand, newest)) newest = cand;
   }
   if (!newest) return '';
 
