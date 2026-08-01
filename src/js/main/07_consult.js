@@ -474,6 +474,15 @@ function submitConsultClaims(p, alias, locOverride) {
     if (_mostOn) addClaim(p, '78720', '78720', 1, dateFmt, loc, null, userNote || null, null, alias, ov);
     p.admitVia = 'RACE';
     sv('patients', st.patients);
+    // v4.88 FIX (2026-08-01, Gerlinsky): persist the stamp to Sheets. sv('patients')
+    // early-returns for clinical keys (03_state.js) so it NEVER pushes. Both callers
+    // — apSubmit (09_patient.js) and the +Claim submit — run push('savePatient', p)
+    // BEFORE submitConsultClaims sets admitVia, so the RACE tag was written to the
+    // in-memory row only and never reached the sheet. Every button-entered RACE
+    // admit therefore came through with admitVia blank and was wrongly flagged
+    // MISSING_CONSULT. The earlier savePatient has already resolved by now, so the
+    // in-flight de-dupe guard (push(), 03_state.js) won't swallow this second push.
+    if (SHEETS_URL) push('savePatient', p);
     sv('claims', st.claims);
     showToast(_mostOn ? 'RACE admit — MOST (78720) added, no consult fee'
                       : 'RACE admit — no claims added (consult billed in RACE clinic)');

@@ -331,8 +331,16 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // reverts to 33010 so a real consult fee is never silently skipped. Stamps
 // admitVia='RACE' on the patient row (Config v2.37 column) so DataCheck
 // v2.36 MISSING_CONSULT skips these patients.
-var APP_VERSION = 'v4.87';
-var APP_BUILT   = '2026-07-31';
+// v4.88 (2026-08-01): RACE-admit stamp-persist fix. The v4.83 admitVia='RACE'
+// stamp was set on the in-memory patient AFTER the caller's push('savePatient')
+// had already written the row, and the following sv('patients') never pushes
+// (clinical keys early-return) — so the tag never reached the sheet and every
+// button-entered RACE admit was wrongly flagged MISSING_CONSULT (Gerlinsky).
+// Fix in 07_consult.js: explicit push('savePatient', p) right after the stamp.
+// NOTE: based on live v4.86; does NOT include the staged-but-undeployed v4.87
+// last-seen-visit change (05_render.js). Version jumps 4.86 -> 4.88.
+var APP_VERSION = 'v4.88';
+var APP_BUILT   = '2026-08-01';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
