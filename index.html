@@ -2217,6 +2217,18 @@ function selectIcd(code, label, dropdownId, hiddenId, inputId) {
 
 // 03_state.js — App state, local storage, Google Sheets sync
 // ═══════════════════════════════════════════════════════
+// v4.89 (2026-08-03): GAP-NOTE SYNC-STORM FIX. (1) Gap-note merge is now
+//   SERVER-AUTHORITATIVE: a local-only note survives only while its push is
+//   pending or it was created <24h ago (createdAt, stamped by 06c). The old
+//   rule kept + re-pushed every orphan on EVERY sync; combined with the
+//   backend's active-PHN filter on gap notes this re-saved the same aged-out
+//   notes thousands of times/day (Aug 1: 2,716 saveGapNote vs 27 real notes),
+//   keeping lastWriteAt permanently hot → every device's 30s ping triggered a
+//   cold getAll → the 100s+ hangs/timeouts. (2) push() in-flight + pending
+//   guards now cover saveGapNote (key 'g|phn|date' — notes have no id);
+//   unguarded parallel note bursts were the 5-simultaneous-doPost pattern in
+//   the execution log. Ships with Crud v3.16 (getAll returns ALL retained
+//   notes) + Bigquery v3.25 (notes >30d archived nightly to BQ gap_notes).
 
 var st = {
   doc:        null,  // { alias, num, name }
@@ -2556,7 +2568,7 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // Fix in 07_consult.js: explicit push('savePatient', p) right after the stamp.
 // NOTE: based on live v4.86; does NOT include the staged-but-undeployed v4.87
 // last-seen-visit change (05_render.js). Version jumps 4.86 -> 4.88.
-var APP_VERSION = 'v4.88';
+var APP_VERSION = 'v4.89';
 var APP_BUILT   = '2026-08-01';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -3185,14 +3197,29 @@ async function syncFromSheets() {
     }
 
     if (d.doctors)   st.doctors   = d.doctors;
-    // Gap notes (billing-gap explanations, hard-gate). Merge server truth with
-    // any LOCAL note not yet on the server, and re-push those — so a saveGapNote
-    // that failed (offline) isn't lost when the sync response overwrites state.
+    // Gap notes — v4.89 STORM FIX: the server is now AUTHORITATIVE. A local-
+    // only note survives (and re-pushes) ONLY while its push is pending or it
+    // was created <24h ago (covers an offline discharge). The old rule kept +
+    // re-pushed EVERY orphan forever; because the pre-v3.16 backend filtered
+    // gap notes to active patients, aged-out notes could never match and the
+    // same 27 notes were re-saved thousands of times/day, keeping lastWriteAt
+    // hot so every 30s ping forced a cold getAll on every device. The 24h
+    // window also makes future server-side deletion safe: notes archived to
+    // BigQuery by the nightly flush (v3.25) simply drop from local state here
+    // instead of being resurrected.
     if (d.gapNotes) {
+      var _gapKey = function(g) { return 'g|' + String(g.phn||'').replace(/\D/g,'') + '|' + String(g.date||''); };
       var _srvGap = {};
-      d.gapNotes.forEach(function(g) { _srvGap[String(g.phn||'').replace(/\D/g,'') + '|' + String(g.date||'')] = true; });
+      d.gapNotes.forEach(function(g) {
+        _srvGap[_gapKey(g)] = true;
+        if (window._pendingPush) delete window._pendingPush[_gapKey(g)];   // confirmed on server
+      });
+      var _GAP_FRESH_MS = 24 * 60 * 60 * 1000;
       var _localGap = (st.gapNotes || []).filter(function(g) {
-        return !_srvGap[String(g.phn||'').replace(/\D/g,'') + '|' + String(g.date||'')];
+        if (_srvGap[_gapKey(g)]) return false;
+        var _pend  = window._pendingPush && window._pendingPush[_gapKey(g)];
+        var _fresh = g.createdAt && (Date.now() - g.createdAt) < _GAP_FRESH_MS;
+        return !!(_pend || _fresh);   // else stale orphan — server wins, drop it
       });
       if (SHEETS_URL) _localGap.forEach(function(g) { push('saveGapNote', g); });
       st.gapNotes = d.gapNotes.concat(_localGap);
@@ -3286,15 +3313,22 @@ async function push(action, body) {
   // v4.25: In-flight guard — if a fetch for this exact ID is already running,
   // skip silently. The pending retry will catch it on the next sync cycle
   // once the in-flight request completes.
-  if ((action === 'savePatient' || action === 'saveClaim') && body && body.id) {
-    if (window._pushInFlight[body.id]) {
+  // v4.89: saveGapNote joins both guards — keyed 'g|phn|date' (notes have no
+  // id). Unguarded parallel note re-pushes were half the Aug-2026 sync storm.
+  var _pKey = null;
+  if ((action === 'savePatient' || action === 'saveClaim') && body && body.id) _pKey = body.id;
+  if (action === 'saveGapNote' && body) {
+    _pKey = 'g|' + String(body.phn || '').replace(/\D/g, '') + '|' + String(body.date || '');
+  }
+  if (_pKey) {
+    if (window._pushInFlight[_pKey]) {
       return true;  // true = don't trigger error handling
     }
-    window._pushInFlight[body.id] = true;
+    window._pushInFlight[_pKey] = true;
   }
   // Mark as pending until next successful sync confirms it
-  if (action === 'savePatient' || action === 'saveClaim') {
-    window._pendingPush[body.id] = { action: action, body: body, ts: Date.now() };
+  if (_pKey) {
+    window._pendingPush[_pKey] = { action: action, body: body, ts: Date.now() };
   }
   setSyncState('syncing');
   try {
@@ -3302,7 +3336,7 @@ async function push(action, body) {
       method: 'POST', body: JSON.stringify(body)
     });
     // v4.25: clear in-flight flag on completion (success or server rejection)
-    if (body && body.id) delete window._pushInFlight[body.id];
+    if (_pKey) delete window._pushInFlight[_pKey];
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     // v3.91: inspect the response BODY, not just the HTTP status. Apps Script
     // returns HTTP 200 even when saveRow rejects a record ({ok:false,error}).
@@ -3323,8 +3357,8 @@ async function push(action, body) {
       // {error} from an old Router — assume transient) → KEEP it pending so
       // the next sync cycle retries automatically.
       var _transient = !!(data.transient || data.ok === undefined);
-      if ((action === 'savePatient' || action === 'saveClaim') && !_transient) {
-        delete window._pendingPush[body.id];
+      if (_pKey && !_transient) {
+        delete window._pendingPush[_pKey];   // v4.89: covers gap notes too
       }
       console.warn('push rejected by server — ' + action + ': ' + window._lastPushError +
                     (_transient ? ' (transient — will retry)' : ' (permanent)'));
@@ -3335,12 +3369,16 @@ async function push(action, body) {
       return false;
     }
     window._lastPushError = null;
+    // v4.89: a gap-note save is confirmed by the server's locked write+flush
+    // ({ok:true}) — clear its pending entry now rather than waiting for the
+    // note to appear in a sync response.
+    if (action === 'saveGapNote' && _pKey) delete window._pendingPush[_pKey];
     setSyncState('synced');
     return true;
   } catch(e) {
     // v4.25: clear in-flight flag on network failure too — the next sync
     // cycle will retry from _pendingPush.
-    if (body && body.id) delete window._pushInFlight[body.id];
+    if (_pKey) delete window._pushInFlight[_pKey];
     // Network / transport failure — transient. Leave it in _pendingPush so
     // the next sync retries it.
     window._lastPushError = e.message || String(e);
@@ -7011,7 +7049,11 @@ function _cvConfirmGapNote(btn) {
     patName: (p.last || '') + ', ' + (p.first || ''),
     alias:   alias,
     note:    note,
-    by:      (st.doc ? st.doc.alias : '') || alias
+    by:      (st.doc ? st.doc.alias : '') || alias,
+    // v4.89: local creation stamp — the sync merge (03_state) keeps an
+    // unconfirmed local note alive for 24h on this. Not a sheet column;
+    // the backend ignores it (objToRow maps by header) and stamps its own ts.
+    createdAt: Date.now()
   };
   if (!st.gapNotes) st.gapNotes = [];
   var idx = -1;
