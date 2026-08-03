@@ -1184,7 +1184,11 @@ function _cvConfirmGapNote(btn) {
     patName: (p.last || '') + ', ' + (p.first || ''),
     alias:   alias,
     note:    note,
-    by:      (st.doc ? st.doc.alias : '') || alias
+    by:      (st.doc ? st.doc.alias : '') || alias,
+    // v4.89: local creation stamp — the sync merge (03_state) keeps an
+    // unconfirmed local note alive for 24h on this. Not a sheet column;
+    // the backend ignores it (objToRow maps by header) and stamps its own ts.
+    createdAt: Date.now()
   };
   if (!st.gapNotes) st.gapNotes = [];
   var idx = -1;
