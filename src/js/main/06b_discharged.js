@@ -120,7 +120,10 @@ async function archiveSearch() {
       return '<div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface2);border-radius:8px;padding:9px 11px;margin-bottom:6px">'
         + '<div><div style="font-weight:700;font-size:13px">' + esc(p.last) + ', ' + esc(p.first) + '</div>'
         + '<div style="font-size:11px;color:var(--text2)">PHN …' + esc(String(p.phn || '').slice(-4)) + dd + ' &middot; ' + claimN + ' claim' + (claimN === 1 ? '' : 's') + '</div></div>'
+        + '<div style="display:flex;gap:6px">'
         + '<button class="btn btn-p" style="margin:0;font-size:12px;padding:6px 12px" onclick="pullArchivedPatient(\'' + esc(p.id) + '\')">Pull claims</button>'
+        + '<button class="btn btn-s" style="margin:0;font-size:12px;padding:6px 12px" onclick="pullArchivedAndClaim(\'' + esc(p.id) + '\')">+ Claim</button>'
+        + '</div>'
         + '</div>';
     }).join('');
     box.innerHTML = '<div style="font-size:11px;color:var(--text3);margin:4px 2px 6px">Archive matches (loads into the calendar for editing):</div>' + rows;
@@ -132,6 +135,16 @@ function pullArchivedPatient(pid) {
   if (!_archiveCache) return;
   var p = _archiveCache.patients.filter(function(x){ return String(x.id) === String(pid); })[0];
   if (!p) { showToast('Could not load that patient — re-run the search.'); return; }
+  // v4.91: PIN the pulled patient (and their claims, by PHN) so the 30s sync
+  // merge keeps them. Archived patients are excluded from the filtered getAll,
+  // so the remote-authoritative merge used to DROP them from st.patients
+  // seconds after the pull — openPatientSummary then found nothing and
+  // silently returned (the "Pull claims does nothing" bug, 2026-08-09).
+  // Pins live for the session only; a reload clears them.
+  if (!window._pulledPin) window._pulledPin = { pids: {}, phns: {} };
+  window._pulledPin.pids[String(p.id)] = Date.now();
+  var _pinPhn = String(p.phn || '').replace(/\D/g, '');
+  if (_pinPhn) window._pulledPin.phns[_pinPhn] = Date.now();
   if (!getP(p.id)) st.patients.push(p);
   var have = {}; st.claims.forEach(function(c){ if (c.id) have[String(c.id)] = true; });
   var pulled = 0;
@@ -142,6 +155,16 @@ function pullArchivedPatient(pid) {
   showToast('Pulled ' + p.last + ' — ' + pulled + ' claim' + (pulled === 1 ? '' : 's') + ' loaded');
   hideModal('pt-summary-modal');
   openPatientSummary(p.id);
+}
+
+// v4.91: pull an archived patient and go straight to the +Claim screen —
+// the "add missing claims to an archived patient" path that previously
+// required restoring to a list or the browser console.
+function pullArchivedAndClaim(pid) {
+  pullArchivedPatient(pid);
+  if (!getP(pid)) return;              // pull failed — toast already shown
+  hideModal('pt-summary-modal');
+  openClaimFromDischarged(pid);
 }
 function renderDischarged(query) {
   var container = document.getElementById('discharged-results');

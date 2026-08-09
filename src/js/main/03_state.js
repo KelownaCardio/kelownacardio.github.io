@@ -1,5 +1,15 @@
 // 03_state.js — App state, local storage, Google Sheets sync
 // ═══════════════════════════════════════════════════════
+// v4.91 (2026-08-09): PULLED-ARCHIVE PIN (Simms "Pull claims does nothing"
+//        bug). Archived/old-discharged patients are excluded from the
+//        filtered getAll, so the remote-authoritative sync merge dropped a
+//        just-pulled patient (and their pulled claims) within one 30s cycle —
+//        openPatientSummary then silently returned. Fix: pullArchivedPatient
+//        pins pulled ids/PHNs (window._pulledPin, session-lifetime) and both
+//        merge keep-loops retain pinned rows WITHOUT re-pushing them. Plus a
+//        "+ Claim" button on archive search results (06b_discharged.js:
+//        pullArchivedAndClaim) so claims can be added to archived patients
+//        without restoring them to a list.
 // v4.90 (2026-08-09): ATOMIC ADD-PATIENT SAVE (dropped-consult fix, Cornish
 //        2026-08-05). Add-Patient now builds ALL claims first, then commits
 //        patient + claims in ONE awaited savePatientWithClaims request
@@ -359,7 +369,7 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // Fix in 07_consult.js: explicit push('savePatient', p) right after the stamp.
 // NOTE: based on live v4.86; does NOT include the staged-but-undeployed v4.87
 // last-seen-visit change (05_render.js). Version jumps 4.86 -> 4.88.
-var APP_VERSION = 'v4.90';
+var APP_VERSION = 'v4.91';
 var APP_BUILT   = '2026-08-01';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -835,9 +845,19 @@ async function syncFromSheets() {
         if (!remoteById[lp.id]) {
           var age = NOW_MS - (parseInt(String(lp.id).replace('p','').slice(0,13)) || 0);
           var isPending = window._pendingPush && window._pendingPush[lp.id];
+          // v4.91: pulled-archive pin — archived patients are excluded from the
+          // filtered getAll, so without this the merge dropped a just-pulled
+          // patient within one sync cycle (Pull claims → summary silently
+          // failed). Pinned patients are KEPT but never re-pushed: they still
+          // exist on the Patients sheet; they're only absent from the
+          // filtered response.
+          var isPinned = window._pulledPin && window._pulledPin.pids &&
+                         window._pulledPin.pids[String(lp.id)];
           if (age < GRACE_MS || isPending) {
             merged.push(lp);
             if (SHEETS_URL) push('savePatient', lp); // retry
+          } else if (isPinned) {
+            merged.push(lp);                         // keep, no re-push
           }
         }
       });
@@ -886,9 +906,16 @@ async function syncFromSheets() {
         if (!remoteClaimIds[lc.id]) {
           var age = NOW_MS - (parseInt(String(lc.id).replace('c','').slice(0,13)) || 0);
           var isPending = window._pendingPush && window._pendingPush[lc.id];
+          // v4.91: keep pulled-archive claims (their patient is pinned by PHN).
+          // Archived claims are absent from the filtered getAll response, not
+          // deleted — keep them visible in the summary calendar, never re-push.
+          var isPinnedClaim = window._pulledPin && window._pulledPin.phns &&
+                              window._pulledPin.phns[String(lc.phn || '').replace(/\D/g, '')];
           if (age < GRACE_MS || isPending) {
             mergedClaims.push(lc);
             if (SHEETS_URL) push('saveClaim', lc); // retry
+          } else if (isPinnedClaim) {
+            mergedClaims.push(lc);                 // keep, no re-push
           }
           // else: not on Sheets, not in flight, not pending — safe to drop (was deleted remotely)
         }
