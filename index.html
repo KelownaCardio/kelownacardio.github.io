@@ -2217,6 +2217,16 @@ function selectIcd(code, label, dropdownId, hiddenId, inputId) {
 
 // 03_state.js — App state, local storage, Google Sheets sync
 // ═══════════════════════════════════════════════════════
+// v4.91 (2026-08-09): PULLED-ARCHIVE PIN (Simms "Pull claims does nothing"
+//        bug). Archived/old-discharged patients are excluded from the
+//        filtered getAll, so the remote-authoritative sync merge dropped a
+//        just-pulled patient (and their pulled claims) within one 30s cycle —
+//        openPatientSummary then silently returned. Fix: pullArchivedPatient
+//        pins pulled ids/PHNs (window._pulledPin, session-lifetime) and both
+//        merge keep-loops retain pinned rows WITHOUT re-pushing them. Plus a
+//        "+ Claim" button on archive search results (06b_discharged.js:
+//        pullArchivedAndClaim) so claims can be added to archived patients
+//        without restoring them to a list.
 // v4.90 (2026-08-09): ATOMIC ADD-PATIENT SAVE (dropped-consult fix, Cornish
 //        2026-08-05). Add-Patient now builds ALL claims first, then commits
 //        patient + claims in ONE awaited savePatientWithClaims request
@@ -2576,7 +2586,7 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // Fix in 07_consult.js: explicit push('savePatient', p) right after the stamp.
 // NOTE: based on live v4.86; does NOT include the staged-but-undeployed v4.87
 // last-seen-visit change (05_render.js). Version jumps 4.86 -> 4.88.
-var APP_VERSION = 'v4.90';
+var APP_VERSION = 'v4.91';
 var APP_BUILT   = '2026-08-01';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -3052,9 +3062,19 @@ async function syncFromSheets() {
         if (!remoteById[lp.id]) {
           var age = NOW_MS - (parseInt(String(lp.id).replace('p','').slice(0,13)) || 0);
           var isPending = window._pendingPush && window._pendingPush[lp.id];
+          // v4.91: pulled-archive pin — archived patients are excluded from the
+          // filtered getAll, so without this the merge dropped a just-pulled
+          // patient within one sync cycle (Pull claims → summary silently
+          // failed). Pinned patients are KEPT but never re-pushed: they still
+          // exist on the Patients sheet; they're only absent from the
+          // filtered response.
+          var isPinned = window._pulledPin && window._pulledPin.pids &&
+                         window._pulledPin.pids[String(lp.id)];
           if (age < GRACE_MS || isPending) {
             merged.push(lp);
             if (SHEETS_URL) push('savePatient', lp); // retry
+          } else if (isPinned) {
+            merged.push(lp);                         // keep, no re-push
           }
         }
       });
@@ -3103,9 +3123,16 @@ async function syncFromSheets() {
         if (!remoteClaimIds[lc.id]) {
           var age = NOW_MS - (parseInt(String(lc.id).replace('c','').slice(0,13)) || 0);
           var isPending = window._pendingPush && window._pendingPush[lc.id];
+          // v4.91: keep pulled-archive claims (their patient is pinned by PHN).
+          // Archived claims are absent from the filtered getAll response, not
+          // deleted — keep them visible in the summary calendar, never re-push.
+          var isPinnedClaim = window._pulledPin && window._pulledPin.phns &&
+                              window._pulledPin.phns[String(lc.phn || '').replace(/\D/g, '')];
           if (age < GRACE_MS || isPending) {
             mergedClaims.push(lc);
             if (SHEETS_URL) push('saveClaim', lc); // retry
+          } else if (isPinnedClaim) {
+            mergedClaims.push(lc);                 // keep, no re-push
           }
           // else: not on Sheets, not in flight, not pending — safe to drop (was deleted remotely)
         }
@@ -5670,7 +5697,10 @@ async function archiveSearch() {
       return '<div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface2);border-radius:8px;padding:9px 11px;margin-bottom:6px">'
         + '<div><div style="font-weight:700;font-size:13px">' + esc(p.last) + ', ' + esc(p.first) + '</div>'
         + '<div style="font-size:11px;color:var(--text2)">PHN …' + esc(String(p.phn || '').slice(-4)) + dd + ' &middot; ' + claimN + ' claim' + (claimN === 1 ? '' : 's') + '</div></div>'
+        + '<div style="display:flex;gap:6px">'
         + '<button class="btn btn-p" style="margin:0;font-size:12px;padding:6px 12px" onclick="pullArchivedPatient(\'' + esc(p.id) + '\')">Pull claims</button>'
+        + '<button class="btn btn-s" style="margin:0;font-size:12px;padding:6px 12px" onclick="pullArchivedAndClaim(\'' + esc(p.id) + '\')">+ Claim</button>'
+        + '</div>'
         + '</div>';
     }).join('');
     box.innerHTML = '<div style="font-size:11px;color:var(--text3);margin:4px 2px 6px">Archive matches (loads into the calendar for editing):</div>' + rows;
@@ -5682,6 +5712,16 @@ function pullArchivedPatient(pid) {
   if (!_archiveCache) return;
   var p = _archiveCache.patients.filter(function(x){ return String(x.id) === String(pid); })[0];
   if (!p) { showToast('Could not load that patient — re-run the search.'); return; }
+  // v4.91: PIN the pulled patient (and their claims, by PHN) so the 30s sync
+  // merge keeps them. Archived patients are excluded from the filtered getAll,
+  // so the remote-authoritative merge used to DROP them from st.patients
+  // seconds after the pull — openPatientSummary then found nothing and
+  // silently returned (the "Pull claims does nothing" bug, 2026-08-09).
+  // Pins live for the session only; a reload clears them.
+  if (!window._pulledPin) window._pulledPin = { pids: {}, phns: {} };
+  window._pulledPin.pids[String(p.id)] = Date.now();
+  var _pinPhn = String(p.phn || '').replace(/\D/g, '');
+  if (_pinPhn) window._pulledPin.phns[_pinPhn] = Date.now();
   if (!getP(p.id)) st.patients.push(p);
   var have = {}; st.claims.forEach(function(c){ if (c.id) have[String(c.id)] = true; });
   var pulled = 0;
@@ -5692,6 +5732,16 @@ function pullArchivedPatient(pid) {
   showToast('Pulled ' + p.last + ' — ' + pulled + ' claim' + (pulled === 1 ? '' : 's') + ' loaded');
   hideModal('pt-summary-modal');
   openPatientSummary(p.id);
+}
+
+// v4.91: pull an archived patient and go straight to the +Claim screen —
+// the "add missing claims to an archived patient" path that previously
+// required restoring to a list or the browser console.
+function pullArchivedAndClaim(pid) {
+  pullArchivedPatient(pid);
+  if (!getP(pid)) return;              // pull failed — toast already shown
+  hideModal('pt-summary-modal');
+  openClaimFromDischarged(pid);
 }
 function renderDischarged(query) {
   var container = document.getElementById('discharged-results');
