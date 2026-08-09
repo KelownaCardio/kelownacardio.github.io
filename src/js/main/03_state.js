@@ -1,5 +1,13 @@
 // 03_state.js — App state, local storage, Google Sheets sync
 // ═══════════════════════════════════════════════════════
+// v4.90 (2026-08-09): ATOMIC ADD-PATIENT SAVE (dropped-consult fix, Cornish
+//        2026-08-05). Add-Patient now builds ALL claims first, then commits
+//        patient + claims in ONE awaited savePatientWithClaims request
+//        (04_billing.js collector + 09_patient.js apSubmit/_addPatientCore).
+//        No change in this file beyond the version bump — push() already
+//        passes savePatientWithClaims through its guards (body.id present;
+//        the empty-patient/claim guards are action-scoped) and fails
+//        correctly on {ok:false} responses.
 // v4.89 (2026-08-03): GAP-NOTE SYNC-STORM FIX. (1) Gap-note merge is now
 //   SERVER-AUTHORITATIVE: a local-only note survives only while its push is
 //   pending or it was created <24h ago (createdAt, stamped by 06c). The old
@@ -351,7 +359,7 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // Fix in 07_consult.js: explicit push('savePatient', p) right after the stamp.
 // NOTE: based on live v4.86; does NOT include the staged-but-undeployed v4.87
 // last-seen-visit change (05_render.js). Version jumps 4.86 -> 4.88.
-var APP_VERSION = 'v4.89';
+var APP_VERSION = 'v4.90';
 var APP_BUILT   = '2026-08-01';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,

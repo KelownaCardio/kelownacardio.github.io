@@ -314,26 +314,51 @@ async function _mergeAndReadmit() {
       (_retagged ? '; ' + _retagged + ' prior claim' + (_retagged > 1 ? 's' : '') + ' retagged' : ''));
   }
 
-  // Create claim — same flow as apSubmit
+  // Create claim — same flow as apSubmit.
+  // v4.90: claims are COLLECTED (not pushed one-by-one) and committed in one
+  // awaited savePatientWithClaims call, so a lost push can no longer silently
+  // drop the consult (the patient row itself was already saved above by the
+  // merge/savePatient call — re-upserting it in the batch is a harmless no-op).
   if (st.doc) {
     var cPerf  = document.getElementById('cb-performing-doc');
     var cAlias = (cPerf && cPerf.value) ? cPerf.value : st.doc.alias;
     var billingLoc = (document.getElementById('f-billing-loc') || {}).value || 'I';
 
-    if (_apClaimType === 'consult') {
-      submitConsultClaims(p, cAlias, billingLoc);
-    } else if (_apClaimType === 'ccu-admit') {
-      var caDateISO = (document.getElementById('ap-ca-date')  || {}).value || '';
-      var caNotes   = (document.getElementById('ap-ca-notes') || {}).value || '';
-      if (caDateISO) {
-        var caDateFmt = fmtD(parseISODate(caDateISO));
-        addClaim(p, '1411', '1411', 1, caDateFmt, billingLoc, null, caNotes, null, cAlias);
-        sv('claims', st.claims);
+    var _mgBatch = [];
+    window._batchClaimCollect = _mgBatch;
+    try {
+      if (_apClaimType === 'consult') {
+        submitConsultClaims(p, cAlias, billingLoc);
+      } else if (_apClaimType === 'ccu-admit') {
+        var caDateISO = (document.getElementById('ap-ca-date')  || {}).value || '';
+        var caNotes   = (document.getElementById('ap-ca-notes') || {}).value || '';
+        if (caDateISO) {
+          var caDateFmt = fmtD(parseISODate(caDateISO));
+          addClaim(p, '1411', '1411', 1, caDateFmt, billingLoc, null, caNotes, null, cAlias);
+        }
+      } else if (_apClaimType === 'other') {
+        var ocLocEl = document.getElementById('oc-loc');
+        if (ocLocEl) ocLocEl.value = billingLoc;
+        submitOtherClaimFor(p, cAlias);
       }
-    } else if (_apClaimType === 'other') {
-      var ocLocEl = document.getElementById('oc-loc');
-      if (ocLocEl) ocLocEl.value = billingLoc;
-      submitOtherClaimFor(p, cAlias);
+    } finally {
+      window._batchClaimCollect = null;
+    }
+    sv('claims', st.claims);
+    if (_mgBatch.length && SHEETS_URL) {
+      var okClaims = await push('savePatientWithClaims', {
+        id:      p.id,
+        patient: p,
+        claims:  _mgBatch
+      });
+      if (!okClaims) {
+        // Patient row is saved; the claims are kept locally and the sync
+        // retry loop will re-push them individually — but tell the doctor
+        // so they can verify rather than trust silence.
+        showToast(window._lastPushError
+          ? 'Patient saved but claims not confirmed: ' + window._lastPushError
+          : 'Patient saved but claims not confirmed — check wifi, then verify in Today\'s Claims');
+      }
     }
   }
 
@@ -1396,11 +1421,63 @@ async function apSubmit(addToList, _skipDupCheck) {
 
   // v4.46: Guard + overlay already shown before dup check (see above).
 
+  // ── v4.90 ATOMIC SAVE ───────────────────────────────────────────
+  // Build ALL claims BEFORE any network save (validation failure aborts with
+  // nothing half-saved), then commit patient + claims in ONE locked server
+  // write (savePatientWithClaims, Crud v3.05+). Fixes the dropped-consult bug
+  // (Cornish 2026-08-05): previously the patient save was awaited but each
+  // claim went out fire-and-forget — a lost claim push left a patient with no
+  // consult and no error. Claims are created into st.claims by addClaim as
+  // usual; _batchClaimCollect diverts their pushes into this bundle.
+  var _apBatch = [];
+  var _apClaimsValid = true;
+  if (st.doc) {
+    var cPerf  = document.getElementById('cb-performing-doc');
+    var cAlias = (cPerf && cPerf.value) ? cPerf.value : st.doc.alias;
+    var billingLoc = (document.getElementById('f-billing-loc') || {}).value || 'I';
+    window._batchClaimCollect = _apBatch;
+    try {
+      if (_apClaimType === 'consult') {
+        _apClaimsValid = submitConsultClaims(p, cAlias, billingLoc) !== false;
+      } else if (_apClaimType === 'ccu-admit') {
+        var caDateISO = (document.getElementById('ap-ca-date')  || {}).value || '';
+        var caNotes   = (document.getElementById('ap-ca-notes') || {}).value || '';
+        if (caDateISO) {
+          var caDateFmt = fmtD(parseISODate(caDateISO));
+          addClaim(p, '1411', '1411', 1, caDateFmt, billingLoc, null, caNotes, null, cAlias);
+        }
+      } else if (_apClaimType === 'other') {
+        var ocLocEl = document.getElementById('oc-loc');
+        if (ocLocEl) ocLocEl.value = billingLoc;
+        _apClaimsValid = submitOtherClaimFor(p, cAlias) !== false;
+      }
+    } finally {
+      window._batchClaimCollect = null;
+    }
+  }
+  if (!_apClaimsValid) {
+    // Claim form invalid (missing time/date/fee — the submit fn already
+    // toasted the reason). Nothing was saved anywhere: roll back the local
+    // patient and any claims built before the failure, and stay on the form.
+    var _apIds = {}; _apBatch.forEach(function(c){ _apIds[c.id] = true; });
+    st.claims   = st.claims.filter(function(c){ return !_apIds[c.id]; });
+    st.patients = st.patients.filter(function(x) { return x.id !== p.id; });
+    sv('claims', st.claims); sv('patients', st.patients);
+    _hideSubmitOverlay();
+    return;
+  }
+
   if (SHEETS_URL) {
-    var ok = await push('savePatient', p);
+    var ok = await push('savePatientWithClaims', {
+      id:      p.id,                        // in-flight guard key
+      patient: p,
+      claims:  _apBatch
+    });
     if (!ok) {
+      var _apIds2 = {}; _apBatch.forEach(function(c){ _apIds2[c.id] = true; });
+      st.claims   = st.claims.filter(function(c){ return !_apIds2[c.id]; });
       st.patients = st.patients.filter(function(x) { return x.id !== p.id; });
-      sv('patients', st.patients);
+      sv('claims', st.claims); sv('patients', st.patients);
       showToast(window._lastPushError
         ? 'Not saved: ' + window._lastPushError
         : 'Could not save patient — check wifi and try again');
@@ -1408,6 +1485,7 @@ async function apSubmit(addToList, _skipDupCheck) {
       return;
     }
   }
+  sv('claims', st.claims);
   logChange(p, addToList ? 'Admitted' : 'Consult only',
     addToList ? (p.ward + (p.bed ? ' Rm ' + p.bed : '')) : 'No rounds list');
 
@@ -1447,37 +1525,9 @@ async function apSubmit(addToList, _skipDupCheck) {
   }
   window._ocrLocDecode = null;
 
-  // Create claim
-  if (st.doc) {
-    // Performing physician — consult area uses cb-performing-doc (unified
-    // form) — all claim forms now render cb-performing-doc.
-    var cPerf  = document.getElementById('cb-performing-doc');
-    var cAlias = (cPerf && cPerf.value) ? cPerf.value : st.doc.alias;
-
-    // v4.19: billing location from the pills (I/P/Q), default 'I'.
-    var billingLoc = (document.getElementById('f-billing-loc') || {}).value || 'I';
-
-    if (_apClaimType === 'consult') {
-      // Unified shared submit — reads the cb-* consult form, runs CCFPP,
-      // and creates the consult + MOST + modifier claims.
-      submitConsultClaims(p, cAlias, billingLoc);
-    } else if (_apClaimType === 'ccu-admit') {
-      var caDateISO = (document.getElementById('ap-ca-date')  || {}).value || '';
-      var caNotes   = (document.getElementById('ap-ca-notes') || {}).value || '';
-      if (caDateISO) {
-        var caDateFmt = fmtD(parseISODate(caDateISO));
-        addClaim(p, '1411', '1411', 1, caDateFmt, billingLoc, null, caNotes, null, cAlias);
-        sv('claims', st.claims);
-      }
-    } else if (_apClaimType === 'other') {
-      // Sync the Other Claim form's oc-loc to match the billing location pills.
-      var ocLocEl = document.getElementById('oc-loc');
-      if (ocLocEl) ocLocEl.value = billingLoc;
-      // Unified shared submit — reads the oc-* form, validates 33005,
-      // and creates the single claim.
-      submitOtherClaimFor(p, cAlias);
-    }
-  }
+  // v4.90: claims were built and saved atomically with the patient above
+  // (see ATOMIC SAVE block) — the old per-claim fire-and-forget block that
+  // lived here was the dropped-consult bug and has been removed.
 
   var listLabel = addToList ? (p.list === 'on' ? 'On' : 'Off') + ' Service' : 'claim only';
   showToast(last + ' added — ' + listLabel);

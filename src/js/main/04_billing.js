@@ -530,7 +530,18 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, 
     return null; // blocked — callers should check
   }
   st.claims.push(c);
-  if (SHEETS_URL) push('saveClaim', c);
+  // v4.90 ATOMIC ADD-PATIENT: when the Add-Patient screen is building its
+  // claim bundle, claims are COLLECTED instead of pushed one-by-one — the
+  // caller sends patient + all claims in ONE savePatientWithClaims request.
+  // Root cause (Cornish 2026-08-05): this fire-and-forget push() was the only
+  // save the bundled consult ever got; a transient failure + app close lost
+  // it silently while the awaited patient save landed. Outside the Add-Patient
+  // flow (window._batchClaimCollect null) behaviour is unchanged.
+  if (window._batchClaimCollect) {
+    window._batchClaimCollect.push(c);
+  } else if (SHEETS_URL) {
+    push('saveClaim', c);
+  }
   // If we back-filled refby/icd onto the patient object, persist to Sheets
   if (_patUpdated) {
     var realP = st.patients.find(function(x) { return x.id === p.id; });
