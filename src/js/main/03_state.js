@@ -369,8 +369,30 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // Fix in 07_consult.js: explicit push('savePatient', p) right after the stamp.
 // NOTE: based on live v4.86; does NOT include the staged-but-undeployed v4.87
 // last-seen-visit change (05_render.js). Version jumps 4.86 -> 4.88.
-var APP_VERSION = 'v4.91';
-var APP_BUILT   = '2026-08-01';
+// v4.92 (2026-08-10): TIMED-CLAIMS OVERHAUL — from the 2026-08-09 export audit.
+// 1. DAY TIMELINE ("Your claims" sheet, injected modal): one box per patient
+//    on a shared clock, consult body left + its 12xx call-out blocks banded
+//    inside the right edge, per-patient colours. Tap a box → adjust start/
+//    finish; EVERYTHING re-derives dynamically on every change (tier from the
+//    new start, increment count, 07:45 weekday cap, majority-portion
+//    keep/drop, CCFPP notes) — nothing cached. openDayTimeline() in
+//    07_consult.js; rebuildConsultModifiers_/applyConsultTimes_ in 04_billing.
+// 2. OVERLAP GUARD: live warning + toast the moment an entered start time
+//    lands on another of the doctor's timed consults that day (the batch-
+//    entry pattern found in the audit: forms keep the now/+50 prefill), and
+//    a submit gate. Consult BODIES never overlap — the earlier consult's end
+//    trims to the later one's start; call-out windows MAY overlap and carry
+//    the CCFPP note automatically (ccfppPredecessorFor_ now tests against
+//    the peer's call-out WINDOW, which can outlast a trimmed body).
+// 3. 33008 ENTRY-TIME STAMP: today-dated dailies get the entry time as
+//    startTime (retroactive fills + multi-day claims stay blank), so a
+//    deliberate second daily on a complex patient is distinguishable.
+// 4. COMBINED-VISIT FIX: the "2 visits (unstable)" second 33008 was silently
+//    blocked by addClaim's v4.21 dedup guard — allowSecondDaily override
+//    lets exactly this path through; its note always carries the literal
+//    "Second visit" marker for DataCheck v2.38.
+var APP_VERSION = 'v4.92';
+var APP_BUILT   = '2026-08-10';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');

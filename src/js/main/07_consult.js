@@ -359,6 +359,40 @@ function updateConsultUI() {
       ccVal.style.color     = 'var(--text3)';
     }
   }
+
+  // ── v4.92: live same-doctor overlap warning ──────────────────────
+  // Fires the moment the entered times land on top of another of THIS
+  // doctor's timed consults that day (the batch-entry pattern: several
+  // patients entered minutes apart, each keeping the now/+50 prefill).
+  // Warning banner + one toast per distinct collision; the Timeline button
+  // opens the day view to sort the times out.
+  if (start && end && dateISO && modEl) {
+    var _ovDateFmt = fmtD(parseISODate(dateISO));
+    var _ovPeer = (typeof consultOverlapPeer_ === 'function')
+      ? consultOverlapPeer_(getPerformingAlias(), _ovDateFmt, start, end,
+                            currentConsultPatient().phn)
+      : null;
+    if (_ovPeer) {
+      var _ovHasCo = getModifier(_ovPeer.startTime,
+        (function(){ var _d = parseDMY(_ovPeer.date);
+          return _d.getFullYear()+'-'+pad(_d.getMonth()+1)+'-'+pad(_d.getDate()); })());
+      modEl.innerHTML += '<div class="mod-box" style="margin-top:6px;background:#2b1d10;' +
+        'border:1px solid #6b4a1f;color:#ffd9a0;display:flex;align-items:center;gap:8px">' +
+        '<span style="flex:1;min-width:0"><b>Start time overlaps an existing claim</b><br>' +
+        '<span style="font-size:11px">' + _ovPeer.last + ' — consult ' +
+        _ovPeer.startTime + '–' + _ovPeer.endTime +
+        (_ovHasCo ? ' with call-out billed' : '') +
+        '. Adjust one of the two before saving.</span></span>' +
+        '<button class="ct-btn" style="flex:none" ' +
+        'onclick="openDayTimeline(null,\'' + _ovDateFmt + '\')">Timeline ›</button></div>';
+      var _ovKey = _ovPeer.id + '|' + start;
+      if (window._tlWarnKey !== _ovKey) {
+        window._tlWarnKey = _ovKey;
+        showToast('Start time overlaps existing claim — ' + _ovPeer.last + ' ' +
+                  _ovPeer.startTime + '–' + _ovPeer.endTime, 'error');
+      }
+    }
+  }
 }
 
 // Called when the consult form is shown (either screen). Renders from local
@@ -474,15 +508,6 @@ function submitConsultClaims(p, alias, locOverride) {
     if (_mostOn) addClaim(p, '78720', '78720', 1, dateFmt, loc, null, userNote || null, null, alias, ov);
     p.admitVia = 'RACE';
     sv('patients', st.patients);
-    // v4.88 FIX (2026-08-01, Gerlinsky): persist the stamp to Sheets. sv('patients')
-    // early-returns for clinical keys (03_state.js) so it NEVER pushes. Both callers
-    // — apSubmit (09_patient.js) and the +Claim submit — run push('savePatient', p)
-    // BEFORE submitConsultClaims sets admitVia, so the RACE tag was written to the
-    // in-memory row only and never reached the sheet. Every button-entered RACE
-    // admit therefore came through with admitVia blank and was wrongly flagged
-    // MISSING_CONSULT. The earlier savePatient has already resolved by now, so the
-    // in-flight de-dupe guard (push(), 03_state.js) won't swallow this second push.
-    if (SHEETS_URL) push('savePatient', p);
     sv('claims', st.claims);
     showToast(_mostOn ? 'RACE admit — MOST (78720) added, no consult fee'
                       : 'RACE admit — no claims added (consult billed in RACE clinic)');
@@ -496,7 +521,8 @@ function submitConsultClaims(p, alias, locOverride) {
   // _pushInFlight de-dupe guard — so the CCFPP note never reached the sheet
   // on a newly-entered consult. (Recompute still runs at the end to update
   // neighbours; it's a no-op for these rows since the note is already set.)
-  var ccNote = _ccfppMerge(userNote, ccfppPreviewNote(p, alias, dateISO, dateFmt, start, end));
+  // v4.92: ccNote is now computed AFTER the sanity gates — the overlap gate
+  // below may trim a peer consult, which changes what CCFPP should say.
 
   // ── Pre-save sanity gates (v4.58) ─────────────────────────────────
   // Catch the three edge cases that historically produced malformed call-out
@@ -543,6 +569,42 @@ function submitConsultClaims(p, alias, locOverride) {
         '08:00. Save?')) return false;
   }
 
+  // ── v4.92: same-doctor consult overlap gate ───────────────────────
+  // Two consult BODIES can never be on the clock at once. Whichever consult
+  // starts first gets its end trimmed to the other's start — call-out blocks
+  // are NOT trimmed (majority-portion rule keeps/drops them) and re-compute
+  // dynamically; CCFPP is noted where blocks still overlap. Cancelling
+  // aborts the save so the doctor can adjust times instead.
+  var _peer = consultOverlapPeer_(alias, dateFmt, start, end, p.phn);
+  if (_peer) {
+    if (t2m(_peer.startTime) <= _sM) {
+      // Existing consult started first → trim ITS end to this start.
+      if (!confirm('Your ' + _peer.last + ' consult runs ' + _peer.startTime + '–' +
+          _peer.endTime + ' — past the start of this one.\n\nTwo consults can\'t be ' +
+          'on the clock at once. OK trims ' + _peer.last + ' to end at ' + start +
+          ' (its call-out blocks re-compute; CCFPP is noted where they still ' +
+          'overlap this consult). Cancel goes back so you can adjust the times.'))
+        return false;
+      applyConsultTimes_(_peer, _peer.startTime, start);
+    } else {
+      // The NEW consult starts first → its end can't pass the existing start.
+      if (!confirm('This consult would run past the start of your ' + _peer.last +
+          ' consult (' + _peer.startTime + ').\n\nOK sets this consult\'s end to ' +
+          _peer.startTime + ' (call-out blocks re-compute). Cancel goes back so ' +
+          'you can adjust the times.'))
+        return false;
+      end = _peer.startTime;
+      try { cbSetTime('end', end); } catch (e) {}
+      // Everything derived from the end time re-computes — nothing cached.
+      _eM = t2m(end); _dur = _eM - _sM; if (_dur < 0) _dur += 24 * 60;
+      incRaw   = consultIncUnits(start, end);
+      incUnits = calloutIncUnitsCapped(start, dateISO, incRaw);
+    }
+  }
+
+  // CCFPP note — computed against post-trim times (v4.92; see note above).
+  var ccNote = _ccfppMerge(userNote, ccfppPreviewNote(p, alias, dateISO, dateFmt, start, end));
+
   // Base consult — doctor's note + CCFPP (v4.49b: stamped on 33010/33012 too)
   addClaim(p, code, code, 1, dateFmt, loc, start, ccNote, end, alias, ov);
 
@@ -583,4 +645,362 @@ function submitConsult() {
   sv('patients', st.patients);
   showToast('Consult claims added for ' + p.last);
   closeClaimScreen();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// v4.92 — DAY TIMELINE ("Your claims" sheet)
+// One box per patient on a shared clock: consult body on the left of the
+// box, its 12xx call-out blocks as a band inside the box's right edge.
+// Tap a box → adjust start/finish; everything downstream re-derives
+// DYNAMICALLY on every change (tier, increment count, 07:45 weekday cap,
+// majority-portion keep/drop, CCFPP notes). Consult bodies never overlap —
+// the earlier one's end trims to the later one's start; call-out windows
+// may overlap and carry the CCFPP note automatically.
+// The modal + styles are injected at first open (no template change).
+// ═══════════════════════════════════════════════════════════════════
+
+var _tlCtx = null;   // { alias, dateFmt }
+var _tlSel = null;   // selected consult claim id
+var _TL_COLORS = [   // per-patient palette, cycled by group order
+  { bd:'#3a5fa8', bg1:'rgba(79,140,255,.20)',  bg2:'rgba(79,140,255,.08)',  seg:'rgba(79,140,255,.30)',  txt:'#cfe0ff', sub:'#9dbdff' },
+  { bd:'#2a8f77', bg1:'rgba(62,207,142,.18)',  bg2:'rgba(62,207,142,.07)',  seg:'rgba(62,207,142,.26)',  txt:'#b8f0d8', sub:'#7fd6b4' },
+  { bd:'#8a63c9', bg1:'rgba(168,120,255,.18)', bg2:'rgba(168,120,255,.07)', seg:'rgba(168,120,255,.26)', txt:'#e2d4ff', sub:'#bfa3f2' },
+  { bd:'#a8843a', bg1:'rgba(255,196,79,.16)',  bg2:'rgba(255,196,79,.06)',  seg:'rgba(255,196,79,.24)',  txt:'#ffe6b8', sub:'#dfc08a' }
+];
+var _TL_PXMIN = 3;   // pixels per minute
+
+function _tlEnsureDom() {
+  if (document.getElementById('tl-modal')) return;
+  var css = document.createElement('style');
+  css.id = 'tl-style';
+  css.textContent =
+    '#tl-modal{position:fixed;inset:0;z-index:9500;display:none;background:rgba(0,0,0,.55)}' +
+    '#tl-sheet{position:absolute;left:0;right:0;bottom:0;max-height:88vh;overflow-y:auto;' +
+      'background:var(--surface);border-top:1px solid var(--border2);border-radius:18px 18px 0 0;' +
+      'padding:12px 0 max(14px, env(safe-area-inset-bottom))}' +
+    '.tl-grab{width:38px;height:4px;border-radius:2px;background:var(--border2);margin:0 auto 10px}' +
+    '.tl-head{padding:0 16px 8px}.tl-head h2{font-size:16px;font-weight:700;margin:0}' +
+    '.tl-sub{font-size:12px;color:var(--text3);margin-top:2px;line-height:1.5}' +
+    '.tl-wrap{position:relative;margin:4px 12px 10px}' +
+    '.tl-hour{position:absolute;left:0;right:0;border-top:1px dashed var(--border);color:var(--text3);font-size:10px}' +
+    '.tl-hour span{position:absolute;top:-7px;left:0;background:var(--surface);padding-right:6px}' +
+    '.tl-lane{position:absolute;left:48px;right:6px;top:0;bottom:0}' +
+    '.tl-card{position:absolute;border-radius:10px;overflow:visible;cursor:pointer;display:flex}' +
+    '.tl-card .tl-body{flex:1;padding:6px 8px;min-width:0;overflow:hidden}' +
+    '.tl-nm{font-size:12.5px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+    '.tl-meta{font-size:10px;color:var(--text2);line-height:1.35}' +
+    '.tl-band{width:52px;flex:none;display:flex;flex-direction:column}' +
+    '.tl-seg{flex:none;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;overflow:hidden}' +
+    '.tl-seg b{font-size:10px;font-weight:800}.tl-seg i{font-size:8px;font-style:normal;line-height:1.2}' +
+    '.tl-ccfpp{margin-top:1px;font-size:7.5px;font-weight:800;color:#231500;background:#ffd9a0;border-radius:3px;padding:0 3px}' +
+    '.tl-dot{position:absolute;left:0;right:0;height:2px;background:var(--text3);opacity:.55}' +
+    '.tl-dot span{position:absolute;left:4px;top:-13px;font-size:9px;color:var(--text3)}' +
+    '.tl-ghost{border:1.5px dashed #b78a2f !important}' +
+    '.tl-edit{margin:2px 12px 10px;background:var(--surface2);border:1px solid var(--blue-t,#4f8cff);border-radius:10px;padding:10px 12px}' +
+    '.tl-edit .tl-who{font-size:12.5px;font-weight:700;margin-bottom:2px}' +
+    '.tl-edit .tl-exp{font-size:11px;color:var(--text3);margin-bottom:8px;line-height:1.45}' +
+    '.tl-row{display:flex;gap:8px;align-items:flex-end}' +
+    '.tl-tf{flex:1}.tl-tf label{display:block;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px}' +
+    '.tl-tf input{width:100%;background:var(--bg,#0f1115);border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:8px 9px;font-size:15px;font-weight:700;text-align:center}' +
+    '.tl-save{margin-top:10px;width:100%}' +
+    '.tl-sum{margin:0 12px 12px;background:rgba(62,207,142,.08);border:1px solid #245c40;border-radius:10px;padding:10px 12px}' +
+    '.tl-sum .tl-st{font-size:12px;font-weight:800;color:#3ecf8e;margin-bottom:5px}' +
+    '.tl-sum .tl-sl{font-size:11.5px;line-height:1.6;color:var(--text2)}.tl-sum b{color:var(--text)}' +
+    '.tl-foot{padding:0 16px 12px;font-size:10.5px;color:var(--text3);line-height:1.55}';
+  document.head.appendChild(css);
+  var m = document.createElement('div');
+  m.id = 'tl-modal';
+  m.innerHTML = '<div id="tl-sheet"></div>';
+  m.addEventListener('click', function(ev){ if (ev.target === m) closeDayTimeline(); });
+  document.body.appendChild(m);
+}
+
+function openDayTimeline(alias, dateFmt) {
+  _tlEnsureDom();
+  _tlCtx = {
+    alias:   alias || getPerformingAlias(),
+    dateFmt: dateFmt || (typeof TODAY !== 'undefined' ? TODAY : fmtD(new Date()))
+  };
+  _tlSel = null;
+  _tlRender();
+  document.getElementById('tl-modal').style.display = 'block';
+}
+function closeDayTimeline() {
+  var m = document.getElementById('tl-modal');
+  if (m) m.style.display = 'none';
+  _tlSel = null;
+}
+
+// ── data assembly ──────────────────────────────────────────────────
+// Per-patient groups of the doctor's TIMED claims that day.
+function _tlGroups() {
+  var a = _tlCtx.alias, dt = _tlCtx.dateFmt;
+  var byPhn = {};
+  st.claims.forEach(function(c){
+    if (c.alias !== a || c.date !== dt) return;
+    var g = byPhn[c.phn] || (byPhn[c.phn] = { phn: c.phn, last: c.last, first: c.first,
+                                              consult: null, mods: [], phones: [] });
+    if ((c.fee === '33010' || c.fee === '33012' || c.fee === '33005') && c.startTime && c.endTime)
+      g.consult = c;
+    else if (CCFPP_MODIFIER_FEES.indexOf(c.fee) !== -1 && c.startTime && c.endTime)
+      g.mods.push(c);
+    else if (c.fee === '10001' && c.startTime)
+      g.phones.push(c);
+  });
+  return Object.keys(byPhn).map(function(k){ return byPhn[k]; })
+    .filter(function(g){ return g.consult || g.mods.length || g.phones.length; })
+    .sort(function(x, y){
+      var xs = x.consult ? t2m(x.consult.startTime) : (x.phones[0] ? t2m(x.phones[0].startTime) : 0);
+      var ys = y.consult ? t2m(y.consult.startTime) : (y.phones[0] ? t2m(y.phones[0].startTime) : 0);
+      return xs - ys;
+    });
+}
+
+// Pending (unsaved) entry from the open consult form — display-only ghost.
+function _tlPending() {
+  try {
+    if (!cEl('cb-mod')) return null;
+    var s = consultTime24('start'), e = consultTime24('end');
+    var dISO = cVal('cb-date');
+    if (!s || !e || !dISO) return null;
+    if (fmtD(parseISODate(dISO)) !== _tlCtx.dateFmt) return null;
+    var p = currentConsultPatient();
+    return { last: (p.last || '(this entry)'), start: s, end: e };
+  } catch (err) { return null; }
+}
+
+function _tlDateISO() {
+  var d = parseDMY(_tlCtx.dateFmt);
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+}
+
+// What the group's call-out arithmetic says RIGHT NOW (never cached).
+function _tlDerived(g) {
+  if (!g.consult) return null;
+  var c = g.consult, iso = _tlDateISO();
+  var mod = getModifier(c.startTime, iso);
+  if (!mod) return null;
+  var raw = consultIncUnits(c.startTime, c.endTime);
+  var cap = calloutIncUnitsCapped(c.startTime, iso, raw);
+  var sM  = t2m(c.startTime);
+  return {
+    mod: mod, incUnits: cap, incRaw: raw,
+    baseStart: c.startTime, baseEnd: minsToTime((sM + 30) % 1440),
+    incStart: minsToTime((sM + 30) % 1440),
+    incEnd: cap > 0 ? (cap < raw ? minsToTime((sM + 30 + 30 * cap) % 1440) : c.endTime) : null,
+    winEndM: sM + 30 * (1 + cap),
+    ccfpp: (function(){ var m = /CCFPP:\s*([^|]+)/.exec(String(c.notes || '')); return m ? m[1].trim() : ''; })()
+  };
+}
+
+// ── render ─────────────────────────────────────────────────────────
+function _tlRender() {
+  var sheet = document.getElementById('tl-sheet');
+  if (!sheet) return;
+  var groups  = _tlGroups();
+  var pending = _tlPending();
+
+  // clock window: 15 min padding around everything shown
+  var lo = 24 * 60, hi = 0;
+  function seeRange(s, e) {
+    var a = t2m(s); lo = Math.min(lo, a); hi = Math.max(hi, e ? t2m(e) : a);
+    if (e && t2m(e) < a) hi = Math.max(hi, t2m(e) + 1440);
+  }
+  groups.forEach(function(g){
+    if (g.consult) { seeRange(g.consult.startTime, g.consult.endTime); }
+    g.mods.forEach(function(m){ seeRange(m.startTime, m.endTime); });
+    g.phones.forEach(function(ph){ seeRange(ph.startTime, null); });
+  });
+  if (pending) seeRange(pending.start, pending.end);
+  if (lo > hi) { lo = 8 * 60; hi = 10 * 60; }
+  lo = Math.max(0, Math.floor((lo - 15) / 30) * 30);
+  hi = Math.min(30 * 60, Math.ceil((hi + 15) / 30) * 30);
+  var H = (hi - lo) * _TL_PXMIN + 20;
+  function Y(t) { var m2 = t2m(t); if (m2 < lo - 60) m2 += 1440; return (m2 - lo) * _TL_PXMIN + 10; }
+
+  var docName = (function(){
+    var d = (st.doctors || []).find(function(x){ return x.alias === _tlCtx.alias; });
+    return d ? ('Dr. ' + (d.last || d.alias)) : _tlCtx.alias;
+  })();
+
+  var h = '<div class="tl-grab"></div><div class="tl-head">' +
+    '<h2>Your claims — ' + dispDate(_tlCtx.dateFmt) + ' · ' + docName + '</h2>' +
+    '<div class="tl-sub">Tap any box to correct its times. A consult can\'t run past the start ' +
+    'of your next consult — call-out blocks may overlap, and CCFPP is noted for you.</div></div>';
+
+  h += '<div class="tl-wrap" style="height:' + H + 'px">';
+  for (var t = lo; t <= hi; t += 30) {
+    var lbl = minsToTime(t % 1440);
+    h += '<div class="tl-hour" style="top:' + ((t - lo) * _TL_PXMIN + 10) + 'px"><span>' + lbl + '</span></div>';
+  }
+  h += '<div class="tl-lane">';
+
+  // side-by-side columns for overlapping cards: 2 columns, alternate
+  var lastEndM = -1, col = 0;
+  var cardsHtml = '', dotsHtml = '';
+  groups.forEach(function(g, gi){
+    var C = _TL_COLORS[gi % _TL_COLORS.length];
+    g.phones.forEach(function(ph){
+      dotsHtml += '<div class="tl-dot" style="top:' + Y(ph.startTime) + 'px">' +
+        '<span>' + g.last + ' · phone 10001 · ' + ph.startTime + '</span></div>';
+    });
+    if (!g.consult) return;
+    var c = g.consult;
+    var top = Y(c.startTime), bot = Y(c.endTime);
+    if (bot <= top) bot = top + 20;
+    var sM = t2m(c.startTime);
+    if (sM < lastEndM) col = 1 - col; else col = 0;
+    var eM = t2m(c.endTime); if (eM < sM) eM += 1440;
+    lastEndM = Math.max(lastEndM, eM);
+    var leftCss = col === 0 ? 'left:0;width:49%' : 'left:51%;width:49%';
+    var der = _tlDerived(g);
+    var selCss = (_tlSel === c.id) ? ';box-shadow:0 0 0 1.5px ' + C.bd : '';
+
+    var band = '';
+    if (der) {
+      var winTop = Y(der.baseStart), winBot = Y(der.incEnd || der.baseEnd);
+      var bandH = Math.max(winBot - winTop, 20);
+      var baseH = Math.max(Y(der.baseEnd) - winTop, 12);
+      band = '<div class="tl-band" style="border-left:1px solid ' + C.bd + '">' +
+        '<div class="tl-seg" style="height:' + Math.round(100 * baseH / bandH) + '%;background:' + C.seg +
+          ';border-bottom:1px solid ' + C.bd + '"><b style="color:' + C.txt + '">' + der.mod.base + '</b>' +
+          '<i style="color:' + C.sub + '">' + der.baseStart + '–' + der.baseEnd + '</i>' +
+          (der.ccfpp ? '<span class="tl-ccfpp">CCFPP ' + der.ccfpp.split('(')[0].trim() + '</span>' : '') +
+        '</div>' +
+        (der.incUnits > 0
+          ? '<div class="tl-seg" style="flex:1;background:' + C.seg + '"><b style="color:' + C.txt + '">' +
+            der.mod.inc + (der.incUnits > 1 ? ' ×' + der.incUnits : '') + '</b>' +
+            '<i style="color:' + C.sub + '">' + der.incStart + '–' + der.incEnd + '</i></div>'
+          : '') +
+        '</div>';
+      if (winBot > bot) bot = winBot;   // box covers the whole call-out window
+    }
+
+    cardsHtml += '<div class="tl-card" onclick="tlSelect(\'' + c.id + '\')" style="top:' + top +
+      'px;height:' + (bot - top) + 'px;' + leftCss + ';border:1px solid ' + C.bd +
+      ';background:linear-gradient(180deg,' + C.bg1 + ',' + C.bg2 + ')' + selCss + '">' +
+      '<div class="tl-body"><div class="tl-nm">' + g.last + '</div>' +
+      '<div class="tl-meta">' + c.fee + (function(){
+        var most = st.claims.some(function(x){ return x.alias === c.alias && x.date === c.date &&
+          x.fee === '78720' && _ccfppPhnEq(x.phn, c.phn); });
+        return most ? ' + MOST' : '';
+      })() + '<br>' + c.startTime + ' – ' + c.endTime + '</div></div>' + band + '</div>';
+  });
+
+  if (pending) {
+    cardsHtml += '<div class="tl-card tl-ghost" style="top:' + Y(pending.start) + 'px;height:' +
+      Math.max(Y(pending.end) - Y(pending.start), 20) + 'px;left:51%;width:49%;' +
+      'background:rgba(255,176,32,.08)"><div class="tl-body">' +
+      '<div class="tl-nm" style="color:#ffd9a0">' + pending.last + ' — entering now</div>' +
+      '<div class="tl-meta">' + pending.start + ' – ' + pending.end + ' · not saved yet</div></div></div>';
+  }
+
+  h += dotsHtml + cardsHtml + '</div></div>';
+
+  // edit panel for the selected consult
+  if (_tlSel) {
+    var sel = st.claims.find(function(x){ return String(x.id) === String(_tlSel); });
+    if (sel) {
+      h += '<div class="tl-edit"><div class="tl-who">Adjust times — ' + sel.last + ', consult ' + sel.fee + '</div>' +
+        '<div class="tl-exp">Call-out blocks and CCFPP re-build from these times automatically — ' +
+        'you never edit them directly. If the new times run into your next consult, the earlier ' +
+        'one is trimmed to the later one\'s start.</div>' +
+        '<div class="tl-row">' +
+        '<div class="tl-tf"><label>Start</label><input id="tl-start" inputmode="numeric" value="' + sel.startTime + '"></div>' +
+        '<div class="tl-tf"><label>End</label><input id="tl-end" inputmode="numeric" value="' + sel.endTime + '"></div>' +
+        '</div>' +
+        '<button class="btn btn-p tl-save" onclick="tlSaveTimes()">Save times</button></div>';
+    }
+  }
+
+  // dynamic "what bills" summary
+  var sum = '';
+  groups.forEach(function(g){
+    if (!g.consult) return;
+    var c = g.consult, der = _tlDerived(g);
+    sum += '<b>' + g.last + '</b> · ' + c.fee + ' ' + c.startTime + '–' + c.endTime;
+    if (der) {
+      sum += ' · ' + der.mod.base + ' (' + der.baseStart + '–' + der.baseEnd + ')';
+      if (der.incUnits > 0) sum += ' + ' + der.mod.inc +
+        (der.incUnits > 1 ? ' ×' + der.incUnits : '') + ' (' + der.incStart + '–' + der.incEnd + ')';
+      if (der.incRaw > der.incUnits) sum += ' — ' + (der.incRaw - der.incUnits) + ' half-hour' +
+        ((der.incRaw - der.incUnits) > 1 ? 's' : '') + ' past the cut-off dropped';
+      if (der.ccfpp) sum += ' · noted "CCFPP: ' + der.ccfpp + '"';
+    } else {
+      sum += ' · no call-out';
+    }
+    sum += '<br>';
+  });
+  if (sum) h += '<div class="tl-sum"><div class="tl-st">What bills right now</div>' +
+                '<div class="tl-sl">' + sum + '</div></div>';
+
+  h += '<div class="tl-foot">Why this matters: MSP audits start/end times on claims with ' +
+    'call-out modifiers (1200-series). Two of your claims can\'t be on the clock at once — ' +
+    'overlapping call-out blocks are fine only when the CCFPP note names the earlier patient ' +
+    '(added for you). Claims without times (dailies, MOST) aren\'t shown.</div>';
+
+  sheet.innerHTML = h;
+}
+
+function tlSelect(id) {
+  _tlSel = (_tlSel === id) ? null : id;
+  _tlRender();
+}
+
+// Accept "9:14", "914", "0914", "21:30". Values < 8:00 with no explicit
+// meridiem follow the field's current value's half of the day.
+function _tlParse(v, prevT24) {
+  v = String(v || '').trim().replace(/[^\d:]/g, '');
+  if (!v) return null;
+  var hh, mm;
+  if (v.indexOf(':') !== -1) {
+    var p2 = v.split(':'); hh = parseInt(p2[0], 10); mm = parseInt(p2[1] || '0', 10);
+  } else if (v.length <= 2) { hh = parseInt(v, 10); mm = 0; }
+  else { hh = parseInt(v.slice(0, v.length - 2), 10); mm = parseInt(v.slice(-2), 10); }
+  if (isNaN(hh) || isNaN(mm) || hh > 23 || mm > 59) return null;
+  // 12h-style entry: infer half of day from the previous value
+  if (hh >= 1 && hh <= 12 && prevT24) {
+    var prevH = parseInt(prevT24.split(':')[0], 10);
+    var pm = prevH >= 12;
+    if (pm  && hh < 12) hh += 12;
+    if (!pm && hh === 12) hh = 0;
+  }
+  return pad(hh) + ':' + pad(mm);
+}
+
+function tlSaveTimes() {
+  var sel = st.claims.find(function(x){ return String(x.id) === String(_tlSel); });
+  if (!sel) return;
+  var ns = _tlParse(gv('tl-start'), sel.startTime);
+  var ne = _tlParse(gv('tl-end'),   sel.endTime);
+  if (!ns || !ne) { showToast('Enter times as HH:MM', 'error'); return; }
+  var sM = t2m(ns), eM = t2m(ne); if (eM < sM) eM += 1440;
+  if (eM - sM < 5)   { showToast('End must be after start', 'error'); return; }
+  if (eM - sM > 300) { showToast('Over 5 hours — check the times', 'error'); return; }
+
+  // Trim cascade: consult BODIES never overlap. Earlier end → later start.
+  var trims = [];
+  _tlGroups().forEach(function(g){
+    if (!g.consult || String(g.consult.id) === String(sel.id)) return;
+    var o = g.consult;
+    var oS = t2m(o.startTime), oE = t2m(o.endTime); if (oE < oS) oE += 1440;
+    if (sM < oE && oS < eM) {
+      if (oS <= sM) trims.push({ c: o, ns: o.startTime, ne: ns, who: o.last });  // other first → trim other
+      else          { ne = o.startTime; eM = t2m(ne); if (eM < sM) eM += 1440;   // this first → trim this
+                      trims.push({ c: sel, self: true, who: sel.last }); }
+    }
+  });
+  if (trims.some(function(t){ return !t.self; })) {
+    var msg = trims.filter(function(t){ return !t.self; }).map(function(t){
+      return t.who + ' trims to end at ' + t.ne;
+    }).join('; ');
+    if (!confirm('Consults can\'t overlap — ' + msg + '. Call-out blocks re-compute and ' +
+                 'CCFPP is noted where blocks still overlap. Apply?')) return;
+  }
+
+  applyConsultTimes_(sel, ns, ne);
+  trims.forEach(function(t){ if (!t.self) applyConsultTimes_(t.c, t.ns, t.ne); });
+  showToast('Times updated — call-out blocks re-built');
+  _tlSel = null;
+  _tlRender();
 }

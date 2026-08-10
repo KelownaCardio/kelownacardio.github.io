@@ -152,6 +152,24 @@ function ccfppPredecessorFor_(consult, alias) {
     var _peerISO  = _peerRefD.getFullYear() + '-' + pad(_peerRefD.getMonth() + 1) + '-' + pad(_peerRefD.getDate());
     if (!getModifier(c.startTime, _peerISO)) continue;   // peer must also be a call-out
 
+    // v4.92: a trimmed consult's CALL-OUT WINDOW can outlast its body — the
+    // base block alone covers start+30 even when the consult ended earlier
+    // (majority-portion rule). CCFPP exists precisely for overlap with that
+    // window, so extend the peer's end to its 12xx rows' latest end before
+    // testing. (Roberts 9:14–9:33 trimmed: his 1202 still runs to 9:44, so
+    // Reid starting 9:33 correctly gets "CCFPP: Roberts".)
+    for (var _mj = 0; _mj < st.claims.length; _mj++) {
+      var _mc = st.claims[_mj];
+      if (_mc.alias !== alias || _mc.date !== c.date) continue;
+      if (!_ccfppPhnEq(_mc.phn, c.phn)) continue;
+      if (CCFPP_MODIFIER_FEES.indexOf(_mc.fee) === -1 || !_mc.endTime) continue;
+      var _me = t2m(_mc.endTime);
+      var _ms2 = _mc.startTime ? t2m(_mc.startTime) : _me;
+      if (_me < _ms2) _me += 1440;
+      if (_isPrev) _me -= 1440; else if (_isNext) _me += 1440;
+      if (_me > prevEndM) prevEndM = _me;
+    }
+
     var _peerPat = (st.patients || []).find(function(pp){ return _ccfppPhnEq(pp.phn, c.phn); }) || {};
     if (ccfppSamePerson_(consult, _peerPat)) continue;
 
@@ -500,10 +518,14 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, 
   // v4.26: CCU dedup is CROSS-PHYSICIAN — only one cardiologist may bill
   // CCU care per patient per date, regardless of who submits. Other fee
   // codes still dedup per-alias only.
+  // v4.92: the combined-visit form's DELIBERATE second daily (33008 ×2 for an
+  // unstable patient) passes allowSecondDaily to skip this guard — it was
+  // silently blocking the second visit. Everything else is unchanged.
   var _ccuFamily = ['CCU_DAILY','1411','1421','1431'];
   var _isCCU = _ccuFamily.indexOf(c.fee) !== -1;
   var _dupClaim = null;
-  var _dupCheck = st.claims.some(function(x) {
+  var _dupCheck = (overrides.allowSecondDaily && c.fee === '33008') ? false :
+  st.claims.some(function(x) {
     if (!samePhn(x.phn, c.phn) || x.date !== c.date) return false;
     if (x.id === c.id) return false;
     if (_isCCU) {
@@ -553,6 +575,139 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, 
     }
   }
   return c;
+}
+
+// ── v4.92: same-doctor consult overlap + dynamic modifier rebuild ──────────
+// Two claims by one doctor cannot be on the clock at once. Consult BODIES
+// never overlap — the earlier consult's end is trimmed to the later one's
+// start. Call-out modifier WINDOWS may overlap when the later claim carries
+// a CCFPP note (that is what CCFPP exists for). All modifier arithmetic is
+// re-derived from current times on EVERY change — tier (evening/night/
+// weekend) from the new start, increment count from the new duration, the
+// 07:45 weekday cap, and CCFPP notes. Nothing is cached.
+
+// The latest-starting timed 33010/33012 of `alias` on dateFmt (± not
+// cross-midnight — the guard covers same-day batch entry) that overlaps
+// [startStr, endStr), excluding excludePhn's own claims. Null if none.
+function consultOverlapPeer_(alias, dateFmt, startStr, endStr, excludePhn) {
+  if (!alias || !dateFmt || !startStr || !endStr) return null;
+  var s = t2m(startStr), e = t2m(endStr);
+  if (e < s) e += 1440;
+  var best = null, bestS = -1;
+  for (var i = 0; i < st.claims.length; i++) {
+    var c = st.claims[i];
+    if (c.alias !== alias || c.date !== dateFmt) continue;
+    if (c.fee !== '33010' && c.fee !== '33012') continue;
+    if (!c.startTime || !c.endTime) continue;
+    if (excludePhn && _ccfppPhnEq(c.phn, excludePhn)) continue;
+    var cs = t2m(c.startTime), ce = t2m(c.endTime);
+    if (ce < cs) ce += 1440;
+    if (s < ce && cs < e && cs > bestS) { best = c; bestS = cs; }
+  }
+  return best;
+}
+
+// Re-derive a consult's 12xx call-out claims from its CURRENT times.
+// Updates rows in place where possible (dodges addClaim's dedup guard),
+// deletes rows that no longer apply, adds ones that newly do. Does NOT
+// sv/push the UPDATED rows — returns them for the caller to persist in one
+// place; deletions and brand-new rows are pushed here (addClaim pushes its
+// own row). Call ccfppRecomputeAround_ after persisting.
+function rebuildConsultModifiers_(consult) {
+  if (!consult || !consult.date) return [];
+  var alias = consult.alias, dateFmt = consult.date;
+  var d = parseDMY(dateFmt);
+  if (!d || isNaN(d)) return [];
+  var dateISO = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  var start = consult.startTime || '', end = consult.endTime || '';
+
+  var mods = st.claims.filter(function(c){
+    return c.alias === alias && c.date === dateFmt &&
+           _ccfppPhnEq(c.phn, consult.phn) &&
+           CCFPP_MODIFIER_FEES.indexOf(c.fee) !== -1;
+  });
+  var BASE_FEES = ['1200','1201','1202'], INC_FEES = ['1205','1206','1207'];
+  var baseRows = mods.filter(function(c){ return BASE_FEES.indexOf(c.fee) !== -1; });
+  var incRows  = mods.filter(function(c){ return INC_FEES.indexOf(c.fee)  !== -1; });
+
+  var modBase  = (start && end) ? getModifier(start, dateISO) : null;
+  var incRaw   = modBase ? consultIncUnits(start, end) : 0;
+  var incUnits = modBase ? calloutIncUnitsCapped(start, dateISO, incRaw) : 0;
+  var _sM = start ? t2m(start) : 0;
+  var changed = [];
+
+  function delRow(c) {
+    st.claims = st.claims.filter(function(x){ return String(x.id) !== String(c.id); });
+    if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL) push('deleteClaim', { id: c.id });
+  }
+  baseRows.slice(1).forEach(delRow);          // never more than one of each
+  incRows.slice(1).forEach(delRow);
+  var baseRow = baseRows[0] || null, incRow = incRows[0] || null;
+
+  // Patient object for addClaim — fall back to a synth from the claim row so
+  // a pulled/archived patient still rebuilds correctly.
+  var pat = (st.patients || []).find(function(pp){ return _ccfppPhnEq(pp.phn, consult.phn); }) ||
+            { phn: consult.phn, last: consult.last, first: consult.first, dob: consult.dob,
+              sex: consult.sex, icd: consult.icd, refby: consult.refby,
+              refbyName: consult.refbyName, fac: consult.fac, ward: consult.ward,
+              bed: consult.room };
+  var userNote = _ccfppStrip(consult.notes);  // CCFPP re-stamped by recompute
+  var ov = { icd: consult.icd, refby: consult.refby, refbyName: consult.refbyName };
+
+  if (modBase) {
+    var baseEnd = minsToTime((_sM + 30) % 1440);
+    if (baseRow) {
+      if (baseRow.fee !== modBase.base || baseRow.startTime !== start ||
+          baseRow.endTime !== baseEnd || String(baseRow.units || 1) !== '1') {
+        baseRow.fee = modBase.base; baseRow.feeCode = modBase.base;
+        baseRow.startTime = start; baseRow.endTime = baseEnd; baseRow.units = 1;
+        changed.push(baseRow);
+      }
+    } else {
+      addClaim(pat, modBase.base, modBase.base, 1, dateFmt, consult.loc || 'I',
+               start, userNote || null, baseEnd, alias, ov);
+    }
+    if (incUnits > 0) {
+      var incStart = minsToTime((_sM + 30) % 1440);
+      var incEnd   = (incUnits < incRaw)
+        ? minsToTime((_sM + 30 + 30 * incUnits) % 1440)
+        : end;
+      if (incRow) {
+        if (incRow.fee !== modBase.inc || incRow.startTime !== incStart ||
+            incRow.endTime !== incEnd || String(incRow.units) !== String(incUnits)) {
+          incRow.fee = modBase.inc; incRow.feeCode = modBase.inc;
+          incRow.startTime = incStart; incRow.endTime = incEnd; incRow.units = incUnits;
+          changed.push(incRow);
+        }
+      } else {
+        addClaim(pat, modBase.inc, modBase.inc, incUnits, dateFmt, consult.loc || 'I',
+                 incStart, userNote || null, incEnd, alias, ov);
+      }
+    } else if (incRow) {
+      delRow(incRow);
+    }
+  } else {
+    if (baseRow) delRow(baseRow);
+    if (incRow)  delRow(incRow);
+  }
+  return changed;
+}
+
+// Apply new start/end to a consult claim and cascade everything dynamic:
+// its own row, its 12xx blocks (rebuilt), and CCFPP notes for the whole
+// alias/date neighbourhood. Persists all changed rows. Returns true.
+function applyConsultTimes_(consult, newStart, newEnd) {
+  if (!consult) return false;
+  consult.startTime = newStart;
+  consult.endTime   = newEnd;
+  var changed = rebuildConsultModifiers_(consult);
+  sv('claims', st.claims);
+  if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL) {
+    push('saveClaim', consult);
+    changed.forEach(function(mc){ push('saveClaim', mc); });
+  }
+  ccfppRecomputeAround_(consult.alias, consult.date);
+  return true;
 }
 
 // ── Log Change ─────────────────────────────────────────

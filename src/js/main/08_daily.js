@@ -98,6 +98,18 @@ function buildDailyForm(p) {
     '<button class="btn btn-p" onclick="claimSubmitOnce(submitDaily)">Add daily care claim</button>';
 }
 
+// v4.92: stamp the entry time on a TODAY-dated 33008 so a deliberate second
+// daily visit is distinguishable in the export and the audit trail. A
+// retroactive daily (back-filling a missed visit date) stays time-blank —
+// "now" would be meaningless for a past date. Multi-day (units>1) claims
+// also stay blank: one row spans several days.
+function dailyStampTime(isoDate, units) {
+  if (units && units > 1) return null;
+  if (isoDate !== localISODate()) return null;
+  var n = new Date();
+  return pad(n.getHours()) + ':' + pad(n.getMinutes());
+}
+
 function submitDaily() {
   var p = getP(_claimPid); if (!checkDoc()) return;
   var ds   = gv('cb-dal-start');
@@ -106,7 +118,7 @@ function submitDaily() {
   var pc = Object.assign({}, p, claimFormOverrides(p));
   if (!validateRequiredForClaim(pc)) { highlightMissingFields(); return; }
   var alias = getPerformingAlias();
-  addClaim(pc, '33008', '33008', days, fmtD(parseISODate(ds)), 'I', null, null, null, alias);
+  addClaim(pc, '33008', '33008', days, fmtD(parseISODate(ds)), 'I', dailyStampTime(ds, days), null, null, alias);
   sv('claims', st.claims);
   showToast('33008 ×' + days + ' — ' + p.last);
   closeClaimScreen();
@@ -157,8 +169,18 @@ function submitCombined() {
   }
   var alias = getPerformingAlias();
   var baseNote = p.combinedDailyReason || '';
-  addClaim(pc, '33008', '33008', 1, fmtD(parseISODate(ds)), 'I', null, baseNote, null, alias);
-  if (v === 2) addClaim(pc, '33008', '33008', 1, fmtD(parseISODate(ds)), 'I', null, (baseNote ? baseNote + ' | ' : '') + (note2 || 'Second visit — patient unstable'), null, alias);
+  // v4.92: stamp entry time on today's dailies (see dailyStampTime).
+  var stamp = dailyStampTime(ds, 1);
+  addClaim(pc, '33008', '33008', 1, fmtD(parseISODate(ds)), 'I', stamp, baseNote, null, alias);
+  // v4.92 FIX: the second-visit claim was silently BLOCKED by addClaim's
+  // same phn+date+fee+alias dedup guard (added v4.21, after this form) — the
+  // "2 visits (unstable)" option never actually wrote its second 33008. The
+  // allowSecondDaily override lets exactly this deliberate path through, and
+  // the note ALWAYS carries the literal "Second visit" marker so DataCheck's
+  // DUPLICATE rule (v2.38) recognises it as intentional.
+  if (v === 2) addClaim(pc, '33008', '33008', 1, fmtD(parseISODate(ds)), 'I', stamp,
+    (baseNote ? baseNote + ' | ' : '') + 'Second visit — ' + (note2 || 'patient unstable'),
+    null, alias, { allowSecondDaily: true });
   sv('claims', st.claims);
   showToast('Combined daily ×' + v + ' — ' + p.last);
   closeClaimScreen();
