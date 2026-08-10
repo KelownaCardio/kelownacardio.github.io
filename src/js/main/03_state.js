@@ -391,7 +391,18 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //    blocked by addClaim's v4.21 dedup guard — allowSecondDaily override
 //    lets exactly this path through; its note always carries the literal
 //    "Second visit" marker for DataCheck v2.38.
-var APP_VERSION = 'v4.92';
+// v4.93 (2026-08-10): CLAIM-EDIT MODIFIER CASCADE. Kathryn's invariant:
+// modifiers are DERIVED data — any edit to a consult's date, time, alias or
+// fee via the claim-edit modal now re-derives its 12xx blocks dynamically
+// (tier, increments, 07:45 cap, majority-portion, CCFPP), exactly like the
+// v4.92 timeline does for time edits. Date/alias moves carry the blocks to
+// the new key first so no strays are left behind; a fee change away from a
+// consult deletes its blocks; a direct edit of a 12xx row's own times warns
+// (derived — edit the consult instead). Also: standing "Day timeline" button
+// in the claim-edit modal (was reachable only from the overlap warning).
+// The stranded-Massey mechanism (consult corrected, 1202 left behind) is
+// closed. 06c_patient_summary.js only + this bump.
+var APP_VERSION = 'v4.93';
 var APP_BUILT   = '2026-08-10';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,

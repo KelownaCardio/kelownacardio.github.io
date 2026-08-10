@@ -1779,6 +1779,13 @@ function openClaimEdit(btn) {
       '<label style="margin-top:10px">Notes</label>' +
       '<input id="ce-notes" value="' + esc(c.notes || '') + '" placeholder="Optional notes…" autocorrect="off">' +
     '</div>' +
+    // v4.93: standing entry to the day timeline — the doctor's whole day of
+    // timed claims for this claim's date, with tap-to-adjust + dynamic
+    // modifier/CCFPP rebuild. Was previously reachable only from the
+    // overlap warning on the consult form.
+    '<button class="btn btn-s" style="margin:10px 0 0;width:100%" ' +
+      'onclick="hideClaimEditModal();openDayTimeline(\'' + esc(c.alias) + '\',\'' + esc(fmtClaimDate(c.date || '')) + '\')">' +
+      '⏱ Day timeline — all of ' + esc(c.alias) + '\'s timed claims on this date</button>' +
     '<div style="display:flex;gap:8px;margin-top:12px">' +
       '<button class="btn btn-p" style="margin:0;flex:1" data-cid="' + cid + '" data-pid="' + pid + '" onclick="saveClaimEdit(this)">Save</button>' +
       '<button class="btn btn-s" style="margin:0;flex:1" onclick="hideClaimEditModal()">Cancel</button>' +
@@ -1815,6 +1822,25 @@ function saveClaimEdit(btn) {
   }
 
   var _ccfppOldDate = c.date, _ccfppOldAlias = c.alias;
+  var _oldFee = c.fee;
+
+  // ── v4.93: editing a call-out block directly is almost always wrong ──
+  // 12xx rows are DERIVED from their consult's times; a direct time edit
+  // would be overwritten by the next rebuild. Warn (but allow — orphan
+  // blocks with no surviving consult still need hand-fixing).
+  if (CCFPP_MODIFIER_FEES.indexOf(c.fee) !== -1 &&
+      (newTime !== c.startTime || newEndTime !== c.endTime || newDate !== c.date)) {
+    var _hasConsult = st.claims.some(function(x){
+      return x.alias === c.alias && x.date === _ccfppOldDate &&
+             _ccfppPhnEq(x.phn, c.phn) &&
+             (x.fee === '33010' || x.fee === '33012');
+    });
+    if (_hasConsult && !confirm('This is a call-out block — its times are built from ' +
+        'the consult\'s times and will be overwritten the next time the consult is ' +
+        'edited.\n\nEdit the CONSULT instead to move the blocks correctly. Save this ' +
+        'direct edit anyway?')) return;
+  }
+
   c.fee     = newFee;
 
   c.icd     = newIcd;
@@ -1836,8 +1862,60 @@ function saveClaimEdit(btn) {
     c.alias  = newAlias;
   }
 
+  // ── v4.93: MODIFIER CASCADE — modifiers are derived data and must never
+  // survive an edit stale (Kathryn, 2026-08-10; the Massey stranded-1202
+  // mechanism). Any date / time / alias / fee change on a CONSULT re-derives
+  // its 12xx blocks dynamically: tier from the new start+date, increment
+  // count, the 07:45 weekday cap, majority-portion — and CCFPP after.
+  var _isConsultNow = (c.fee === '33010' || c.fee === '33012');
+  var _wasConsult   = (_oldFee === '33010' || _oldFee === '33012');
+  var _movedKey     = (_ccfppOldDate !== c.date || _ccfppOldAlias !== c.alias);
+  var _cascadeChanged = [];
+  if (_wasConsult || _isConsultNow) {
+    // Bring the consult's 12xx rows along on a date/alias move FIRST, so the
+    // rebuild finds them under the new key instead of leaving strays behind.
+    if (_movedKey) {
+      st.claims.forEach(function(mc){
+        if (mc.alias !== _ccfppOldAlias || mc.date !== _ccfppOldDate) return;
+        if (!_ccfppPhnEq(mc.phn, c.phn)) return;
+        if (CCFPP_MODIFIER_FEES.indexOf(mc.fee) === -1) return;
+        mc.date = c.date; mc.alias = c.alias;
+        _cascadeChanged.push(mc);
+      });
+    }
+    if (_isConsultNow) {
+      // Re-derive blocks from the consult's CURRENT date+times.
+      rebuildConsultModifiers_(c).forEach(function(mc){
+        if (_cascadeChanged.indexOf(mc) === -1) _cascadeChanged.push(mc);
+      });
+    } else {
+      // Fee changed AWAY from a consult — its blocks no longer have a
+      // reason to exist; delete them.
+      st.claims.filter(function(mc){
+        return mc.alias === c.alias && mc.date === c.date &&
+               _ccfppPhnEq(mc.phn, c.phn) &&
+               CCFPP_MODIFIER_FEES.indexOf(mc.fee) !== -1;
+      }).forEach(function(mc){
+        st.claims = st.claims.filter(function(x){ return String(x.id) !== String(mc.id); });
+        if (SHEETS_URL) push('deleteClaim', { id: mc.id });
+      });
+    }
+    // Same-doctor overlap check on the edited consult (same rule as entry:
+    // consult bodies never overlap). Warn-only here — the doctor may be
+    // mid-way through fixing several claims; DataCheck backstops it.
+    if (_isConsultNow && c.startTime && c.endTime &&
+        typeof consultOverlapPeer_ === 'function') {
+      var _edPeer = consultOverlapPeer_(c.alias, c.date, c.startTime, c.endTime, c.phn);
+      if (_edPeer) showToast('Note: overlaps your ' + _edPeer.last + ' consult (' +
+        _edPeer.startTime + '–' + _edPeer.endTime + ') — fix in the day timeline', 'error');
+    }
+  }
+
   sv('claims', st.claims);
-  if (SHEETS_URL) push('saveClaim', c);
+  if (SHEETS_URL) {
+    push('saveClaim', c);
+    _cascadeChanged.forEach(function(mc){ push('saveClaim', mc); });
+  }
   // v4.49: refresh CCFPP for the edited claim's window (and old date/alias if moved).
   ccfppRecomputeAround_(c.alias, c.date);
   if (_ccfppOldDate && (_ccfppOldDate !== c.date || _ccfppOldAlias !== c.alias))
