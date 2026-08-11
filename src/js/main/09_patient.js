@@ -319,9 +319,9 @@ async function _mergeAndReadmit() {
   // awaited savePatientWithClaims call, so a lost push can no longer silently
   // drop the consult (the patient row itself was already saved above by the
   // merge/savePatient call — re-upserting it in the batch is a harmless no-op).
-  if (st.doc) {
-    var cPerf  = document.getElementById('cb-performing-doc');
-    var cAlias = (cPerf && cPerf.value) ? cPerf.value : st.doc.alias;
+  // v4.94: same rule as apSubmit — in-card performing pick, else signed-in doctor.
+  var cAlias = _billingAliasForAdd();
+  if (cAlias) {
     var billingLoc = (document.getElementById('f-billing-loc') || {}).value || 'I';
 
     var _mgBatch = [];
@@ -360,6 +360,12 @@ async function _mergeAndReadmit() {
           : 'Patient saved but claims not confirmed — check wifi, then verify in Today\'s Claims');
       }
     }
+  } else {
+    // v4.94 BACKSTOP — the patient row is already saved on this path, so the
+    // only honest outcome is to say so out loud. Never silent.
+    showToast('Patient saved but NO claim was created — no doctor selected. '
+            + 'Tap your name, then add the claim from the patient card.');
+    if (typeof showModal === 'function') showModal('doc-modal');
   }
 
   // v4.69: plain-language toast — say what happened, not which internal path ran.
@@ -1087,6 +1093,27 @@ function apRolePill(val)    { return locRolePill('f', val); }
 function syncApRolePills()  { return locSyncRolePills('f'); }
 function syncApListPills()  { locSyncListPills('f'); locSyncRolePills('f'); }
 
+// ── v4.94: WHO IS BILLING (shared by every Add-Patient claim path) ──────
+// Resolve the alias a new claim should be billed under.
+//   1. the in-card "performing doctor" pick, when set — a doctor entering on
+//      a colleague's phone or a shared hospital PC;
+//   2. otherwise the signed-in doctor (st.doc).
+// Returns '' when NEITHER exists.
+//
+// WHY THIS EXISTS: v4.93 and earlier wrapped the entire claim-creation block
+// in `if (st.doc)`. On a device that had never signed in, st.doc is null, so
+// the block was skipped SILENTLY — the in-card performing-doctor pick was
+// never even read — and the patient saved with claims:[] behind an "added to
+// list" toast. Confirmed in the ChangeLog as `edit_patient_batch claims=0`
+// rows attributed to user `unknown` (FHalperin, 2026-08-09 onward).
+// Callers MUST treat '' as a hard stop, never as "skip the claim".
+function _billingAliasForAdd() {
+  var el   = document.getElementById('cb-performing-doc');
+  var card = (el && el.value) ? String(el.value).trim() : '';
+  if (card) return card;                      // card pick stands on its own
+  return (st.doc && st.doc.alias) || '';
+}
+
 async function apSubmit(addToList, _skipDupCheck) {
   // v4.26: Submit overlay — reuse the same guard and overlay as claimSubmitOnce
   if (_submitGuard) return;
@@ -1221,6 +1248,10 @@ async function apSubmit(addToList, _skipDupCheck) {
   if (!phn && !_oop)                           addMissing.push('phn');
   if (!gv('cb-refby') && !gv('oc-refby')) addMissing.push('refby');
   if (!icd)                                    addMissing.push('icd');
+  // v4.94: a claim can never be built without a billing doctor. Blocked HERE,
+  // before anything is written, so it is fixed on the form instead of surfacing
+  // weeks later as a missing consult at export.
+  if (!_billingAliasForAdd())                  addMissing.push('who you are — tap your name (top right) or pick a performing doctor');
   if (_apClaimType === 'consult') {
     if (!(document.getElementById('cb-date')  || {}).value) addMissing.push('date');
     if (!(document.getElementById('cb-start') || {}).value) addMissing.push('start time');
@@ -1431,9 +1462,10 @@ async function apSubmit(addToList, _skipDupCheck) {
   // usual; _batchClaimCollect diverts their pushes into this bundle.
   var _apBatch = [];
   var _apClaimsValid = true;
-  if (st.doc) {
-    var cPerf  = document.getElementById('cb-performing-doc');
-    var cAlias = (cPerf && cPerf.value) ? cPerf.value : st.doc.alias;
+  // v4.94: gate on the resolved billing alias (login OR in-card pick), never on
+  // st.doc alone. Empty = hard stop in the else, never a silent skip.
+  var cAlias = _billingAliasForAdd();
+  if (cAlias) {
     var billingLoc = (document.getElementById('f-billing-loc') || {}).value || 'I';
     window._batchClaimCollect = _apBatch;
     try {
@@ -1454,6 +1486,14 @@ async function apSubmit(addToList, _skipDupCheck) {
     } finally {
       window._batchClaimCollect = null;
     }
+  } else {
+    // v4.94 BACKSTOP — unreachable through the UI (the missing-fields gate
+    // above stops it first). If it is ever reached, fail LOUD and roll back:
+    // an add-patient always intends a claim, so "no billing doctor" must never
+    // resolve to "save the patient and drop the claim".
+    _apClaimsValid = false;
+    showToast('Not saved — no doctor selected. Tap your name to sign in.');
+    if (typeof showModal === 'function') showModal('doc-modal');
   }
   if (!_apClaimsValid) {
     // Claim form invalid (missing time/date/fee — the submit fn already

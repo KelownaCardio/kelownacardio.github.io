@@ -402,7 +402,35 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // in the claim-edit modal (was reachable only from the overlap warning).
 // The stranded-Massey mechanism (consult corrected, 1202 left behind) is
 // closed. 06c_patient_summary.js only + this bump.
-var APP_VERSION = 'v4.93';
+// v4.94 (2026-08-11): MANDATORY SIGN-IN + NEVER-SILENT CLAIMS. st.doc lives in
+// localStorage, so a new/shared device starts null. v4.93 and earlier wrapped
+// the whole Add-Patient claim block in `if (st.doc)` — with no sign-in the
+// block was skipped SILENTLY (the in-card performing-doctor pick was never
+// even read) and the patient saved with claims:[] behind an "added to list"
+// toast. Live evidence: ChangeLog `edit_patient_batch ... claims=0` by user
+// `unknown` — Bernard/Spencer/Verwey 2026-08-09, Wilton 2026-08-11 07:16 PT
+// (FHalperin then re-keyed all 4 Wilton claims by hand at 07:41 once signed
+// in; his logChange rows are blank in the `by` column before 07:41 and read
+// FHalperin after — st.doc was null for that window).
+// Fix: (1) the doctor picker is forced and non-dismissible when st.doc is null
+// (14_init.js _forceSignIn/_releaseSignIn + hideModal guard); (2) the billing
+// alias now resolves as in-card pick -> signed-in doctor, so a card pick
+// stands on its own if the login is ever lost (09_patient.js
+// _billingAliasForAdd); (3) "no billing doctor" is a blocked submit with a
+// named missing field, never a dropped claim, on BOTH the new-patient and
+// merge/readmit paths. Frontend-only; no cache-format change.
+// v4.94 (cont.): DUPLICATE CLAIM = TOAST + TIME + MANDATORY NOTE (Kathryn).
+// An exact duplicate (same doctor, same patient, same day, same fee) used to
+// be a dead-end toast in addClaim's dedup guard — the second service simply
+// could not be billed. It now toasts, then opens an injected bottom sheet
+// demanding (a) the TIME of the second service, prefilled with the clock but
+// editable, and (b) a MANDATORY note >=8 chars, which is written to the
+// claim's `notes` and therefore travels to MSP as the justification. The
+// accepted claim carries allowDuplicate + dupOfId + dupNoteAt; Crud v3.17
+// honours the marker and logs `dup_claim_allowed` with the time, note and
+// repeated-claim id. CCU family (CCU_DAILY/1411/1421/1431) can NEVER be
+// overridden — it is cross-physician and a second CCU day is not a service.
+var APP_VERSION = 'v4.94';
 var APP_BUILT   = '2026-08-10';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,

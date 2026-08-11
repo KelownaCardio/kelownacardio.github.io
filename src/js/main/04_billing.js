@@ -524,7 +524,17 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, 
   var _ccuFamily = ['CCU_DAILY','1411','1421','1431'];
   var _isCCU = _ccuFamily.indexOf(c.fee) !== -1;
   var _dupClaim = null;
-  var _dupCheck = (overrides.allowSecondDaily && c.fee === '33008') ? false :
+  // v4.94: an EXACT duplicate (same doctor, same patient, same day, same fee)
+  // is no longer a dead end. The doctor is toasted, then asked for the real
+  // service time + a MANDATORY note explaining the second service; with both
+  // supplied the claim is created and a dup_claim_allowed audit row is written.
+  // MSP pays a same-day repeat only when it is timed and justified — this
+  // captures both while the doctor still remembers why.
+  // (Kathryn 2026-08-11. CCU-family stays a HARD block: it is cross-physician
+  // and a second CCU day is never a legitimate second service.)
+  var _dupCheck = ((overrides.allowSecondDaily && c.fee === '33008') ||
+                   (overrides.allowDuplicate && String(overrides.dupNote || '').trim() &&
+                    ['CCU_DAILY','1411','1421','1431'].indexOf(c.fee) === -1)) ? false :
   st.claims.some(function(x) {
     if (!samePhn(x.phn, c.phn) || x.date !== c.date) return false;
     if (x.id === c.id) return false;
@@ -541,15 +551,41 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, 
     // Signal block to callers (return null) and to showToast (suppress
     // success toasts that fire immediately after, before caller checks)
     window._claimBlockedAt = Date.now();
-    if (_isCCU && _dupClaim && _dupClaim.alias !== c.alias) {
-      showToast('Another physician (' + _dupClaim.alias + ') has already claimed CCU for this date — blocked', 'error');
-    } else if (_isCCU) {
-      showToast('CCU already claimed for this patient on ' + c.date + ' — blocked', 'error');
-    } else {
-      showToast('Duplicate ' + c.fee + ' already exists for ' + c.date + ' — blocked', 'error');
+    if (_isCCU) {
+      if (_dupClaim && _dupClaim.alias !== c.alias) {
+        showToast('Another physician (' + _dupClaim.alias + ') has already claimed CCU for this date — blocked', 'error');
+      } else {
+        showToast('CCU already claimed for this patient on ' + c.date + ' — blocked', 'error');
+      }
+      console.warn('Duplicate CCU claim blocked:', c.fee, c.date, c.phn);
+      return null;                                   // CCU: hard block, unchanged
     }
-    console.warn('Duplicate claim blocked:', c.fee, c.date, c.phn, _dupClaim ? 'existing alias=' + _dupClaim.alias : '');
-    return null; // blocked — callers should check
+    // v4.94: non-CCU exact duplicate → toast, then the note-required sheet.
+    showToast('Already billed ' + c.fee + ' for this patient on ' + c.date +
+              ' — add a time and a note to bill it again', 'error');
+    openDupClaimSheet({
+      p: p, fee: fee, feeCode: feeCode, units: units, date: date, loc: loc,
+      startTime: startTime, notes: notes, endTime: endTime,
+      performingAlias: performingAlias, overrides: overrides
+    }, _dupClaim, c);
+    console.warn('Duplicate claim held for note:', c.fee, c.date, c.phn);
+    return null; // held for a note — callers should check
+  }
+  // v4.94: an accepted duplicate carries its justification in `notes` (which
+  // travels to MSP on the claim) and leaves a dup_claim_allowed row in the
+  // ChangeLog — deliberately NOT a hidden Claims column, so the audit trail
+  // lives where Kathryn already reads it and no schema change is forced on a
+  // live billing sheet mid-quarter.
+  if (overrides.allowDuplicate && String(overrides.dupNote || '').trim()) {
+    c.notes          = String(overrides.dupNote).trim();
+    c.allowDuplicate = true;                         // read server-side (Crud v3.17)
+    c.dupOfId        = overrides.dupOfId || '';
+    c.dupNoteAt      = new Date().toISOString();
+    // Uses the EXISTING logChange action — no new Router endpoint. The
+    // authoritative ISO-stamped row is written server-side by Crud v3.17
+    // (dup_claim_allowed); this one puts it in the doctor's local log too.
+    logChange(p, 'Second ' + c.fee + ' billed (duplicate)',
+      c.date + ' at ' + (c.startTime || '(no time)') + ' — ' + c.notes);
   }
   st.claims.push(c);
   // v4.90 ATOMIC ADD-PATIENT: when the Add-Patient screen is building its
@@ -782,3 +818,102 @@ function claimedTodayFee(p, feeTypes) {
 // ═══════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════════
+// v4.94 — DUPLICATE CLAIM: TOAST → TIME + MANDATORY NOTE → BILL IT
+// ══════════════════════════════════════════════════════════════════════
+// Kathryn, 2026-08-11: an exact duplicate (same doctor, same patient, same
+// day, same fee code) must not be a dead end — the second service is often
+// real (patient re-reviewed, deteriorated, called back). MSP will pay it only
+// if it is TIMED and JUSTIFIED, so both are captured here, at the moment the
+// doctor still remembers why, and the claim is then created normally.
+//
+// Injected DOM (same approach as the v4.92 Day Timeline sheet) so no
+// index.template.html change is needed and this ships frontend-only.
+var _dupSheetArgs = null;
+
+function openDupClaimSheet(args, existing, pending) {
+  args.dupOfId = (existing && existing.id) || '';
+  _dupSheetArgs = args;
+  var el = document.getElementById('dup-claim-sheet');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'dup-claim-sheet';
+    el.className = 'overlay top';
+    document.body.appendChild(el);
+  }
+  var name = [pending.last, pending.first].filter(Boolean).join(', ');
+  var exTime = (existing && existing.startTime) ? existing.startTime : '';
+  el.innerHTML =
+    '<div class="modal">' +
+      '<div class="modal-title">Already billed today</div>' +
+      '<div style="font-size:12px;color:var(--text2);margin-top:-8px;margin-bottom:10px">' +
+        esc(name) + ' &middot; ' + esc(pending.fee) + ' &middot; ' + esc(pending.date) +
+        ' &middot; ' + esc(pending.alias) +
+      '</div>' +
+      '<div style="font-size:12px;color:var(--text2);background:var(--amber-bg);' +
+           'border:.5px solid var(--amber-t);border-radius:8px;padding:8px 10px;margin-bottom:12px">' +
+        'You already have a ' + esc(pending.fee) + ' on this patient for ' + esc(pending.date) +
+        (exTime ? ' at <b>' + esc(exTime) + '</b>' : ' (no time recorded)') + '.<br>' +
+        'To bill a second one, give the time of the second service and say why.' +
+      '</div>' +
+      '<div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:4px">' +
+        'TIME OF THIS SECOND SERVICE</div>' +
+      '<input id="dup-time" type="time" class="inp" style="width:100%;margin-bottom:12px">' +
+      '<div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:4px">' +
+        'WHY A SECOND ' + esc(pending.fee) + '? (required &mdash; goes on the claim)</div>' +
+      '<textarea id="dup-note" class="inp" rows="3" style="width:100%;resize:vertical" ' +
+        'placeholder="e.g. Recalled to ward 14:20 for new chest pain and ECG changes"></textarea>' +
+      '<div id="dup-err" style="display:none;font-size:12px;color:var(--red-t);margin-top:8px"></div>' +
+      '<div class="divider"></div>' +
+      '<button class="btn" style="width:100%;margin:0 0 8px" onclick="confirmDupClaim()">' +
+        'Bill the second ' + esc(pending.fee) + '</button>' +
+      '<button class="btn btn-s" style="width:100%;margin:0" onclick="cancelDupClaim()">Cancel</button>' +
+    '</div>';
+  el.classList.add('on');
+  // Prefill with the current clock time — the doctor corrects it if the
+  // service was earlier. Never auto-accepted without them seeing it.
+  var t = document.getElementById('dup-time');
+  if (t) {
+    var n = new Date();
+    t.value = ('0' + n.getHours()).slice(-2) + ':' + ('0' + n.getMinutes()).slice(-2);
+  }
+  var nt = document.getElementById('dup-note');
+  if (nt) setTimeout(function() { try { nt.focus(); } catch (e) {} }, 80);
+}
+
+function cancelDupClaim() {
+  _dupSheetArgs = null;
+  var el = document.getElementById('dup-claim-sheet');
+  if (el) el.classList.remove('on');
+}
+
+function confirmDupClaim() {
+  var a = _dupSheetArgs;
+  if (!a) return cancelDupClaim();
+  var note = (document.getElementById('dup-note') || {}).value || '';
+  var time = (document.getElementById('dup-time') || {}).value || '';
+  var err  = document.getElementById('dup-err');
+  var show = function(m) { if (err) { err.textContent = m; err.style.display = 'block'; } };
+
+  // MANDATORY — both. No note, no claim.
+  if (!String(note).trim()) return show('A note is required to bill a second ' + a.fee + '.');
+  if (String(note).trim().length < 8) return show('Give a little more detail — this note is what justifies the repeat claim to MSP.');
+  if (!time) return show('Enter the time of the second service.');
+
+  var ov = {};
+  for (var k in (a.overrides || {})) ov[k] = a.overrides[k];
+  ov.allowDuplicate = true;
+  ov.dupNote        = String(note).trim();
+  ov.dupOfId        = (a.dupOfId || '');
+
+  cancelDupClaim();
+  var made = addClaim(a.p, a.fee, a.feeCode, a.units, a.date, a.loc,
+                      time,                       // service time -> startTime
+                      String(note).trim(),
+                      a.endTime, a.performingAlias, ov);
+  if (made) {
+    sv('claims', st.claims);
+    showToast('Second ' + a.fee + ' billed at ' + time + ' with your note');
+  }
+}

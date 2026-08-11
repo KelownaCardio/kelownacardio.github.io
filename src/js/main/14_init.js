@@ -75,6 +75,11 @@ async function submitAppPassword() {
   var ov = document.getElementById('apppw-modal');
   if (ov) ov.classList.remove('on');
   _appPwOpen = false;
+  // v4.94: authorising the device is HALF the login. The password says "this
+  // device may see patient data"; it does not say who is billing. Chain the
+  // doctor picker straight onto it so "log in on a random PC" is one flow that
+  // always ends with a name selected. (Kathryn 2026-08-11.)
+  if (!st.doc) _forceSignIn();
   var res = _appPwResolve; _appPwResolve = null;
   if (res) res();
 }
@@ -149,6 +154,10 @@ async function init() {
     });
     sv('doctors', st.doctors);
   }
+
+  // v4.94: no signed-in doctor on this device → force the picker now, before
+  // anything can be entered. Nothing on Add Patient may be billed without it.
+  if (!st.doc) _forceSignIn();
 
   // (test patients removed for live deployment)
     // Restore any custom wards saved from previous sessions
@@ -377,7 +386,41 @@ function showModal(id) {
 }
 
 function hideModal(id) {
+  // v4.94: the doctor picker is non-dismissible while sign-in is mandatory.
+  if (id === 'doc-modal' && _signInMandatory && !st.doc) {
+    showToast('Tap your name first — claims cannot be billed without it.');
+    return;
+  }
   document.getElementById(id).classList.remove('on');
+}
+
+// ── v4.94: MANDATORY SIGN-IN ───────────────────────────────────────────────
+// st.doc lives in localStorage, so a brand-new device (or a shared hospital
+// PC that has never been signed in) starts with st.doc = null. Until v4.94
+// nothing forced the doctor to pick a name, and the Add-Patient claim block
+// was silently skipped in that state — patient on the list, no claim, no
+// error (FHalperin 2026-08-09 onward; ChangeLog `claims=0` / user `unknown`).
+// The picker is now non-dismissible until a name is chosen.
+var _signInMandatory = false;
+
+function _forceSignIn() {
+  if (st.doc) return;
+  _signInMandatory = true;
+  showModal('doc-modal');
+  var t = document.querySelector('#doc-modal .modal-title');
+  if (t) t.textContent = 'Who are you?';
+  var sub = document.querySelector('#doc-modal .modal-title + div');
+  if (sub) sub.textContent = 'Required — claims cannot be billed until you sign in.';
+  var cancel = document.querySelector('#doc-modal .btn-s');   // the Cancel button
+  if (cancel) cancel.style.display = 'none';
+}
+
+function _releaseSignIn() {
+  _signInMandatory = false;
+  var cancel = document.querySelector('#doc-modal .btn-s');
+  if (cancel) cancel.style.display = '';
+  var sub = document.querySelector('#doc-modal .modal-title + div');
+  if (sub) sub.textContent = 'Tap your name to sign in';
 }
 
 function renderDocOpts() {
@@ -405,6 +448,7 @@ function selectDocEl(el) {
 function selectDoc(alias, num, name) {
   st.doc = { alias:alias, num:num, name:name };
   sv('doc', st.doc);
+  _releaseSignIn();                                   // v4.94
   document.getElementById('doc-label').textContent = alias;
   document.getElementById('doc-dot').classList.add('on');
   hideModal('doc-modal');
