@@ -2619,7 +2619,35 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // in the claim-edit modal (was reachable only from the overlap warning).
 // The stranded-Massey mechanism (consult corrected, 1202 left behind) is
 // closed. 06c_patient_summary.js only + this bump.
-var APP_VERSION = 'v4.93';
+// v4.94 (2026-08-11): MANDATORY SIGN-IN + NEVER-SILENT CLAIMS. st.doc lives in
+// localStorage, so a new/shared device starts null. v4.93 and earlier wrapped
+// the whole Add-Patient claim block in `if (st.doc)` — with no sign-in the
+// block was skipped SILENTLY (the in-card performing-doctor pick was never
+// even read) and the patient saved with claims:[] behind an "added to list"
+// toast. Live evidence: ChangeLog `edit_patient_batch ... claims=0` by user
+// `unknown` — Bernard/Spencer/Verwey 2026-08-09, Wilton 2026-08-11 07:16 PT
+// (FHalperin then re-keyed all 4 Wilton claims by hand at 07:41 once signed
+// in; his logChange rows are blank in the `by` column before 07:41 and read
+// FHalperin after — st.doc was null for that window).
+// Fix: (1) the doctor picker is forced and non-dismissible when st.doc is null
+// (14_init.js _forceSignIn/_releaseSignIn + hideModal guard); (2) the billing
+// alias now resolves as in-card pick -> signed-in doctor, so a card pick
+// stands on its own if the login is ever lost (09_patient.js
+// _billingAliasForAdd); (3) "no billing doctor" is a blocked submit with a
+// named missing field, never a dropped claim, on BOTH the new-patient and
+// merge/readmit paths. Frontend-only; no cache-format change.
+// v4.94 (cont.): DUPLICATE CLAIM = TOAST + TIME + MANDATORY NOTE (Kathryn).
+// An exact duplicate (same doctor, same patient, same day, same fee) used to
+// be a dead-end toast in addClaim's dedup guard — the second service simply
+// could not be billed. It now toasts, then opens an injected bottom sheet
+// demanding (a) the TIME of the second service, prefilled with the clock but
+// editable, and (b) a MANDATORY note >=8 chars, which is written to the
+// claim's `notes` and therefore travels to MSP as the justification. The
+// accepted claim carries allowDuplicate + dupOfId + dupNoteAt; Crud v3.17
+// honours the marker and logs `dup_claim_allowed` with the time, note and
+// repeated-claim id. CCU family (CCU_DAILY/1411/1421/1431) can NEVER be
+// overridden — it is cross-physician and a second CCU day is not a service.
+var APP_VERSION = 'v4.94';
 var APP_BUILT   = '2026-08-10';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -3980,7 +4008,17 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, 
   var _ccuFamily = ['CCU_DAILY','1411','1421','1431'];
   var _isCCU = _ccuFamily.indexOf(c.fee) !== -1;
   var _dupClaim = null;
-  var _dupCheck = (overrides.allowSecondDaily && c.fee === '33008') ? false :
+  // v4.94: an EXACT duplicate (same doctor, same patient, same day, same fee)
+  // is no longer a dead end. The doctor is toasted, then asked for the real
+  // service time + a MANDATORY note explaining the second service; with both
+  // supplied the claim is created and a dup_claim_allowed audit row is written.
+  // MSP pays a same-day repeat only when it is timed and justified — this
+  // captures both while the doctor still remembers why.
+  // (Kathryn 2026-08-11. CCU-family stays a HARD block: it is cross-physician
+  // and a second CCU day is never a legitimate second service.)
+  var _dupCheck = ((overrides.allowSecondDaily && c.fee === '33008') ||
+                   (overrides.allowDuplicate && String(overrides.dupNote || '').trim() &&
+                    ['CCU_DAILY','1411','1421','1431'].indexOf(c.fee) === -1)) ? false :
   st.claims.some(function(x) {
     if (!samePhn(x.phn, c.phn) || x.date !== c.date) return false;
     if (x.id === c.id) return false;
@@ -3997,15 +4035,41 @@ function addClaim(p, fee, feeCode, units, date, loc, startTime, notes, endTime, 
     // Signal block to callers (return null) and to showToast (suppress
     // success toasts that fire immediately after, before caller checks)
     window._claimBlockedAt = Date.now();
-    if (_isCCU && _dupClaim && _dupClaim.alias !== c.alias) {
-      showToast('Another physician (' + _dupClaim.alias + ') has already claimed CCU for this date — blocked', 'error');
-    } else if (_isCCU) {
-      showToast('CCU already claimed for this patient on ' + c.date + ' — blocked', 'error');
-    } else {
-      showToast('Duplicate ' + c.fee + ' already exists for ' + c.date + ' — blocked', 'error');
+    if (_isCCU) {
+      if (_dupClaim && _dupClaim.alias !== c.alias) {
+        showToast('Another physician (' + _dupClaim.alias + ') has already claimed CCU for this date — blocked', 'error');
+      } else {
+        showToast('CCU already claimed for this patient on ' + c.date + ' — blocked', 'error');
+      }
+      console.warn('Duplicate CCU claim blocked:', c.fee, c.date, c.phn);
+      return null;                                   // CCU: hard block, unchanged
     }
-    console.warn('Duplicate claim blocked:', c.fee, c.date, c.phn, _dupClaim ? 'existing alias=' + _dupClaim.alias : '');
-    return null; // blocked — callers should check
+    // v4.94: non-CCU exact duplicate → toast, then the note-required sheet.
+    showToast('Already billed ' + c.fee + ' for this patient on ' + c.date +
+              ' — add a time and a note to bill it again', 'error');
+    openDupClaimSheet({
+      p: p, fee: fee, feeCode: feeCode, units: units, date: date, loc: loc,
+      startTime: startTime, notes: notes, endTime: endTime,
+      performingAlias: performingAlias, overrides: overrides
+    }, _dupClaim, c);
+    console.warn('Duplicate claim held for note:', c.fee, c.date, c.phn);
+    return null; // held for a note — callers should check
+  }
+  // v4.94: an accepted duplicate carries its justification in `notes` (which
+  // travels to MSP on the claim) and leaves a dup_claim_allowed row in the
+  // ChangeLog — deliberately NOT a hidden Claims column, so the audit trail
+  // lives where Kathryn already reads it and no schema change is forced on a
+  // live billing sheet mid-quarter.
+  if (overrides.allowDuplicate && String(overrides.dupNote || '').trim()) {
+    c.notes          = String(overrides.dupNote).trim();
+    c.allowDuplicate = true;                         // read server-side (Crud v3.17)
+    c.dupOfId        = overrides.dupOfId || '';
+    c.dupNoteAt      = new Date().toISOString();
+    // Uses the EXISTING logChange action — no new Router endpoint. The
+    // authoritative ISO-stamped row is written server-side by Crud v3.17
+    // (dup_claim_allowed); this one puts it in the doctor's local log too.
+    logChange(p, 'Second ' + c.fee + ' billed (duplicate)',
+      c.date + ' at ' + (c.startTime || '(no time)') + ' — ' + c.notes);
   }
   st.claims.push(c);
   // v4.90 ATOMIC ADD-PATIENT: when the Add-Patient screen is building its
@@ -4238,6 +4302,105 @@ function claimedTodayFee(p, feeTypes) {
 // ═══════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════════
+// v4.94 — DUPLICATE CLAIM: TOAST → TIME + MANDATORY NOTE → BILL IT
+// ══════════════════════════════════════════════════════════════════════
+// Kathryn, 2026-08-11: an exact duplicate (same doctor, same patient, same
+// day, same fee code) must not be a dead end — the second service is often
+// real (patient re-reviewed, deteriorated, called back). MSP will pay it only
+// if it is TIMED and JUSTIFIED, so both are captured here, at the moment the
+// doctor still remembers why, and the claim is then created normally.
+//
+// Injected DOM (same approach as the v4.92 Day Timeline sheet) so no
+// index.template.html change is needed and this ships frontend-only.
+var _dupSheetArgs = null;
+
+function openDupClaimSheet(args, existing, pending) {
+  args.dupOfId = (existing && existing.id) || '';
+  _dupSheetArgs = args;
+  var el = document.getElementById('dup-claim-sheet');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'dup-claim-sheet';
+    el.className = 'overlay top';
+    document.body.appendChild(el);
+  }
+  var name = [pending.last, pending.first].filter(Boolean).join(', ');
+  var exTime = (existing && existing.startTime) ? existing.startTime : '';
+  el.innerHTML =
+    '<div class="modal">' +
+      '<div class="modal-title">Already billed today</div>' +
+      '<div style="font-size:12px;color:var(--text2);margin-top:-8px;margin-bottom:10px">' +
+        esc(name) + ' &middot; ' + esc(pending.fee) + ' &middot; ' + esc(pending.date) +
+        ' &middot; ' + esc(pending.alias) +
+      '</div>' +
+      '<div style="font-size:12px;color:var(--text2);background:var(--amber-bg);' +
+           'border:.5px solid var(--amber-t);border-radius:8px;padding:8px 10px;margin-bottom:12px">' +
+        'You already have a ' + esc(pending.fee) + ' on this patient for ' + esc(pending.date) +
+        (exTime ? ' at <b>' + esc(exTime) + '</b>' : ' (no time recorded)') + '.<br>' +
+        'To bill a second one, give the time of the second service and say why.' +
+      '</div>' +
+      '<div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:4px">' +
+        'TIME OF THIS SECOND SERVICE</div>' +
+      '<input id="dup-time" type="time" class="inp" style="width:100%;margin-bottom:12px">' +
+      '<div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:4px">' +
+        'WHY A SECOND ' + esc(pending.fee) + '? (required &mdash; goes on the claim)</div>' +
+      '<textarea id="dup-note" class="inp" rows="3" style="width:100%;resize:vertical" ' +
+        'placeholder="e.g. Recalled to ward 14:20 for new chest pain and ECG changes"></textarea>' +
+      '<div id="dup-err" style="display:none;font-size:12px;color:var(--red-t);margin-top:8px"></div>' +
+      '<div class="divider"></div>' +
+      '<button class="btn" style="width:100%;margin:0 0 8px" onclick="confirmDupClaim()">' +
+        'Bill the second ' + esc(pending.fee) + '</button>' +
+      '<button class="btn btn-s" style="width:100%;margin:0" onclick="cancelDupClaim()">Cancel</button>' +
+    '</div>';
+  el.classList.add('on');
+  // Prefill with the current clock time — the doctor corrects it if the
+  // service was earlier. Never auto-accepted without them seeing it.
+  var t = document.getElementById('dup-time');
+  if (t) {
+    var n = new Date();
+    t.value = ('0' + n.getHours()).slice(-2) + ':' + ('0' + n.getMinutes()).slice(-2);
+  }
+  var nt = document.getElementById('dup-note');
+  if (nt) setTimeout(function() { try { nt.focus(); } catch (e) {} }, 80);
+}
+
+function cancelDupClaim() {
+  _dupSheetArgs = null;
+  var el = document.getElementById('dup-claim-sheet');
+  if (el) el.classList.remove('on');
+}
+
+function confirmDupClaim() {
+  var a = _dupSheetArgs;
+  if (!a) return cancelDupClaim();
+  var note = (document.getElementById('dup-note') || {}).value || '';
+  var time = (document.getElementById('dup-time') || {}).value || '';
+  var err  = document.getElementById('dup-err');
+  var show = function(m) { if (err) { err.textContent = m; err.style.display = 'block'; } };
+
+  // MANDATORY — both. No note, no claim.
+  if (!String(note).trim()) return show('A note is required to bill a second ' + a.fee + '.');
+  if (String(note).trim().length < 8) return show('Give a little more detail — this note is what justifies the repeat claim to MSP.');
+  if (!time) return show('Enter the time of the second service.');
+
+  var ov = {};
+  for (var k in (a.overrides || {})) ov[k] = a.overrides[k];
+  ov.allowDuplicate = true;
+  ov.dupNote        = String(note).trim();
+  ov.dupOfId        = (a.dupOfId || '');
+
+  cancelDupClaim();
+  var made = addClaim(a.p, a.fee, a.feeCode, a.units, a.date, a.loc,
+                      time,                       // service time -> startTime
+                      String(note).trim(),
+                      a.endTime, a.performingAlias, ov);
+  if (made) {
+    sv('claims', st.claims);
+    showToast('Second ' + a.fee + ' billed at ' + time + ' with your note');
+  }
+}
 // 05_render.js — Render rounds list (geo + alpha + off service)
 //
 // v4.19 change: alphaRow (on-service alphabetical view) now places
@@ -10047,9 +10210,9 @@ async function _mergeAndReadmit() {
   // awaited savePatientWithClaims call, so a lost push can no longer silently
   // drop the consult (the patient row itself was already saved above by the
   // merge/savePatient call — re-upserting it in the batch is a harmless no-op).
-  if (st.doc) {
-    var cPerf  = document.getElementById('cb-performing-doc');
-    var cAlias = (cPerf && cPerf.value) ? cPerf.value : st.doc.alias;
+  // v4.94: same rule as apSubmit — in-card performing pick, else signed-in doctor.
+  var cAlias = _billingAliasForAdd();
+  if (cAlias) {
     var billingLoc = (document.getElementById('f-billing-loc') || {}).value || 'I';
 
     var _mgBatch = [];
@@ -10088,6 +10251,12 @@ async function _mergeAndReadmit() {
           : 'Patient saved but claims not confirmed — check wifi, then verify in Today\'s Claims');
       }
     }
+  } else {
+    // v4.94 BACKSTOP — the patient row is already saved on this path, so the
+    // only honest outcome is to say so out loud. Never silent.
+    showToast('Patient saved but NO claim was created — no doctor selected. '
+            + 'Tap your name, then add the claim from the patient card.');
+    if (typeof showModal === 'function') showModal('doc-modal');
   }
 
   // v4.69: plain-language toast — say what happened, not which internal path ran.
@@ -10815,6 +10984,27 @@ function apRolePill(val)    { return locRolePill('f', val); }
 function syncApRolePills()  { return locSyncRolePills('f'); }
 function syncApListPills()  { locSyncListPills('f'); locSyncRolePills('f'); }
 
+// ── v4.94: WHO IS BILLING (shared by every Add-Patient claim path) ──────
+// Resolve the alias a new claim should be billed under.
+//   1. the in-card "performing doctor" pick, when set — a doctor entering on
+//      a colleague's phone or a shared hospital PC;
+//   2. otherwise the signed-in doctor (st.doc).
+// Returns '' when NEITHER exists.
+//
+// WHY THIS EXISTS: v4.93 and earlier wrapped the entire claim-creation block
+// in `if (st.doc)`. On a device that had never signed in, st.doc is null, so
+// the block was skipped SILENTLY — the in-card performing-doctor pick was
+// never even read — and the patient saved with claims:[] behind an "added to
+// list" toast. Confirmed in the ChangeLog as `edit_patient_batch claims=0`
+// rows attributed to user `unknown` (FHalperin, 2026-08-09 onward).
+// Callers MUST treat '' as a hard stop, never as "skip the claim".
+function _billingAliasForAdd() {
+  var el   = document.getElementById('cb-performing-doc');
+  var card = (el && el.value) ? String(el.value).trim() : '';
+  if (card) return card;                      // card pick stands on its own
+  return (st.doc && st.doc.alias) || '';
+}
+
 async function apSubmit(addToList, _skipDupCheck) {
   // v4.26: Submit overlay — reuse the same guard and overlay as claimSubmitOnce
   if (_submitGuard) return;
@@ -10949,6 +11139,10 @@ async function apSubmit(addToList, _skipDupCheck) {
   if (!phn && !_oop)                           addMissing.push('phn');
   if (!gv('cb-refby') && !gv('oc-refby')) addMissing.push('refby');
   if (!icd)                                    addMissing.push('icd');
+  // v4.94: a claim can never be built without a billing doctor. Blocked HERE,
+  // before anything is written, so it is fixed on the form instead of surfacing
+  // weeks later as a missing consult at export.
+  if (!_billingAliasForAdd())                  addMissing.push('who you are — tap your name (top right) or pick a performing doctor');
   if (_apClaimType === 'consult') {
     if (!(document.getElementById('cb-date')  || {}).value) addMissing.push('date');
     if (!(document.getElementById('cb-start') || {}).value) addMissing.push('start time');
@@ -11159,9 +11353,10 @@ async function apSubmit(addToList, _skipDupCheck) {
   // usual; _batchClaimCollect diverts their pushes into this bundle.
   var _apBatch = [];
   var _apClaimsValid = true;
-  if (st.doc) {
-    var cPerf  = document.getElementById('cb-performing-doc');
-    var cAlias = (cPerf && cPerf.value) ? cPerf.value : st.doc.alias;
+  // v4.94: gate on the resolved billing alias (login OR in-card pick), never on
+  // st.doc alone. Empty = hard stop in the else, never a silent skip.
+  var cAlias = _billingAliasForAdd();
+  if (cAlias) {
     var billingLoc = (document.getElementById('f-billing-loc') || {}).value || 'I';
     window._batchClaimCollect = _apBatch;
     try {
@@ -11182,6 +11377,14 @@ async function apSubmit(addToList, _skipDupCheck) {
     } finally {
       window._batchClaimCollect = null;
     }
+  } else {
+    // v4.94 BACKSTOP — unreachable through the UI (the missing-fields gate
+    // above stops it first). If it is ever reached, fail LOUD and roll back:
+    // an add-patient always intends a claim, so "no billing doctor" must never
+    // resolve to "save the patient and drop the claim".
+    _apClaimsValid = false;
+    showToast('Not saved — no doctor selected. Tap your name to sign in.');
+    if (typeof showModal === 'function') showModal('doc-modal');
   }
   if (!_apClaimsValid) {
     // Claim form invalid (missing time/date/fee — the submit fn already
@@ -15685,6 +15888,11 @@ async function submitAppPassword() {
   var ov = document.getElementById('apppw-modal');
   if (ov) ov.classList.remove('on');
   _appPwOpen = false;
+  // v4.94: authorising the device is HALF the login. The password says "this
+  // device may see patient data"; it does not say who is billing. Chain the
+  // doctor picker straight onto it so "log in on a random PC" is one flow that
+  // always ends with a name selected. (Kathryn 2026-08-11.)
+  if (!st.doc) _forceSignIn();
   var res = _appPwResolve; _appPwResolve = null;
   if (res) res();
 }
@@ -15759,6 +15967,10 @@ async function init() {
     });
     sv('doctors', st.doctors);
   }
+
+  // v4.94: no signed-in doctor on this device → force the picker now, before
+  // anything can be entered. Nothing on Add Patient may be billed without it.
+  if (!st.doc) _forceSignIn();
 
   // (test patients removed for live deployment)
     // Restore any custom wards saved from previous sessions
@@ -15987,7 +16199,41 @@ function showModal(id) {
 }
 
 function hideModal(id) {
+  // v4.94: the doctor picker is non-dismissible while sign-in is mandatory.
+  if (id === 'doc-modal' && _signInMandatory && !st.doc) {
+    showToast('Tap your name first — claims cannot be billed without it.');
+    return;
+  }
   document.getElementById(id).classList.remove('on');
+}
+
+// ── v4.94: MANDATORY SIGN-IN ───────────────────────────────────────────────
+// st.doc lives in localStorage, so a brand-new device (or a shared hospital
+// PC that has never been signed in) starts with st.doc = null. Until v4.94
+// nothing forced the doctor to pick a name, and the Add-Patient claim block
+// was silently skipped in that state — patient on the list, no claim, no
+// error (FHalperin 2026-08-09 onward; ChangeLog `claims=0` / user `unknown`).
+// The picker is now non-dismissible until a name is chosen.
+var _signInMandatory = false;
+
+function _forceSignIn() {
+  if (st.doc) return;
+  _signInMandatory = true;
+  showModal('doc-modal');
+  var t = document.querySelector('#doc-modal .modal-title');
+  if (t) t.textContent = 'Who are you?';
+  var sub = document.querySelector('#doc-modal .modal-title + div');
+  if (sub) sub.textContent = 'Required — claims cannot be billed until you sign in.';
+  var cancel = document.querySelector('#doc-modal .btn-s');   // the Cancel button
+  if (cancel) cancel.style.display = 'none';
+}
+
+function _releaseSignIn() {
+  _signInMandatory = false;
+  var cancel = document.querySelector('#doc-modal .btn-s');
+  if (cancel) cancel.style.display = '';
+  var sub = document.querySelector('#doc-modal .modal-title + div');
+  if (sub) sub.textContent = 'Tap your name to sign in';
 }
 
 function renderDocOpts() {
@@ -16015,6 +16261,7 @@ function selectDocEl(el) {
 function selectDoc(alias, num, name) {
   st.doc = { alias:alias, num:num, name:name };
   sv('doc', st.doc);
+  _releaseSignIn();                                   // v4.94
   document.getElementById('doc-label').textContent = alias;
   document.getElementById('doc-dot').classList.add('on');
   hideModal('doc-modal');
