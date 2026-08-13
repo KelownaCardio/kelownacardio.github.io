@@ -1,4 +1,14 @@
-// 13_meditech.js — Meditech rounds list bulk photo import
+// 13_meditech.js — Meditech rounds list photo: discharge reconcile +
+//                  MRP transitions (new-patient import RETIRED v4.95)
+// ═══════════════════════════════════════════════════════
+// v4.95 (2026-08-12): NEW-PATIENT IMPORT RETIRED (Kathryn's decision).
+//        Imported patients carried no PHN and the server has blocked no-PHN
+//        patient rows since ~June (v2.29), so the import silently created
+//        local-only records that never synced. New-patient rows in the
+//        preview are now informational only ("not in app — add via Add
+//        Patient"); tapping them toasts the explanation. Discharge
+//        reconciliation and MRP transitions are unchanged — they operate on
+//        existing patient rows and still work.
 // ═══════════════════════════════════════════════════════
 
 // ── KGH location decoder ───────────────────────────────────────────
@@ -277,7 +287,14 @@ function renderMediteachPreview(patients) {
     return Object.assign({}, p, {
       _idx: i, _ward: loc.ward, _room: loc.room,
       _list: care.list, _care: care.care, _role: care.role,
-      _icd: icd, _mrp: _mrp, _include: !existing, _existing: existing,
+      // v4.95: IMPORT RETIRED — new patients default to excluded and cannot
+      // be toggled on (see toggleImpRow). Meditech rows carry no PHN and the
+      // server has blocked no-PHN patient rows since ~June (v2.29), so the
+      // "import" only ever created a local-only patient that other devices
+      // never received. New patients must come in via Add Patient (sticker
+      // OCR → PHN). Discharge reconcile + MRP transitions below still work —
+      // they mutate EXISTING rows.
+      _icd: icd, _mrp: _mrp, _include: false, _existing: existing,
       _matches: matches,  // v3.38: full match list for conflict detection
       _mrpTransition: null,
       _existingPid: null,
@@ -430,7 +447,7 @@ function renderMediteachPreview(patients) {
       }).join('') +
       '<div style="height:10px"></div>' +
       (_mitPats.length
-        ? '<div class="sec-lbl" style="margin-top:4px">Add from Meditech (' + _mitPats.filter(function(p){return !p._existing;}).length + ' new)</div>'
+        ? '<div class="sec-lbl" style="margin-top:4px">On Meditech, not in app (' + _mitPats.filter(function(p){return !p._existing;}).length + ') — import retired, add via Add Patient</div>'
         : '');
   }
 
@@ -500,6 +517,10 @@ function renderMediteachPreview(patients) {
     } else if (p._existing) {
       rowCls += ' existing';
       nameTag = ' <span style="color:var(--green-t);font-size:10px;font-weight:700">already on list</span>';
+    } else {
+      // v4.95: IMPORT RETIRED — new patient on Meditech, informational only.
+      rowCls += ' excluded';
+      nameTag = ' <span style="color:var(--text2);font-size:10px;font-weight:700">not in app — add via Add Patient</span>';
     }
     return '<div class="' + rowCls + '" id="imp-row-' + p._idx + '"' + rowStyle + '>' +
       '<div class="imp-chk' + (p._include ? ' on' : '') + '" id="imp-chk-' + p._idx + '" onclick="toggleImpRow(' + p._idx + ')">' +
@@ -555,6 +576,12 @@ function renderMediteachPreview(patients) {
 
 function toggleImpRow(idx) {
   var p   = _mitPats[idx];
+  // v4.95: IMPORT RETIRED — a row that isn't an existing patient can't be
+  // selected; importing it would create a PHN-less record the server rejects.
+  if (!p._existing) {
+    showToast('Import retired — add new patients via Add Patient (sticker has the PHN)');
+    return;
+  }
   p._include = !p._include;
   var chk = document.getElementById('imp-chk-' + idx);
   var row = document.getElementById('imp-row-' + idx);
@@ -637,40 +664,22 @@ function confirmMediteachImport() {
               prev + ' → ' + ep.mrp + '/' + ep.list + '/' + ep.role + '/' + ep.care);
   });
 
-  // ── Imports ───────────────────────────────────────────
-  var toImport = _mitPats.filter(function(p) { return p._include && !p._existing; });
-  toImport.forEach(function(p) {
-    var newPt = {
-      id:          'p' + Date.now() + Math.floor(Math.random() * 9999),
-      last:        p.last,
-      first:       p.first,
-      phn:         '',
-      dob:         '',
-      sex:         p.sex || '',
-      ward:        p._ward,
-      bed:         p._room,
-      fac:         'OA040',
-      refby:       '',
-      refbyName:   '',
-      care:        p._care,
-      list:        p._list,
-      role:        p._role || 'consultant',
-      icd:         p._icd,
-      roundedToday:null,
-      mrp:         p._mrp || 'Other'
-    };
-    st.patients.push(newPt);
-    if (SHEETS_URL) push('savePatient', newPt);
-    logChange(newPt, 'Imported from Meditech', p._ward + (p._room ? ' Rm ' + p._room : ''));
-  });
+  // ── Imports: RETIRED (v4.95, Kathryn 2026-08-12) ──────
+  // The new-patient import created PHN-less records the server has rejected
+  // since ~June (v2.29) — the patient existed only on the importing device
+  // and never reached other devices or the sheet. New patients now come in
+  // ONLY via Add Patient (sticker OCR supplies the PHN). The Meditech list
+  // remains useful for what still works below: discharge reconciliation and
+  // MRP transitions, both of which mutate EXISTING patient rows.
+  var newOnMeditech = _mitPats.filter(function(p) { return !p._existing; }).length;
   sv('patients', st.patients);
   hideModal('mit-modal');
   render();
 
   var msg = [];
-  if (toImport.length)     msg.push(toImport.length     + ' imported');
   if (toTransition.length) msg.push(toTransition.length + ' MRP changed');
   if (toDisch.length)      msg.push(toDisch.length      + ' discharged');
+  if (newOnMeditech)       msg.push(newOnMeditech + ' new on Meditech NOT imported — add via Add Patient');
   showToast(msg.length ? msg.join(', ') : 'Nothing to change');
 
   _mitPats  = [];

@@ -1,5 +1,11 @@
 // 03_state.js — App state, local storage, Google Sheets sync
 // ═══════════════════════════════════════════════════════
+// v4.95 (2026-08-12): version bump only in this file. The fix lives in
+//        09_patient.js (+13_meditech.js) — every new add now sends explicit
+//        discharged:false so a server PHN-merge into a discharged
+//        phone-consult stub can't resurrect discharged=TRUE and hide the
+//        patient from the on-service list (Vankoesveld, 2026-08-11). Pairs
+//        with Crud.gs v3.18 server-side backstop.
 // v4.91 (2026-08-09): PULLED-ARCHIVE PIN (Simms "Pull claims does nothing"
 //        bug). Archived/old-discharged patients are excluded from the
 //        filtered getAll, so the remote-authoritative sync merge dropped a
@@ -430,7 +436,7 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // honours the marker and logs `dup_claim_allowed` with the time, note and
 // repeated-claim id. CCU family (CCU_DAILY/1411/1421/1431) can NEVER be
 // overridden — it is cross-physician and a second CCU day is not a service.
-var APP_VERSION = 'v4.94';
+var APP_VERSION = 'v4.95';
 var APP_BUILT   = '2026-08-10';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,

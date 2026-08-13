@@ -1,6 +1,20 @@
 // 09_patient.js — Add patient (Step 1), sticker/Meditech
 //                 chart photo OCR, ward/room selectors
 // ═══════════════════════════════════════════════════════
+// v4.95 (2026-08-12): VANKOESVELD FIX — the NEW-patient branch of apSubmit
+//        never set `discharged`, so when the server PHN-merged the payload
+//        into an existing DISCHARGED row (phone-consult webform stubs are
+//        created discharged=TRUE) the blank kept the stub's discharge state:
+//        ward/bed/list saved fine but the patient never appeared on the
+//        on-service list, and the pending-edit confirm loop re-pushed for
+//        ~50 min (the "errors" AKhosla saw 2026-08-11). Now every new add
+//        sends discharged:false + cleared discharge fields explicitly, and
+//        stampChangedGroups stamps the discharge hot group so LWW protects
+//        it. Also: _mergeAndReadmit assigns a fresh id when the dup match
+//        arrived without one — a missing patient.id used to hard-fail the
+//        whole savePatientWithClaims batch, claims included (Schwab,
+//        2026-08-11 18:24). Pairs with Crud.gs v3.18 server backstop.
+// ═══════════════════════════════════════════════════════
 
 // ── Duplicate patient helper: 2-of-3 match on PHN / last / DOB ───
 function _findDup2of3(patients, chkPhn, chkLast, chkDob) {
@@ -146,6 +160,12 @@ async function _mergeAndReadmit() {
   hideModal('merge-modal');
   var p = window._dupExisting;
   if (!p) return;
+  // v4.95: a dup match sourced from an archive/BQ search can arrive without an
+  // id. savePatientWithClaims used to hard-fail the WHOLE batch on missing
+  // patient.id (killing the claims too — DPatton/Schwab 2026-08-11 18:24).
+  // Give it a fresh id here; the server PHN-upsert still merges into the
+  // existing PHN row, so no duplicate patient row is created.
+  if (!p.id) p.id = 'p' + Date.now();
   var addToList = window._apPendingAddToList;
 
   // v4.69: snapshot the demographics BEFORE the write-back. Claim rows carry a
@@ -1420,6 +1440,19 @@ async function apSubmit(addToList, _skipDupCheck) {
     p.privatePay = true;
     p.rateMode   = gv('f-private-rate') || 'BCMA';
   }
+
+  // v4.95: ALWAYS send explicit discharge state on a new add. The admitted
+  // branch below never set `discharged`, so when the server PHN-merged this
+  // payload into an existing DISCHARGED row (e.g. the phone-consult webform
+  // stub, which is created discharged=TRUE) the blank field kept the stub's
+  // discharge state and the patient silently vanished from the on-service
+  // list (Vankoesveld, 2026-08-11). Setting it here also makes
+  // stampChangedGroups() below stamp the discharge hot group, so multi-device
+  // LWW protects the reactivation. The consult-only branch overrides to true.
+  p.discharged    = false;
+  p.dischargedAt  = '';
+  p.dischargeDate = '';
+  p.dischargedBy  = '';
 
   if (addToList) {
     var ward = gv('f-ward') || 'OTHER';
