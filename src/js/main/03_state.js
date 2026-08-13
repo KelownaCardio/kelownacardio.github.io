@@ -1,5 +1,11 @@
 // 03_state.js — App state, local storage, Google Sheets sync
 // ═══════════════════════════════════════════════════════
+// v4.96 (2026-08-13): version bump only in this file. New fee code 00081
+//        Emergency Bedside Care ($119.97 per 30-min unit or majority
+//        portion ≥16 min; start/end + resuscitation note mandatory; Yes/No
+//        "consult covers the first 30 min" sheet at submit). Changes live in
+//        02_constants.js (FEES entry) + 06_claim_screen.js (form/units/
+//        sheet). Backend Config.gs adds 00081 to VALID_FEE_CODES.
 // v4.95 (2026-08-12): version bump only in this file. The fix lives in
 //        09_patient.js (+13_meditech.js) — every new add now sends explicit
 //        discharged:false so a server PHN-merge into a discharged
@@ -436,8 +442,8 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // honours the marker and logs `dup_claim_allowed` with the time, note and
 // repeated-claim id. CCU family (CCU_DAILY/1411/1421/1431) can NEVER be
 // overridden — it is cross-physician and a second CCU day is not a service.
-var APP_VERSION = 'v4.95';
-var APP_BUILT   = '2026-08-10';
+var APP_VERSION = 'v4.96';
+var APP_BUILT   = '2026-08-13';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
