@@ -765,6 +765,22 @@ function _tlPending() {
     if (!s || !e || !dISO) return null;
     if (fmtD(parseISODate(dISO)) !== _tlCtx.dateFmt) return null;
     var p = currentConsultPatient();
+    // v4.95: GHOST FIX (Bernard, 2026-08-12). The dashed "entering now — not
+    // saved yet" card mirrors whatever sits in the consult form. If a saved
+    // claim for the SAME patient + date + start time already exists, the
+    // entry HAS been saved — the form is just still holding the values — and
+    // the ghost renders as a confusing phantom next to the real card. Only
+    // show the ghost while no matching saved claim exists.
+    var _gPhn = String((p && p.phn) || '').replace(/\D/g, '');
+    var _gLast = String((p && p.last) || '').trim().toLowerCase();
+    var _saved = (st.claims || []).some(function(x) {
+      if (String(x.date) !== _tlCtx.dateFmt) return false;
+      if (String(x.startTime || '') !== s) return false;
+      var xPhn = String(x.phn || '').replace(/\D/g, '');
+      if (_gPhn && xPhn) return xPhn === _gPhn;
+      return _gLast && String(x.last || '').trim().toLowerCase() === _gLast;
+    });
+    if (_saved) return null;
     return { last: (p.last || '(this entry)'), start: s, end: e };
   } catch (err) { return null; }
 }
