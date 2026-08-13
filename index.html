@@ -1511,6 +1511,13 @@ var FEES = [
   { code:'33012',  desc:'Repeat / limited consultation (same illness, within 6 months)',  amount:'$93.08',  cat:'Consult',   clr:'chip-yellow' },
   { code:'33014',  desc:'Prolonged visit for counselling (max 4/year)',                   amount:'$66.47',  cat:'Consult',   clr:'chip-yellow' },
   { code:'33005',  desc:'Emergency visit when specially called',                          amount:'$97.15',  cat:'Consult',   clr:'chip-red'    },
+  // v4.96: Emergency Bedside Care — per 30 min (or majority portion, ≥16 min)
+  // of a life-threatening cardiac event. Start/end time + resuscitation note
+  // mandatory (enforced in 06_claim_screen). Exported as literal '00081'
+  // (leading zeros preserved — '81' is a different MSP item). If an initial
+  // consult is billed for the same event, the consult covers the first 30 min
+  // (Yes/No prompt at submit handles the split).
+  { code:'00081',  desc:'Emergency bedside care — per 30 min of life-threatening cardiac event', amount:'$119.97', cat:'Emergency', clr:'chip-red'    },
 
   // ── Continuing care by consultant ────────────────────────────────
   { code:'33006',  desc:'Directive visit (max 2 per Sun–Sat week; 3rd requires note)',    amount:'$82.42',  cat:'Directive', clr:'chip-skyblue'},
@@ -1533,9 +1540,6 @@ var FEES = [
   // 2026-07-17); private BCMA invoices are priced per component in Invoice.gs.
   { code:'ECHODOP', desc:'Echo with Doppler (33091 + 08679) — OOP / Private only',       amount:'$90.00',  cat:'Diagnostics', clr:'chip-teal'  },
   { code:'STRECHO', desc:'Stress Echo (08662 + 08679) — OOP / Private only',             amount:'$122.57', cat:'Diagnostics', clr:'chip-teal'  },
-  // v4.80: TEE bundles — same OOP / Private-Pay restriction.
-  { code:'TEECARD', desc:'TEE by Cardiology (08679 + 08638 + 33057) — OOP / Private only', amount:'$231.22', cat:'Diagnostics', clr:'chip-teal'  },
-  { code:'TEEINT',  desc:'TEE interp only, anaesthesia (08679 + 08638) — OOP / Private only', amount:'$62.02',  cat:'Diagnostics', clr:'chip-teal'  },
 
   // ── Discharge / planning ────────────────────────────────────────
   { code:'78717',  desc:'Specialist discharge care plan for complex patients (extra)',    amount:'$82.19',  cat:'Discharge', clr:'chip-green' },
@@ -1564,26 +1568,13 @@ var FEES = [
 // 08679 professional = $18.50). Private-pay BCMA invoices ignore feeAmount —
 // Invoice.gs prices each component from BCMA_RATES (33091 $691, 08679 $148,
 // 08662 $789, April 2026 catalogue).
-// v4.80: TEE bundles. Cluster totals $231.22 (08679C) and $62.02 (08679F)
-// per Kathryn 2026-07-17; per-component MSP split holds 08679 = $18.50 (as
-// in the two bundles above), leaving 08638 = $43.52 and 33057 = $169.20 so
-// the parts sum to the cluster total exactly. BCMA (Invoice.gs) prices each
-// component from the April 2026 catalogue: 08679 $148 + 08638 $325 + 33057
-// $525 = $998; 08679 $148 + 08638 $325 = $473.
 var ECHO_BUNDLES = {
   ECHODOP: { label: 'Echo with Doppler',
              parts: [ { code: '33091', msp: 71.50  },
                       { code: '08679', msp: 18.50  } ] },
   STRECHO: { label: 'Stress Echo',
              parts: [ { code: '08662', msp: 104.07 },
-                      { code: '08679', msp: 18.50  } ] },
-  TEECARD: { label: 'TEE by Cardiology',
-             parts: [ { code: '08679', msp: 18.50  },
-                      { code: '08638', msp: 43.52  },
-                      { code: '33057', msp: 169.20 } ] },
-  TEEINT:  { label: 'TEE interp only',
-             parts: [ { code: '08679', msp: 18.50  },
-                      { code: '08638', msp: 43.52  } ] }
+                      { code: '08679', msp: 18.50  } ] }
 };
 
 // ── Derive FEE_RATES from the FEES catalogue ───────────────────────────
@@ -2217,6 +2208,12 @@ function selectIcd(code, label, dropdownId, hiddenId, inputId) {
 
 // 03_state.js — App state, local storage, Google Sheets sync
 // ═══════════════════════════════════════════════════════
+// v4.96 (2026-08-13): version bump only in this file. New fee code 00081
+//        Emergency Bedside Care ($119.97 per 30-min unit or majority
+//        portion ≥16 min; start/end + resuscitation note mandatory; Yes/No
+//        "consult covers the first 30 min" sheet at submit). Changes live in
+//        02_constants.js (FEES entry) + 06_claim_screen.js (form/units/
+//        sheet). Backend Config.gs adds 00081 to VALID_FEE_CODES.
 // v4.95 (2026-08-12): version bump only in this file. The fix lives in
 //        09_patient.js (+13_meditech.js) — every new add now sends explicit
 //        discharged:false so a server PHN-merge into a discharged
@@ -2653,8 +2650,8 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // honours the marker and logs `dup_claim_allowed` with the time, note and
 // repeated-claim id. CCU family (CCU_DAILY/1411/1421/1431) can NEVER be
 // overridden — it is cross-physician and a second CCU day is not a service.
-var APP_VERSION = 'v4.95';
-var APP_BUILT   = '2026-08-10';
+var APP_VERSION = 'v4.96';
+var APP_BUILT   = '2026-08-13';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -5440,6 +5437,51 @@ function wpAddClaim(btn) {
 
 // 06_claim_screen.js — Tap-patient claim screen controller
 // ═══════════════════════════════════════════════════════
+// v4.96 (2026-08-13): 00081 Emergency Bedside Care (Kathryn spec).
+//   - $119.97 per 30-min unit or MAJORITY portion (≥16 min) thereof; units
+//     auto-calculated from the mandatory start/end times.
+//   - Resuscitation-details note mandatory.
+//   - On submit (from the +Claim screen) a Yes/No sheet asks "Add an initial
+//     consult covering the first 30 minutes?". Yes → the consult form opens
+//     pre-filled start→start+30 and the 00081 claim starts at the next
+//     minute, units re-calculated on the remaining time. No → 00081 alone
+//     covers the whole window. From Add Patient (batch path — no modal
+//     possible) the full window is billed and a reminder toast shown.
+//   - Exported fee code is the literal string '00081' (Crud writes all cells
+//     with '@' text format, so the leading zeros survive the Sheet + CSV).
+
+// ── 00081 Emergency Bedside Care ───────────────────────────────────
+var EBC_CODE = '00081';
+var EBC_EXPLANATION = 'Per 30 minutes of life threatening cardiac event ' +
+  '(note: if billing an initial consult also, that consult fee covers the first 30 min)';
+
+// One unit per 30 min or majority portion (≥16 min) thereof.
+// 16–45 min → 1, 46–75 → 2, 76–105 → 3 … (<16 min → 0, not billable)
+function ebcUnitsFromDur(durMins) {
+  if (!durMins || durMins <= 0) return 0;
+  var full = Math.floor(durMins / 30);
+  var rem  = durMins - full * 30;
+  return full + (rem >= 16 ? 1 : 0);
+}
+
+// Bedside duration in minutes from 24h "HH:MM" strings (handles midnight wrap).
+function ebcDurMins(start24, end24) {
+  if (!start24 || !end24) return 0;
+  var s = t2m(start24), e = t2m(end24);
+  if (e < s) e += 24 * 60;
+  return e - s;
+}
+
+// 24h "HH:MM" + n minutes (wraps at midnight).
+function ebcAddMins(t24, n) {
+  return minsToTime((t2m(t24) + n) % (24 * 60));
+}
+
+// 12h display for the modal ("14:35" → "2:35pm").
+function ebcDisp(t24) {
+  var v = _ocTo12(t24);
+  return v.disp ? v.disp + v.ap : t24;
+}
 
 function _openClaimScreen(pid) {
   _claimPid = pid;
@@ -5525,7 +5567,7 @@ function feeSearch(query) {
     'Echo':'var(--teal-t)',       'Pacemaker':'var(--teal-t)', 'Remote':'var(--teal-t)',
     'Diagnostics':'var(--teal-t)','Event':'var(--teal-t)',      'Procedure':'var(--purple-t)',  'Rehab':'var(--green-t)',
     'Discharge':'var(--green-t)', 'CCU':'var(--red-t)',        'Modifier':'var(--text3)',
-    'Other':'var(--teal-t)'
+    'Emergency':'var(--red-t)',   'Other':'var(--teal-t)'
   };
 
   dd.innerHTML = matches.map(function(f) {
@@ -5555,14 +5597,18 @@ function selectFeeCode(code, desc) {
   var endWrap = document.getElementById('oc-end-wrap');
   var notesEl = document.getElementById('oc-notes');
   var startLbl = document.getElementById('oc-start-lbl');
-  if (code === '33005') {
+  if (code === '33005' || code === EBC_CODE) {
     if (endWrap)  endWrap.style.display = 'block';
     if (startLbl) startLbl.innerHTML = 'Start time <span style="color:var(--red-t)">*</span>';
     if (notesEl) {
-      notesEl.placeholder = 'Describe emergency care provided (mandatory by MSP)';
+      notesEl.placeholder = code === EBC_CODE
+        ? 'Resuscitation details (mandatory)'
+        : 'Describe emergency care provided (mandatory by MSP)';
       notesEl.style.cssText = 'border:1.5px solid var(--amber-t)';
       notesEl.setAttribute('data-required', '1');
     }
+    // 00081: surface the billing rule right under the fee-code picker.
+    if (code === EBC_CODE && disp) disp.textContent = EBC_EXPLANATION;
   } else {
     if (endWrap)  endWrap.style.display = 'none';
     if (startLbl) startLbl.innerHTML = 'Start time <span style="font-size:10px;color:var(--text3)">(if required)</span>';
@@ -5610,6 +5656,7 @@ function ocSetMeridiem(which, ap) {
   var pm = document.getElementById('oc-' + which + '-pm');
   if (am) am.className = 'ct-btn' + (ap === 'am' ? ' ct-on-consult' : '');
   if (pm) pm.className = 'ct-btn' + (ap === 'pm' ? ' ct-on-consult' : '');
+  updateOtherPreview();   // v4.96: 00081 units live-recalculate on time edits
 }
 
 function ocMeridiem(which) {
@@ -5638,6 +5685,7 @@ function ocTimeBlur(which) {
       ocSetMeridiem(which, (new Date()).getHours() >= 12 ? 'pm' : 'am');
     }
   }
+  updateOtherPreview();   // v4.96: 00081 units live-recalculate on time edits
 }
 
 // Canonical 24h "HH:MM" from OC field text + pill.
@@ -5759,12 +5807,34 @@ function updateOtherPreview() {
   }
   var knownFee = FEES.find(function(f) { return f.code === fee; });
   var amt      = knownFee && knownFee.amount ? '<span class="cp-amount" style="margin-left:8px;font-weight:700;color:var(--green-t)">' + esc(knownFee.amount) + '</span>' : '';
+
+  // v4.96: 00081 — live unit calculation from the start/end times.
+  var extra = '';
+  if (fee === EBC_CODE) {
+    var s   = ocTime24('start');
+    var e   = ocTime24('end');
+    var dur = ebcDurMins(s, e);
+    var u   = ebcUnitsFromDur(dur);
+    var rate = FEE_RATES[EBC_CODE] || 0;
+    if (dur > 0) {
+      extra = '<div class="cp-row" style="font-size:12px;margin-top:4px">Bedside ' + dur +
+        ' min &rarr; ' + u + ' &times; 30-min unit' + (u === 1 ? '' : 's') +
+        (u ? ' = <b>$' + (u * rate).toFixed(2) + '</b>'
+           : ' &mdash; <span style="color:var(--red-t)">under 16 min, not billable</span>') +
+        '</div>';
+    } else {
+      extra = '<div style="font-size:11px;color:var(--text3);margin-top:4px">Enter start and end time &mdash; ' +
+        'billed per 30 min (or majority portion, &ge;16 min) at the bedside.</div>';
+    }
+    extra += '<div style="font-size:11px;color:var(--text3);margin-top:3px">' + esc(EBC_EXPLANATION) + '</div>';
+  }
+
   prev.innerHTML = '<div class="cp-title">Claim to add</div>' +
     '<div class="cp-row" style="display:flex;align-items:center;gap:6px">' +
     '<span class="cp-code">' + esc(fee) + '</span>' +
     '<span class="cp-desc" style="flex:1;min-width:0">' + esc(knownFee ? knownFee.desc : 'Custom fee code') + '</span>' +
     amt +
-    '</div>';
+    '</div>' + extra;
 }
 
 // Shared Other-claim submit — reads the oc-* form, validates 33005, and
@@ -5772,7 +5842,11 @@ function updateOtherPreview() {
 // Per-claim ICD / referring-MD ride on the claim only (via pClone); the
 // patient's baseline is never rewritten — consistent with the consult form.
 // Returns true on success, false if validation blocked the save.
-function submitOtherClaimFor(p, alias) {
+// v4.96: opts.interactive (set by the +Claim screen wrapper) enables the
+// 00081 "add a consult for the first 30 min?" sheet. The Add-Patient batch
+// path stays 2-arg / non-interactive: full window billed, reminder toasted.
+function submitOtherClaimFor(p, alias, opts) {
+  opts = opts || {};
   var fee     = ((document.getElementById('oc-fee')   || {}).value || '').trim();
   var dateISO = (document.getElementById('oc-date')  || {}).value || '';
   var start   = ocTime24('start');
@@ -5786,24 +5860,34 @@ function submitOtherClaimFor(p, alias) {
   if (!fee)     { showToast('Enter a fee code'); return false; }
   if (!dateISO) { showToast('Enter a date');     return false; }
 
-  // 33005 (emergency visit) — start, end, and a description are mandatory.
-  if (fee === '33005') {
+  // 33005 (emergency visit) / 00081 (emergency bedside care) —
+  // start, end, and a description are mandatory.
+  if (fee === '33005' || fee === EBC_CODE) {
     var em = [];
     if (!start)   em.push('start time');
     if (!endTime) em.push('end time');
-    if (!notes)   em.push('description of emergency care');
+    if (!notes)   em.push(fee === EBC_CODE ? 'resuscitation details' : 'description of emergency care');
     if (em.length) {
       if (!start)   { var _se = document.getElementById('oc-start'); if (_se) _se.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
       if (!endTime) { var _ee = document.getElementById('oc-end');   if (_ee) _ee.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
       if (!notes)   { var _ne = document.getElementById('oc-notes'); if (_ne) _ne.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
-      showToast('Required for 33005: ' + em.join(', '));
+      showToast('Required for ' + fee + ': ' + em.join(', '));
       return false;
     }
   }
 
   var dateFmt = fmtD(parseISODate(dateISO));
-  // Units are always 1 for an Other claim.
+  // Units are always 1 for an Other claim — except 00081 (per-30-min).
   var pClone  = Object.assign({}, p, { icd: icd, refby: refby, refbyName: refName });
+
+  // v4.96: 00081 Emergency Bedside Care — units from the bedside window;
+  // interactive path asks whether an initial consult covers the first 30 min.
+  if (fee === EBC_CODE) {
+    return _ebcSubmit(p, pClone, alias, opts, {
+      dateISO: dateISO, dateFmt: dateFmt, start: start, end: endTime,
+      loc: loc, notes: notes
+    });
+  }
 
   // v4.79: Echo bundles — one tap creates each component claim with its
   // professional-fee amount stamped. Restricted to OOP / Private-Pay
@@ -5834,6 +5918,125 @@ function submitOtherClaimFor(p, alias) {
   return true;
 }
 
+// ── v4.96: 00081 submit + consult-split sheet ──────────────────────
+// f = { dateISO, dateFmt, start, end, loc, notes }; times are 24h "HH:MM".
+function _ebcSubmit(p, pClone, alias, opts, f) {
+  var dur = ebcDurMins(f.start, f.end);
+  if (dur <= 0) { showToast('00081: end time must be after start time'); return false; }
+  var fullUnits = ebcUnitsFromDur(dur);
+  if (!fullUnits) {
+    showToast('00081 needs at least 16 min at the bedside (billed per 30 min or majority portion)');
+    return false;
+  }
+
+  if (!opts.interactive) {
+    // Add-Patient batch path — no modal possible mid-batch. Bill the full
+    // window; the consult-covers-first-30-min rule is surfaced as a reminder
+    // (an Add-Patient submission carries EITHER a consult OR an Other claim,
+    // never both, so no same-batch double-billing is possible).
+    var r0 = addClaim(pClone, EBC_CODE, EBC_CODE, fullUnits, f.dateFmt, f.loc,
+                      f.start, f.notes, f.end, alias);
+    if (!r0) return false;
+    sv('claims', st.claims);
+    showToast('00081 × ' + fullUnits + ' unit' + (fullUnits > 1 ? 's' : '') +
+      ' added. If an initial consult is billed too, it covers the first 30 min.');
+    return true;
+  }
+
+  _ebcShowConsultSheet(p, pClone, alias, f, dur, fullUnits);
+  return false;  // caller stays open — the sheet's buttons finish the flow
+}
+
+var _ebcPending = null;
+
+function _ebcEnsureModal() {
+  if (document.getElementById('ebc-modal')) return;
+  var d = document.createElement('div');
+  d.className = 'overlay top';
+  d.id = 'ebc-modal';
+  d.style.zIndex = '10000';  // above the submit overlay (9999)
+  d.innerHTML = '<div class="modal">' +
+    '<div class="modal-title">Emergency Bedside Care &mdash; 00081</div>' +
+    '<div id="ebc-modal-body"></div></div>';
+  d.addEventListener('click', function(ev) { if (ev.target === d) _ebcCancel(); });
+  document.body.appendChild(d);
+}
+
+function _ebcShowConsultSheet(p, pClone, alias, f, dur, fullUnits) {
+  _ebcEnsureModal();
+  var afterUnits = ebcUnitsFromDur(dur - 30);
+  var rate = FEE_RATES[EBC_CODE] || 0;
+  _ebcPending = { p: p, pClone: pClone, alias: alias, f: f,
+                  fullUnits: fullUnits, afterUnits: afterUnits };
+
+  var yesDetail = afterUnits
+    ? 'consult ' + ebcDisp(f.start) + '&ndash;' + ebcDisp(ebcAddMins(f.start, 30)) +
+      ', then 00081 &times; ' + afterUnits + ' unit' + (afterUnits > 1 ? 's' : '') +
+      ' ($' + (afterUnits * rate).toFixed(2) + ')'
+    : 'consult only &mdash; the remaining ' + Math.max(0, dur - 30) +
+      ' min is under the 16-min minimum, so no 00081 will be billed';
+
+  document.getElementById('ebc-modal-body').innerHTML =
+    '<div style="font-size:13px;color:var(--text2);margin-bottom:8px">Bedside ' +
+      ebcDisp(f.start) + '&ndash;' + ebcDisp(f.end) + ' (' + dur + ' min).</div>' +
+    '<div style="font-size:12px;color:var(--text3);margin-bottom:10px">' + esc(EBC_EXPLANATION) + '</div>' +
+    '<div style="font-size:14px;font-weight:700;margin-bottom:12px">Add a consult covering the first 30 minutes?</div>' +
+    '<button class="btn btn-p" style="width:100%;margin:0 0 8px" onclick="_ebcYes()">Yes &mdash; ' + yesDetail + '</button>' +
+    '<button class="btn" style="width:100%;margin:0 0 8px;background:var(--red-bg);color:var(--red-t);border:.5px solid var(--red-t)" ' +
+      'onclick="_ebcNo()">No &mdash; 00081 only, ' + fullUnits + ' unit' + (fullUnits > 1 ? 's' : '') +
+      ' ($' + (fullUnits * rate).toFixed(2) + ')</button>' +
+    '<button class="btn btn-s" style="width:100%;margin:0" onclick="_ebcCancel()">Cancel &mdash; back to the form</button>';
+
+  showModal('ebc-modal');
+}
+
+// Yes — the consult covers start→start+30; 00081 starts at the next minute
+// and bills the remaining time. Then the consult form opens pre-filled so
+// call-out modifiers / MOST / 33010-vs-33012 all go through the normal flow.
+function _ebcYes() {
+  var x = _ebcPending; if (!x) return;
+  _ebcPending = null;
+  hideModal('ebc-modal');
+
+  if (x.afterUnits > 0) {
+    var ebcStart = ebcAddMins(x.f.start, 31);   // "next minute" after the consult's 30
+    var r = addClaim(x.pClone, EBC_CODE, EBC_CODE, x.afterUnits, x.f.dateFmt,
+                     x.f.loc, ebcStart, x.f.notes, x.f.end, x.alias);
+    if (!r) return;  // dedup blocked — its toast is showing; stay on the form
+    sv('claims', st.claims);
+    showToast('00081 × ' + x.afterUnits + ' added — now confirm the consult (first 30 min)');
+  } else {
+    showToast('No 00081 billed (remaining time under 16 min) — enter the consult');
+  }
+
+  // Switch the claim screen to the consult form, pre-filled with the first
+  // 30 minutes of the bedside window (doctor adjusts / submits as usual).
+  selCT('consult');
+  var dEl = cEl('cb-date'); if (dEl) dEl.value = x.f.dateISO;
+  cbSetTime('start', x.f.start);
+  cbSetTime('end',   ebcAddMins(x.f.start, 30));
+  updateConsultUI();
+}
+
+// No — 00081 alone covers the whole bedside window.
+function _ebcNo() {
+  var x = _ebcPending; if (!x) return;
+  _ebcPending = null;
+  hideModal('ebc-modal');
+  var r = addClaim(x.pClone, EBC_CODE, EBC_CODE, x.fullUnits, x.f.dateFmt,
+                   x.f.loc, x.f.start, x.f.notes, x.f.end, x.alias);
+  if (!r) return;  // dedup blocked — stay on the form
+  sv('claims', st.claims);
+  showToast('00081 × ' + x.fullUnits + ' unit' + (x.fullUnits > 1 ? 's' : '') +
+    ' added for ' + x.p.last);
+  closeClaimScreen();
+}
+
+function _ebcCancel() {
+  _ebcPending = null;
+  hideModal('ebc-modal');
+}
+
 // +Claim screen wrapper — validates the doctor + required fields, then
 // delegates to the shared submit and closes the claim screen.
 function submitOtherClaim() {
@@ -5849,8 +6052,10 @@ function submitOtherClaim() {
   var validateP = Object.assign({}, p, { icd: icd, refby: refby, refbyName: refName });
   if (!validateRequiredForClaim(validateP)) { highlightMissingFields(); return; }
 
-  if (!submitOtherClaimFor(p, getPerformingAlias())) return;
+  if (!submitOtherClaimFor(p, getPerformingAlias(), { interactive: true })) return;
 
+  // 00081 finishes via its own sheet (submitOtherClaimFor returned false
+  // while it is open), so this toast/close only runs for ordinary codes.
   showToast((fee || 'Claim') + ' claim added for ' + p.last);
   closeClaimScreen();
 }
