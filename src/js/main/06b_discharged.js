@@ -131,30 +131,91 @@ async function archiveSearch() {
     box.innerHTML = '<div style="font-size:12px;color:var(--amber-t);padding:8px 2px">Archive search failed — check connection and retry.</div>';
   }
 }
+// v4.99: normalise a raw Patients-sheet row into the shape the app expects.
+// getAllForDataCheck returns UNTOUCHED cell values (Dates serialise to ISO
+// strings, all-digit cells to numbers, checkboxes to booleans). syncFromSheets
+// normalises the getAll payload the same way; the archive pull never did, so a
+// recalled patient carried ISO dobs/discharge dates and a numeric PHN into the
+// calendar — dischargeDaysAgo() then read off dischargedAt and reported the
+// wrong age.
+function _normArchivePatient(raw) {
+  var p = Object.assign({}, raw);
+  delete p._row;
+  if (p.dob)           p.dob           = fmtClaimDate(p.dob);
+  if (p.admitDate)     p.admitDate     = fmtClaimDate(p.admitDate);
+  if (p.dischargeDate) p.dischargeDate = fmtClaimDate(p.dischargeDate);
+  if (p.roundedToday)  p.roundedToday  = fmtClaimDate(p.roundedToday);
+  if (p.dischargedAt)  p.dischargedAt  = parseDischargedAt(p.dischargedAt);
+  p.discharged = parseBool(p.discharged);
+  if (p.phn   != null) p.phn   = String(p.phn);
+  if (p.bed   != null) p.bed   = String(p.bed);
+  if (p.refby != null) p.refby = String(p.refby);
+  if (p.icd   != null) p.icd   = String(p.icd);
+  if (p.last  != null) p.last  = fmtName(p.last);
+  if (p.first != null) p.first = fmtName(p.first);
+  try { sanitizeReferrer(p); } catch (e) {}
+  return p;
+}
+
+// v4.99: same treatment for a raw Claims-sheet row.
+function _normArchiveClaim(raw) {
+  var c = Object.assign({}, raw);
+  delete c._row;
+  if (c.date)      c.date      = fmtClaimDate(c.date);
+  if (c.dob)       c.dob       = fmtClaimDate(c.dob);
+  if (c.startTime) c.startTime = fmtStartTime(c.startTime);
+  if (c.endTime)   c.endTime   = fmtStartTime(c.endTime);
+  if (c.phn     != null) c.phn     = String(c.phn);
+  if (c.fee     != null) c.fee     = String(c.fee).trim();
+  if (c.feeCode != null) c.feeCode = String(c.feeCode).trim();
+  if (c.icd     != null) c.icd     = String(c.icd).trim();
+  return c;
+}
+
 function pullArchivedPatient(pid) {
   if (!_archiveCache) return;
-  var p = _archiveCache.patients.filter(function(x){ return String(x.id) === String(pid); })[0];
-  if (!p) { showToast('Could not load that patient — re-run the search.'); return; }
+  var raw = _archiveCache.patients.filter(function(x){ return String(x.id) === String(pid); })[0];
+  if (!raw) { showToast('Could not load that patient — re-run the search.'); return; }
+  var p = _normArchivePatient(raw);          // v4.99
+  p._recalled = true;                        // v4.99: drives the archive chip
+
   // v4.91: PIN the pulled patient (and their claims, by PHN) so the 30s sync
   // merge keeps them. Archived patients are excluded from the filtered getAll,
   // so the remote-authoritative merge used to DROP them from st.patients
-  // seconds after the pull — openPatientSummary then found nothing and
-  // silently returned (the "Pull claims does nothing" bug, 2026-08-09).
-  // Pins live for the session only; a reload clears them.
+  // seconds after the pull. Pins live for the session only; a reload clears them.
   if (!window._pulledPin) window._pulledPin = { pids: {}, phns: {} };
   window._pulledPin.pids[String(p.id)] = Date.now();
   var _pinPhn = String(p.phn || '').replace(/\D/g, '');
   if (_pinPhn) window._pulledPin.phns[_pinPhn] = Date.now();
-  if (!getP(p.id)) st.patients.push(p);
+
+  // ── v4.99 THE BUG ──────────────────────────────────────────────────────
+  // Was: `if (!getP(p.id)) st.patients.push(p);`
+  // getP() returns `... || {}` — an empty object, which is TRUTHY — so the
+  // negation was ALWAYS false and the recalled patient was NEVER added to
+  // st.patients. The claims below were added regardless, so the toast
+  // truthfully reported "n claims loaded" while the patient itself was
+  // missing. openPatientSummary() then hit its own `if (!p.id) return` and
+  // exited silently ("nothing happens"), and the +Claim route rendered a
+  // context bar with no name ("blank patient card"). Test .id, not the object.
+  var existing = getP(p.id);
+  if (!existing || !existing.id) st.patients.push(p);
+  // else: already loaded (e.g. pulled earlier this session) — keep the loaded
+  // object untouched. The archive cache can be up to 2 min stale, and a
+  // recalled patient's edits can't be re-fetched through the filtered getAll,
+  // so overwriting here would silently revert session edits.
+
   var have = {}; st.claims.forEach(function(c){ if (c.id) have[String(c.id)] = true; });
   var pulled = 0;
   _archiveCache.claims.forEach(function(c){
-    if (samePhn(c.phn, p.phn) && !have[String(c.id)]) { st.claims.push(c); pulled++; }
+    if (samePhn(c.phn, p.phn) && !have[String(c.id)]) {
+      st.claims.push(_normArchiveClaim(c)); pulled++;
+    }
   });
   sv('patients', st.patients); sv('claims', st.claims);
-  showToast('Pulled ' + p.last + ' — ' + pulled + ' claim' + (pulled === 1 ? '' : 's') + ' loaded');
+  showToast('Recalled ' + p.last + ' — ' + pulled + ' claim' + (pulled === 1 ? '' : 's') + ' loaded');
   hideModal('pt-summary-modal');
   openPatientSummary(p.id);
+  renderDischarged((document.getElementById('discharged-search') || {}).value || '');
 }
 
 // v4.91: pull an archived patient and go straight to the +Claim screen —
@@ -162,9 +223,17 @@ function pullArchivedPatient(pid) {
 // required restoring to a list or the browser console.
 function pullArchivedAndClaim(pid) {
   pullArchivedPatient(pid);
-  if (!getP(pid)) return;              // pull failed — toast already shown
+  var p = getP(pid);
+  if (!p || !p.id) return;             // v4.99: .id test (see note above)
   hideModal('pt-summary-modal');
   openClaimFromDischarged(pid);
+}
+
+// v4.99: is this patient a session recall (absent from the filtered getAll)?
+function isRecalled(p) {
+  if (!p) return false;
+  if (p._recalled) return true;
+  return !!(window._pulledPin && window._pulledPin.pids && window._pulledPin.pids[String(p.id)]);
 }
 function renderDischarged(query) {
   var container = document.getElementById('discharged-results');
@@ -283,6 +352,8 @@ function dischargedRow(p) {
   var daysAgo = dischargeDaysAgo(p);
   var daysLabel = daysAgo === null ? '' : daysAgo <= 0 ? 'today' : daysAgo === 1 ? '1 day ago' : daysAgo + ' days ago';
   var statusChip = '<span class="chip chip-grey">Discharged' + (daysLabel ? ' ' + daysLabel : '') + '</span>';
+  // v4.99: make a session recall obvious — it is not on the server's active list
+  if (isRecalled(p)) statusChip += ' <span class="chip chip-amber">Recalled from archive</span>';
 
   var phnDisplay = phn ? 'PHN …' + phn.slice(-4) : '<span class="warn-tag">⚠ no PHN</span>';
   var bedDisplay = bed ? ' Rm ' + esc(bed) : '';

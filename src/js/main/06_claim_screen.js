@@ -55,6 +55,13 @@ function _openClaimScreen(pid) {
   _claimReturnSummaryPid = null;
 
   var p = getP(pid);
+  // v4.99: getP() returns {} for an unknown id, so this used to render a
+  // nameless, claim-less "blank patient card" that looked like a data-loss
+  // event. Bail out loudly instead.
+  if (!p || !p.id) {
+    showToast('That patient is not loaded — search the archive and tap Recall.');
+    return;
+  }
 
   // Context bar at top — with pencil edit icon
   document.getElementById('claim-ctx').innerHTML =

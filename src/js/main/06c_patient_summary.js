@@ -191,7 +191,13 @@ function savePatientNotes(pid) {
 
 function openPatientSummary(pid) {
   var p = getP(pid);
-  if (!p || !p.id) return;
+  // v4.99: never fail silently. Before, a missing patient (the archive-recall
+  // bug) made this function return with no UI change at all — the tap simply
+  // did nothing and there was no way to tell why.
+  if (!p || !p.id) {
+    showToast('That patient is not loaded — search the archive and tap Recall.');
+    return;
+  }
   _cvActiveType = null;  // reset legend pill selection for fresh open
   _cvDocAlias   = null;  // reset calendar performing-doctor to signed-in default
   window._cvBQClaims = [];  // reset archived (BigQuery) claims for fresh open
@@ -200,6 +206,28 @@ function openPatientSummary(pid) {
   // sorted oldest → newest. _cvBQClaims is empty on first open and is filled
   // asynchronously by _augmentSummaryWithBQ() below, which then re-renders.
   var claims = _cvClaimsFor(p);
+
+  // Default calendar month (v4.99). Both branches used to resolve to today's
+  // month, which is right for a patient on service and useless for a recalled
+  // one — a June admission opened on an empty August grid and read as "no
+  // claims" until you happened to page back. Now: the month of the newest
+  // claim on record, else the discharge month, else today.
+  var nowD = new Date();
+  var _cvSeedMs = 0;
+  for (var _ci = claims.length - 1; _ci >= 0; _ci--) {
+    var _cm = parseDMYsafe(claims[_ci].date);
+    if (_cm && _cm > _cvSeedMs) _cvSeedMs = _cm;
+  }
+  // parseDMYsafe returns 0 (or NaN) on malformed input — truthiness guards
+  // keep a bad dischargeDate from seeding the calendar to January 1970.
+  if (!_cvSeedMs && p.dischargeDate) _cvSeedMs = parseDMYsafe(p.dischargeDate) || 0;
+  if (!_cvSeedMs && p.admitDate)     _cvSeedMs = parseDMYsafe(p.admitDate) || 0;
+  if (_cvSeedMs && !isNaN(_cvSeedMs)) {
+    var _sD = new Date(_cvSeedMs);
+    window._cvMonth = new Date(_sD.getFullYear(), _sD.getMonth(), 1);
+  } else {
+    window._cvMonth = new Date(nowD.getFullYear(), nowD.getMonth(), 1);
+  }
 
   var html = '';
 
@@ -295,17 +323,6 @@ function openPatientSummary(pid) {
 
   // Stash the patient id for calendar interactions
   window._cvPid = p.id;
-  // Default calendar month: most recent of (today's month, admit month)
-  var admitMs = p.admitDate ? parseDMYsafe(p.admitDate) : null;
-  var nowD = new Date();
-  if (admitMs) {
-    var aD = new Date(admitMs);
-    // Show month containing today by default; user can navigate back to admit
-    window._cvMonth = new Date(nowD.getFullYear(), nowD.getMonth(), 1);
-  } else {
-    window._cvMonth = new Date(nowD.getFullYear(), nowD.getMonth(), 1);
-  }
-
   // Pull the patient's older (submitted + archived) claims from BigQuery and
   // merge them into the view. Nightly maintenance purges submitted claims from
   // the Sheet after discharge, so without this an older/re-admitted patient's

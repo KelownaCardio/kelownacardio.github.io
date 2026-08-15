@@ -1,5 +1,18 @@
 // 03_state.js — App state, local storage, Google Sheets sync
 // ═══════════════════════════════════════════════════════
+// v4.99 (2026-08-15): ARCHIVE RECALL FIX. "Pull claims" on a >7-day
+//        discharged patient loaded the claims but never the patient:
+//        pullArchivedPatient guarded the push with `if (!getP(p.id))`, and
+//        getP() returns `|| {}` — always truthy — so the push never ran.
+//        Tapping the patient then hit openPatientSummary's own `!p.id`
+//        early-return (nothing happened) or _openClaimScreen, which rendered
+//        an empty context bar (the "blank patient card"). Fixed in
+//        06b_discharged.js, plus: raw sheet rows are now normalised on pull
+//        (ISO dates / numeric PHNs), both dead-ends now toast instead of
+//        failing silently, the summary calendar opens on the month of the
+//        newest claim rather than today, and a recalled patient carries an
+//        amber "Recalled from archive" chip. No change in this file beyond
+//        the version bump.
 // v4.96 (2026-08-13): version bump only in this file. New fee code 00081
 //        Emergency Bedside Care ($119.97 per 30-min unit or majority
 //        portion ≥16 min; start/end + resuscitation note mandatory; Yes/No
@@ -442,7 +455,7 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // honours the marker and logs `dup_claim_allowed` with the time, note and
 // repeated-claim id. CCU family (CCU_DAILY/1411/1421/1431) can NEVER be
 // overridden — it is cross-physician and a second CCU day is not a service.
-var APP_VERSION = 'v4.98';
+var APP_VERSION = 'v4.99';
 var APP_BUILT   = '2026-08-13';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
