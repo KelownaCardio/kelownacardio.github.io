@@ -2208,6 +2208,19 @@ function selectIcd(code, label, dropdownId, hiddenId, inputId) {
 
 // 03_state.js — App state, local storage, Google Sheets sync
 // ═══════════════════════════════════════════════════════
+// v4.99 (2026-08-15): ARCHIVE RECALL FIX. "Pull claims" on a >7-day
+//        discharged patient loaded the claims but never the patient:
+//        pullArchivedPatient guarded the push with `if (!getP(p.id))`, and
+//        getP() returns `|| {}` — always truthy — so the push never ran.
+//        Tapping the patient then hit openPatientSummary's own `!p.id`
+//        early-return (nothing happened) or _openClaimScreen, which rendered
+//        an empty context bar (the "blank patient card"). Fixed in
+//        06b_discharged.js, plus: raw sheet rows are now normalised on pull
+//        (ISO dates / numeric PHNs), both dead-ends now toast instead of
+//        failing silently, the summary calendar opens on the month of the
+//        newest claim rather than today, and a recalled patient carries an
+//        amber "Recalled from archive" chip. No change in this file beyond
+//        the version bump.
 // v4.96 (2026-08-13): version bump only in this file. New fee code 00081
 //        Emergency Bedside Care ($119.97 per 30-min unit or majority
 //        portion ≥16 min; start/end + resuscitation note mandatory; Yes/No
@@ -2650,7 +2663,7 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // honours the marker and logs `dup_claim_allowed` with the time, note and
 // repeated-claim id. CCU family (CCU_DAILY/1411/1421/1431) can NEVER be
 // overridden — it is cross-physician and a second CCU day is not a service.
-var APP_VERSION = 'v4.98';
+var APP_VERSION = 'v4.99';
 var APP_BUILT   = '2026-08-13';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -5492,6 +5505,13 @@ function _openClaimScreen(pid) {
   _claimReturnSummaryPid = null;
 
   var p = getP(pid);
+  // v4.99: getP() returns {} for an unknown id, so this used to render a
+  // nameless, claim-less "blank patient card" that looked like a data-loss
+  // event. Bail out loudly instead.
+  if (!p || !p.id) {
+    showToast('That patient is not loaded — search the archive and tap Recall.');
+    return;
+  }
 
   // Context bar at top — with pencil edit icon
   document.getElementById('claim-ctx').innerHTML =
@@ -6270,30 +6290,91 @@ async function archiveSearch() {
     box.innerHTML = '<div style="font-size:12px;color:var(--amber-t);padding:8px 2px">Archive search failed — check connection and retry.</div>';
   }
 }
+// v4.99: normalise a raw Patients-sheet row into the shape the app expects.
+// getAllForDataCheck returns UNTOUCHED cell values (Dates serialise to ISO
+// strings, all-digit cells to numbers, checkboxes to booleans). syncFromSheets
+// normalises the getAll payload the same way; the archive pull never did, so a
+// recalled patient carried ISO dobs/discharge dates and a numeric PHN into the
+// calendar — dischargeDaysAgo() then read off dischargedAt and reported the
+// wrong age.
+function _normArchivePatient(raw) {
+  var p = Object.assign({}, raw);
+  delete p._row;
+  if (p.dob)           p.dob           = fmtClaimDate(p.dob);
+  if (p.admitDate)     p.admitDate     = fmtClaimDate(p.admitDate);
+  if (p.dischargeDate) p.dischargeDate = fmtClaimDate(p.dischargeDate);
+  if (p.roundedToday)  p.roundedToday  = fmtClaimDate(p.roundedToday);
+  if (p.dischargedAt)  p.dischargedAt  = parseDischargedAt(p.dischargedAt);
+  p.discharged = parseBool(p.discharged);
+  if (p.phn   != null) p.phn   = String(p.phn);
+  if (p.bed   != null) p.bed   = String(p.bed);
+  if (p.refby != null) p.refby = String(p.refby);
+  if (p.icd   != null) p.icd   = String(p.icd);
+  if (p.last  != null) p.last  = fmtName(p.last);
+  if (p.first != null) p.first = fmtName(p.first);
+  try { sanitizeReferrer(p); } catch (e) {}
+  return p;
+}
+
+// v4.99: same treatment for a raw Claims-sheet row.
+function _normArchiveClaim(raw) {
+  var c = Object.assign({}, raw);
+  delete c._row;
+  if (c.date)      c.date      = fmtClaimDate(c.date);
+  if (c.dob)       c.dob       = fmtClaimDate(c.dob);
+  if (c.startTime) c.startTime = fmtStartTime(c.startTime);
+  if (c.endTime)   c.endTime   = fmtStartTime(c.endTime);
+  if (c.phn     != null) c.phn     = String(c.phn);
+  if (c.fee     != null) c.fee     = String(c.fee).trim();
+  if (c.feeCode != null) c.feeCode = String(c.feeCode).trim();
+  if (c.icd     != null) c.icd     = String(c.icd).trim();
+  return c;
+}
+
 function pullArchivedPatient(pid) {
   if (!_archiveCache) return;
-  var p = _archiveCache.patients.filter(function(x){ return String(x.id) === String(pid); })[0];
-  if (!p) { showToast('Could not load that patient — re-run the search.'); return; }
+  var raw = _archiveCache.patients.filter(function(x){ return String(x.id) === String(pid); })[0];
+  if (!raw) { showToast('Could not load that patient — re-run the search.'); return; }
+  var p = _normArchivePatient(raw);          // v4.99
+  p._recalled = true;                        // v4.99: drives the archive chip
+
   // v4.91: PIN the pulled patient (and their claims, by PHN) so the 30s sync
   // merge keeps them. Archived patients are excluded from the filtered getAll,
   // so the remote-authoritative merge used to DROP them from st.patients
-  // seconds after the pull — openPatientSummary then found nothing and
-  // silently returned (the "Pull claims does nothing" bug, 2026-08-09).
-  // Pins live for the session only; a reload clears them.
+  // seconds after the pull. Pins live for the session only; a reload clears them.
   if (!window._pulledPin) window._pulledPin = { pids: {}, phns: {} };
   window._pulledPin.pids[String(p.id)] = Date.now();
   var _pinPhn = String(p.phn || '').replace(/\D/g, '');
   if (_pinPhn) window._pulledPin.phns[_pinPhn] = Date.now();
-  if (!getP(p.id)) st.patients.push(p);
+
+  // ── v4.99 THE BUG ──────────────────────────────────────────────────────
+  // Was: `if (!getP(p.id)) st.patients.push(p);`
+  // getP() returns `... || {}` — an empty object, which is TRUTHY — so the
+  // negation was ALWAYS false and the recalled patient was NEVER added to
+  // st.patients. The claims below were added regardless, so the toast
+  // truthfully reported "n claims loaded" while the patient itself was
+  // missing. openPatientSummary() then hit its own `if (!p.id) return` and
+  // exited silently ("nothing happens"), and the +Claim route rendered a
+  // context bar with no name ("blank patient card"). Test .id, not the object.
+  var existing = getP(p.id);
+  if (!existing || !existing.id) st.patients.push(p);
+  // else: already loaded (e.g. pulled earlier this session) — keep the loaded
+  // object untouched. The archive cache can be up to 2 min stale, and a
+  // recalled patient's edits can't be re-fetched through the filtered getAll,
+  // so overwriting here would silently revert session edits.
+
   var have = {}; st.claims.forEach(function(c){ if (c.id) have[String(c.id)] = true; });
   var pulled = 0;
   _archiveCache.claims.forEach(function(c){
-    if (samePhn(c.phn, p.phn) && !have[String(c.id)]) { st.claims.push(c); pulled++; }
+    if (samePhn(c.phn, p.phn) && !have[String(c.id)]) {
+      st.claims.push(_normArchiveClaim(c)); pulled++;
+    }
   });
   sv('patients', st.patients); sv('claims', st.claims);
-  showToast('Pulled ' + p.last + ' — ' + pulled + ' claim' + (pulled === 1 ? '' : 's') + ' loaded');
+  showToast('Recalled ' + p.last + ' — ' + pulled + ' claim' + (pulled === 1 ? '' : 's') + ' loaded');
   hideModal('pt-summary-modal');
   openPatientSummary(p.id);
+  renderDischarged((document.getElementById('discharged-search') || {}).value || '');
 }
 
 // v4.91: pull an archived patient and go straight to the +Claim screen —
@@ -6301,9 +6382,17 @@ function pullArchivedPatient(pid) {
 // required restoring to a list or the browser console.
 function pullArchivedAndClaim(pid) {
   pullArchivedPatient(pid);
-  if (!getP(pid)) return;              // pull failed — toast already shown
+  var p = getP(pid);
+  if (!p || !p.id) return;             // v4.99: .id test (see note above)
   hideModal('pt-summary-modal');
   openClaimFromDischarged(pid);
+}
+
+// v4.99: is this patient a session recall (absent from the filtered getAll)?
+function isRecalled(p) {
+  if (!p) return false;
+  if (p._recalled) return true;
+  return !!(window._pulledPin && window._pulledPin.pids && window._pulledPin.pids[String(p.id)]);
 }
 function renderDischarged(query) {
   var container = document.getElementById('discharged-results');
@@ -6422,6 +6511,8 @@ function dischargedRow(p) {
   var daysAgo = dischargeDaysAgo(p);
   var daysLabel = daysAgo === null ? '' : daysAgo <= 0 ? 'today' : daysAgo === 1 ? '1 day ago' : daysAgo + ' days ago';
   var statusChip = '<span class="chip chip-grey">Discharged' + (daysLabel ? ' ' + daysLabel : '') + '</span>';
+  // v4.99: make a session recall obvious — it is not on the server's active list
+  if (isRecalled(p)) statusChip += ' <span class="chip chip-amber">Recalled from archive</span>';
 
   var phnDisplay = phn ? 'PHN …' + phn.slice(-4) : '<span class="warn-tag">⚠ no PHN</span>';
   var bedDisplay = bed ? ' Rm ' + esc(bed) : '';
@@ -6687,7 +6778,13 @@ function savePatientNotes(pid) {
 
 function openPatientSummary(pid) {
   var p = getP(pid);
-  if (!p || !p.id) return;
+  // v4.99: never fail silently. Before, a missing patient (the archive-recall
+  // bug) made this function return with no UI change at all — the tap simply
+  // did nothing and there was no way to tell why.
+  if (!p || !p.id) {
+    showToast('That patient is not loaded — search the archive and tap Recall.');
+    return;
+  }
   _cvActiveType = null;  // reset legend pill selection for fresh open
   _cvDocAlias   = null;  // reset calendar performing-doctor to signed-in default
   window._cvBQClaims = [];  // reset archived (BigQuery) claims for fresh open
@@ -6696,6 +6793,28 @@ function openPatientSummary(pid) {
   // sorted oldest → newest. _cvBQClaims is empty on first open and is filled
   // asynchronously by _augmentSummaryWithBQ() below, which then re-renders.
   var claims = _cvClaimsFor(p);
+
+  // Default calendar month (v4.99). Both branches used to resolve to today's
+  // month, which is right for a patient on service and useless for a recalled
+  // one — a June admission opened on an empty August grid and read as "no
+  // claims" until you happened to page back. Now: the month of the newest
+  // claim on record, else the discharge month, else today.
+  var nowD = new Date();
+  var _cvSeedMs = 0;
+  for (var _ci = claims.length - 1; _ci >= 0; _ci--) {
+    var _cm = parseDMYsafe(claims[_ci].date);
+    if (_cm && _cm > _cvSeedMs) _cvSeedMs = _cm;
+  }
+  // parseDMYsafe returns 0 (or NaN) on malformed input — truthiness guards
+  // keep a bad dischargeDate from seeding the calendar to January 1970.
+  if (!_cvSeedMs && p.dischargeDate) _cvSeedMs = parseDMYsafe(p.dischargeDate) || 0;
+  if (!_cvSeedMs && p.admitDate)     _cvSeedMs = parseDMYsafe(p.admitDate) || 0;
+  if (_cvSeedMs && !isNaN(_cvSeedMs)) {
+    var _sD = new Date(_cvSeedMs);
+    window._cvMonth = new Date(_sD.getFullYear(), _sD.getMonth(), 1);
+  } else {
+    window._cvMonth = new Date(nowD.getFullYear(), nowD.getMonth(), 1);
+  }
 
   var html = '';
 
@@ -6791,17 +6910,6 @@ function openPatientSummary(pid) {
 
   // Stash the patient id for calendar interactions
   window._cvPid = p.id;
-  // Default calendar month: most recent of (today's month, admit month)
-  var admitMs = p.admitDate ? parseDMYsafe(p.admitDate) : null;
-  var nowD = new Date();
-  if (admitMs) {
-    var aD = new Date(admitMs);
-    // Show month containing today by default; user can navigate back to admit
-    window._cvMonth = new Date(nowD.getFullYear(), nowD.getMonth(), 1);
-  } else {
-    window._cvMonth = new Date(nowD.getFullYear(), nowD.getMonth(), 1);
-  }
-
   // Pull the patient's older (submitted + archived) claims from BigQuery and
   // merge them into the view. Nightly maintenance purges submitted claims from
   // the Sheet after discharge, so without this an older/re-admitted patient's
