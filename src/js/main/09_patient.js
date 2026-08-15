@@ -2090,6 +2090,89 @@ function processStickerOCR(croppedDataUrl, bar) {
 // blank) — shows amber "Could not read sticker" with retry button
 // instead of the misleading green "✓ Extracted: ?, ?".
 
+// ═══════════════════════════════════════════════════════════════════
+// v4.98 — MEDITECH DEMOGRAPHICS OCR (out-of-province / private pay)
+// ───────────────────────────────────────────────────────────────────
+// WHY: OOP and private-pay billing needs home province, home health number
+// and a mailing address. None of it is reliably known at admission — the
+// patient arrives, the clerk types "Do not have the info", and nothing ever
+// chases it. Hutsebaut, George H sat that way from 30/06 to 15/08/2026 with
+// two unbillable claims, because MSP will not accept a reciprocal claim
+// without the home-province number. It IS all in Meditech by discharge.
+//
+// Two different screens carry the pieces, so this prompt handles EITHER and
+// fills whatever it finds — paste one, then the other:
+//
+//   "More Patient Information" > MAIN
+//        Insurances
+//        Province Manitoba - 104407495     <- province + home health number
+//        Self Pay
+//
+//   Sidebar "Demographic Data"
+//        Mailing Address  1702-55 Nassau St N / Winnipeg, MB / R3L 2G8
+//        Insurance        OOP              <- or OOC
+//
+// The payer type comes free: a "Province X - N" line or Insurance "OOP"
+// means reciprocal out-of-province (bills MSP via a hand-keyed Claim
+// Summary); "OOC" or a bare "Self Pay" means out-of-country / private pay
+// (BCMA rates, invoiced to the patient). That flag is currently a hand-
+// ticked box on the Add form and getting it wrong is upstream of every
+// invoicing bug we chased on 2026-08-15.
+//
+// DELIBERATELY NOT TRUSTED: the "Health Care Num: 9641944584, British
+// Columbia" line on MAIN. For an out-of-province patient that is the
+// temporary BC-format number KGH issues, NOT their real coverage. Taking it
+// as homeHCN would produce a confidently wrong, unbillable claim — worse
+// than a blank. The prompt is told to ignore it.
+// ═══════════════════════════════════════════════════════════════════
+var DEMOG_PROMPT =
+  'Screenshot from Meditech at Kelowna General Hospital. It is EITHER the ' +
+  '"More Patient Information" MAIN tab, OR the "Demographic Data" sidebar ' +
+  'panel. Extract printed values only; ignore handwriting.\n\n' +
+  'Return a single JSON object with exactly these fields, using an empty ' +
+  'string "" for anything not visible on THIS screenshot:\n' +
+  '  homeProvince, homeHCN, homeAddress, payer, phone\n\n' +
+  'Rules:\n' +
+  '  homeProvince — the province/state of coverage. On MAIN it is in the\n' +
+  '                 "Insurances" block, e.g. "Province Manitoba - 104407495"\n' +
+  '                 gives "MB". On the sidebar take it from the Mailing\n' +
+  '                 Address city line, e.g. "Winnipeg, MB" gives "MB".\n' +
+  '                 Return the 2-letter Canadian code (AB BC MB NB NL NS NT\n' +
+  '                 NU ON PE QC SK YT). If the address is outside Canada,\n' +
+  '                 return the country name instead, e.g. "India".\n' +
+  '  homeHCN      — the home-province health number: the digits AFTER the\n' +
+  '                 dash on an Insurances line like\n' +
+  '                 "Province Manitoba - 104407495"  ->  "104407495".\n' +
+  '                 CRITICAL: do NOT use the "Health Care Num:" value in the\n' +
+  '                 grey header row (e.g. "9641944584, British Columbia").\n' +
+  '                 For an out-of-province patient that is a TEMPORARY BC\n' +
+  '                 number issued by KGH, not their real coverage. If the\n' +
+  '                 only number you can see is on that header line, return "".\n' +
+  '  homeAddress  — the Mailing Address, joined into ONE line with ", "\n' +
+  '                 separators, e.g. "1702-55 Nassau St N, Winnipeg, MB,\n' +
+  '                 R3L 2G8". Sidebar only; return "" on the MAIN tab.\n' +
+  '  payer        — one of exactly "OOP", "OOC" or "".\n' +
+  '                 "OOP"  if the sidebar Insurance row says OOP, or MAIN\n' +
+  '                        shows a "Province <name> - <number>" line.\n' +
+  '                 "OOC"  if Insurance says OOC, or the only insurance\n' +
+  '                        shown is "Self Pay" with no Province line.\n' +
+  '                 A Province line WINS over a "Self Pay" line when both\n' +
+  '                 appear.\n' +
+  '                 ""     if no insurance information is visible.\n' +
+  '  phone        — Preferred Phone or Patient Phone Number, digits and\n' +
+  '                 dashes as shown. "" if not visible.\n\n' +
+  'Return ONLY the JSON object, no commentary, no code fences.';
+
+// Run the demographics OCR over a data-URL image. Resolves with the parsed
+// object. Reuses the same Apps Script relay as the sticker OCR — the backend
+// ocrSticker action takes whatever prompt it is handed, so this needs no
+// server change at all.
+function runDemogOCR(dataUrl) {
+  var m = /^data:([^;]+);base64,(.*)$/.exec(String(dataUrl || ''));
+  if (!m) return Promise.reject(new Error('Not a base64 image'));
+  return _runAppsScriptOCR(m[2], m[1], DEMOG_PROMPT, 600);
+}
+
 var STICKER_PROMPT =
   'Hospital patient sticker or Meditech chart header from Kelowna ' +
   'General Hospital (KGH). Extract the printed fields ONLY — ignore ' +
