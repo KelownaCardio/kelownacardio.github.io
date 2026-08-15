@@ -149,6 +149,9 @@ function toggleLocRole(role) {
 // ── Discharge Modal ────────────────────────────────────
 // Flow (v4.82 — date FIRST, then complex d/c):
 //   Step 0 — billing-gap gate (unchanged)
+//   Step 0b — v4.97 private-pay / OOP interpretation gate (ECG / Holter /
+//            echo interp), shown ONLY for privatePay or oop patients. Cancel
+//            exits so claims can be added; Done falls through to Step 1.
 //   Step 1 — doctor confirms the DISCHARGE DATE
 //   Step 2 — if stay >= 5 days measured to that date (admission day = day 1):
 //            complex discharge (78717) criteria checklist, showing actual LOS days
@@ -192,6 +195,15 @@ function _cvProceedDischarge(pid) {
   hideModal('pt-summary-modal');
   document.getElementById('disch-title').textContent = p.last + ', ' + p.first;
   _dischDate = '';                // fresh open — default the date picker to today
+  // v4.97 STEP 0: private-pay / OOP interpretation gate, shown once per
+  // patient per session before anything else. ppInterpDone() sets _ppAckPid
+  // and calls back into here, which then falls through to the date step.
+  // Everything below is unchanged for normal MSP patients.
+  if (_ppIsPrivateOrOOP(p) && window._ppAckPid !== pid) {
+    _ppStepInterp(pid);
+    showModal('disch-modal');
+    return;
+  }
   _dischStepDate(pid);            // v4.82: confirm discharge date FIRST
   showModal('disch-modal');
 }
@@ -488,6 +500,8 @@ function _dischFinalize(pid) {
   if (!p) return;
   var dcDate = _dischDate || TODAY;
   _dischDate = '';
+  window._ppAckPid = null;    // v4.97: clear the interpretation ack — a readmit
+                              // of the same patient must be prompted again
   p.dischargeDate = dcDate;   // DD/MM/YYYY — human-readable, pushed to Sheets
   logChange(p, 'Discharged', 'D/C ' + dcDate);
   removePatient(pid);
@@ -517,6 +531,7 @@ function disch78717() {
   addClaim(p, '33008', '33008', 1, TODAY, 'I');
   addClaim(p, '78717', '78717', 1, TODAY, 'I');
   logChange(p, 'Discharged (33008 + 78717)', '');
+  window._ppAckPid = null;   // v4.97
   removePatient(_claimPid);
   hideModal('disch-modal');
   closeClaimScreen();
@@ -527,6 +542,7 @@ function dischSimple() {
   var p = getP(_claimPid); if (!checkDoc()) return;
   addClaim(p, '33008', '33008', 1, TODAY, 'I');
   logChange(p, 'Discharged (33008)', '');
+  window._ppAckPid = null;   // v4.97
   removePatient(_claimPid);
   hideModal('disch-modal');
   closeClaimScreen();
@@ -568,6 +584,98 @@ function removePatient(pid) {
     var searchEl = document.getElementById('discharged-search');
     renderDischarged(searchEl ? searchEl.value : '');
   }
+}
+
+// ── v4.97: PRIVATE-PAY / OOP INTERPRETATION GATE ─────────────────────
+// WHY: private-pay and OOP invoices are built from whatever claims are on
+// the sheet 24h after discharge. ECG / Holter / echo interpretations are the
+// codes most often remembered late, and every late addition means rebuilding
+// and re-issuing an invoice the patient may already be holding (Mazzoco
+// 2026-431 → 431_UPDATED). Cheapest place to catch it is BEFORE the doctor
+// commits the discharge, while they are still on the patient.
+//
+// This is STEP 0 of the discharge flow, rendered into the same disch-modal:
+//   step 0  interpretation gate   (private pay / OOP only — this file)
+//   step 1  confirm discharge date        (_dischStepDate)
+//   step 2  complex-discharge checklist   (_cdRender, LOS >= 5 only)
+//   finalize                              (_dischFinalize)
+// Cancel closes the modal so they can go add the missing claims; Done sets
+// _ppAckPid and re-enters _cvProceedDischarge, which then falls straight
+// through to the normal date step. Normal MSP discharges never see it.
+var PP_INTERP_CODES = {
+  '33091': 'Echo — complete',
+  '08679': 'Echo — Doppler',
+  '8679':  'Echo — Doppler',
+  '08662': 'Stress echo',
+  '8662':  'Stress echo',
+  '08638': 'TEE',
+  '8638':  'TEE',
+  '33057': 'Contrast echo',
+  '33018': 'ECG interpretation',
+  '00081': 'Emergency bedside care',
+  '81':    'Emergency bedside care'
+};
+
+// Which of the interpretation codes are already billed for this patient?
+function _ppBilledInterps(p) {
+  var pd = String((p && p.phn) || '').replace(/\D/g, '');
+  var have = {}, out = [];
+  (st.claims || []).forEach(function(c) {
+    if (!c) return;
+    if (String(c.phn || '').replace(/\D/g, '') !== pd) return;
+    var code = String(c.feeCode || c.fee || '').replace(/\.0+$/, '');
+    var lbl = PP_INTERP_CODES[code];
+    if (lbl && !have[lbl]) { have[lbl] = 1; out.push(lbl); }
+  });
+  return out;
+}
+
+function _ppIsPrivateOrOOP(p) {
+  if (!p) return false;
+  return (p.privatePay === true || String(p.privatePay).toLowerCase() === 'true') ||
+         (p.oop === true || String(p.oop).toLowerCase() === 'true');
+}
+
+// Step 0 body. Rendered into disch-body by _cvProceedDischarge.
+function _ppStepInterp(pid) {
+  var p = getP(pid);
+  if (!p) return;
+  var isPriv = (p.privatePay === true || String(p.privatePay).toLowerCase() === 'true');
+  var label  = isPriv ? 'PRIVATE PAY' : 'OUT OF PROVINCE';
+  // Red line ONLY when nothing is billed at all. When something IS billed we
+  // say nothing — Kathryn 2026-08-15: listing what is already there invites a
+  // glance-and-go, and the doctor should close out and check the chart either
+  // way. So the card is silent unless it has a hard warning to give.
+  var billed = _ppBilledInterps(p);
+  var status = billed.length ? '' :
+    '<div style="font-size:12px;color:var(--red-t,#c42828);font-weight:700;margin-top:8px">' +
+      'No ECG, Holter or echo interpretation is billed for this patient.</div>';
+
+  document.getElementById('disch-body').innerHTML =
+    '<div style="background:#fff3cd;border:1px solid var(--amber-t);border-radius:var(--r);' +
+      'padding:12px 13px;margin-bottom:12px">' +
+      '<div style="font-size:11px;font-weight:800;letter-spacing:.4px;color:var(--amber-t)">' +
+        '\u26a0 ' + label + '</div>' +
+      '<div style="font-size:13px;font-weight:700;margin-top:5px;line-height:1.4;color:var(--text)">' +
+        'Private Pay / OOP \u2014 ensure all ECGs, holters, echo interp etc have been added ' +
+        'before discharge</div>' +
+      status +
+    '</div>' +
+    '<div style="display:flex;flex-direction:column;gap:8px">' +
+      '<button class="btn btn-p" style="margin:0" data-pid="' + pid + '" ' +
+        'onclick="ppInterpDone(this)">Done \u2014 continue to discharge \u203a</button>' +
+      '<button class="btn btn-s" style="margin:0" ' +
+        'onclick="hideModal(\'disch-modal\')">Cancel \u2014 go back and add claims</button>' +
+    '</div>';
+}
+
+// "Done" \u2014 acknowledge for this patient and fall through to the normal
+// discharge flow. The ack is per-patient and lives only for this app session,
+// so a later discharge of a different private-pay patient prompts again.
+function ppInterpDone(btn) {
+  var pid = btn.getAttribute('data-pid');
+  window._ppAckPid = pid;
+  _cvProceedDischarge(pid);
 }
 
 function purgeOldPatients() {
