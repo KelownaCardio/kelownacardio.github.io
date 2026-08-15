@@ -2650,7 +2650,7 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // honours the marker and logs `dup_claim_allowed` with the time, note and
 // repeated-claim id. CCU family (CCU_DAILY/1411/1421/1431) can NEVER be
 // overridden — it is cross-physician and a second CCU day is not a service.
-var APP_VERSION = 'v4.97';
+var APP_VERSION = 'v4.98';
 var APP_BUILT   = '2026-08-13';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -12208,6 +12208,89 @@ function processStickerOCR(croppedDataUrl, bar) {
 // blank) — shows amber "Could not read sticker" with retry button
 // instead of the misleading green "✓ Extracted: ?, ?".
 
+// ═══════════════════════════════════════════════════════════════════
+// v4.98 — MEDITECH DEMOGRAPHICS OCR (out-of-province / private pay)
+// ───────────────────────────────────────────────────────────────────
+// WHY: OOP and private-pay billing needs home province, home health number
+// and a mailing address. None of it is reliably known at admission — the
+// patient arrives, the clerk types "Do not have the info", and nothing ever
+// chases it. Hutsebaut, George H sat that way from 30/06 to 15/08/2026 with
+// two unbillable claims, because MSP will not accept a reciprocal claim
+// without the home-province number. It IS all in Meditech by discharge.
+//
+// Two different screens carry the pieces, so this prompt handles EITHER and
+// fills whatever it finds — paste one, then the other:
+//
+//   "More Patient Information" > MAIN
+//        Insurances
+//        Province Manitoba - 104407495     <- province + home health number
+//        Self Pay
+//
+//   Sidebar "Demographic Data"
+//        Mailing Address  1702-55 Nassau St N / Winnipeg, MB / R3L 2G8
+//        Insurance        OOP              <- or OOC
+//
+// The payer type comes free: a "Province X - N" line or Insurance "OOP"
+// means reciprocal out-of-province (bills MSP via a hand-keyed Claim
+// Summary); "OOC" or a bare "Self Pay" means out-of-country / private pay
+// (BCMA rates, invoiced to the patient). That flag is currently a hand-
+// ticked box on the Add form and getting it wrong is upstream of every
+// invoicing bug we chased on 2026-08-15.
+//
+// DELIBERATELY NOT TRUSTED: the "Health Care Num: 9641944584, British
+// Columbia" line on MAIN. For an out-of-province patient that is the
+// temporary BC-format number KGH issues, NOT their real coverage. Taking it
+// as homeHCN would produce a confidently wrong, unbillable claim — worse
+// than a blank. The prompt is told to ignore it.
+// ═══════════════════════════════════════════════════════════════════
+var DEMOG_PROMPT =
+  'Screenshot from Meditech at Kelowna General Hospital. It is EITHER the ' +
+  '"More Patient Information" MAIN tab, OR the "Demographic Data" sidebar ' +
+  'panel. Extract printed values only; ignore handwriting.\n\n' +
+  'Return a single JSON object with exactly these fields, using an empty ' +
+  'string "" for anything not visible on THIS screenshot:\n' +
+  '  homeProvince, homeHCN, homeAddress, payer, phone\n\n' +
+  'Rules:\n' +
+  '  homeProvince — the province/state of coverage. On MAIN it is in the\n' +
+  '                 "Insurances" block, e.g. "Province Manitoba - 104407495"\n' +
+  '                 gives "MB". On the sidebar take it from the Mailing\n' +
+  '                 Address city line, e.g. "Winnipeg, MB" gives "MB".\n' +
+  '                 Return the 2-letter Canadian code (AB BC MB NB NL NS NT\n' +
+  '                 NU ON PE QC SK YT). If the address is outside Canada,\n' +
+  '                 return the country name instead, e.g. "India".\n' +
+  '  homeHCN      — the home-province health number: the digits AFTER the\n' +
+  '                 dash on an Insurances line like\n' +
+  '                 "Province Manitoba - 104407495"  ->  "104407495".\n' +
+  '                 CRITICAL: do NOT use the "Health Care Num:" value in the\n' +
+  '                 grey header row (e.g. "9641944584, British Columbia").\n' +
+  '                 For an out-of-province patient that is a TEMPORARY BC\n' +
+  '                 number issued by KGH, not their real coverage. If the\n' +
+  '                 only number you can see is on that header line, return "".\n' +
+  '  homeAddress  — the Mailing Address, joined into ONE line with ", "\n' +
+  '                 separators, e.g. "1702-55 Nassau St N, Winnipeg, MB,\n' +
+  '                 R3L 2G8". Sidebar only; return "" on the MAIN tab.\n' +
+  '  payer        — one of exactly "OOP", "OOC" or "".\n' +
+  '                 "OOP"  if the sidebar Insurance row says OOP, or MAIN\n' +
+  '                        shows a "Province <name> - <number>" line.\n' +
+  '                 "OOC"  if Insurance says OOC, or the only insurance\n' +
+  '                        shown is "Self Pay" with no Province line.\n' +
+  '                 A Province line WINS over a "Self Pay" line when both\n' +
+  '                 appear.\n' +
+  '                 ""     if no insurance information is visible.\n' +
+  '  phone        — Preferred Phone or Patient Phone Number, digits and\n' +
+  '                 dashes as shown. "" if not visible.\n\n' +
+  'Return ONLY the JSON object, no commentary, no code fences.';
+
+// Run the demographics OCR over a data-URL image. Resolves with the parsed
+// object. Reuses the same Apps Script relay as the sticker OCR — the backend
+// ocrSticker action takes whatever prompt it is handed, so this needs no
+// server change at all.
+function runDemogOCR(dataUrl) {
+  var m = /^data:([^;]+);base64,(.*)$/.exec(String(dataUrl || ''));
+  if (!m) return Promise.reject(new Error('Not a base64 image'));
+  return _runAppsScriptOCR(m[2], m[1], DEMOG_PROMPT, 600);
+}
+
 var STICKER_PROMPT =
   'Hospital patient sticker or Meditech chart header from Kelowna ' +
   'General Hospital (KGH). Extract the printed fields ONLY — ignore ' +
@@ -13656,9 +13739,9 @@ function _ppStepInterp(pid) {
         'before discharge</div>' +
       status +
     '</div>' +
+    _ppDemogBlock(p) +
     '<div style="display:flex;flex-direction:column;gap:8px">' +
-      '<button class="btn btn-p" style="margin:0" data-pid="' + pid + '" ' +
-        'onclick="ppInterpDone(this)">Done \u2014 continue to discharge \u203a</button>' +
+      _ppDoneButton(p) +
       '<button class="btn btn-s" style="margin:0" ' +
         'onclick="hideModal(\'disch-modal\')">Cancel \u2014 go back and add claims</button>' +
     '</div>';
@@ -13669,8 +13752,28 @@ function _ppStepInterp(pid) {
 // so a later discharge of a different private-pay patient prompts again.
 function ppInterpDone(btn) {
   var pid = btn.getAttribute('data-pid');
+  var p   = getP(pid);
+  // v4.98: HARD GATE (Kathryn 2026-08-15) — an OOP / private-pay patient may
+  // not be discharged while a billing-critical field is still missing. The
+  // information is in Meditech and the patient is still here; six weeks later
+  // neither is true (Hutsebaut).
+  if (p && _ppMissingDemogFields(p).length) {
+    showToast('Missing billing details \u2014 capture or type them first', 'error');
+    var z = document.getElementById('pp-demog');
+    if (z && z.scrollIntoView) z.scrollIntoView({ behavior:'smooth', block:'center' });
+    return;
+  }
   window._ppAckPid = pid;
   _cvProceedDischarge(pid);
+}
+
+// The Done button is disabled-looking while fields are outstanding, so the
+// block is visible BEFORE it is hit rather than as a rejection afterwards.
+function _ppDoneButton(p) {
+  var blocked = _ppMissingDemogFields(p).length;
+  return '<button class="btn ' + (blocked ? 'btn-s' : 'btn-p') + '" ' +
+    'style="margin:0' + (blocked ? ';opacity:.55' : '') + '" data-pid="' + p.id + '" ' +
+    'onclick="ppInterpDone(this)">Done \u2014 continue to discharge \u203a</button>';
 }
 
 function purgeOldPatients() {
@@ -13688,6 +13791,374 @@ function purgeOldPatients() {
   }
 }
 
+
+
+// ═══════════════════════════════════════════════════════════════════
+// v4.98 — MEDITECH DEMOGRAPHICS CAPTURE (inside the Step 0 discharge gate)
+// ───────────────────────────────────────────────────────────────────
+// Kathryn, 2026-08-15: "most docs don't know where any of this is or who has
+// entered what info so far. they will need prompts and to be able to do it
+// from their phone." And: all fields must be completed before discharge —
+// that IS the best time, because the information is in Meditech and the
+// patient is still here. Six weeks later neither is true: Hutsebaut, George H
+// carried homeHCN = "Do not have the info" from 30/06 to 15/08/2026 with two
+// claims that MSP could never have accepted.
+//
+// Design consequences of those two sentences:
+//   • PHONE FIRST. Meditech runs on the IT-locked hospital desktop; the app
+//     is on their phone. There is no clipboard between the two, so the
+//     primary action is a CAMERA PHOTO of the Meditech screen, reusing the
+//     same capture + crop + OCR path as the patient sticker. Paste is kept
+//     as a desktop convenience, not the main route.
+//   • PER-FIELD PROMPTS. The data is split across two screens and nobody
+//     remembers which. So we do not say "paste your demographics" — we name
+//     the exact field that is missing, the exact clicks to reach it, and
+//     draw a labelled sample of what they are looking for.
+//   • SHOW WHAT IS ALREADY THERE. Otherwise two doctors photograph the same
+//     screen on consecutive days, neither knowing the other did.
+//   • TYPING IS ALWAYS AVAILABLE. That is what makes a hard gate safe: the
+//     block is on the DATA being present, never on the method. A doctor who
+//     cannot reach a terminal but knows the number is never stuck.
+// ═══════════════════════════════════════════════════════════════════
+var PP_PROV_CODES = {AB:1,BC:1,MB:1,NB:1,NL:1,NS:1,NT:1,NU:1,ON:1,PE:1,QC:1,SK:1,YT:1};
+
+// Placeholder text counts as MISSING. "Do not have the info" is what actually
+// gets typed, and it is worse than a blank because it looks filled in. Kept
+// identical to the DataCheck v2.43 NONMSP_MISSING_INFO rule so the app and
+// the check can never disagree about who is outstanding.
+var PP_PLACEHOLDER_RE = /^(n\/?a|na|none|nil|unknown|unk|pending|tbd|tba|\?+|-+|do ?n(o|')t have.*|not (available|known|provided).*|do not have.*)$/i;
+function _ppBlankish(v) {
+  var t = String(v == null ? '' : v).trim();
+  return !t || PP_PLACEHOLDER_RE.test(t);
+}
+
+// Deliberately permissive: something@something.tld with no spaces. A stricter
+// pattern rejects real addresses and a doctor mid-discharge will not argue
+// with it — they will type a fake one to get past the gate, which is worse
+// than a slightly malformed real one.
+function _ppValidEmail(v) {
+  var t = String(v == null ? '' : v).trim();
+  if (!t || PP_PLACEHOLDER_RE.test(t)) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(t);
+}
+
+function _ppMissingDemogFields(p) {
+  if (!p || !_ppIsPrivateOrOOP(p)) return [];
+  var priv = (p.privatePay === true || String(p.privatePay).toLowerCase() === 'true');
+  var oop  = (p.oop === true || String(p.oop).toLowerCase() === 'true');
+  var qc   = /^(qc|pq|quebec)/i.test(String(p.homeProvince || '').trim());
+  var out  = [];
+  // Reciprocal OOP bills MSP by hand-keyed Claim Summary — needs the home
+  // province and its health number or the claim is not submittable at all.
+  if (oop && !qc) {
+    if (_ppBlankish(p.homeProvince)) out.push('province');
+    if (_ppBlankish(p.homeHCN))      out.push('hcn');
+  }
+  // Private pay and Quebec are invoiced to the patient — the invoice has to
+  // have somewhere to go. (Mazzoco's 2026-431 was issued with no address.)
+  if (priv || qc) {
+    if (_ppBlankish(p.homeAddress))  out.push('address');
+    // v4.98b: the invoice has to reach the patient. Email is the only field
+    // here that is NOT in Meditech — no email appears on the MAIN tab or the
+    // Demographic Data sidebar — so it can only be asked for, and discharge
+    // is the last moment anyone is in a position to ask.
+    if (!_ppValidEmail(p.homeEmail)) out.push('email');
+  }
+  return out;
+}
+
+// ── Labelled samples of the two Meditech screens ────────────────────
+// Drawn rather than screenshotted: no PHI, a few hundred bytes, and it
+// renders identically on every phone. The point is recognition — the doctor
+// should spot the same block on their own screen without reading a word.
+function _ppSampleMain() {
+  return '<div style="border:1px solid var(--border2);border-radius:var(--rsm);overflow:hidden;' +
+      'margin-top:8px;font-size:10px;line-height:1.5;background:#fff">' +
+    '<div style="background:#1a73e8;color:#fff;padding:4px 7px;font-weight:700">More Patient Information</div>' +
+    '<div style="display:flex;border-bottom:1px solid var(--border)">' +
+      '<div style="padding:3px 8px;font-weight:800;color:#1a73e8;border-bottom:2px solid #1a73e8">MAIN</div>' +
+      '<div style="padding:3px 8px;color:var(--text3)">CONTACT</div>' +
+    '</div>' +
+    '<div style="padding:4px 7px;color:#b9b4c4;text-decoration:line-through">' +
+      'Health Care Num: 9641944584, British Columbia</div>' +
+    '<div style="padding:0 7px 5px;font-size:9px;color:var(--red-t,#c42828);font-weight:700">' +
+      '↑ NOT this one — temporary BC number</div>' +
+    '<div style="padding:4px 7px;border-top:1px solid var(--border)">' +
+      '<div style="font-style:italic;color:var(--text2)">Insurances</div>' +
+      '<div style="background:#fff3a3;font-weight:800;display:inline-block;padding:1px 3px">' +
+        'Province Manitoba - 104407495</div>' +
+      '<div style="color:var(--text2)">Self Pay</div>' +
+    '</div>' +
+  '</div>';
+}
+function _ppSampleSidebar() {
+  return '<div style="border:1px solid var(--border2);border-radius:var(--rsm);overflow:hidden;' +
+      'margin-top:8px;font-size:10px;line-height:1.5;background:#fffdf2;max-width:230px">' +
+    '<div style="padding:4px 7px;font-weight:700;color:#1a6b52;border-bottom:1px solid var(--border)">' +
+      '▾  ● Demographic Data</div>' +
+    '<div style="padding:5px 7px;display:flex;gap:6px">' +
+      '<div style="color:var(--text2);width:62px;flex:none">Mailing Address</div>' +
+      '<div style="background:#fff3a3;font-weight:800;padding:1px 3px">1702-55 Nassau St N<br>Winnipeg, MB<br>R3L 2G8</div>' +
+    '</div>' +
+    '<div style="padding:0 7px 5px;display:flex;gap:6px">' +
+      '<div style="color:var(--text2);width:62px;flex:none">Insurance</div><div>OOP</div>' +
+    '</div>' +
+  '</div>';
+}
+
+// ── The block itself ────────────────────────────────────────────────
+function _ppDemogBlock(p) {
+  var missing = _ppMissingDemogFields(p);
+  var need = {}; missing.forEach(function(k){ need[k] = true; });
+
+  // What is already on file, so nobody re-photographs a screen for nothing.
+  var have = [];
+  if (!_ppBlankish(p.homeProvince)) have.push('Province <b>' + esc(String(p.homeProvince).trim()) + '</b>');
+  if (!_ppBlankish(p.homeHCN))      have.push('Health # <b>' + esc(String(p.homeHCN).trim()) + '</b>');
+  if (!_ppBlankish(p.homeAddress))  have.push('Address <b>' + esc(String(p.homeAddress).trim()) + '</b>');
+  if (_ppValidEmail(p.homeEmail))   have.push('Email <b>' + esc(String(p.homeEmail).trim()) + '</b>');
+  var by = String(p.updatedBy || '').trim();
+  var onFile = have.length
+    ? '<div style="font-size:11px;color:var(--green-t,#1a7a4a);margin-top:6px;line-height:1.5">' +
+        '✓ On file: ' + have.join(' · ') +
+        (by ? '<span style="color:var(--text3)"> — last edited by ' + esc(by) + '</span>' : '') +
+      '</div>'
+    : '';
+
+  if (!missing.length) {
+    return have.length
+      ? '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r);' +
+          'padding:10px 13px;margin-bottom:12px">' +
+          '<div style="font-size:12px;font-weight:800;color:var(--green-t,#1a7a4a)">' +
+            'Billing details complete</div>' + onFile + '</div>'
+      : '';
+  }
+
+  var cards = '';
+
+  // ── Card A: province + home health number  ->  MAIN tab ───────────
+  if (need.province || need.hcn) {
+    cards +=
+      '<div style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px">' +
+        '<div style="font-size:12px;font-weight:800;color:var(--text)">' +
+          'Need: home province &amp; health number</div>' +
+        '<div style="font-size:11px;color:var(--text2);margin-top:4px;line-height:1.5">' +
+          'In Meditech tap the <b>ⓘ</b> beside the patient name → <b>MAIN</b> tab → ' +
+          'the <b>Insurances</b> block. Photograph just that block.</div>' +
+        _ppSampleMain() +
+        _ppCaptureRow(p.id, 'main') +
+        '<div style="display:flex;gap:7px;margin-top:8px">' +
+          '<input id="pp-d-prov" type="text" value="' + esc(String(p.homeProvince || '').trim()) + '" ' +
+            'placeholder="Prov (MB)" style="width:96px;padding:8px;border:.5px solid var(--border2);' +
+            'border-radius:var(--rsm);font-size:14px;text-transform:uppercase">' +
+          '<input id="pp-d-hcn" type="text" inputmode="numeric" ' +
+            'value="' + esc(String(p.homeHCN || '').trim()) + '" placeholder="Health # e.g. 104407495" ' +
+            'style="flex:1;padding:8px;border:.5px solid var(--border2);border-radius:var(--rsm);font-size:14px">' +
+        '</div>' +
+      '</div>';
+  }
+
+  // ── Card B: mailing address  ->  Demographic Data sidebar ─────────
+  if (need.address || need.email) {
+    cards +=
+      '<div style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px">' +
+        '<div style="font-size:12px;font-weight:800;color:var(--text)">Need: ' +
+          (need.address && need.email ? 'mailing address &amp; email'
+                                      : (need.email ? 'email address' : 'mailing address')) + '</div>' +
+        '<div style="font-size:11px;color:var(--text2);margin-top:4px;line-height:1.5">' +
+          'In Meditech open the <b>Demographic Data</b> panel in the right-hand sidebar → ' +
+          '<b>Mailing Address</b>. Photograph that panel.</div>' +
+        _ppSampleSidebar() +
+        _ppCaptureRow(p.id, 'side') +
+        '<input id="pp-d-addr" type="text" value="' + esc(String(p.homeAddress || '').trim()) + '" ' +
+          'placeholder="Street, City, Prov, Postal" ' +
+          'style="width:100%;margin-top:8px;padding:8px;border:.5px solid var(--border2);' +
+          'border-radius:var(--rsm);font-size:14px">' +
+        '<div style="font-size:11px;color:var(--text2);margin-top:9px;line-height:1.5">' +
+          '<b>Email</b> \u2014 not in Meditech, ask the patient. This is where their ' +
+          'invoice gets sent.</div>' +
+        '<input id="pp-d-email" type="email" inputmode="email" autocapitalize="off" ' +
+          'spellcheck="false" value="' + esc(String(p.homeEmail || '').trim()) + '" ' +
+          'placeholder="name@example.com" ' +
+          'style="width:100%;margin-top:5px;padding:8px;border:.5px solid var(--border2);' +
+          'border-radius:var(--rsm);font-size:14px">' +
+      '</div>';
+  }
+
+  return '<div id="pp-demog" style="background:var(--surface2);border:1px solid var(--amber-t);' +
+      'border-radius:var(--r);padding:12px 13px;margin-bottom:12px">' +
+    '<div style="font-size:11px;font-weight:800;letter-spacing:.4px;color:var(--amber-t)">' +
+      'REQUIRED BEFORE DISCHARGE</div>' +
+    _ppHowTo() +
+    onFile +
+    cards +
+    '<div id="pp-demog-status" style="font-size:11px;margin-top:9px;min-height:14px;color:var(--text3)"></div>' +
+    '<button class="btn btn-s" style="margin:8px 0 0" data-pid="' + p.id + '" ' +
+      'onclick="ppDemogSave(this)">Save details</button>' +
+  '</div>';
+}
+
+// All three routes stated ONCE, at the top of the block (Kathryn 2026-08-15:
+// "so all instructions (cell or pc) are in one spot"). Previously the phone
+// route was implied by a camera button while the PC route was a grey footnote
+// underneath it, so a doctor on a desktop had to read past the thing they
+// could not use to reach the thing they could.
+// KGH desktops are Windows (Expanse), so Win+Shift+S leads; the Mac shortcut
+// follows for anyone on one.
+function _ppHowTo() {
+  return '<div style="background:var(--surface);border:.5px solid var(--border2);' +
+      'border-radius:var(--rsm);padding:9px 10px;margin-top:8px;font-size:11px;' +
+      'line-height:1.6;color:var(--text2)">' +
+    '<div style="font-weight:800;color:var(--text);margin-bottom:3px">Three ways \u2014 whichever is quickest</div>' +
+    '<div><b>\u2328\ufe0f Type it</b> into the boxes below.</div>' +
+    '<div><b>\ud83d\udcf7 Photograph</b> just that block with your phone.</div>' +
+    '<div><b>\ud83d\udcbb On a PC</b> press <b>Win+Shift+S</b> (Mac: <b>\u2318\u21e74</b>), ' +
+      'drag over that block, then press <b>Ctrl+V</b> / <b>\u2318V</b> anywhere on this screen.</div>' +
+  '</div>';
+}
+
+// Camera / gallery / paste row. capture="environment" opens the rear camera
+// straight away on a phone, which is the whole point.
+function _ppCaptureRow(pid, which) {
+  return '<div style="display:flex;gap:7px;margin-top:8px;align-items:center">' +
+    '<input type="file" accept="image/*" capture="environment" style="display:none" ' +
+      'id="pp-cam-' + which + '" onchange="ppDemogPhoto(this)">' +
+    '<input type="file" accept="image/*" style="display:none" ' +
+      'id="pp-gal-' + which + '" onchange="ppDemogPhoto(this)">' +
+    '<button class="btn btn-p" style="margin:0;flex:1;padding:9px" ' +
+      'onclick="document.getElementById(\'pp-cam-' + which + '\').click()">📷 Photo</button>' +
+    '<button class="btn btn-s" style="margin:0;padding:9px 11px" ' +
+      'onclick="document.getElementById(\'pp-gal-' + which + '\').click()">🖼</button>' +
+  '</div>';
+}
+
+function ppDemogPhoto(input) {
+  var file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  var r = new FileReader();
+  r.onload = function(ev) { _ppReadShot(String(ev.target.result || '')); };
+  r.readAsDataURL(file);
+}
+
+// Paste route (desktop). Scoped to the open discharge modal so it can never
+// collide with the Add-Patient sticker paste listener.
+document.addEventListener('paste', function(e) {
+  if (!document.getElementById('pp-demog')) return;
+  var modal = document.getElementById('disch-modal');
+  if (!modal || !modal.classList.contains('on')) return;
+  var items = (e.clipboardData || {}).items;
+  if (!items) return;
+  var img = null;
+  for (var i = 0; i < items.length; i++) {
+    if (items[i].type.indexOf('image') !== -1) { img = items[i]; break; }
+  }
+  if (!img) return;
+  e.preventDefault();
+  var file = img.getAsFile();
+  if (!file) return;
+  var r = new FileReader();
+  r.onload = function(ev) { _ppReadShot(String(ev.target.result || '')); };
+  r.readAsDataURL(file);
+}, true);
+
+// Crop first — a phone photo of a whole monitor is mostly furniture, and
+// trimming to the Insurances block materially improves the read.
+function _ppReadShot(dataUrl) {
+  if (!dataUrl) return;
+  if (typeof openCropModal === 'function') {
+    openCropModal(dataUrl, 'sticker', function(cropped) { _ppApplyDemogOCR(cropped); }, function() {});
+  } else {
+    _ppApplyDemogOCR(dataUrl);
+  }
+}
+
+function _ppStatus(msg, colour) {
+  var el = document.getElementById('pp-demog-status');
+  if (!el) return;
+  el.style.color = colour || 'var(--text3)';
+  el.innerHTML = msg;
+}
+
+function _ppApplyDemogOCR(dataUrl) {
+  var btn = document.querySelector('#pp-demog button[data-pid]');
+  var p   = btn ? getP(btn.getAttribute('data-pid')) : null;
+  if (!p) return;
+  _ppStatus('Reading screenshot…', 'var(--text2)');
+
+  runDemogOCR(dataUrl).then(function(r) {
+    r = r || {};
+    var got = [];
+    var prov = String(r.homeProvince || '').trim();
+    if (prov) {
+      var up = prov.toUpperCase();
+      p.homeProvince = PP_PROV_CODES[up] ? up : prov;   // 2-letter code, or a country name
+      got.push('province ' + p.homeProvince);
+    }
+    var hcn = String(r.homeHCN || '').trim();
+    if (hcn) { p.homeHCN = hcn; got.push('health # ' + hcn); }
+    var addr = String(r.homeAddress || '').trim();
+    if (addr) { p.homeAddress = addr; got.push('address'); }
+
+    // Payer type free from the Insurance line — the flag that is currently
+    // hand-ticked on the Add form and sits upstream of every invoicing bug.
+    var payer = String(r.payer || '').trim().toUpperCase();
+    if (payer === 'OOP')      { p.oop = true; p.privatePay = false; got.push('OOP'); }
+    else if (payer === 'OOC') { p.privatePay = true; p.oop = false;
+                                if (!p.rateMode) p.rateMode = 'BCMA'; got.push('private pay'); }
+
+    if (!got.length) {
+      _ppStatus('Nothing readable there — try the other Meditech screen, or type it below.',
+                'var(--amber-t)');
+      return;
+    }
+    _ppCommitPatient(p);
+    _ppStatus('✓ Read: ' + esc(got.join(', ')), 'var(--green-t,#1a7a4a)');
+    _ppStepInterp(p.id);            // re-render: solved cards disappear
+  }).catch(function(err) {
+    _ppStatus('Could not read it (' + esc((err && err.message) || String(err)) +
+              ') — type it below instead.', 'var(--red-t,#c42828)');
+  });
+}
+
+function ppDemogSave(btn) {
+  var p = getP(btn.getAttribute('data-pid'));
+  if (!p) return;
+  var prov = document.getElementById('pp-d-prov');
+  var hcn  = document.getElementById('pp-d-hcn');
+  var addr = document.getElementById('pp-d-addr');
+  if (prov && String(prov.value || '').trim()) p.homeProvince = String(prov.value).trim().toUpperCase();
+  if (hcn  && String(hcn.value  || '').trim()) p.homeHCN      = String(hcn.value).trim();
+  if (addr && String(addr.value || '').trim()) p.homeAddress  = String(addr.value).trim();
+  var em = document.getElementById('pp-d-email');
+  if (em) {
+    var ev = String(em.value || '').trim();
+    if (ev && !_ppValidEmail(ev)) {
+      showToast('That email does not look right \u2014 check it', 'error');
+      return;                                   // do not save a typo silently
+    }
+    if (ev) p.homeEmail = ev;
+  }
+  _ppCommitPatient(p);
+  var left = _ppMissingDemogFields(p);
+  showToast(left.length ? 'Saved — still missing ' + left.join(', ') : 'Billing details complete');
+  _ppStepInterp(p.id);
+}
+
+function _ppCommitPatient(p) {
+  var _hotSnap = (typeof snapHot === 'function') ? snapHot(p) : {};
+  if (st.doc && st.doc.alias) p.updatedBy = st.doc.alias;
+  p.updatedAt = Date.now();
+  if (typeof stampChangedGroups === 'function') stampChangedGroups(p, _hotSnap);
+  var idx = st.patients.findIndex(function(x){ return x && x.id === p.id; });
+  if (idx >= 0) st.patients[idx] = p;
+  sv('patients', st.patients);
+  if (SHEETS_URL) push('savePatient', p);
+  if (typeof logChange === 'function') {
+    logChange(p, 'OOP/private details captured',
+      [p.homeProvince, p.homeHCN, p.homeAddress, p.homeEmail].filter(Boolean).join(' | '));
+  }
+}
 // 11_export.js — export queue helpers (CSV export removed v3.75;
 //   all CSV generation handled by Google Sheets Apps Script)
 // ═══════════════════════════════════════════════════════
