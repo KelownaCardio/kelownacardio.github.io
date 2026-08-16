@@ -234,7 +234,9 @@ function updateDailyTotal() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// FEES — MSC Payment Schedule (January 31, 2026) — Kelowna Cardiology
+// FEES — MSC Payment Schedule (May 31, 2026) — Kelowna Cardiology
+// v5.00 (2026-08-16): re-verified every amount below against
+// msc_payment_schedule_may_31_2026.pdf. Only 33030 and 33093 had moved.
 //
 // Each entry: { code, desc, amount, cat, clr }
 //   - code   = MSP fee item submitted to iClinic
@@ -271,7 +273,7 @@ var FEES = [
 
   // ── Cardiology procedures performed by the group ─────────────────
   { code:'33025', desc:'Cardioversion',                                                  amount:'$105.70', cat:'Procedure',    clr:'chip-purple'   },
-  { code:'33030', desc:'Temporary pacemaker placement (TVP)',                            amount:'$176.07', cat:'Procedure',    clr:'chip-purple'   },
+  { code:'33030', desc:'Temporary pacemaker placement (TVP)',                            amount:'$180.05', cat:'Procedure',    clr:'chip-purple'   },  // v5.00: MSC May 31 2026 (was $176.07, Jan 2026)
   { code:'00751',  desc:'Pericardiocentesis (pericardial puncture)',                      amount:'$258.25', cat:'Procedure',    clr:'chip-purple'   },
   { code:'00017',  desc:'Central line insertion',                                         amount:'$26.63',  cat:'Procedure',    clr:'chip-purple'   },
 
@@ -279,7 +281,7 @@ var FEES = [
   { code:'33035', desc:'Treadmill Test (GXT)',                                            amount:'$47.11',  cat:'Diagnostics', clr:'chip-teal'  },
   { code:'33018', desc:'ECG Professional Fee',                                          amount:'$9.01',   cat:'Diagnostics', clr:'chip-teal'  },
   { code:'33047', desc:'Holter Monitor Professional Fee',                               amount:'$67.63',  cat:'Diagnostics', clr:'chip-teal'  },
-  { code:'33093', desc:'Level 3 Echo Complex Assessment (Overread)',                     amount:'$252.39', cat:'Diagnostics', clr:'chip-teal'  },
+  { code:'33093', desc:'Level 3 Echo Complex Assessment (Overread)',                     amount:'$258.10', cat:'Diagnostics', clr:'chip-teal'  },  // v5.00: MSC May 31 2026 (was $252.39, Jan 2026)
   // v4.79: Echo bundles — OOP / Private-Pay only. Pseudo-codes expanded into
   // their component claims in submitOtherClaimFor; never written to a claim
   // row. Shown amount = MSP professional-only bundle total (Kathryn
