@@ -2665,7 +2665,7 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // honours the marker and logs `dup_claim_allowed` with the time, note and
 // repeated-claim id. CCU family (CCU_DAILY/1411/1421/1431) can NEVER be
 // overridden — it is cross-physician and a second CCU day is not a service.
-var APP_VERSION = 'v5.00';
+var APP_VERSION = 'v5.01';
 var APP_BUILT   = '2026-08-13';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -8048,8 +8048,13 @@ function icdDescOnly(code) {
 // so they have no FEES catalogue entry. Listed here so claim history shows a
 // meaningful label instead of a bare code.
 var PHONE_ADVICE_LABELS = {
-  '10001': 'Telephone advice < 24hrs 📞'
+  '10001': 'Telephone advice < 24hrs 📞',
+  '10002': 'Telephone advice < 7 days 📞',        // v5.01
+  '78711': 'Specialist conference call 📞'        // v5.01
 };
+// NOTE: 10004 is deliberately NOT listed. It is Multidisciplinary Conferencing
+// (the Wednesday 07:00 rounds), billed by a separate route — it is not phone
+// advice, and listing it here would make isPhoneAdviceClaim() misclassify it.
 
 // True when a claim originated from the PhoneAdvice phone-consult intake rather
 // than an in-app entry. Keyed off (a) the phone-advice fee code(s), (b) the
@@ -16430,7 +16435,7 @@ function paRenderForm() {
     '<label>Fee code</label>' +
     '<div class="fl" style="gap:6px;margin-bottom:4px">' +
       '<button type="button" class="ap-list-pill on" id="pa-fee-10001" onclick="paFee(\'10001\')">&lt;24hr (10001)</button>' +
-      '<button type="button" class="ap-list-pill" id="pa-fee-10004" onclick="paFee(\'10004\')">&lt;7day (10004)</button>' +
+      '<button type="button" class="ap-list-pill" id="pa-fee-10002" onclick="paFee(\'10002\')">&lt;7day (10002)</button>' +
       '<button type="button" class="ap-list-pill" id="pa-fee-78711" onclick="paFee(\'78711\')">Conf (78711)</button>' +
     '</div>' +
     '<input type="hidden" id="pa-fee" value="10001">' +
@@ -16534,7 +16539,10 @@ function paSex(s) {
 
 function paFee(code) {
   document.getElementById('pa-fee').value = code;
-  ['10001', '10004', '78711'].forEach(function(c) {
+  // v5.01: 10004 was WRONG here — that is Multidisciplinary Conferencing
+  // (Wednesday 07:00 rounds, billed separately). The <7-day advice code is
+  // G10002 (Kathryn 2026-08-16).
+  ['10001', '10002', '78711'].forEach(function(c) {
     document.getElementById('pa-fee-' + c).classList.toggle('on', c === code);
   });
 }
