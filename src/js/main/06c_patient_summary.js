@@ -1459,8 +1459,13 @@ function icdDescOnly(code) {
 // so they have no FEES catalogue entry. Listed here so claim history shows a
 // meaningful label instead of a bare code.
 var PHONE_ADVICE_LABELS = {
-  '10001': 'Telephone advice < 24hrs 📞'
+  '10001': 'Telephone advice < 24hrs 📞',
+  '10002': 'Telephone advice < 7 days 📞',        // v5.01
+  '78711': 'Specialist conference call 📞'        // v5.01
 };
+// NOTE: 10004 is deliberately NOT listed. It is Multidisciplinary Conferencing
+// (the Wednesday 07:00 rounds), billed by a separate route — it is not phone
+// advice, and listing it here would make isPhoneAdviceClaim() misclassify it.
 
 // True when a claim originated from the PhoneAdvice phone-consult intake rather
 // than an in-app entry. Keyed off (a) the phone-advice fee code(s), (b) the

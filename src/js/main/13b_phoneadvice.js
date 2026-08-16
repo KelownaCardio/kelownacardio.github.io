@@ -212,7 +212,7 @@ function paRenderForm() {
     '<label>Fee code</label>' +
     '<div class="fl" style="gap:6px;margin-bottom:4px">' +
       '<button type="button" class="ap-list-pill on" id="pa-fee-10001" onclick="paFee(\'10001\')">&lt;24hr (10001)</button>' +
-      '<button type="button" class="ap-list-pill" id="pa-fee-10004" onclick="paFee(\'10004\')">&lt;7day (10004)</button>' +
+      '<button type="button" class="ap-list-pill" id="pa-fee-10002" onclick="paFee(\'10002\')">&lt;7day (10002)</button>' +
       '<button type="button" class="ap-list-pill" id="pa-fee-78711" onclick="paFee(\'78711\')">Conf (78711)</button>' +
     '</div>' +
     '<input type="hidden" id="pa-fee" value="10001">' +
@@ -316,7 +316,10 @@ function paSex(s) {
 
 function paFee(code) {
   document.getElementById('pa-fee').value = code;
-  ['10001', '10004', '78711'].forEach(function(c) {
+  // v5.01: 10004 was WRONG here — that is Multidisciplinary Conferencing
+  // (Wednesday 07:00 rounds, billed separately). The <7-day advice code is
+  // G10002 (Kathryn 2026-08-16).
+  ['10001', '10002', '78711'].forEach(function(c) {
     document.getElementById('pa-fee-' + c).classList.toggle('on', c === code);
   });
 }
