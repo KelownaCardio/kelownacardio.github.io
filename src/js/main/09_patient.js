@@ -202,6 +202,16 @@ async function _mergeAndReadmit() {
 
   var _hotSnap = snapHot(p);   // v4.73: stamp changed hot groups (readmit path)
 
+  // v5.02: the Readmit button already states the intent, so this path asks
+  // nothing extra — but the finished stay must still be filed before the
+  // reactivate below wipes dischargeDate, or DataCheck can never tell a
+  // readmission from a billing gap. Same inpatient scope as the Restore
+  // prompt (see needsReadmitConfirm in 06b_discharged.js).
+  if (window._dupIsReadmit && needsReadmitConfirm(p)) {
+    _recordPriorStay(p);
+    p.admitDate = fmtD(new Date());
+  }
+
   // Reactivate
   p.discharged = false;
   p.dischargedAt = '';

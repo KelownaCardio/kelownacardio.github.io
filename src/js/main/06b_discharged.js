@@ -384,6 +384,62 @@ function openClaimFromDischarged(pid) {
   _openClaimScreen(pid);
 }
 
+// ══ v5.02: READMISSION CONFIRM ═════════════════════════════════════
+// WHY (Kathryn, 2026-08-16, after Hubli / Brown / Verwey): a patient who
+// leaves the service and comes back later has TWO admissions — but every
+// restore path wiped dischargeDate/dischargedAt/dischargedBy to null, so
+// nothing downstream could ever see that a discharge had happened.
+// DataCheck's CCU_GAP / DAILY_GAP suppressor is CLAIM-based (78717 /
+// 33010 / outpatient) and a simple discharge produces no claim at all
+// (78717 needs LOS >= 5), so the days between a real discharge and a
+// later readmission were reported as unbilled care — three false MEDIUM
+// CCU_GAPs in the 16/08/2026 run (Hubli went to the OR under cardiac
+// surgery on 12/08 and was re-consulted on 15/08; nothing was missed).
+// Restoring now asks whether this is a NEW admission and, if so, files
+// the finished stay in `stayHistory` and stamps a fresh admitDate.
+// DataCheck v2.45 reads both as discharge evidence.
+//
+// SCOPE (Kathryn's rule): INPATIENTS ONLY — MRP cardiology AND at least
+// one daily / CCU claim on file. A patient whose whole history is phone
+// advice (10001) must never see this prompt.
+var _READMIT_INPATIENT_FEES = {
+  '33008':1, '33006':1, 'CCU_DAILY':1, '1411':1, '1421':1, '1431':1, '1441':1
+};
+
+function needsReadmitConfirm(p) {
+  if (!p) return false;
+  var isMrpCard = String(p.role || '').toLowerCase() === 'mrp' ||
+                  String(p.mrp  || '').toLowerCase() === 'cardiology';
+  if (!isMrpCard) return false;
+  return (st.claims || []).some(function(c) {
+    return samePhn(c.phn, p.phn) &&
+           _READMIT_INPATIENT_FEES[String(c.fee || '').trim()] === 1;
+  });
+}
+
+// File the stay that just ended onto the patient record, so the discharge
+// survives the restore. Newest last, capped at 10 entries.
+function _recordPriorStay(p) {
+  if (!p || !p.dischargeDate) return;
+  var d = fmtClaimDate(p.dischargeDate);
+  if (!d) return;
+  var hist = [];
+  try { hist = JSON.parse(p.stayHistory || '[]'); } catch (e) { hist = []; }
+  if (!Array.isArray(hist)) hist = [];
+  var last = hist.length ? hist[hist.length - 1] : null;
+  if (!last || last.d !== d) {
+    hist.push({ a: p.admitDate ? fmtClaimDate(p.admitDate) : '', d: d });
+  }
+  if (hist.length > 10) hist = hist.slice(hist.length - 10);
+  p.stayHistory = JSON.stringify(hist);
+}
+
+// 'YYYY-MM-DD' (native date input) -> 'DD/MM/YYYY'. Blank/bad input -> ''.
+function _isoToDMY(iso) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || '').trim());
+  return m ? (m[3] + '/' + m[2] + '/' + m[1]) : '';
+}
+
 // Restore — show on/off service choice using data attributes (no inline quote nesting)
 function restorePatient(pid) {
   var p = (st.patients || []).find(function(x) { return x.id === pid; });
@@ -406,11 +462,70 @@ function restorePatient(pid) {
   showModal('merge-modal');
 }
 
+// v5.02: inpatients are asked the readmission question first; everyone
+// else (phone-advice-only, non-MRP) restores exactly as before.
 function _doRestore(pid, list) {
+  var p = (st.patients || []).find(function(x) { return x.id === pid; });
+  if (!p) return;
+  if (needsReadmitConfirm(p)) { _askReadmit(pid, list); return; }
+  _doRestoreCommit(pid, list, 'same', '');
+}
+
+function _askReadmit(pid, list) {
+  var p = (st.patients || []).find(function(x) { return x.id === pid; });
+  if (!p) return;
+  var body  = document.getElementById('merge-body');
+  var title = document.getElementById('merge-title');
+  // No modal shell (shouldn't happen) — never block the restore over it.
+  if (!body || !title) { _doRestoreCommit(pid, list, 'same', ''); return; }
+
+  var n = new Date();
+  var iso = n.getFullYear() + '-' + ('0' + (n.getMonth() + 1)).slice(-2)
+                            + '-' + ('0' + n.getDate()).slice(-2);
+  var dOut = p.dischargeDate ? fmtClaimDate(p.dischargeDate) : '';
+
+  title.textContent = 'Readmission?';
+  body.innerHTML =
+    '<div style="font-size:13px;margin-bottom:6px">' +
+      esc(p.last + ', ' + p.first) + ' was discharged' +
+      (dOut ? ' <strong>' + esc(dOut) + '</strong>' : '') +
+      (p.dischargedBy ? ' by ' + esc(p.dischargedBy) : '') + '.' +
+    '</div>' +
+    '<div style="font-size:12px;color:var(--text2);margin-bottom:14px">' +
+      'Is this a new admission, or was that discharge entered by mistake?' +
+    '</div>' +
+    '<label style="font-size:12px;color:var(--text2)">Readmitted on</label>' +
+    '<input type="date" id="rd-date" value="' + iso + '" ' +
+      'style="width:100%;margin:4px 0 14px;padding:10px;font-size:15px;' +
+      'border:1px solid var(--line);border-radius:8px">' +
+    '<div style="display:flex;flex-direction:column;gap:8px">' +
+      '<button class="btn btn-p" style="margin:0" data-pid="' + esc(pid) + '" data-list="' + esc(list) + '" ' +
+        'onclick="_doRestoreCommit(this.dataset.pid,this.dataset.list,\'new\',(document.getElementById(\'rd-date\')||{}).value||\'\')">' +
+        'New admission — start a new stay</button>' +
+      '<button class="btn btn-s" style="margin:0" data-pid="' + esc(pid) + '" data-list="' + esc(list) + '" ' +
+        'onclick="_doRestoreCommit(this.dataset.pid,this.dataset.list,\'same\',\'\')">' +
+        'Same stay — the discharge was a mistake</button>' +
+    '</div>';
+  showModal('merge-modal');
+}
+
+// mode 'new'  = readmission: the finished stay is filed in stayHistory and a
+//               fresh admitDate is stamped, so billing gaps between the two
+//               stays are correctly ignored.
+// mode 'same' = the discharge was an error: nothing is filed, because the
+//               patient never left and those days ARE billable.
+function _doRestoreCommit(pid, list, mode, isoDate) {
   var p = (st.patients || []).find(function(x) { return x.id === pid; });
   if (!p) return;
   hideModal('merge-modal');
   var _hotSnap = snapHot(p);   // v4.73
+  var prevDisch = p.dischargeDate ? fmtClaimDate(p.dischargeDate) : '';
+
+  if (mode === 'new') {
+    _recordPriorStay(p);                       // must run BEFORE the wipe below
+    p.admitDate = _isoToDMY(isoDate) || fmtD(new Date());
+  }
+
   p.discharged    = false;
   p.dischargedAt  = null;
   p.dischargeDate = null;
@@ -420,8 +535,15 @@ function _doRestore(pid, list) {
   stampChangedGroups(p, _hotSnap);   // v4.73: restore = discharge+location tap
   sv('patients', st.patients);
   if (SHEETS_URL) push('savePatient', p);
-  logChange(p, 'Restored', 'Returned to ' + (list === 'on' ? 'On Service' : 'Off Service'));
-  showToast(p.last + ' restored to ' + (list === 'on' ? 'on-service' : 'off-service') + ' list');
+  logChange(p,
+    mode === 'new' ? 'Readmitted' : 'Restored',
+    mode === 'new'
+      ? 'New admission ' + p.admitDate +
+        (prevDisch ? ' — previous stay closed ' + prevDisch : '')
+      : 'Returned to ' + (list === 'on' ? 'On Service' : 'Off Service'));
+  showToast(mode === 'new'
+    ? p.last + ' readmitted — new stay from ' + p.admitDate
+    : p.last + ' restored to ' + (list === 'on' ? 'on-service' : 'off-service') + ' list');
   renderDischarged(document.getElementById('discharged-search') ? document.getElementById('discharged-search').value : '');
   render();
 }
