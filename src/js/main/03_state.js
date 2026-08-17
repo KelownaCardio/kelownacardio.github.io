@@ -455,8 +455,25 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // honours the marker and logs `dup_claim_allowed` with the time, note and
 // repeated-claim id. CCU family (CCU_DAILY/1411/1421/1431) can NEVER be
 // overridden — it is cross-physician and a second CCU day is not a service.
-var APP_VERSION = 'v5.02';
-var APP_BUILT   = '2026-08-16';
+// v5.03 (2026-08-17): FRICTIONLESS EXISTING-PATIENT FLOW + ACTIONABLE
+// MODIFIER NOTE (Kathryn).
+// (1) The post-OCR "Patient already exists in Database → ↩ Restore to list"
+// banner is GONE (09_patient.js showExistingPatientBanner). It saved no time
+// and derailed claim + location entry. The doctor now just finishes the form;
+// at submit, when the dup check matches and every filled demographic field
+// AGREES, the merge runs silently (_dupPrep + direct _mergeAndReadmit — no
+// modal) and the normal "added to list / added" toast reports it. The
+// side-by-side reconcile modal appears ONLY when a filled field genuinely
+// disagrees. The "Patient already on the list → Go to patient" banner for
+// currently-active patients is KEPT (Kathryn's call, 2026-08-17).
+// (2) The "Increment starts after 08:00 — not billable" dead-end note
+// (07_consult.js) is now actionable: "Note — second modifier will not apply:
+// < 45 min from end of modifier interval (08:00). Should start time be
+// adjusted?" with an inline time picker that rewrites the start field
+// (_incAdjustStart) and recomputes the banner. End time deliberately stays.
+// Frontend-only; no cache-format change.
+var APP_VERSION = 'v5.03';
+var APP_BUILT   = '2026-08-17';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');

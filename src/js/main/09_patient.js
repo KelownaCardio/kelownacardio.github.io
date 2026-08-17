@@ -35,25 +35,31 @@ function _findDup2of3(patients, chkPhn, chkLast, chkDob) {
   return { match: best, fields: bestFields };
 }
 
-// ── Duplicate merge modal ─────────────────────────────────────────
-// Shows side-by-side comparison pills for each differing demographic.
-// Doctor taps the correct value for each, then merges or creates new.
-function openDuplicateMergeModal(existing, matchedFields, newData) {
-  // Store state for merge/create handlers
+// ── Duplicate-merge shared setup ──────────────────────────────────
+// v5.03: extracted from openDuplicateMergeModal so apSubmit can decide
+// BEFORE rendering anything whether a reconcile is needed at all.
+// Fills window._dupExisting / _dupNewData / _dupFieldVals / _dupSelections /
+// _dupIsReadmit (everything _mergeAndReadmit reads) and returns the labels
+// of genuinely CONFLICTING fields — both sides filled and different.
+// Blank-on-one-side is absorb-the-filled-value, not a conflict.
+var _DUP_DEMO_FIELDS = [
+  { key: 'last',  label: 'Last Name' },
+  { key: 'first', label: 'First Name' },
+  { key: 'phn',   label: 'PHN' },
+  { key: 'dob',   label: 'DOB' },
+  { key: 'sex',   label: 'Sex' }
+];
+
+function _dupPrep(existing, newData) {
   window._dupExisting = existing;
   window._dupNewData  = newData;
-
-  // Build per-field comparison data
-  var demoFields = [
-    { key: 'last',  label: 'Last Name' },
-    { key: 'first', label: 'First Name' },
-    { key: 'phn',   label: 'PHN' },
-    { key: 'dob',   label: 'DOB' },
-    { key: 'sex',   label: 'Sex' }
-  ];
+  // A record ever on/off service = true readmission (ChangeLog verb +
+  // prior-stay filing in _mergeAndReadmit); consult/procedure-only = restore.
+  window._dupIsReadmit = (existing.list === 'on' || existing.list === 'off');
   window._dupFieldVals = {};
   window._dupSelections = {};
-  demoFields.forEach(function(f) {
+  var conflictLabels = [];
+  _DUP_DEMO_FIELDS.forEach(function(f) {
     var oldV = String(f.key === 'phn'
       ? (existing.phn || '').replace(/\D/g, '')
       : f.key === 'dob' && existing.dob ? fmtClaimDate(existing.dob)
@@ -62,15 +68,27 @@ function openDuplicateMergeModal(existing, matchedFields, newData) {
     window._dupFieldVals[f.key] = { old: oldV, 'new': newV };
     // Pre-select new value (unless blank, then keep old)
     window._dupSelections[f.key] = newV ? 'new' : 'old';
+    if (oldV && newV && oldV.toLowerCase() !== newV.toLowerCase())
+      conflictLabels.push(f.label);
   });
+  return conflictLabels;
+}
+
+// ── Duplicate merge modal ─────────────────────────────────────────
+// Shows side-by-side comparison pills for each differing demographic.
+// Doctor taps the correct value for each, then merges or creates new.
+// v5.03: only reached when _dupPrep found a real conflict — the
+// demographics-agree case now merges silently from apSubmit.
+function openDuplicateMergeModal(existing, matchedFields, newData) {
+  var conflictLabels = _dupPrep(existing, newData);
+  var demoFields = _DUP_DEMO_FIELDS;
 
   // (Status badges removed 2026-07-06 — the "Currently on list" / "Phone Consult"
   // pills were confusing sitting next to the record-type button wording below.)
   var h = '';
   var via = existing.addedVia || '';
-  // Comparison rows \u2014 built first so the header can name any inconsistent fields.
+  // Comparison rows \u2014 conflictLabels already computed by _dupPrep above.
   var rowsHtml = '';
-  var conflictLabels = [];
   demoFields.forEach(function(f) {
     var vals = window._dupFieldVals[f.key];
     var oldV = vals.old, newV = vals['new'];
@@ -84,10 +102,10 @@ function openDuplicateMergeModal(existing, matchedFields, newData) {
     } else if (!oldV) {
       rowsHtml += '<div class="dup-match">+ ' + esc(dispNew) + '</div>';
     } else if (!newV) {
-      window._dupSelections[f.key] = 'old';
+      // _dupPrep already selected 'old' for blank-new fields
       rowsHtml += '<div class="dup-match">\u2713 ' + esc(dispOld) + '</div>';
     } else {
-      conflictLabels.push(f.label);
+      // conflict \u2014 _dupPrep already recorded the label
       var sel = window._dupSelections[f.key];
       rowsHtml += '<div class="dup-pills">';
       rowsHtml += '<button class="dup-pill' + (sel === 'old' ? ' selected' : '') +
@@ -127,8 +145,7 @@ function openDuplicateMergeModal(existing, matchedFields, newData) {
   //   • demographics agree    → "Add to list" / "Add claim" (consult-only path)
   // _dupIsReadmit is kept — the ChangeLog verb still distinguishes a true
   // readmission (ever on/off service) from a phone-consult/procedure restore.
-  var wasOnService = (existing.list === 'on' || existing.list === 'off');
-  window._dupIsReadmit = wasOnService;
+  // (v5.03: _dupIsReadmit is now set by _dupPrep above.)
   var _addToList = !!window._apPendingAddToList;
   var mergeLabel = conflictLabels.length
     ? 'Update patient info'
@@ -1421,6 +1438,17 @@ async function apSubmit(addToList, _skipDupCheck) {
         dob:   chkDob,
         sex:   gv('f-sex')
       };
+      // v5.03 (Kathryn): demographics agree → NO interruption. The doctor has
+      // already finished the claim + location form; merge onto the existing
+      // record (prior phone consult, old discharge, active row — all the
+      // same) and let _mergeAndReadmit's own "added to list / added" toast
+      // report it. The reconcile modal appears ONLY when a filled
+      // demographic field genuinely disagrees between the two records.
+      var _dupConflicts = _dupPrep(dupResult.match, _newData);
+      if (!_dupConflicts.length) {
+        await _mergeAndReadmit();   // ends with toast + overlay hide + nav
+        return;
+      }
       openDuplicateMergeModal(dupResult.match, dupResult.fields, _newData);
       _hideSubmitOverlay();
       return;
@@ -2825,8 +2853,16 @@ function handleOCRResult(data, bar) {
 
 // ── Existing-patient banner (sticker fast-path) ─────────────────────
 // Rendered into the Add Patient pane when an OCR'd sticker PHN matches a
-// patient already in st.patients. Discharged → offer Restore (reuses the
-// On/Off Service chooser). Still on a list → offer to jump to them.
+// patient already in st.patients — but ONLY for a patient still active on a
+// list ("Go to patient" jump).
+//
+// v5.03 (2026-08-17, Kathryn): the DISCHARGED variant ("Patient already
+// exists in Database → ↩ Restore to list") is GONE. A prior-phone-consult /
+// discharged match used to interrupt the sticker flow with a restore offer
+// that saved no time and derailed claim + location entry. Now the doctor
+// just finishes the form; apSubmit's dup check merges onto the existing
+// record silently, and the reconcile modal appears only when a filled
+// demographic field genuinely disagrees (see _dupPrep / apSubmit).
 function showExistingPatientBanner(match) {
   dismissExistingPatientBanner();
   var bar = document.getElementById('ocr-bar');
@@ -2834,21 +2870,14 @@ function showExistingPatientBanner(match) {
 
   var nameStr = ((match.last || '') + ', ' + (match.first || '')).replace(/^,\s*|,\s*$/g, '');
   var discharged = (typeof isDischarged === 'function') ? isDischarged(match) : !!match.discharged;
+  if (discharged) return;   // v5.03: no banner — silent merge at submit instead
 
   var div = document.createElement('div');
   div.id = 'existing-pt-banner';
   div.style.cssText = 'margin-top:6px;padding:10px;border-radius:8px;' +
     'background:var(--surface2);border:1px solid var(--border2)';
 
-  if (discharged) {
-    var detail = esc(nameStr) + (match.phn ? ' · ' + esc(String(match.phn)) : '') + ' · discharged';
-    div.innerHTML =
-      '<div style="font-weight:600;margin-bottom:4px">Patient already exists in Database</div>' +
-      '<div style="font-size:12px;color:var(--text2);margin-bottom:8px">' + detail + '</div>' +
-      '<button class="btn btn-p" style="margin:0" data-pid="' + esc(match.id) + '" ' +
-        'onclick="dismissExistingPatientBanner();restorePatient(this.getAttribute(\'data-pid\'))">' +
-        '↩ Restore to list</button>';
-  } else {
+  {
     var wardStr = match.ward ? ((typeof wardLabel === 'function' && wardLabel(match.ward)) || match.ward) : '';
     div.innerHTML =
       '<div style="font-weight:600;margin-bottom:4px">Patient already on the list</div>' +

@@ -271,6 +271,17 @@ function toggleConsultCode(code) {
   if (!race) updateConsultUI();
 }
 
+// v5.03: inline start-time adjust from the "second modifier will not apply"
+// banner (see updateConsultUI). Writes the picked 24h time into the start
+// field via cbSetTime (12h display + am/pm pill), then re-renders — the
+// modifier banner recomputes immediately. End time is left untouched on
+// purpose: the doctor is correcting when the consult BEGAN.
+function _incAdjustStart(t24) {
+  if (!t24) return;
+  cbSetTime('start', t24);
+  updateConsultUI();
+}
+
 function toggleMost() {
   _mostOn = !_mostOn;
   cEl('cb-most').className = 'most-btn' + (_mostOn ? ' on' : '');
@@ -313,11 +324,26 @@ function updateConsultUI() {
         '<span style="font-size:10px;font-weight:700;margin-left:6px">' + incMod.inc + ' ×' + incUnits + '</span>' + _capNote +
         '</div>';
     } else if (incRaw > 0) {
-      // Consult IS > 45 min but the increment period starts after the 08:00
-      // cut-off, so no increment is billable.
-      banner += '<div style="font-size:11px;padding:5px 10px;color:var(--text3);' +
+      // Consult IS > 45 min but the increment period starts after the 07:45
+      // cut-off, so no increment (second modifier) is billable.
+      // v5.03 (Kathryn): the dead-end note is now ACTIONABLE — if the consult
+      // actually began earlier than entered, correcting the start time right
+      // here restores the increment. The inline picker rewrites cb-start
+      // (12h display + am/pm pill) and re-renders this banner; the end time
+      // deliberately stays put (the +50-min end-follow only fires on direct
+      // cb-start edits), so an earlier start lengthens the consult.
+      banner += '<div style="font-size:11px;padding:6px 10px;color:var(--text2);' +
         'border:.5px solid var(--border);border-top:none;border-radius:0 0 var(--rsm) var(--rsm);' +
-        'background:var(--surface2)">Increment starts after 08:00 — not billable</div>';
+        'background:var(--surface2)">' +
+        'Note — second modifier will not apply: &lt; 45 min from end of ' +
+        'modifier interval (08:00). Should start time be adjusted?' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-top:6px">' +
+        '<input type="time" id="cb-inc-adjust" value="' + start + '" ' +
+        'onchange="_incAdjustStart(this.value)" ' +
+        'style="padding:4px 8px;border:1px solid var(--border2);border-radius:var(--rsm);' +
+        'background:var(--surface);color:var(--text);font-size:13px">' +
+        '<span style="font-size:10px;color:var(--text3)">adjusts start only — end time stays</span>' +
+        '</div></div>';
     } else {
       banner += '<div style="font-size:11px;padding:5px 10px;color:var(--text3);' +
         'border:.5px solid var(--border);border-top:none;border-radius:0 0 var(--rsm) var(--rsm);' +
