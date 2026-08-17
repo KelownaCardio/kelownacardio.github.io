@@ -2665,8 +2665,25 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // honours the marker and logs `dup_claim_allowed` with the time, note and
 // repeated-claim id. CCU family (CCU_DAILY/1411/1421/1431) can NEVER be
 // overridden — it is cross-physician and a second CCU day is not a service.
-var APP_VERSION = 'v5.02';
-var APP_BUILT   = '2026-08-16';
+// v5.03 (2026-08-17): FRICTIONLESS EXISTING-PATIENT FLOW + ACTIONABLE
+// MODIFIER NOTE (Kathryn).
+// (1) The post-OCR "Patient already exists in Database → ↩ Restore to list"
+// banner is GONE (09_patient.js showExistingPatientBanner). It saved no time
+// and derailed claim + location entry. The doctor now just finishes the form;
+// at submit, when the dup check matches and every filled demographic field
+// AGREES, the merge runs silently (_dupPrep + direct _mergeAndReadmit — no
+// modal) and the normal "added to list / added" toast reports it. The
+// side-by-side reconcile modal appears ONLY when a filled field genuinely
+// disagrees. The "Patient already on the list → Go to patient" banner for
+// currently-active patients is KEPT (Kathryn's call, 2026-08-17).
+// (2) The "Increment starts after 08:00 — not billable" dead-end note
+// (07_consult.js) is now actionable: "Note — second modifier will not apply:
+// < 45 min from end of modifier interval (08:00). Should start time be
+// adjusted?" with an inline time picker that rewrites the start field
+// (_incAdjustStart) and recomputes the banner. End time deliberately stays.
+// Frontend-only; no cache-format change.
+var APP_VERSION = 'v5.03';
+var APP_BUILT   = '2026-08-17';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -9343,6 +9360,17 @@ function toggleConsultCode(code) {
   if (!race) updateConsultUI();
 }
 
+// v5.03: inline start-time adjust from the "second modifier will not apply"
+// banner (see updateConsultUI). Writes the picked 24h time into the start
+// field via cbSetTime (12h display + am/pm pill), then re-renders — the
+// modifier banner recomputes immediately. End time is left untouched on
+// purpose: the doctor is correcting when the consult BEGAN.
+function _incAdjustStart(t24) {
+  if (!t24) return;
+  cbSetTime('start', t24);
+  updateConsultUI();
+}
+
 function toggleMost() {
   _mostOn = !_mostOn;
   cEl('cb-most').className = 'most-btn' + (_mostOn ? ' on' : '');
@@ -9385,11 +9413,26 @@ function updateConsultUI() {
         '<span style="font-size:10px;font-weight:700;margin-left:6px">' + incMod.inc + ' ×' + incUnits + '</span>' + _capNote +
         '</div>';
     } else if (incRaw > 0) {
-      // Consult IS > 45 min but the increment period starts after the 08:00
-      // cut-off, so no increment is billable.
-      banner += '<div style="font-size:11px;padding:5px 10px;color:var(--text3);' +
+      // Consult IS > 45 min but the increment period starts after the 07:45
+      // cut-off, so no increment (second modifier) is billable.
+      // v5.03 (Kathryn): the dead-end note is now ACTIONABLE — if the consult
+      // actually began earlier than entered, correcting the start time right
+      // here restores the increment. The inline picker rewrites cb-start
+      // (12h display + am/pm pill) and re-renders this banner; the end time
+      // deliberately stays put (the +50-min end-follow only fires on direct
+      // cb-start edits), so an earlier start lengthens the consult.
+      banner += '<div style="font-size:11px;padding:6px 10px;color:var(--text2);' +
         'border:.5px solid var(--border);border-top:none;border-radius:0 0 var(--rsm) var(--rsm);' +
-        'background:var(--surface2)">Increment starts after 08:00 — not billable</div>';
+        'background:var(--surface2)">' +
+        'Note — second modifier will not apply: &lt; 45 min from end of ' +
+        'modifier interval (08:00). Should start time be adjusted?' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-top:6px">' +
+        '<input type="time" id="cb-inc-adjust" value="' + start + '" ' +
+        'onchange="_incAdjustStart(this.value)" ' +
+        'style="padding:4px 8px;border:1px solid var(--border2);border-radius:var(--rsm);' +
+        'background:var(--surface);color:var(--text);font-size:13px">' +
+        '<span style="font-size:10px;color:var(--text3)">adjusts start only — end time stays</span>' +
+        '</div></div>';
     } else {
       banner += '<div style="font-size:11px;padding:5px 10px;color:var(--text3);' +
         'border:.5px solid var(--border);border-top:none;border-radius:0 0 var(--rsm) var(--rsm);' +
@@ -10390,25 +10433,31 @@ function _findDup2of3(patients, chkPhn, chkLast, chkDob) {
   return { match: best, fields: bestFields };
 }
 
-// ── Duplicate merge modal ─────────────────────────────────────────
-// Shows side-by-side comparison pills for each differing demographic.
-// Doctor taps the correct value for each, then merges or creates new.
-function openDuplicateMergeModal(existing, matchedFields, newData) {
-  // Store state for merge/create handlers
+// ── Duplicate-merge shared setup ──────────────────────────────────
+// v5.03: extracted from openDuplicateMergeModal so apSubmit can decide
+// BEFORE rendering anything whether a reconcile is needed at all.
+// Fills window._dupExisting / _dupNewData / _dupFieldVals / _dupSelections /
+// _dupIsReadmit (everything _mergeAndReadmit reads) and returns the labels
+// of genuinely CONFLICTING fields — both sides filled and different.
+// Blank-on-one-side is absorb-the-filled-value, not a conflict.
+var _DUP_DEMO_FIELDS = [
+  { key: 'last',  label: 'Last Name' },
+  { key: 'first', label: 'First Name' },
+  { key: 'phn',   label: 'PHN' },
+  { key: 'dob',   label: 'DOB' },
+  { key: 'sex',   label: 'Sex' }
+];
+
+function _dupPrep(existing, newData) {
   window._dupExisting = existing;
   window._dupNewData  = newData;
-
-  // Build per-field comparison data
-  var demoFields = [
-    { key: 'last',  label: 'Last Name' },
-    { key: 'first', label: 'First Name' },
-    { key: 'phn',   label: 'PHN' },
-    { key: 'dob',   label: 'DOB' },
-    { key: 'sex',   label: 'Sex' }
-  ];
+  // A record ever on/off service = true readmission (ChangeLog verb +
+  // prior-stay filing in _mergeAndReadmit); consult/procedure-only = restore.
+  window._dupIsReadmit = (existing.list === 'on' || existing.list === 'off');
   window._dupFieldVals = {};
   window._dupSelections = {};
-  demoFields.forEach(function(f) {
+  var conflictLabels = [];
+  _DUP_DEMO_FIELDS.forEach(function(f) {
     var oldV = String(f.key === 'phn'
       ? (existing.phn || '').replace(/\D/g, '')
       : f.key === 'dob' && existing.dob ? fmtClaimDate(existing.dob)
@@ -10417,15 +10466,27 @@ function openDuplicateMergeModal(existing, matchedFields, newData) {
     window._dupFieldVals[f.key] = { old: oldV, 'new': newV };
     // Pre-select new value (unless blank, then keep old)
     window._dupSelections[f.key] = newV ? 'new' : 'old';
+    if (oldV && newV && oldV.toLowerCase() !== newV.toLowerCase())
+      conflictLabels.push(f.label);
   });
+  return conflictLabels;
+}
+
+// ── Duplicate merge modal ─────────────────────────────────────────
+// Shows side-by-side comparison pills for each differing demographic.
+// Doctor taps the correct value for each, then merges or creates new.
+// v5.03: only reached when _dupPrep found a real conflict — the
+// demographics-agree case now merges silently from apSubmit.
+function openDuplicateMergeModal(existing, matchedFields, newData) {
+  var conflictLabels = _dupPrep(existing, newData);
+  var demoFields = _DUP_DEMO_FIELDS;
 
   // (Status badges removed 2026-07-06 — the "Currently on list" / "Phone Consult"
   // pills were confusing sitting next to the record-type button wording below.)
   var h = '';
   var via = existing.addedVia || '';
-  // Comparison rows \u2014 built first so the header can name any inconsistent fields.
+  // Comparison rows \u2014 conflictLabels already computed by _dupPrep above.
   var rowsHtml = '';
-  var conflictLabels = [];
   demoFields.forEach(function(f) {
     var vals = window._dupFieldVals[f.key];
     var oldV = vals.old, newV = vals['new'];
@@ -10439,10 +10500,10 @@ function openDuplicateMergeModal(existing, matchedFields, newData) {
     } else if (!oldV) {
       rowsHtml += '<div class="dup-match">+ ' + esc(dispNew) + '</div>';
     } else if (!newV) {
-      window._dupSelections[f.key] = 'old';
+      // _dupPrep already selected 'old' for blank-new fields
       rowsHtml += '<div class="dup-match">\u2713 ' + esc(dispOld) + '</div>';
     } else {
-      conflictLabels.push(f.label);
+      // conflict \u2014 _dupPrep already recorded the label
       var sel = window._dupSelections[f.key];
       rowsHtml += '<div class="dup-pills">';
       rowsHtml += '<button class="dup-pill' + (sel === 'old' ? ' selected' : '') +
@@ -10482,8 +10543,7 @@ function openDuplicateMergeModal(existing, matchedFields, newData) {
   //   • demographics agree    → "Add to list" / "Add claim" (consult-only path)
   // _dupIsReadmit is kept — the ChangeLog verb still distinguishes a true
   // readmission (ever on/off service) from a phone-consult/procedure restore.
-  var wasOnService = (existing.list === 'on' || existing.list === 'off');
-  window._dupIsReadmit = wasOnService;
+  // (v5.03: _dupIsReadmit is now set by _dupPrep above.)
   var _addToList = !!window._apPendingAddToList;
   var mergeLabel = conflictLabels.length
     ? 'Update patient info'
@@ -11776,6 +11836,17 @@ async function apSubmit(addToList, _skipDupCheck) {
         dob:   chkDob,
         sex:   gv('f-sex')
       };
+      // v5.03 (Kathryn): demographics agree → NO interruption. The doctor has
+      // already finished the claim + location form; merge onto the existing
+      // record (prior phone consult, old discharge, active row — all the
+      // same) and let _mergeAndReadmit's own "added to list / added" toast
+      // report it. The reconcile modal appears ONLY when a filled
+      // demographic field genuinely disagrees between the two records.
+      var _dupConflicts = _dupPrep(dupResult.match, _newData);
+      if (!_dupConflicts.length) {
+        await _mergeAndReadmit();   // ends with toast + overlay hide + nav
+        return;
+      }
       openDuplicateMergeModal(dupResult.match, dupResult.fields, _newData);
       _hideSubmitOverlay();
       return;
@@ -13180,8 +13251,16 @@ function handleOCRResult(data, bar) {
 
 // ── Existing-patient banner (sticker fast-path) ─────────────────────
 // Rendered into the Add Patient pane when an OCR'd sticker PHN matches a
-// patient already in st.patients. Discharged → offer Restore (reuses the
-// On/Off Service chooser). Still on a list → offer to jump to them.
+// patient already in st.patients — but ONLY for a patient still active on a
+// list ("Go to patient" jump).
+//
+// v5.03 (2026-08-17, Kathryn): the DISCHARGED variant ("Patient already
+// exists in Database → ↩ Restore to list") is GONE. A prior-phone-consult /
+// discharged match used to interrupt the sticker flow with a restore offer
+// that saved no time and derailed claim + location entry. Now the doctor
+// just finishes the form; apSubmit's dup check merges onto the existing
+// record silently, and the reconcile modal appears only when a filled
+// demographic field genuinely disagrees (see _dupPrep / apSubmit).
 function showExistingPatientBanner(match) {
   dismissExistingPatientBanner();
   var bar = document.getElementById('ocr-bar');
@@ -13189,21 +13268,14 @@ function showExistingPatientBanner(match) {
 
   var nameStr = ((match.last || '') + ', ' + (match.first || '')).replace(/^,\s*|,\s*$/g, '');
   var discharged = (typeof isDischarged === 'function') ? isDischarged(match) : !!match.discharged;
+  if (discharged) return;   // v5.03: no banner — silent merge at submit instead
 
   var div = document.createElement('div');
   div.id = 'existing-pt-banner';
   div.style.cssText = 'margin-top:6px;padding:10px;border-radius:8px;' +
     'background:var(--surface2);border:1px solid var(--border2)';
 
-  if (discharged) {
-    var detail = esc(nameStr) + (match.phn ? ' · ' + esc(String(match.phn)) : '') + ' · discharged';
-    div.innerHTML =
-      '<div style="font-weight:600;margin-bottom:4px">Patient already exists in Database</div>' +
-      '<div style="font-size:12px;color:var(--text2);margin-bottom:8px">' + detail + '</div>' +
-      '<button class="btn btn-p" style="margin:0" data-pid="' + esc(match.id) + '" ' +
-        'onclick="dismissExistingPatientBanner();restorePatient(this.getAttribute(\'data-pid\'))">' +
-        '↩ Restore to list</button>';
-  } else {
+  {
     var wardStr = match.ward ? ((typeof wardLabel === 'function' && wardLabel(match.ward)) || match.ward) : '';
     div.innerHTML =
       '<div style="font-weight:600;margin-bottom:4px">Patient already on the list</div>' +
