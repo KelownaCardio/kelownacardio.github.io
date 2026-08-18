@@ -49,14 +49,35 @@ async function submitAppPassword() {
 
   if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
   var verdict = 'network';   // 'ok' | 'rejected' | 'network'
+  // v5.04: clear it. A stale code from an earlier attempt would otherwise
+  // caption THIS attempt — e.g. still saying "you're offline" on a retry
+  // that actually got an HTTP 503. That is the same wrong-cause advice
+  // this change exists to remove.
+  window._signinFailCode = '';
   try {
     var r = await fetch(SHEETS_URL + '?action=ping&key=' + encodeURIComponent(val) + '&_t=' + Date.now(),
                         { cache: 'no-store', credentials: 'omit', redirect: 'follow' });
     if (r.ok) {
       var d = await r.json();
       verdict = (d && d.ok) ? 'ok' : (d && d.error === 'unauthorized' ? 'rejected' : 'network');
+    } else {
+      // Apps Script returning 5xx/429 does NOT throw, so this path produced
+      // verdict='network' with nothing logged and no cause recorded.
+      window._signinFailCode = 'http_' + r.status;
+      netlogRecord('init', { action: 'ping', checkpoint: 'signin-probe',
+        code: window._signinFailCode, errMsg: 'HTTP ' + r.status + ' ' + (r.statusText || ''),
+        httpStatus: r.status, attempt: 1, recovered: false });
     }
-  } catch (e) { verdict = 'network'; }
+  } catch (e) {
+    verdict = 'network';
+    // v5.04: a doctor who cannot get PAST sign-in never reaches a sync, so
+    // nothing downstream would ever record this. Logged here; it flushes
+    // as soon as they do get in.
+    window._signinFailCode = netlogClassify(e, null);
+    netlogRecord('init', { action: 'ping', checkpoint: 'signin-probe',
+      code: window._signinFailCode, errName: String(e && e.name || ''),
+      errMsg: String(e && e.message || e), attempt: 1, recovered: false });
+  }
   if (btn) { btn.disabled = false; btn.textContent = 'Connect'; }
 
   if (verdict === 'rejected') {
@@ -64,7 +85,9 @@ async function submitAppPassword() {
     return;                                  // modal stays open; stored password untouched
   }
   if (verdict === 'network') {
-    showErr("Couldn't reach the server — check your connection and try again.");
+    // v5.04: name the actual cause instead of the generic line.
+    showErr("Couldn't reach the server — " + netlogExplain(window._signinFailCode || '') +
+            ". If it keeps happening, sign in later and the app will report it automatically.");
     return;
   }
 
@@ -236,7 +259,14 @@ async function init() {
       try {
         var r = await fetch(SHEETS_URL + '?action=ping&key=' + SHARED_KEY +
                             '&_t=' + Date.now(), { cache: 'no-store' });
-        if (!r.ok) return;
+        if (!r.ok) {
+          netlogRecordThrottled('ping', {
+            action: 'ping', checkpoint: 'keepalive', code: 'http_' + r.status,
+            errMsg: 'HTTP ' + r.status + ' ' + (r.statusText || ''),
+            httpStatus: r.status, attempt: 1, recovered: false
+          });
+          return;
+        }
         var d = await r.json();
         if (!d || !d.lastWriteAt) return;          // old backend / no writes yet
         var seen = window._lastSeenWriteAt;
@@ -248,7 +278,19 @@ async function init() {
           window._lastSeenWriteAt = String(d.lastWriteAt);
           _autoRefreshSync('ping-sync');           // guarded full pull + render
         }
-      } catch (e) { /* silent — next tick retries */ }
+      } catch (e) {
+        // v5.04: was fully silent ("next tick retries"). It still is, from
+        // the doctor's point of view — no banner, no toast, nothing shown.
+        // But this probe runs every 30s all day and is the earliest and
+        // most sensitive detector of a flaky path, so it now leaves a
+        // throttled trace. This is what will show whether the 18/08 AM
+        // reports were one bad patch of signal or a daily pattern.
+        netlogRecordThrottled('ping', {
+          action: 'ping', checkpoint: 'keepalive', code: netlogClassify(e, null),
+          errName: String(e && e.name || ''), errMsg: String(e && e.message || e),
+          attempt: 1, recovered: false
+        });
+      }
     }
     setInterval(function() {
       if (document.visibilityState !== 'visible') return;
@@ -289,10 +331,20 @@ async function resetLocalData() {
         setSyncState('synced');
         showToast('Sync complete — ' + st.patients.filter(function(p){return !p.discharged;}).length + ' active patients loaded');
       } else {
-        setSyncState('error');
-        showToast('Sync error — check connection');
+        // v5.04: log it. This reset path had its own hand-rolled fetch and
+        // was invisible to every diagnostic in the app.
+        netlogRecord('init', { action: 'getAll', checkpoint: 'reset-resync',
+          code: 'rejected', errName: 'AppsScript', errMsg: String(d.error) });
+        setSyncState('error', { code: 'rejected' });
+        showToast('Sync error — ' + netlogExplain('rejected'), 'error');
       }
-    } catch(e) { setSyncState('error'); showToast('Sync failed — check connection'); }
+    } catch(e) {
+      var _rc = netlogClassify(e, null);
+      netlogRecord('init', { action: 'getAll', checkpoint: 'reset-resync',
+        code: _rc, errName: String(e && e.name || ''), errMsg: String(e && e.message || e) });
+      setSyncState('error', { code: _rc });
+      showToast('Sync failed — ' + netlogExplain(_rc), 'error');
+    }
   }
   render();
 }
