@@ -2682,8 +2682,8 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // adjusted?" with an inline time picker that rewrites the start field
 // (_incAdjustStart) and recomputes the banner. End time deliberately stays.
 // Frontend-only; no cache-format change.
-var APP_VERSION = 'v5.03';
-var APP_BUILT   = '2026-08-17';
+var APP_VERSION = 'v5.04';
+var APP_BUILT   = '2026-08-18';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -2855,7 +2855,13 @@ function sanitizeReferrer(obj) {
 // banner and no clue that the app was sitting on a password prompt. New 'auth'
 // state: red pulsing dot + its own banner, so "the app needs the password" can
 // never again be mistaken for "the app is busy".
-function setSyncState(s) {
+// v5.04: optional 2nd arg `detail` — {code:'transport'|'timeout'|'http_502'|...}
+// so the banner can name the actual cause instead of the old one-size
+// "switch to cellular data" (which was actively wrong advice for anyone
+// already ON cellular — Kathryn, 2026-08-18). Callers that pass nothing
+// fall back to the last recorded netlog event, so every existing call
+// site keeps working and still gets a better message than before.
+function setSyncState(s, detail) {
   var dot = document.getElementById('sync-dot');
   if (dot) dot.className = 'sync-dot ' + s;
 
@@ -2863,6 +2869,8 @@ function setSyncState(s) {
   if (!banner) return;
   var txt = document.getElementById('wifi-banner-text');
   var btn = document.getElementById('wifi-banner-btn');
+  var rbtn = document.getElementById('wifi-banner-report');
+  if (rbtn) rbtn.style.display = 'none';   // only shown on 'error'
 
   if (s === 'auth') {
     if (txt) txt.textContent = 'App password needed';
@@ -2875,10 +2883,23 @@ function setSyncState(s) {
     }
     banner.style.display = 'flex';
   } else if (s === 'error') {
-    if (txt) txt.textContent = "Can't connect — switch to cellular data";
+    // v5.04: name the cause. `netlogExplain` is the single source of this
+    // wording — the same string goes into the report email, so what the
+    // doctor saw and what lands in the inbox can never disagree.
+    var _code = (detail && detail.code) ||
+                (window._netlogLast && window._netlogLast.code) || '';
+    if (txt) txt.textContent = netlogExplain(_code);
     if (btn) {
-      btn.textContent = 'Retry';
+      btn.textContent = (_code === 'offline') ? 'Try anyway' : 'Retry';
       btn.onclick = function() { setSyncState('syncing'); syncFromSheets(); };
+    }
+    // One tap, sends itself, nothing for them to describe or remember.
+    // Also re-labelled on every error so a previous "Reported ✓" does not
+    // stick around and imply THIS failure was already sent.
+    if (rbtn) {
+      rbtn.style.display = 'inline-block';
+      rbtn.disabled = false;
+      rbtn.textContent = 'Report to KB';
     }
     banner.style.display = 'flex';
   } else {
@@ -2995,44 +3016,105 @@ async function syncFromSheets() {
   window._lastSyncResponse.checkpoint = 'fetch-start';
   window._lastSyncResponse.startedAt = new Date().toISOString();
   try {
-    // Wrap fetch in a 45s timeout so a stalled request is detectable instead of hanging forever
-    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-    var timeoutId = setTimeout(function() {
-      if (ctrl) ctrl.abort();
-    }, 45000);
-    var fetchOpts = ctrl ? {
-      signal: ctrl.signal,
-      redirect: 'follow',
-      cache: 'no-store',
-      credentials: 'omit'
-    } : { redirect: 'follow', cache: 'no-store', credentials: 'omit' };
-    var r;
-    try {
-      // Cache-bust URL with timestamp to defeat any iOS BFCache fetch interception
-      var url = SHEETS_URL + '?action=getAll&key=' + SHARED_KEY + '&_t=' + Date.now();
-      r = await fetch(url, fetchOpts);
-    } catch (fetchErr) {
+    // ─── v5.04: AUTO-RETRY + TELEMETRY ────────────────────────────────
+    // Was: one attempt, 45s timeout, straight to the red banner on any
+    // failure. That surfaced a transient dropped leg to the doctor as a
+    // hard error AND left no record anywhere (Apps Script logs nothing
+    // for a request it never received, or whose reply was lost on the
+    // googleusercontent redirect).
+    //
+    // Now: two attempts, ~1.2s apart, 20s each. 20s not 45s deliberately
+    // — two attempts at 20s is still under the old single 45s wait, so
+    // nobody waits longer than before, and observed getAll runs top out
+    // around 12s. Every attempt is recorded either way, so the "Client
+    // Errors" sheet shows exactly how many of these attempt 2 rescues.
+    var r = null, _parsed = null;
+    var _lastCode = '', _lastErr = null, _attempts = 0;
+    var NETLOG_SYNC_TIMEOUT_MS = 20000;
+    for (var _try = 1; _try <= 2; _try++) {
+      _attempts = _try;
+      var _t0 = Date.now();
+      var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      var timeoutId = setTimeout(function() {
+        if (ctrl) ctrl.abort();
+      }, NETLOG_SYNC_TIMEOUT_MS);
+      var fetchOpts = ctrl ? {
+        signal: ctrl.signal,
+        redirect: 'follow',
+        cache: 'no-store',
+        credentials: 'omit'
+      } : { redirect: 'follow', cache: 'no-store', credentials: 'omit' };
+      var _resp = null, _err = null;
+      try {
+        // Cache-bust URL with timestamp to defeat any iOS BFCache fetch interception
+        var url = SHEETS_URL + '?action=getAll&key=' + SHARED_KEY + '&_t=' + Date.now();
+        _resp = await fetch(url, fetchOpts);
+        // Parse INSIDE the loop, not after it. A response that arrives
+        // truncated — the exact failure this whole change is chasing —
+        // throws here, and in the first draft that landed in the outer
+        // catch with no retry attempt at all. Now a half-delivered body
+        // gets the second attempt it deserves.
+        if (_resp && _resp.ok) {
+          window._lastSyncResponse.checkpoint = 'parsing-json';
+          _parsed = await _resp.json();
+        }
+      } catch (fetchErr) {
+        _err  = fetchErr;
+        _resp = null;   // a body that died mid-parse is not a usable response
+      }
       clearTimeout(timeoutId);
-      var errMsg = fetchErr.name === 'AbortError'
-        ? 'Fetch aborted after 45s timeout — Apps Script may be slow or unreachable'
-        : 'Fetch failed: ' + (fetchErr.message || fetchErr);
-      window._lastSyncError = errMsg;
-      window._lastSyncResponse.checkpoint = 'fetch-failed';
-      window._lastSyncResponse.fetchError = errMsg;
-      setSyncState('error');
-      return;
+
+      if (_resp && _resp.ok) {
+        // Success. If this was attempt 2, record the rescue — that row is
+        // the whole point of the exercise: it proves the failure was a
+        // transient transport drop and not a backend fault.
+        if (_try > 1) {
+          netlogRecord('sync', {
+            action: 'getAll', checkpoint: 'fetch-returned', code: _lastCode,
+            errName: _lastErr ? String(_lastErr.name || '') : '',
+            errMsg:  _lastErr ? String(_lastErr.message || _lastErr) : '',
+            attempt: _try, recovered: true, durationMs: Date.now() - _t0
+          });
+        }
+        r = _resp;
+        break;
+      }
+
+      _lastErr  = _err;
+      _lastCode = netlogClassify(_err, _resp);
+      netlogRecord('sync', {
+        action: 'getAll', checkpoint: _err ? 'fetch-failed' : 'http-error',
+        code: _lastCode,
+        errName: _err ? String(_err.name || '') : '',
+        errMsg:  _err ? String(_err.message || _err)
+                      : ('HTTP ' + _resp.status + ' ' + (_resp.statusText || '')),
+        httpStatus: _resp ? _resp.status : '',
+        attempt: _try, recovered: false, durationMs: Date.now() - _t0
+      });
+
+      // Give up early when a second attempt provably cannot help (4xx,
+      // offline) — no point making the doctor wait another 20s for the
+      // same answer.
+      if (_try >= 2 || !netlogWorthRetry(_lastCode)) {
+        window._lastSyncError = _err
+          ? (_err.name === 'AbortError'
+              ? 'Fetch aborted after ' + (NETLOG_SYNC_TIMEOUT_MS / 1000) + 's timeout — Apps Script may be slow or unreachable'
+              : 'Fetch failed: ' + (_err.message || _err))
+          : ('HTTP ' + _resp.status + ' ' + _resp.statusText);
+        window._lastSyncResponse.checkpoint = _err ? 'fetch-failed' : 'http-error';
+        window._lastSyncResponse.fetchError = window._lastSyncError;
+        window._lastSyncResponse.attempts   = _attempts;
+        setSyncState('error', { code: _lastCode });
+        return;
+      }
+      await _netlogSleep(NETLOG_RETRY_DELAY_MS);
     }
-    clearTimeout(timeoutId);
+
     window._lastSyncResponse.checkpoint = 'fetch-returned';
     window._lastSyncResponse.httpStatus = r.status;
     window._lastSyncResponse.httpOk = r.ok;
-    if (!r.ok) {
-      window._lastSyncError = 'HTTP ' + r.status + ' ' + r.statusText;
-      setSyncState('error');
-      return;
-    }
-    window._lastSyncResponse.checkpoint = 'parsing-json';
-    var d = await r.json();
+    window._lastSyncResponse.attempts = _attempts;
+    var d = _parsed;   // parsed inside the retry loop above
     window._lastSyncResponse.checkpoint = 'json-parsed';
     window._lastSyncResponse.hasError = !!d.error;
     window._lastSyncResponse.error = d.error || null;
@@ -3056,7 +3138,16 @@ async function syncFromSheets() {
     if (typeof resetUnauthCount === 'function') resetUnauthCount();  // v4.66: authorized → clear transient-unauth counter
     if (d.error) {
       window._lastSyncError = 'Apps Script: ' + d.error;
-      setSyncState('error');
+      // v5.04: a clean 200 carrying {error} is a BACKEND fault, not a
+      // network one. Tagged 'rejected' so the banner says so and the
+      // sheet separates these from transport drops — they need opposite
+      // fixes and used to look identical to the user.
+      netlogRecord('sync', {
+        action: 'getAll', checkpoint: 'server-error', code: 'rejected',
+        errName: 'AppsScript', errMsg: String(d.error),
+        httpStatus: 200, attempt: 1, recovered: false
+      });
+      setSyncState('error', { code: 'rejected' });
       return;
     }
 
@@ -3365,6 +3456,11 @@ async function syncFromSheets() {
     window._lastSyncOkAt = Date.now();   // v4.73: resume-guard staleness marker
     if (d.lastWriteAt) window._lastSeenWriteAt = String(d.lastWriteAt);   // v4.75: ping-sync re-baseline
     setSyncState('synced');
+    // v5.04: we are demonstrably online RIGHT NOW — the one safe moment to
+    // ship any buffered failure records. Fire-and-forget; a flush that
+    // fails leaves the buffer intact for the next sync and is never itself
+    // logged, so this cannot storm.
+    try { netlogFlush(); } catch (eNl) {}
     render();
     // If user is currently viewing the Recently Discharged pane, refresh it too
     var dischPane = document.getElementById('p-discharged');
@@ -3374,11 +3470,22 @@ async function syncFromSheets() {
     }
   } catch(e) {
     window._lastSyncError = e.message || String(e);
+    var _cpt = (window._lastSyncResponse && window._lastSyncResponse.checkpoint) || 'unknown';
     if (window._lastSyncResponse) {
-      window._lastSyncResponse.checkpoint = 'EXCEPTION at ' + (window._lastSyncResponse.checkpoint || 'unknown');
+      window._lastSyncResponse.checkpoint = 'EXCEPTION at ' + _cpt;
       window._lastSyncResponse.exception = e.message || String(e);
     }
-    setSyncState('error');
+    // v5.04: this is where a truncated/garbled body lands (r.json() throws
+    // mid-parse). Previously indistinguishable from "no signal"; now it is
+    // logged with the checkpoint that was in progress, which is what
+    // identifies a response that arrived only partially.
+    var _c = netlogClassify(e, null);
+    netlogRecord('sync', {
+      action: 'getAll', checkpoint: 'EXCEPTION at ' + _cpt, code: _c,
+      errName: String(e && e.name || ''), errMsg: String(e && e.message || e),
+      attempt: 1, recovered: false
+    });
+    setSyncState('error', { code: _c });
   } finally {
     _syncInFlight = false;
   }
@@ -3453,28 +3560,112 @@ async function push(action, body) {
   }
   if (_pKey) {
     if (window._pushInFlight[_pKey]) {
+      // v5.04: the in-flight window grew (retry + 20s abort ceiling), so
+      // "skip silently" now has teeth it did not have when a failure came
+      // back in ~1s. Queue the NEWER body before returning, otherwise a
+      // doctor who corrects a fee mid-retry gets a success toast for a
+      // value that was never sent anywhere.
+      window._pendingPush[_pKey] = { action: action, body: body, ts: Date.now() };
       return true;  // true = don't trigger error handling
     }
     window._pushInFlight[_pKey] = true;
   }
   // Mark as pending until next successful sync confirms it
+  var _pStart = Date.now();
   if (_pKey) {
-    window._pendingPush[_pKey] = { action: action, body: body, ts: Date.now() };
+    window._pendingPush[_pKey] = { action: action, body: body, ts: _pStart };
   }
+  // v5.04 review fix: with the retry chain, this push can be in flight for
+  // up to ~25s — long enough for the doctor to save the SAME record again.
+  // That newer save is queued into _pendingPush (see the in-flight guard
+  // above). This push's completion must then leave the entry alone, or a
+  // gap-note confirm / permanent-reject cleanup would silently discard an
+  // edit whose caller was already told "saved".
+  var _pendingIsNewer = function () {
+    var q = _pKey && window._pendingPush[_pKey];
+    return !!(q && q.ts > _pStart);
+  };
   setSyncState('syncing');
   try {
-    var resp = await fetch(SHEETS_URL + '?action=' + action + '&key=' + SHARED_KEY, {
-      method: 'POST', body: JSON.stringify(body)
-    });
+    // ─── v5.04: AUTO-RETRY + TELEMETRY (writes) ─────────────────────
+    // Two things were wrong here. (1) No timeout at all — a hung POST sat
+    // forever with the amber dot pulsing. (2) Any transport blip went
+    // straight to the red banner with no record of what happened.
+    // Retry is gated on NETLOG_IDEMPOTENT: a lost reply may mean the write
+    // LANDED, so only upsert-by-key actions may be replayed. Append-only
+    // actions fall through to _pendingPush exactly as before.
+    var _pUrl = SHEETS_URL + '?action=' + action + '&key=' + SHARED_KEY;
+    var _pMax = NETLOG_IDEMPOTENT[action] ? 2 : 1;
+    var resp = null, _pCode = '';
+    for (var _pt = 1; _pt <= _pMax; _pt++) {
+      var _pt0 = Date.now(), _pr = null, _pe = null;
+      // 12s, not 20s: a write blocks its record behind _pushInFlight for the
+      // whole attempt chain, so the ceiling here is a UI-responsiveness
+      // number, not just a network one. 12 + 1.35 + 12 ~= 25s worst case.
+      var _pCtrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      var _pTid  = setTimeout(function() { if (_pCtrl) _pCtrl.abort(); }, 12000);
+      try {
+        _pr = await fetch(_pUrl, _pCtrl
+          ? { method: 'POST', body: JSON.stringify(body), signal: _pCtrl.signal }
+          : { method: 'POST', body: JSON.stringify(body) });
+      } catch (_pex) { _pe = _pex; }
+      clearTimeout(_pTid);
+
+      if (_pr && _pr.ok) {
+        if (_pt > 1) {
+          netlogRecord('push', {
+            action: action, checkpoint: 'post-returned', code: _pCode,
+            attempt: _pt, recovered: true, durationMs: Date.now() - _pt0
+          });
+        }
+        resp = _pr;
+        break;
+      }
+
+      _pCode = netlogClassify(_pe, _pr);
+      netlogRecord('push', {
+        action: action, checkpoint: _pe ? 'post-failed' : 'http-error', code: _pCode,
+        errName: _pe ? String(_pe.name || '') : '',
+        errMsg:  _pe ? String(_pe.message || _pe)
+                     : ('HTTP ' + _pr.status + ' ' + (_pr.statusText || '')),
+        httpStatus: _pr ? _pr.status : '',
+        attempt: _pt, recovered: false, durationMs: Date.now() - _pt0
+      });
+
+      if (_pt >= _pMax || !netlogWorthRetry(_pCode)) {
+        // v4.25 behaviour preserved: clear in-flight, leave the record in
+        // _pendingPush so the next sync cycle retries it.
+        if (_pKey) delete window._pushInFlight[_pKey];
+        window._lastPushError = _pe ? (_pe.message || String(_pe))
+                                    : ('HTTP ' + _pr.status);
+        setSyncState('error', { code: _pCode });
+        return false;
+      }
+      await _netlogSleep(NETLOG_RETRY_DELAY_MS);
+    }
     // v4.25: clear in-flight flag on completion (success or server rejection)
     if (_pKey) delete window._pushInFlight[_pKey];
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
     // v3.91: inspect the response BODY, not just the HTTP status. Apps Script
     // returns HTTP 200 even when saveRow rejects a record ({ok:false,error}).
     // Treating that as success let rejected patient saves pass silently — the
     // row never landed, and the orphan-claim healer then rebuilt it blank.
-    var data = null;
-    try { data = await resp.json(); } catch (_) { data = null; }
+    var data = null, _parseErr = null;
+    try { data = await resp.json(); } catch (_pj) { data = null; _parseErr = _pj; }
+    // v5.04: a body that will not parse used to fall straight through to
+    // setSyncState('synced') + return true — a save reported as succeeded
+    // on the strength of a reply nobody could read. Treat it as transient:
+    // the record stays in _pendingPush and the next sync re-sends it, which
+    // is safe because every action that reaches _pendingPush is upsert-keyed.
+    if (_parseErr) {
+      window._lastPushError = 'Unreadable reply: ' + (_parseErr.message || _parseErr);
+      netlogRecord('push', {
+        action: action, checkpoint: 'post-parse', code: 'bad_json',
+        errName: String(_parseErr.name || ''), errMsg: String(_parseErr.message || _parseErr),
+        httpStatus: resp.status, attempt: 1, recovered: false
+      });
+      setSyncState('error', { code: 'bad_json' });
+      return false;
+    }
     // v4.76: a response carrying `error` is a FAILURE even without ok:false.
     // Router ≤v3.05 returned bare {error} for thrown backend exceptions (lock
     // timeout) and this branch missed it — the app treated the failed save as
@@ -3488,7 +3679,7 @@ async function push(action, body) {
       // {error} from an old Router — assume transient) → KEEP it pending so
       // the next sync cycle retries automatically.
       var _transient = !!(data.transient || data.ok === undefined);
-      if (_pKey && !_transient) {
+      if (_pKey && !_transient && !_pendingIsNewer()) {
         delete window._pendingPush[_pKey];   // v4.89: covers gap notes too
       }
       console.warn('push rejected by server — ' + action + ': ' + window._lastPushError +
@@ -3503,7 +3694,7 @@ async function push(action, body) {
     // v4.89: a gap-note save is confirmed by the server's locked write+flush
     // ({ok:true}) — clear its pending entry now rather than waiting for the
     // note to appear in a sync response.
-    if (action === 'saveGapNote' && _pKey) delete window._pendingPush[_pKey];
+    if (action === 'saveGapNote' && _pKey && !_pendingIsNewer()) delete window._pendingPush[_pKey];
     setSyncState('synced');
     return true;
   } catch(e) {
@@ -3513,9 +3704,427 @@ async function push(action, body) {
     // Network / transport failure — transient. Leave it in _pendingPush so
     // the next sync retries it.
     window._lastPushError = e.message || String(e);
-    setSyncState('error');
+    // v5.04: the transport attempts and the JSON-parse guard above handle
+    // and log their own failures, so this is the last-resort net for
+    // anything unforeseen after the response arrived.
+    var _ec = netlogClassify(e, null);
+    netlogRecord('push', {
+      action: action, checkpoint: 'post-parse', code: _ec,
+      errName: String(e && e.name || ''), errMsg: String(e && e.message || e),
+      attempt: 1, recovered: false
+    });
+    setSyncState('error', { code: _ec });
     return false;
   }
+}
+// ═══════════════════════════════════════════════════════════════════
+// 03b_netlog.js — v5.04 CONNECTION FAILURE TELEMETRY
+//
+// WHY THIS EXISTS
+// Kathryn, 2026-08-18: a red "can't connect" banner on cellular data,
+// with a COMPLETELY CLEAN Apps Script executions log. Other doctors saw
+// the same thing that morning. Nothing in the log because Apps Script
+// only records runs it actually starts — a request that never arrived,
+// or whose response was lost on the way back (Apps Script 302-redirects
+// its payload to *.googleusercontent.com; that second leg can drop on a
+// mobile network while doGet logs a clean "Completed"), leaves no trace
+// server-side at all.
+//
+// The app already knew exactly what failed — window._lastSyncError and a
+// checkpoint trail — but nothing ever displayed or transmitted it.
+//
+// THREE THINGS THIS MODULE ADDS
+//   1. Every network failure is recorded locally with full context
+//      (checkpoint, error name, HTTP status, attempt #, whether the
+//      auto-retry rescued it, connection type, downlink, doctor).
+//   2. The buffer is flushed to the "Client Errors" sheet on the NEXT
+//      SUCCESSFUL sync. Deferred on purpose — at the moment of failure
+//      the network is exactly what is broken, so logging live would just
+//      fail too. Nothing is asked of the user.
+//   3. If it never flushes (device stays offline / app closed), the red
+//      banner carries a "Report" button that opens a pre-filled email.
+//      Belt and braces.
+//
+// READING THE SHEET: the column that answers the question is `recovered`.
+//   recovered=TRUE in bulk  → transient transport drop (the redirect-leg
+//                             theory). Users now never see these.
+//   recovered=FALSE + errName=AbortError → genuinely slow/hung backend.
+//   recovered=FALSE + httpStatus 429/500/502/503 → Google-side quota or
+//                             outage; correlate ts with the exec log.
+//   online=false            → the device really had no signal.
+// ═══════════════════════════════════════════════════════════════════
+
+var NETLOG_KEY      = 'kgh5:netlog';
+var NETLOG_MAX      = 40;      // ring buffer — oldest dropped past this
+var NETLOG_REPORTTO = 'kathrynb77@gmail.com';   // "Report" button destination
+var _netlogFlushing = false;   // recursion guard: a failed flush must never log itself
+
+// Stable per-load id so multi-attempt sequences group in the sheet.
+var NETLOG_SESSION = 'S' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+function _netlogRead() {
+  try {
+    var raw = localStorage.getItem(NETLOG_KEY);
+    var arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+}
+
+function _netlogWrite(arr) {
+  try { localStorage.setItem(NETLOG_KEY, JSON.stringify(arr.slice(-NETLOG_MAX))); } catch (e) {}
+}
+
+// Connection context, defended on every field — navigator.connection is
+// absent on iOS Safari, so these are usually blank there. Still worth
+// capturing: Android/Chrome users fill them in, and the blanks themselves
+// identify the platform.
+function _netlogConn() {
+  var c = {};
+  try {
+    var n = navigator.connection || navigator.mozConnection || navigator.webkitConnection || {};
+    c.connType  = String(n.effectiveType || '');
+    c.downlink  = (n.downlink  != null) ? String(n.downlink)  : '';
+    c.rtt       = (n.rtt       != null) ? String(n.rtt)       : '';
+    c.saveData  = (n.saveData  != null) ? String(n.saveData)  : '';
+  } catch (e) {}
+  try { c.online = String(navigator.onLine !== false); } catch (e) { c.online = ''; }
+  try { c.vis    = String(document.visibilityState || ''); } catch (e) { c.vis = ''; }
+  return c;
+}
+
+function _netlogDoctor() {
+  try {
+    var d = (typeof st !== 'undefined' && st) ? st.doc : null;
+    if (!d) return '';
+    if (typeof d === 'object') return String(d.alias || d.name || '');
+    return String(d);
+  } catch (e) { return ''; }
+}
+
+// Classify a thrown fetch error / response into a stable short code.
+// This is what makes the sheet groupable — free-text messages differ per
+// browser ("Load failed" on Safari, "Failed to fetch" on Chrome, both
+// meaning the same thing).
+function netlogClassify(err, resp) {
+  if (resp && !resp.ok) return 'http_' + resp.status;
+  if (!err) return 'unknown';
+  var name = String(err.name || '');
+  var msg  = String(err.message || err || '');
+  if (name === 'AbortError')                   return 'timeout';
+  try { if (navigator.onLine === false)        return 'offline'; } catch (e) {}
+  if (name === 'TypeError' ||
+      /failed to fetch|load failed|networkerror|network request/i.test(msg)) return 'transport';
+  if (/json/i.test(msg))                       return 'bad_json';
+  return 'other';
+}
+
+// Plain-English text for a code. Used for the banner AND the email so the
+// two never drift apart.
+function netlogExplain(code) {
+  if (code === 'offline')   return "You're offline — the app will resync when signal returns";
+  if (code === 'timeout')   return 'Server took too long to answer — tap Retry';
+  if (code === 'transport') return 'Connection dropped before the server replied — tap Retry';
+  if (code === 'bad_json')  return 'Server sent an unreadable reply — tap Retry';
+  if (code && code.indexOf('http_') === 0) return 'Server error ' + code.slice(5) + ' — tap Retry';
+  if (code === 'rejected')  return 'Server rejected the request — tap Report';
+  return "Can't reach the server — tap Retry";
+}
+
+// ── The recorder ───────────────────────────────────────────────────
+// kind:   'sync' | 'push' | 'init'
+// detail: { action, checkpoint, code, errName, errMsg, httpStatus,
+//           attempt, recovered, durationMs }
+// Returns the record so callers can hold it for the banner.
+function netlogRecord(kind, detail) {
+  // NOTE: deliberately NOT gated on _netlogFlushing. The first draft was,
+  // to "never log the logger" — but netlogFlush contains no netlogRecord
+  // call, so there was nothing to guard against, and the gate silently
+  // DROPPED every failure that happened during a flush. That window is
+  // when syncFromSheets replays _pendingPush writes, i.e. exactly the
+  // most diagnostic events available.
+  var d = detail || {};
+  var rec = {
+    ts:         new Date().toISOString(),
+    session:    NETLOG_SESSION,
+    kind:       String(kind || ''),
+    action:     String(d.action     || ''),
+    checkpoint: String(d.checkpoint || ''),
+    code:       String(d.code       || ''),
+    errName:    String(d.errName    || ''),
+    errMsg:     String(d.errMsg     || '').slice(0, 300),
+    httpStatus: (d.httpStatus != null) ? String(d.httpStatus) : '',
+    attempt:    String(d.attempt   != null ? d.attempt : 1),
+    recovered:  String(!!d.recovered),
+    durationMs: (d.durationMs != null) ? String(Math.round(d.durationMs)) : '',
+    appVersion: (typeof APP_VERSION !== 'undefined') ? APP_VERSION : '',
+    doctor:     _netlogDoctor()
+  };
+  var c = _netlogConn();
+  for (var k in c) { if (Object.prototype.hasOwnProperty.call(c, k)) rec[k] = c[k]; }
+  try { rec.ua = String(navigator.userAgent || '').slice(0, 160); } catch (e) { rec.ua = ''; }
+
+  var buf = _netlogRead();
+  buf.push(rec);
+  _netlogWrite(buf);
+  window._netlogLast = rec;
+  try { console.warn('[netlog] ' + rec.kind + '/' + rec.action + ' ' + rec.code +
+                     ' attempt ' + rec.attempt + (d.recovered ? ' → RECOVERED' : ''), rec); } catch (e) {}
+  return rec;
+}
+
+// ── Deferred central flush ─────────────────────────────────────────
+// Called from syncFromSheets the moment a sync completes cleanly, i.e.
+// the exact moment we know the network is working again. Fire-and-forget:
+// a flush that fails leaves the buffer intact for the next sync, and is
+// itself never logged (guard above), so this can never storm.
+function netlogFlush() {
+  if (_netlogFlushing) return;
+  if (typeof SHEETS_URL === 'undefined' || !SHEETS_URL) return;
+  var buf = _netlogRead();
+  if (!buf.length) return;
+  _netlogFlushing = true;
+  var batch = buf.slice(0, NETLOG_MAX);
+  var sentN = batch.length;
+
+  // A flush that HANGS (rather than errors) is the realistic failure on a
+  // stalled mobile link — and without a timeout it would leave
+  // _netlogFlushing stuck true, blocking every later flush for the rest of
+  // the session. Same 20s abort used everywhere else.
+  var fCtrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  var fTid  = setTimeout(function () { if (fCtrl) fCtrl.abort(); }, 20000);
+  var done  = function () { clearTimeout(fTid); _netlogFlushing = false; };
+
+  var opts = { method: 'POST', body: JSON.stringify({ events: batch }) };
+  if (fCtrl) opts.signal = fCtrl.signal;
+
+  fetch(SHEETS_URL + '?action=logClientErrors&key=' + SHARED_KEY, opts)
+    .then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);   // transport-ish → keep buffer
+      return r.json();
+    })
+    .then(function (d) {
+      if (d && d.ok) {
+        // Drop exactly what we sent, by COUNT off the front — anything
+        // recorded while this was in flight is at the tail and survives.
+        var now = _netlogRead();
+        _netlogWrite(now.slice(sentN));
+        try { console.log('[netlog] flushed ' + sentN + ' event(s)'); } catch (e) {}
+        return;
+      }
+      // A definitive server reply that is not ok:true will say the same
+      // thing forever — an old Router with no logClientErrors action (the
+      // partial-rollout case: frontend on GitHub Pages before the Apps
+      // Script deploy), or {error:'unauthorized'} on a stale password.
+      // The first draft kept the buffer on ANY non-ok reply, which meant
+      // every phone re-POSTing a 25KB body on every sync, forever. Only a
+      // transient marker earns a retry; anything else is dropped.
+      if (d && d.transient) return;                      // keep, try next sync
+      var now2 = _netlogRead();
+      _netlogWrite(now2.slice(sentN));
+      try { console.warn('[netlog] server refused the batch — dropped ' + sentN +
+                         ' event(s):', d && d.error); } catch (e) {}
+    })
+    .catch(function () {
+      // Transport failure or abort. Buffer untouched; next good sync retries.
+    })
+    .then(done, done);
+}
+
+// ── Human-readable dump, for the email ─────────────────────────────
+function netlogSummary(maxEvents) {
+  var buf = _netlogRead();
+  var n   = maxEvents || 6;
+  var recent = buf.slice(-n);
+  var lines = [];
+  lines.push('App: ' + ((typeof APP_VERSION !== 'undefined') ? APP_VERSION : '?') +
+             '  Doctor: ' + (_netlogDoctor() || '(not signed in)'));
+  lines.push('Session: ' + NETLOG_SESSION);
+  lines.push('Local time: ' + new Date().toString());
+  lines.push('Buffered events: ' + buf.length + ' (showing last ' + recent.length + ')');
+  lines.push('');
+  if (!recent.length) lines.push('(no failures recorded)');
+  recent.forEach(function (r, i) {
+    lines.push('--- ' + (i + 1) + ' ---');
+    lines.push('when      : ' + r.ts);
+    lines.push('what      : ' + r.kind + (r.action ? ' / ' + r.action : ''));
+    lines.push('cause     : ' + r.code + (r.httpStatus ? ' (HTTP ' + r.httpStatus + ')' : ''));
+    lines.push('checkpoint: ' + r.checkpoint);
+    lines.push('error     : ' + r.errName + ' ' + r.errMsg);
+    lines.push('attempt   : ' + r.attempt + '   recovered: ' + r.recovered +
+               (r.durationMs ? '   took: ' + r.durationMs + 'ms' : ''));
+    lines.push('network   : online=' + r.online + ' type=' + (r.connType || 'n/a') +
+               ' downlink=' + (r.downlink || 'n/a') + ' rtt=' + (r.rtt || 'n/a') +
+               ' tab=' + (r.vis || 'n/a'));
+    lines.push('device    : ' + (r.ua || ''));
+  });
+  return lines.join('\n');
+}
+
+// ── "Report to KB" ─────────────────────────────────────────────────
+// Sends itself. No mail app, no typing, no dialog — one tap and it is gone.
+// The direct POST is the primary path: it carries the FULL buffer and the
+// backend emails KB straight away. The mailto is only the last resort for a
+// device that still has no usable connection, because in that state there is
+// nothing else left to try.
+//
+// Note the ordering: this is a Retry as well as a Report. If the tap succeeds,
+// the doctor has just proved the network is back, and the buffer goes out
+// with it.
+function netlogReport() {
+  var btn = document.getElementById('wifi-banner-report');
+  var restore = function (label) {
+    if (btn) { btn.disabled = false; btn.textContent = label || 'Report to KB'; }
+  };
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+
+  var buf = _netlogRead();
+  if (!buf.length && window._netlogLast) buf = [window._netlogLast];
+  if (!buf.length) {
+    restore();
+    try { showToast('Nothing to report — no failures recorded'); } catch (e) {}
+    return;
+  }
+  var sentN = Math.min(buf.length, NETLOG_MAX);
+
+  var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  var tid  = setTimeout(function () { if (ctrl) ctrl.abort(); }, 15000);
+  var opts = {
+    method: 'POST',
+    // notify:true => backend emails KB immediately, bypassing the hourly
+    // throttle. A doctor who bothered to tap the button is telling us this
+    // one matters.
+    body: JSON.stringify({ events: buf.slice(-NETLOG_MAX), notify: true,
+                           note: 'Sent by ' + (_netlogDoctor() || 'an unidentified device') +
+                                 ' from the error banner' })
+  };
+  if (ctrl) opts.signal = ctrl.signal;
+
+  fetch(SHEETS_URL + '?action=logClientErrors&key=' + SHARED_KEY, opts)
+    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function (d) {
+      clearTimeout(tid);
+      if (!(d && d.ok)) throw new Error((d && d.error) || 'refused');
+      // Delivered — drop exactly what we sent, by count off the front, so
+      // anything recorded during the 15s flight survives to the next flush
+      // (same accounting netlogFlush uses).
+      _netlogWrite(_netlogRead().slice(sentN));
+      restore('Reported ✓');
+      try { showToast('Reported to KB — thank you'); } catch (e) {}
+    })
+    .catch(function () {
+      clearTimeout(tid);
+      // Still no usable connection. Fall back to the pre-filled email so the
+      // information is not lost — the doctor still types nothing, they just
+      // have to press send in their mail app.
+      restore();
+      _netlogMailtoFallback();
+    });
+}
+
+// Last resort only. Body is capped — some mail clients silently truncate very
+// long mailto URLs, so 4 events is the safe payload; the rest still reach the
+// sheet whenever a sync next succeeds.
+function _netlogMailtoFallback() {
+  var body = netlogSummary(4) +
+             '\n\n(Anything else worth noting — what you were doing at the time?)\n';
+  var subj = 'Billing app — connection problem ' +
+             ((typeof APP_VERSION !== 'undefined') ? APP_VERSION : '') +
+             ' — ' + ((window._netlogLast && window._netlogLast.code) || 'unknown');
+  var href = 'mailto:' + NETLOG_REPORTTO +
+             '?subject=' + encodeURIComponent(subj) +
+             '&body='    + encodeURIComponent(body);
+  try {
+    showToast('Still offline — opening an email you can send when signal returns', 'error');
+  } catch (e) {}
+  try {
+    window.location.href = href;
+  } catch (e) {
+    try { console.log(netlogSummary(20)); } catch (e2) {}
+  }
+}
+
+// ── Shared retry helper ────────────────────────────────────────────
+// ONE extra attempt, ~1.2s apart with jitter. Deliberately not more:
+// the failure being targeted is a single dropped leg, and a doctor on
+// rounds should not wait through an exponential ladder. Both attempts
+// are recorded, so the sheet shows how often attempt 2 saves the day.
+//
+// SAFETY: only ever wrap requests that are safe to repeat. Reads always
+// are. Writes only if the backend upserts by key (saveRow-by-id), because
+// a "transport" failure may mean the write DID land and only the reply
+// was lost — replaying an append-only action would duplicate the row.
+var NETLOG_RETRY_DELAY_MS = 1200;
+
+function _netlogSleep(ms) {
+  return new Promise(function (res) { setTimeout(res, ms + Math.floor(Math.random() * 300)); });
+}
+
+// Codes where a second try has a real chance. A 4xx or a server-side
+// rejection will fail identically, so those go straight to the banner.
+function netlogWorthRetry(code) {
+  if (code === 'transport' || code === 'timeout' || code === 'bad_json') return true;
+  if (code && code.indexOf('http_5') === 0) return true;   // 500/502/503/504
+  // NOT http_429. A 429 means the Google-side quota is already spent;
+  // retrying 1.2s later cannot succeed and doubles the load from every
+  // phone at once — which would lengthen the very outage this is meant
+  // to diagnose. Logged, surfaced, not retried.
+  return false;
+}
+
+// ── Which writes are safe to replay ────────────────────────────────
+// A 'transport' failure is ambiguous: the request may have reached the
+// server and only the REPLY was lost. Replaying is therefore only safe
+// for actions the backend upserts by key — saveRow(sheet, body, 'id')
+// and saveGapNote (keyed phn|date) overwrite the same row, so a second
+// delivery is a no-op. Everything append-only (logChange, logOCR*,
+// logRoomDetection, saveHistorical, addPhysician) is DELIBERATELY absent:
+// retrying those would duplicate audit rows. They keep the old behaviour
+// — one attempt, and _pendingPush retries them on the next sync cycle.
+//
+// ⚠️ REVIEW FINDING, 18/08 — saveRef and saveDoctor were on this list in the
+// first draft and had to come OFF. Crud saveRow() takes the script lock and
+// flushes ONLY for 'Claims' and 'Patients' (Crud v3.15 line 548:
+// `if (sheetName === 'Claims' || sheetName === 'Patients')`). For Referrers
+// and Doctors the lock is null, the "re-check rowIdx now that we hold the
+// lock" line is skipped, and SpreadsheetApp.flush() never runs — so attempt
+// 2 can call findRowIndex before attempt 1's append has committed, miss it,
+// and append a SECOND row with the same id/alias. Upsert-by-key is only
+// idempotent when the read-modify-write is serialized. It is not, here.
+var NETLOG_IDEMPOTENT = {
+  savePatient: 1, saveClaim: 1, saveGapNote: 1,
+  deletePatient: 1, deleteClaim: 1
+};
+
+// ── Throttled variant, for high-frequency probes ───────────────────
+// The 30s keep-alive ping is the app's best network sensor — it runs all
+// day, silently, and is the first thing to notice a bad patch of signal.
+// But an unthrottled recorder would let one 20-minute dead zone flush the
+// entire 40-slot ring with identical ping rows and push the interesting
+// sync/push failures out. One row per code per 5 min keeps the signal
+// (when it started, when it stopped, which doctor, which hour) without
+// the noise.
+var _netlogThrottle  = {};
+var _netlogSuppressed = {};   // PER KEY — a global counter misattributed the
+                              // volume of one outage to whatever cause
+                              // happened to be recorded next, which is
+                              // precisely the column clientErrorReport_ reads.
+function netlogRecordThrottled(kind, detail, everyMs) {
+  var d   = detail || {};
+  var key = kind + '|' + (d.action || '') + '|' + (d.code || '');
+  var now = Date.now();
+  var win = everyMs || (5 * 60 * 1000);
+  if (_netlogThrottle[key] && (now - _netlogThrottle[key]) < win) {
+    _netlogSuppressed[key] = (_netlogSuppressed[key] || 0) + 1;
+    return null;
+  }
+  _netlogThrottle[key] = now;
+  // Carry the suppressed count so the sheet never implies a single blip
+  // when it was actually a sustained outage.
+  if (_netlogSuppressed[key]) {
+    d.errMsg = String(d.errMsg || '') + ' [+' + _netlogSuppressed[key] + ' suppressed since last]';
+    _netlogSuppressed[key] = 0;
+  }
+  return netlogRecord(kind, d);
 }
 // 04_billing.js — Modifier logic, BC stat holidays,
 //                 CCU consolidation, directive weekly limit
@@ -17032,14 +17641,35 @@ async function submitAppPassword() {
 
   if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
   var verdict = 'network';   // 'ok' | 'rejected' | 'network'
+  // v5.04: clear it. A stale code from an earlier attempt would otherwise
+  // caption THIS attempt — e.g. still saying "you're offline" on a retry
+  // that actually got an HTTP 503. That is the same wrong-cause advice
+  // this change exists to remove.
+  window._signinFailCode = '';
   try {
     var r = await fetch(SHEETS_URL + '?action=ping&key=' + encodeURIComponent(val) + '&_t=' + Date.now(),
                         { cache: 'no-store', credentials: 'omit', redirect: 'follow' });
     if (r.ok) {
       var d = await r.json();
       verdict = (d && d.ok) ? 'ok' : (d && d.error === 'unauthorized' ? 'rejected' : 'network');
+    } else {
+      // Apps Script returning 5xx/429 does NOT throw, so this path produced
+      // verdict='network' with nothing logged and no cause recorded.
+      window._signinFailCode = 'http_' + r.status;
+      netlogRecord('init', { action: 'ping', checkpoint: 'signin-probe',
+        code: window._signinFailCode, errMsg: 'HTTP ' + r.status + ' ' + (r.statusText || ''),
+        httpStatus: r.status, attempt: 1, recovered: false });
     }
-  } catch (e) { verdict = 'network'; }
+  } catch (e) {
+    verdict = 'network';
+    // v5.04: a doctor who cannot get PAST sign-in never reaches a sync, so
+    // nothing downstream would ever record this. Logged here; it flushes
+    // as soon as they do get in.
+    window._signinFailCode = netlogClassify(e, null);
+    netlogRecord('init', { action: 'ping', checkpoint: 'signin-probe',
+      code: window._signinFailCode, errName: String(e && e.name || ''),
+      errMsg: String(e && e.message || e), attempt: 1, recovered: false });
+  }
   if (btn) { btn.disabled = false; btn.textContent = 'Connect'; }
 
   if (verdict === 'rejected') {
@@ -17047,7 +17677,9 @@ async function submitAppPassword() {
     return;                                  // modal stays open; stored password untouched
   }
   if (verdict === 'network') {
-    showErr("Couldn't reach the server — check your connection and try again.");
+    // v5.04: name the actual cause instead of the generic line.
+    showErr("Couldn't reach the server — " + netlogExplain(window._signinFailCode || '') +
+            ". If it keeps happening, sign in later and the app will report it automatically.");
     return;
   }
 
@@ -17219,7 +17851,14 @@ async function init() {
       try {
         var r = await fetch(SHEETS_URL + '?action=ping&key=' + SHARED_KEY +
                             '&_t=' + Date.now(), { cache: 'no-store' });
-        if (!r.ok) return;
+        if (!r.ok) {
+          netlogRecordThrottled('ping', {
+            action: 'ping', checkpoint: 'keepalive', code: 'http_' + r.status,
+            errMsg: 'HTTP ' + r.status + ' ' + (r.statusText || ''),
+            httpStatus: r.status, attempt: 1, recovered: false
+          });
+          return;
+        }
         var d = await r.json();
         if (!d || !d.lastWriteAt) return;          // old backend / no writes yet
         var seen = window._lastSeenWriteAt;
@@ -17231,7 +17870,19 @@ async function init() {
           window._lastSeenWriteAt = String(d.lastWriteAt);
           _autoRefreshSync('ping-sync');           // guarded full pull + render
         }
-      } catch (e) { /* silent — next tick retries */ }
+      } catch (e) {
+        // v5.04: was fully silent ("next tick retries"). It still is, from
+        // the doctor's point of view — no banner, no toast, nothing shown.
+        // But this probe runs every 30s all day and is the earliest and
+        // most sensitive detector of a flaky path, so it now leaves a
+        // throttled trace. This is what will show whether the 18/08 AM
+        // reports were one bad patch of signal or a daily pattern.
+        netlogRecordThrottled('ping', {
+          action: 'ping', checkpoint: 'keepalive', code: netlogClassify(e, null),
+          errName: String(e && e.name || ''), errMsg: String(e && e.message || e),
+          attempt: 1, recovered: false
+        });
+      }
     }
     setInterval(function() {
       if (document.visibilityState !== 'visible') return;
@@ -17272,10 +17923,20 @@ async function resetLocalData() {
         setSyncState('synced');
         showToast('Sync complete — ' + st.patients.filter(function(p){return !p.discharged;}).length + ' active patients loaded');
       } else {
-        setSyncState('error');
-        showToast('Sync error — check connection');
+        // v5.04: log it. This reset path had its own hand-rolled fetch and
+        // was invisible to every diagnostic in the app.
+        netlogRecord('init', { action: 'getAll', checkpoint: 'reset-resync',
+          code: 'rejected', errName: 'AppsScript', errMsg: String(d.error) });
+        setSyncState('error', { code: 'rejected' });
+        showToast('Sync error — ' + netlogExplain('rejected'), 'error');
       }
-    } catch(e) { setSyncState('error'); showToast('Sync failed — check connection'); }
+    } catch(e) {
+      var _rc = netlogClassify(e, null);
+      netlogRecord('init', { action: 'getAll', checkpoint: 'reset-resync',
+        code: _rc, errName: String(e && e.name || ''), errMsg: String(e && e.message || e) });
+      setSyncState('error', { code: _rc });
+      showToast('Sync failed — ' + netlogExplain(_rc), 'error');
+    }
   }
   render();
 }
