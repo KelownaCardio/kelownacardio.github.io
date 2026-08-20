@@ -472,8 +472,8 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // adjusted?" with an inline time picker that rewrites the start field
 // (_incAdjustStart) and recomputes the banner. End time deliberately stays.
 // Frontend-only; no cache-format change.
-var APP_VERSION = 'v5.04';
-var APP_BUILT   = '2026-08-18';
+var APP_VERSION = 'v5.05';
+var APP_BUILT   = '2026-08-20';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -1389,11 +1389,15 @@ async function push(action, body) {
     var resp = null, _pCode = '';
     for (var _pt = 1; _pt <= _pMax; _pt++) {
       var _pt0 = Date.now(), _pr = null, _pe = null;
-      // 12s, not 20s: a write blocks its record behind _pushInFlight for the
-      // whole attempt chain, so the ceiling here is a UI-responsiveness
-      // number, not just a network one. 12 + 1.35 + 12 ~= 25s worst case.
+      // v5.05: 12s → 20s. The first two days of Client Errors data
+      // (18–19/08) showed 57 write timeouts hitting the 12s ceiling —
+      // saves at peak routinely need longer (every write holds the script
+      // lock and sorts inside it, so 7am writes queue behind each other).
+      // Data said 12s was cutting off requests that would have succeeded;
+      // 20s matches the sync ceiling. Worst case 20 + 1.35 + 20 ~= 41s,
+      // still under the old single 45s wait.
       var _pCtrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-      var _pTid  = setTimeout(function() { if (_pCtrl) _pCtrl.abort(); }, 12000);
+      var _pTid  = setTimeout(function() { if (_pCtrl) _pCtrl.abort(); }, 20000);
       try {
         _pr = await fetch(_pUrl, _pCtrl
           ? { method: 'POST', body: JSON.stringify(body), signal: _pCtrl.signal }
