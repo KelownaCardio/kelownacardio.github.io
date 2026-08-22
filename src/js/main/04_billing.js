@@ -72,6 +72,48 @@ function ccfppSamePerson_(a, b) {
 // 120x call-out modifier fee codes. CCFPP rides on these AND the 33010/33012 consult row (v4.49b); this list identifies the modifier rows.
 var CCFPP_MODIFIER_FEES = ['1200','1201','1202','1205','1206','1207'];
 
+// v4.92.2 (Kathryn, 2026-08-22): CCFPP exists to keep MSP from REJECTING a
+// claim whose times look like they overlap another patient's — so err
+// inclusive. A same-doctor consult that starts within this many minutes of
+// the PRECEDING call-out consult's claimed end (including overlap/zero-gap)
+// still counts as "immediately subsequent... timing continuing" and gets
+// the CCFPP note, even though a realistic doctor-to-doctor handoff (walking,
+// a chart note) rarely lands at an exact zero-gap boundary.
+var CCFPP_MAX_GAP_MIN = 15;
+
+// v4.93 (Kathryn, 2026-08-22): the CALL-OUT DECISION card's proximity
+// window. A second same-doctor call-out consult starting within this many
+// minutes of the PRIOR one's end is close enough that it might be the same
+// trip (sequential CCFPP care — no separate 1200-series charge) OR a
+// genuine new call-back (fresh 1200-series charge) — MSP rules don't
+// distinguish these automatically, only the doctor knows. So instead of the
+// narrow CCFPP_MAX_GAP_MIN's silent auto-note, any gap in this wider window
+// surfaces an explicit, submit-blocking choice (buildConsultForm/
+// updateConsultUI's "Call-out decision" card). A genuine time OVERLAP is
+// always sequential/CCFPP by definition (see consultOverlapPeer_) — no
+// choice needed there, only the raw time conflict is resolved.
+var CCFPP_DECISION_MAX_GAP_MIN = 60;
+
+// v4.93: does SOME OTHER same-alias consult's CCFPP note name THIS consult's
+// patient as its predecessor? If so, this consult's own continuing care has
+// moved onto that successor's claim — see rebuildConsultModifiers_'s
+// `absorbed` branch. Scans the CCFPP tag's own "(phn)" — not date-scoped,
+// since a CCFPP link is only ever formed between date-adjacent consults by
+// construction (calloutDecisionPredecessor_ / consultOverlapPeer_).
+function _ccfppIsAbsorbedPredecessor_(consult, alias) {
+  if (!consult || !consult.phn) return false;
+  var re = /CCFPP:\s*[^|]*?\(([^)]+)\)/i;
+  for (var i = 0; i < st.claims.length; i++) {
+    var c = st.claims[i];
+    if (c.alias !== alias) continue;
+    if (c.fee !== '33010' && c.fee !== '33012') continue;
+    if (_ccfppPhnEq(c.phn, consult.phn)) continue;   // not itself
+    var m = re.exec(String(c.notes || ''));
+    if (m && _ccfppPhnEq(m[1], consult.phn)) return true;
+  }
+  return false;
+}
+
 // Format a patient's name as "Last, First" for CCFPP notes.
 function _ccfppName(p) {
   var last  = String((p && p.last)  || '').trim();
@@ -173,8 +215,21 @@ function ccfppPredecessorFor_(consult, alias) {
     var _peerPat = (st.patients || []).find(function(pp){ return _ccfppPhnEq(pp.phn, c.phn); }) || {};
     if (ccfppSamePerson_(consult, _peerPat)) continue;
 
-    // Overlap AND peer starts at/before this consult → peer is a predecessor.
-    if (thisStartM < prevEndM && prevStartM < thisEndM && prevStartM <= thisStartM) {
+    // Overlap, exact zero-gap adjacency, OR a short real-world handoff gap
+    // (< CCFPP_MAX_GAP_MIN) AND peer starts at/before this consult → peer is
+    // a predecessor. v4.92.1: was strict `<` (thisStartM < prevEndM), which
+    // silently missed the single most common real case — a same-doctor
+    // overlap TRIMS the peer's body to end exactly at this consult's start
+    // (applyConsultTimes_ sets peer.endTime = this consult's startTime), so
+    // prevEndM == thisStartM by construction; the widening step above only
+    // rescued this when the peer's INCREMENT survived the trim and ran past
+    // the trim point. v4.92.2: widened further, from exact adjacency to a
+    // 15-min gap tolerance (Kathryn, 2026-08-22) — CCFPP exists to prevent
+    // MSP rejections on claims that look like they overlap, so a realistic
+    // few-minute gap between finishing one patient and starting the next
+    // still counts as "immediately subsequent... timing continuing" per the
+    // fee guide, even though it isn't literally zero minutes.
+    if ((thisStartM - prevEndM) < CCFPP_MAX_GAP_MIN && prevStartM < thisEndM && prevStartM <= thisStartM) {
       if (prevStartM > bestStartM) {
         bestStartM = prevStartM;
         bestPhn    = c.phn;
@@ -184,6 +239,81 @@ function ccfppPredecessorFor_(consult, alias) {
   }
 
   return bestPhn ? { phn: bestPhn, name: bestName } : null;
+}
+
+// v4.93 (Kathryn, 2026-08-22) — Call-out DECISION card predecessor lookup.
+// Same shape as ccfppPredecessorFor_ above (single most-recent same-alias
+// call-out consult), but with the WIDER CCFPP_DECISION_MAX_GAP_MIN window
+// and, critically, it EXCLUDES a genuine overlap (gap < 0) — that case is a
+// real time conflict, resolved separately via consultOverlapPeer_ and its
+// own in-form card. `consult` needs only {phn,last,first,dob,date,startTime}
+// — endTime is irrelevant to this proximity check. Returns
+// { phn, name, endM, gapMin } or null.
+function calloutDecisionPredecessor_(consult, alias) {
+  if (!consult || !consult.startTime || !consult.date) return null;
+  var dateFmt = consult.date;
+  var _curD = parseDMY(dateFmt);
+  if (!_curD || isNaN(_curD)) return null;
+  var _curISO = _curD.getFullYear() + '-' + pad(_curD.getMonth() + 1) + '-' + pad(_curD.getDate());
+  if (!getModifier(consult.startTime, _curISO)) return null;   // this consult isn't itself a call-out
+
+  var thisStartM = t2m(consult.startTime);
+  var prevDateFmt = pad(new Date(_curD.getTime() - 86400000).getDate()) + '/' + pad(new Date(_curD.getTime() - 86400000).getMonth() + 1) + '/' + new Date(_curD.getTime() - 86400000).getFullYear();
+
+  var best = null, bestEndM = -1, bestPhn = null, bestName = null, bestGap = null;
+
+  for (var _i = 0; _i < st.claims.length; _i++) {
+    var c = st.claims[_i];
+    if (c.alias !== alias) continue;
+    if (_ccfppPhnEq(c.phn, consult.phn)) continue;
+    if (c.fee !== '33010' && c.fee !== '33012') continue;
+    if (!c.startTime || !c.endTime) continue;
+
+    var _isSame = c.date === dateFmt, _isPrev = c.date === prevDateFmt;
+    if (!_isSame && !_isPrev) continue;
+
+    var prevStartM = t2m(c.startTime), prevEndM = t2m(c.endTime);
+    if (prevEndM < prevStartM) prevEndM += 1440;
+    if (_isPrev) {
+      if (prevEndM <= 1440) continue;
+      prevStartM -= 1440; prevEndM -= 1440;
+    }
+
+    var _peerRefD = parseDMY(c.date);
+    var _peerISO = _peerRefD.getFullYear() + '-' + pad(_peerRefD.getMonth() + 1) + '-' + pad(_peerRefD.getDate());
+    if (!getModifier(c.startTime, _peerISO)) continue;   // predecessor must itself be a call-out
+
+    // Same widening ccfppPredecessorFor_ uses — a trimmed body's call-out
+    // WINDOW can outlast it (majority-portion rule), so extend the peer's
+    // end to its latest 12xx modifier row before testing the gap.
+    for (var _mj = 0; _mj < st.claims.length; _mj++) {
+      var _mc = st.claims[_mj];
+      if (_mc.alias !== alias || _mc.date !== c.date) continue;
+      if (!_ccfppPhnEq(_mc.phn, c.phn)) continue;
+      if (CCFPP_MODIFIER_FEES.indexOf(_mc.fee) === -1 || !_mc.endTime) continue;
+      var _me = t2m(_mc.endTime);
+      var _ms2 = _mc.startTime ? t2m(_mc.startTime) : _me;
+      if (_me < _ms2) _me += 1440;
+      if (_isPrev) _me -= 1440;
+      if (_me > prevEndM) prevEndM = _me;
+    }
+
+    var _peerPat = (st.patients || []).find(function(pp){ return _ccfppPhnEq(pp.phn, c.phn); }) || {};
+    if (ccfppSamePerson_(consult, _peerPat)) continue;
+
+    var gap = thisStartM - prevEndM;
+    if (gap < 0) continue;                              // real overlap — not this function's job
+    if (gap > CCFPP_DECISION_MAX_GAP_MIN) continue;
+
+    if (prevEndM > bestEndM) {
+      bestEndM = prevEndM;
+      bestPhn  = c.phn;
+      bestName = _ccfppName((_peerPat && _peerPat.last) ? _peerPat : c);
+      bestGap  = gap;
+    }
+  }
+
+  return bestPhn ? { phn: bestPhn, name: bestName, endM: bestEndM, gapMin: bestGap } : null;
 }
 
 // PURE preview — the CCFPP note the NEW consult would carry on its 120x
@@ -215,6 +345,18 @@ function ccfppRecomputeForAliasDates_(alias, dateFmts) {
 
   var changed = [];
   consults.forEach(function(consult){
+    // v4.93: a consult already resolved by the explicit Call-out Decision
+    // card (CCFPP pill, New-call-back pill, or a resolved real-time overlap)
+    // keeps whatever its notes say the doctor decided — this broad sweep
+    // must not silently re-derive and overwrite an explicit choice using the
+    // narrower automatic-note logic below. Detected by: a qualifying
+    // predecessor still exists within the WIDER decision window, or a real
+    // overlap still/again exists — either way this consult belongs to the
+    // new mechanism, not the old automatic one.
+    if (calloutDecisionPredecessor_(consult, alias) ||
+        consultOverlapPeer_(alias, consult.date, consult.startTime, consult.endTime, consult.phn)) {
+      return;
+    }
     var pred = ccfppPredecessorFor_(consult, alias);
     var note = pred ? ('CCFPP: ' + pred.name + ' (' + pred.phn + ')') : '';
     for (var j = 0; j < st.claims.length; j++) {
@@ -243,15 +385,53 @@ function ccfppRecomputeForAliasDates_(alias, dateFmts) {
   }
 }
 
+// v4.93: re-derive the 1200-series AMOUNTS (base + continuing-care units) —
+// not just notes — for every modifier-eligible consult in dateFmts. Run
+// AFTER ccfppRecomputeForAliasDates_ so every consult's .notes (the single
+// source of truth rebuildConsultModifiers_ reads) are already final: a
+// successor's CCFPP tag decides ITS OWN base-suppression + shifted ladder,
+// and — via _ccfppIsAbsorbedPredecessor_ — its predecessor's own inc-row
+// suppression. Makes the whole neighbourhood self-healing on every edit:
+// linking, re-linking, or un-linking a pair correctly moves the continuing-
+// care charge and restores/removes each side's rows without any special-
+// casing at the call sites (submit, Day Timeline save, overlap trim).
+function ccfppRebuildAmountsAroundAll_(alias, dateFmts) {
+  if (!alias || !dateFmts || !dateFmts.length) return;
+  var dateSet = {};
+  dateFmts.forEach(function(d){ if (d) dateSet[d] = true; });
+  var consults = st.claims.filter(function(c){
+    return c.alias === alias && (c.fee === '33010' || c.fee === '33012') &&
+           c.startTime && c.endTime && dateSet[c.date];
+  });
+  var allChanged = [];
+  consults.forEach(function(consult){
+    var changed = rebuildConsultModifiers_(consult);
+    if (changed.length) allChanged = allChanged.concat(changed);
+  });
+  if (allChanged.length) {
+    sv('claims', st.claims);
+    if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL) {
+      allChanged.forEach(function(mc){ push('saveClaim', mc); });
+    }
+  }
+}
+
 // Convenience: recompute the 3-day window around one date (the caller's
-// consult date), covering cross-midnight predecessors/successors.
+// consult date), covering cross-midnight predecessors/successors. Notes
+// first, then amounts — see ccfppRebuildAmountsAroundAll_ above.
 function ccfppRecomputeAround_(alias, dateFmt) {
   if (!alias || !dateFmt) return;
   var d = parseDMY(dateFmt);
-  if (!d || isNaN(d)) { ccfppRecomputeForAliasDates_(alias, [dateFmt]); return; }
+  if (!d || isNaN(d)) {
+    ccfppRecomputeForAliasDates_(alias, [dateFmt]);
+    ccfppRebuildAmountsAroundAll_(alias, [dateFmt]);
+    return;
+  }
   var prev = pad(new Date(d.getTime() - 86400000).getDate()) + '/' + pad(new Date(d.getTime() - 86400000).getMonth() + 1) + '/' + new Date(d.getTime() - 86400000).getFullYear();
   var next = pad(new Date(d.getTime() + 86400000).getDate()) + '/' + pad(new Date(d.getTime() + 86400000).getMonth() + 1) + '/' + new Date(d.getTime() + 86400000).getFullYear();
-  ccfppRecomputeForAliasDates_(alias, [prev, dateFmt, next]);
+  var dates = [prev, dateFmt, next];
+  ccfppRecomputeForAliasDates_(alias, dates);
+  ccfppRebuildAmountsAroundAll_(alias, dates);
 }
 
 
@@ -339,6 +519,31 @@ function consultIncUnits(startTimeStr, endTimeStr) {
   return units;
 }
 
+// v4.93 (Kathryn, 2026-08-22) — CCFPP continuing-care units, 30-min lapse
+// WAIVED. The Fee Guide's half-hour-or-major-portion ladder normally starts
+// counting only after a free 30 min (first unit at 45 min total — see
+// consultIncUnits above). For an "immediately subsequent patient" on the
+// same call-out (CCFPP), that free 30 min is waived, so the SAME ladder
+// shifts one 30-min step earlier: first unit at 15 min, second at 45, third
+// at 75, etc. — computed purely from THIS consult's own start/end (confirmed
+// against Kathryn's worked example: 12:42 AM–1:32 AM = 50 min → 1206 ×2).
+// This REPLACES both the base 1200-series charge (never billed — the
+// predecessor's own base charge already covers the call-out) and the normal
+// consultIncUnits ladder for a CCFPP-linked consult.
+function ccfppContinuingUnits(startTimeStr, endTimeStr) {
+  if (!startTimeStr || !endTimeStr) return 0;
+  var startM = t2m(startTimeStr);
+  var endM   = t2m(endTimeStr);
+  if (endM < startM) endM += 24 * 60;
+  var dur = endM - startM;
+  var units = 0;
+  for (var n = 1; n <= 10; n++) {
+    if (dur >= 15 + 30 * (n - 1)) units = n;
+    else break;
+  }
+  return units;
+}
+
 // v4.86 — 08:00 cut-off applied to INCREMENT periods (weekdays only).
 // A call-out premium block (base OR increment) may only be added when its
 // 30-min period STARTS at least 15 min before the 08:00 night-window cut-off
@@ -349,7 +554,11 @@ function consultIncUnits(startTimeStr, endTimeStr) {
 // Only the night tier on weekdays has an 08:00 loss boundary; weekends/stats
 // (whole day is designated time) and the evening tier (rolls into night at
 // 23:00) have no such boundary and are left uncapped.
-function calloutIncUnitsCapped(startTimeStr, dateStr, rawUnits) {
+// Shared by calloutIncUnitsCapped (normal — period n starts at start+30*n,
+// since period 0/[start,start+30) is the base charge) and
+// ccfppContinuingUnitsCapped (CCFPP — period n starts at start+30*(n-1),
+// since there is no separate base charge; period 0 is itself unit 1).
+function _calloutPeriodsCapped(startTimeStr, dateStr, rawUnits, firstPeriodOffsetMin) {
   if (!rawUnits || rawUnits < 1) return 0;
   var mod = getModifier(startTimeStr, dateStr);
   if (!mod || mod.type !== 'night') return rawUnits;   // no 08:00 loss boundary
@@ -358,7 +567,7 @@ function calloutIncUnitsCapped(startTimeStr, dateStr, rawUnits) {
   var CUT = 8 * 60, WIN = 15;                            // 08:00 cut-off; need ≥15 min in-window
   var allowed = 0;
   for (var n = 1; n <= rawUnits; n++) {
-    var pStart = (startM + 30 * n) % (24 * 60);          // clock start of increment period n
+    var pStart = (startM + firstPeriodOffsetMin + 30 * (n - 1)) % (24 * 60);
     // Billable only if the period starts by 07:45 (≥15 min before 08:00).
     // A start in 07:46–07:59, or at/after 08:00 into daytime, is not billable.
     var inMorningCut = (pStart > (CUT - WIN) && pStart < CUT);   // 07:46–07:59
@@ -367,6 +576,17 @@ function calloutIncUnitsCapped(startTimeStr, dateStr, rawUnits) {
     allowed = n;
   }
   return allowed;
+}
+
+function calloutIncUnitsCapped(startTimeStr, dateStr, rawUnits) {
+  return _calloutPeriodsCapped(startTimeStr, dateStr, rawUnits, 30);
+}
+
+// v4.93 — same 08:00 weekday cut-off, applied to the CCFPP shifted ladder
+// (period 1 starts at the consult's OWN start time, not start+30, since a
+// CCFPP-linked consult has no separate base-charge period to skip past).
+function ccfppContinuingUnitsCapped(startTimeStr, dateStr, rawUnits) {
+  return _calloutPeriodsCapped(startTimeStr, dateStr, rawUnits, 0);
 }
 
 // ── Directive Weekly Limit (Sun–Sat) ───────────────────
@@ -667,8 +887,37 @@ function rebuildConsultModifiers_(consult) {
   var incRows  = mods.filter(function(c){ return INC_FEES.indexOf(c.fee)  !== -1; });
 
   var modBase  = (start && end) ? getModifier(start, dateISO) : null;
-  var incRaw   = modBase ? consultIncUnits(start, end) : 0;
-  var incUnits = modBase ? calloutIncUnitsCapped(start, dateISO, incRaw) : 0;
+
+  // v4.93: a consult whose OWN notes already carry a CCFPP tag was resolved
+  // by the Call-out Decision card (CCFPP pill in Scenario B, or the
+  // always-sequential Scenario C overlap) — the predecessor's base charge
+  // covers the call-out, so this consult bills NO 1200-series charge of its
+  // own, and its continuing-care units use the 30-min-lapse-waived ladder
+  // (ccfppContinuingUnits) instead of the normal one. This flag is read
+  // fresh from .notes every rebuild rather than re-derived from current
+  // geometry, so it faithfully reflects whichever choice the doctor made and
+  // is never silently flipped by an unrelated nearby edit (see
+  // ccfppRecomputeForAliasDates_'s matching skip-logic).
+  var ccfppLinked = /(^|\|)\s*CCFPP:/i.test(String(consult.notes || ''));
+
+  // v4.93: the flip side of ccfppLinked — this consult is a PREDECESSOR that
+  // some OTHER consult's CCFPP note now names. Its own continuing care has
+  // moved onto that successor's claim (one continuous call-out bills
+  // continuing care against whichever patient the doctor was actually with),
+  // so it keeps its 1200-series base charge but drops its own inc row
+  // entirely, regardless of its own duration.
+  var absorbed = !ccfppLinked && _ccfppIsAbsorbedPredecessor_(consult, alias);
+
+  var incRaw, incUnits;
+  if (absorbed) {
+    incRaw = 0; incUnits = 0;             // continuing care moved to the successor's claim
+  } else if (ccfppLinked) {
+    incRaw   = modBase ? ccfppContinuingUnits(start, end) : 0;
+    incUnits = modBase ? ccfppContinuingUnitsCapped(start, dateISO, incRaw) : 0;
+  } else {
+    incRaw   = modBase ? consultIncUnits(start, end) : 0;
+    incUnits = modBase ? calloutIncUnitsCapped(start, dateISO, incRaw) : 0;
+  }
   var _sM = start ? t2m(start) : 0;
   var changed = [];
 
@@ -690,7 +939,34 @@ function rebuildConsultModifiers_(consult) {
   var userNote = _ccfppStrip(consult.notes);  // CCFPP re-stamped by recompute
   var ov = { icd: consult.icd, refby: consult.refby, refbyName: consult.refbyName };
 
-  if (modBase) {
+  if (modBase && ccfppLinked) {
+    // No base row, ever — the predecessor named in this consult's own CCFPP
+    // note already billed the 1200-series charge for this call-out.
+    if (baseRow) delRow(baseRow);
+    if (incUnits > 0) {
+      var lIncStart = start;
+      var lIncEnd   = (incUnits < incRaw) ? minsToTime((_sM + 30 * incUnits) % 1440) : end;
+      if (incRow) {
+        if (incRow.fee !== modBase.inc || incRow.startTime !== lIncStart ||
+            incRow.endTime !== lIncEnd || String(incRow.units) !== String(incUnits)) {
+          incRow.fee = modBase.inc; incRow.feeCode = modBase.inc;
+          incRow.startTime = lIncStart; incRow.endTime = lIncEnd; incRow.units = incUnits;
+          changed.push(incRow);
+        }
+      } else {
+        // v4.93: seed the CCFPP tag directly (use the consult's OWN current
+        // notes, not the stripped userNote) — ccfppRecomputeForAliasDates_
+        // deliberately SKIPS re-stamping a card-linked consult's notes (so it
+        // never overrides the doctor's explicit choice), so this row must
+        // carry the tag from the moment it's created rather than waiting for
+        // that sweep to add it.
+        addClaim(pat, modBase.inc, modBase.inc, incUnits, dateFmt, consult.loc || 'I',
+                 lIncStart, consult.notes || userNote || null, lIncEnd, alias, ov);
+      }
+    } else if (incRow) {
+      delRow(incRow);
+    }
+  } else if (modBase) {
     var baseEnd = minsToTime((_sM + 30) % 1440);
     if (baseRow) {
       if (baseRow.fee !== modBase.base || baseRow.startTime !== start ||

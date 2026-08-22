@@ -368,6 +368,15 @@ async function _mergeAndReadmit() {
   // merge/savePatient call — re-upserting it in the batch is a harmless no-op).
   // v4.94: same rule as apSubmit — in-card performing pick, else signed-in doctor.
   var cAlias = _billingAliasForAdd();
+  // v4.95 — same rule as the new-patient atomic-save path below: claim-
+  // creation functions can return false (e.g. an unresolved Call-out
+  // Decision card) and that must never be silently swallowed. Unlike the
+  // new-patient path, the patient row here is already saved (merge/readmit
+  // happened above), so there's nothing to roll back — but the doctor still
+  // needs to be told plainly that no claim was created, not shown the normal
+  // success toast.
+  var _mgClaimsValid = true;
+  var _mgClaimAttempted = false;
   if (cAlias) {
     var billingLoc = (document.getElementById('f-billing-loc') || {}).value || 'I';
 
@@ -375,7 +384,8 @@ async function _mergeAndReadmit() {
     window._batchClaimCollect = _mgBatch;
     try {
       if (_apClaimType === 'consult') {
-        submitConsultClaims(p, cAlias, billingLoc);
+        _mgClaimAttempted = true;
+        _mgClaimsValid = submitConsultClaims(p, cAlias, billingLoc) !== false;
       } else if (_apClaimType === 'ccu-admit') {
         var caDateISO = (document.getElementById('ap-ca-date')  || {}).value || '';
         var caNotes   = (document.getElementById('ap-ca-notes') || {}).value || '';
@@ -386,13 +396,14 @@ async function _mergeAndReadmit() {
       } else if (_apClaimType === 'other') {
         var ocLocEl = document.getElementById('oc-loc');
         if (ocLocEl) ocLocEl.value = billingLoc;
-        submitOtherClaimFor(p, cAlias);
+        _mgClaimAttempted = true;
+        _mgClaimsValid = submitOtherClaimFor(p, cAlias) !== false;
       }
     } finally {
       window._batchClaimCollect = null;
     }
     sv('claims', st.claims);
-    if (_mgBatch.length && SHEETS_URL) {
+    if (_mgClaimsValid && _mgBatch.length && SHEETS_URL) {
       var okClaims = await push('savePatientWithClaims', {
         id:      p.id,
         patient: p,
@@ -410,9 +421,23 @@ async function _mergeAndReadmit() {
   } else {
     // v4.94 BACKSTOP — the patient row is already saved on this path, so the
     // only honest outcome is to say so out loud. Never silent.
+    _mgClaimsValid = false;
     showToast('Patient saved but NO claim was created — no doctor selected. '
             + 'Tap your name, then add the claim from the patient card.');
     if (typeof showModal === 'function') showModal('doc-modal');
+  }
+
+  if (!_mgClaimsValid && _mgClaimAttempted) {
+    // v4.95 — claim was blocked (unresolved Call-out Decision card, missing
+    // fee/date on an Other claim, etc. — the claim function already toasted
+    // the specific reason). Stay on the form rather than clearing/navigating
+    // away, so the doctor can fix it and tap submit again — the patient
+    // merge itself already landed and re-submitting is a harmless no-op on
+    // that part. Wording is generic on purpose: the cause varies.
+    showToast('Patient saved but NO claim was added — fix the claim '
+             + 'above, then tap submit again.');
+    _hideSubmitOverlay();
+    return;
   }
 
   // v4.69: plain-language toast — say what happened, not which internal path ran.
@@ -1024,6 +1049,18 @@ function apSelectClaimType(type) {
   } else {
     // Other claim — unified form self-inits its date + performing selector.
     area.innerHTML = buildApOtherClaimArea();
+  }
+  // v4.95: switching AWAY from the consult form while its Call-out Decision
+  // card was unresolved would otherwise leave the two Add-Patient submit
+  // buttons stuck disabled (nothing re-runs updateConsultUI once the form is
+  // gone). CCU-admit/Other claims have no such card — reset the buttons
+  // directly. The consult branch needs nothing: initAddPatientConsult →
+  // updateConsultUI re-derives the correct state itself.
+  if (type !== 'consult') {
+    var _apL = document.getElementById('ap-submit-list');
+    var _apO = document.getElementById('ap-submit-only');
+    if (_apL) { _apL.disabled = false; _apL.className = 'btn btn-p'; }
+    if (_apO) { _apO.disabled = false; _apO.className = 'btn btn-s'; }
   }
 }
 

@@ -112,6 +112,11 @@ function openDailyClaimsList(filter) {
   var pills = '<div style="display:flex;margin-bottom:10px">' +
     '<span style="' + (isConsultView ? _offStyle : _onStyle) + '" onclick="openDailyClaimsList(\'all\')">All (' + todays.length + ')</span>' +
     '<span style="' + (isConsultView ? _onStyle : _offStyle) + '" onclick="openDailyClaimsList(\'consults\')">Consults &amp; Admits</span>' +
+    // v4.93 (Kathryn, 2026-08-22): third pill — jumps straight to the Day
+    // Timeline for today instead of toggling the list filter, so a doctor
+    // reviewing today's claims can get to the time-ordered view (and the
+    // overlap/CCFPP tools that live there) without hunting for it elsewhere.
+    '<span style="' + _offStyle + '" onclick="hideModal(\'daily-claims-modal\');openDayTimeline();">Day Timeline</span>' +
     '</div>';
 
   if (!todays.length) {
