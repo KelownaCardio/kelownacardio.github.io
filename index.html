@@ -16032,11 +16032,17 @@ function searchPhysiciansRemote(query, dropdownId, hiddenId, nameId) {
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (query !== _lastRemoteQ) return; // stale
-        if (!Array.isArray(data) || !data.length) return;
         var dd = document.getElementById(dropdownId);
         if (!dd || dd.style.display === 'none') return;
-        // Remove "searching..." placeholder
         var ph = dd.querySelector('.bc-searching');
+        // No results anywhere in BC — tell the doctor so they know to use
+        // "+ Add as new physician" instead of waiting on a spinner that
+        // never resolves.
+        if (!Array.isArray(data) || !data.length) {
+          if (ph) ph.textContent = 'No match found — add as new physician below';
+          return;
+        }
+        // Remove "searching..." placeholder
         if (ph) ph.remove();
         // Find already-shown numbers
         var shownNums = [];
@@ -16056,8 +16062,21 @@ function searchPhysiciansRemote(query, dropdownId, hiddenId, nameId) {
             if (addRow) addRow.insertAdjacentHTML('beforebegin', extraHtml);
             else dd.innerHTML += extraHtml;
           }
+          // Remote came back with results, but none new (all duplicates of
+          // what's already shown) — still resolve the "searching" state.
+          else if (ph) {
+            ph.textContent = 'No match found — add as new physician below';
+          }
       })
-      .catch(function() {}); // silent fail — offline OK
+      .catch(function() {
+        // Offline / request failed — can't confirm a match either way, but
+        // leaving "Searching..." on screen forever is worse than telling
+        // the doctor to enter it manually.
+        var dd = document.getElementById(dropdownId);
+        if (!dd || dd.style.display === 'none') return;
+        var ph = dd.querySelector('.bc-searching');
+        if (ph) ph.textContent = 'No match found — add as new physician below';
+      });
   }, 400);
 }
 
@@ -16102,11 +16121,17 @@ function refSearch(query, dropdownId, hiddenId, nameId) {
   var local = searchPhysiciansLocal(query);
 
   if (!local.length) {
+    // No remote search configured/available (offline, no SHEETS_URL) —
+    // nothing will ever resolve the "Searching..." placeholder, so tell
+    // the doctor right away instead of leaving a spinner on screen.
+    var canSearchRemote = query.length >= 2 && typeof SHEETS_URL !== 'undefined' && SHEETS_URL;
     dd.innerHTML =
-      '<div class="bc-searching" style="padding:8px 10px;font-size:11px;color:var(--text2)">Searching all BC...</div>' +
+      (canSearchRemote
+        ? '<div class="bc-searching" style="padding:8px 10px;font-size:11px;color:var(--text2)">Searching all BC...</div>'
+        : '<div class="bc-searching" style="padding:8px 10px;font-size:11px;color:var(--text2)">No match found — add as new physician below</div>') +
       buildAddNewRowHtml(query, dropdownId, hiddenId, nameId);
     dd.style.display = 'block';
-    searchPhysiciansRemote(query, dropdownId, hiddenId, nameId);
+    if (canSearchRemote) searchPhysiciansRemote(query, dropdownId, hiddenId, nameId);
     return;
   }
 
@@ -16158,7 +16183,11 @@ function openAddPhysicianForm(el) {
     i.id = id; i.placeholder = placeholder; i.value = value || '';
     i.style.cssText = 'width:100%;margin-bottom:8px;box-sizing:border-box';
     i.autocorrect = 'off';
-    if (type === 'num') { i.inputMode = 'numeric'; i.autocapitalize = 'none'; }
+    // MSP doctor #s are normally digits, but some newer/out-of-province
+    // numbers carry a letter prefix (e.g. "J1234") — a numeric-only mobile
+    // keypad makes those impossible to type, so use a plain text field with
+    // auto-uppercase instead of forcing digits.
+    if (type === 'num') { i.inputMode = 'text'; i.autocapitalize = 'characters'; }
     else i.autocapitalize = 'words';
     wrap.appendChild(i);
   }
