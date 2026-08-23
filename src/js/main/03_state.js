@@ -482,8 +482,19 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // build all of 22/08 as a result (the Shunter stray-CCFPP incident; the
 // new build's recompute self-healed the data at first use that evening).
 // No cache-format change; BUILD_ID deliberately NOT bumped (no re-login).
-var APP_VERSION = 'v5.06';
-var APP_BUILT   = '2026-08-22';
+// v5.07 (2026-08-23): CCFPP billing rule finalized per Kathryn — "we bill
+// for the time spent in 30-min intervals (or majority thereof); the only
+// decision is whether we're continuing the same call-out." (1) The
+// "absorbed predecessor" rule is REMOVED (04_billing.js): a consult named
+// in a successor's CCFPP note keeps ALL its own charges — the link only
+// affects the successor (no 1200-series base, 15-min-first-unit ladder).
+// (2) The Call-out Decision proximity window is now STRICTLY under 60 min
+// — a gap of exactly 60 is a new call-back (no card, no CCFPP); "a new
+// consult [is] >60min from the end time of the last one, or as confirmed
+// by MD". (3) Card/summary wording updated to match. No cache-format
+// change; BUILD_ID not bumped (no re-login).
+var APP_VERSION = 'v5.07';
+var APP_BUILT   = '2026-08-23';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');

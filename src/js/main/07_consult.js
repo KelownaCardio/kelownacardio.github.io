@@ -534,8 +534,8 @@ function updateConsultUI() {
                 '</span></button>' +
               '<div class="cod-adjust" style="display:' + (_codChoice1Open ? 'block' : 'none') + '">' +
                 '<div class="cod-adjust-note">' + esc(overlapPeer.last) + ' becomes ' + peerStart12 + '–' + target12 +
-                  ' (' + newDur + ' min) — keeps <b>' + (peerMod ? peerMod.base : overlapPeer.fee) + ' only</b>. ' +
-                  'Its continuing care already carries forward to this claim regardless (CCFPP).</div>' +
+                  ' (' + newDur + ' min) — its call-out charges re-derive from the shorter time. ' +
+                  'This consult continues the same call-out (CCFPP noted).</div>' +
                 '<button class="cod-apply-btn" onclick="_codApplyChoice1()">Apply — trim ' + esc(overlapPeer.last) + ' to ' + target12 + '</button>' +
               '</div>' +
             '</div>' +
@@ -580,8 +580,7 @@ function updateConsultUI() {
             ') — continuing the same call-out.' +
             (incUnits > 0 ? ' <b>' + modBase.inc + ' ×' + incUnits + '</b>' : ' Under 15 min so far — no continuing-care surcharge yet.') +
             '</div></div>' +
-          '<div class="c-harrison-note">' + esc(linkPred.name) + '\'s claim: ' + (predMod ? predMod.base : '') +
-            ' only — its continuing care now bills on this claim instead (CCFPP).</div>';
+          '<div class="c-harrison-note">' + esc(linkPred.name) + '\'s own claim is unchanged — each patient bills their own time (CCFPP noted on both).</div>';
         _codUpdateSubmitBtn(false);
       }
     } else {
@@ -1248,8 +1247,9 @@ function _tlRender() {
           ', which overlaps another consult already on the clock. ' + _trimList + '.' +
           (_tlCanLink
             ? ' This is treated as one continuous call-out (sequential claims) — ' + esc(sel.last) +
-              ' will carry a CCFPP note naming the trimmed consult, and its own continuing-care count moves ' +
-              'onto ' + esc(sel.last) + '\'s claim.'
+              ' will carry a CCFPP note naming the trimmed consult and bill its own time on the ' +
+              'continuing-care ladder with no separate call-out charge; the trimmed consult\'s ' +
+              'own charges just re-derive from its shorter time.'
             : '') + '</div>' +
           '<button class="cod-apply-btn" onclick="_tlApplyCod()">' +
             (_tlCanLink ? 'Apply — trim and link CCFPP' : 'Apply — trim the times') + '</button>' +
@@ -1419,7 +1419,10 @@ function tlSaveTimes() {
   // absorbed predecessor — an already-resolved link isn't re-litigated by
   // just nudging times a few minutes; the amounts sweep below still keeps
   // it correct either way.
-  if (!/CCFPP:\s*[^|]+/i.test(String(sel.notes || '')) && !_ccfppIsAbsorbedPredecessor_(sel, sel.alias)) {
+  // v5.07: the old "absorbed predecessor" skip is gone — being named in a
+  // successor's note no longer affects this consult's own billing, so only
+  // its OWN existing link suppresses the card.
+  if (!/CCFPP:\s*[^|]+/i.test(String(sel.notes || ''))) {
     var decision = _tlDecisionFor(sel, ns);
     if (decision) {
       _tlCod = { mode: 'B', ns: ns, ne: ne, pred: decision.pred, choice: null };

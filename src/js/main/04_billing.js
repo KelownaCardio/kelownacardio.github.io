@@ -94,25 +94,13 @@ var CCFPP_MAX_GAP_MIN = 15;
 // choice needed there, only the raw time conflict is resolved.
 var CCFPP_DECISION_MAX_GAP_MIN = 60;
 
-// v4.93: does SOME OTHER same-alias consult's CCFPP note name THIS consult's
-// patient as its predecessor? If so, this consult's own continuing care has
-// moved onto that successor's claim — see rebuildConsultModifiers_'s
-// `absorbed` branch. Scans the CCFPP tag's own "(phn)" — not date-scoped,
-// since a CCFPP link is only ever formed between date-adjacent consults by
-// construction (calloutDecisionPredecessor_ / consultOverlapPeer_).
-function _ccfppIsAbsorbedPredecessor_(consult, alias) {
-  if (!consult || !consult.phn) return false;
-  var re = /CCFPP:\s*[^|]*?\(([^)]+)\)/i;
-  for (var i = 0; i < st.claims.length; i++) {
-    var c = st.claims[i];
-    if (c.alias !== alias) continue;
-    if (c.fee !== '33010' && c.fee !== '33012') continue;
-    if (_ccfppPhnEq(c.phn, consult.phn)) continue;   // not itself
-    var m = re.exec(String(c.notes || ''));
-    if (m && _ccfppPhnEq(m[1], consult.phn)) return true;
-  }
-  return false;
-}
+// v4.93 had an "absorbed predecessor" rule here (a consult named in a
+// successor's CCFPP note lost its own 1205–1207 row — the charge "moved
+// downstream"). REMOVED in v5.07 (Kathryn, 2026-08-23): "we bill for the
+// time spent in 30-min intervals (or majority thereof)" — every patient's
+// account bills its OWN face time. Being someone's CCFPP predecessor
+// changes NOTHING on the predecessor's claim; the link only affects the
+// SUCCESSOR (no 1200-series base charge, 15-min-first-unit ladder).
 
 // Format a patient's name as "Last, First" for CCFPP notes.
 function _ccfppName(p) {
@@ -303,7 +291,10 @@ function calloutDecisionPredecessor_(consult, alias) {
 
     var gap = thisStartM - prevEndM;
     if (gap < 0) continue;                              // real overlap — not this function's job
-    if (gap > CCFPP_DECISION_MAX_GAP_MIN) continue;
+    // v5.07 (Kathryn, 2026-08-23): STRICTLY under 60 — "define a new
+    // consult [as] >60min from the end time of the last one". A gap of
+    // exactly 60 minutes is a new call-back: no card, no CCFPP.
+    if (gap >= CCFPP_DECISION_MAX_GAP_MIN) continue;
 
     if (prevEndM > bestEndM) {
       bestEndM = prevEndM;
@@ -389,9 +380,9 @@ function ccfppRecomputeForAliasDates_(alias, dateFmts) {
 // not just notes — for every modifier-eligible consult in dateFmts. Run
 // AFTER ccfppRecomputeForAliasDates_ so every consult's .notes (the single
 // source of truth rebuildConsultModifiers_ reads) are already final: a
-// successor's CCFPP tag decides ITS OWN base-suppression + shifted ladder,
-// and — via _ccfppIsAbsorbedPredecessor_ — its predecessor's own inc-row
-// suppression. Makes the whole neighbourhood self-healing on every edit:
+// consult's own CCFPP tag decides ITS OWN base-suppression + shifted
+// ladder (v5.07: nothing else's — predecessors keep their own rows).
+// Makes the whole neighbourhood self-healing on every edit:
 // linking, re-linking, or un-linking a pair correctly moves the continuing-
 // care charge and restores/removes each side's rows without any special-
 // casing at the call sites (submit, Day Timeline save, overlap trim).
@@ -900,18 +891,12 @@ function rebuildConsultModifiers_(consult) {
   // ccfppRecomputeForAliasDates_'s matching skip-logic).
   var ccfppLinked = /(^|\|)\s*CCFPP:/i.test(String(consult.notes || ''));
 
-  // v4.93: the flip side of ccfppLinked — this consult is a PREDECESSOR that
-  // some OTHER consult's CCFPP note now names. Its own continuing care has
-  // moved onto that successor's claim (one continuous call-out bills
-  // continuing care against whichever patient the doctor was actually with),
-  // so it keeps its 1200-series base charge but drops its own inc row
-  // entirely, regardless of its own duration.
-  var absorbed = !ccfppLinked && _ccfppIsAbsorbedPredecessor_(consult, alias);
-
+  // v5.07 (Kathryn, 2026-08-23): the old "absorbed predecessor" branch is
+  // GONE — being named in a successor's CCFPP note no longer strips this
+  // consult's own continuing-care row. Every patient bills their own face
+  // time; only the SUCCESSOR's claim changes (no base, shifted ladder).
   var incRaw, incUnits;
-  if (absorbed) {
-    incRaw = 0; incUnits = 0;             // continuing care moved to the successor's claim
-  } else if (ccfppLinked) {
+  if (ccfppLinked) {
     incRaw   = modBase ? ccfppContinuingUnits(start, end) : 0;
     incUnits = modBase ? ccfppContinuingUnitsCapped(start, dateISO, incRaw) : 0;
   } else {
