@@ -10970,10 +10970,14 @@ var _tlSel = null;   // selected consult claim id
 // timeline is reopened.
 var _tlCod = null;
 var _TL_COLORS = [   // per-patient palette, cycled by group order
-  { bd:'#3a5fa8', bg1:'rgba(79,140,255,.20)',  bg2:'rgba(79,140,255,.08)',  seg:'rgba(79,140,255,.30)',  txt:'#cfe0ff', sub:'#9dbdff' },
-  { bd:'#2a8f77', bg1:'rgba(62,207,142,.18)',  bg2:'rgba(62,207,142,.07)',  seg:'rgba(62,207,142,.26)',  txt:'#b8f0d8', sub:'#7fd6b4' },
-  { bd:'#8a63c9', bg1:'rgba(168,120,255,.18)', bg2:'rgba(168,120,255,.07)', seg:'rgba(168,120,255,.26)', txt:'#e2d4ff', sub:'#bfa3f2' },
-  { bd:'#a8843a', bg1:'rgba(255,196,79,.16)',  bg2:'rgba(255,196,79,.06)',  seg:'rgba(255,196,79,.24)',  txt:'#ffe6b8', sub:'#dfc08a' }
+  // v5.07 (Kathryn, 2026-08-23): txt/sub were pale pastels (a dark-theme
+  // leftover) — nearly invisible on the light band fills, worst on the
+  // green/amber cards. Now dark shades of each card's own hue, so the fee
+  // codes and times in the modifier bands read clearly on every colour.
+  { bd:'#3a5fa8', bg1:'rgba(79,140,255,.20)',  bg2:'rgba(79,140,255,.08)',  seg:'rgba(79,140,255,.30)',  txt:'#1e3a70', sub:'#44639e' },
+  { bd:'#2a8f77', bg1:'rgba(62,207,142,.18)',  bg2:'rgba(62,207,142,.07)',  seg:'rgba(62,207,142,.26)',  txt:'#125c3e', sub:'#2e7d5f' },
+  { bd:'#8a63c9', bg1:'rgba(168,120,255,.18)', bg2:'rgba(168,120,255,.07)', seg:'rgba(168,120,255,.26)', txt:'#4e3387', sub:'#7457ad' },
+  { bd:'#a8843a', bg1:'rgba(255,196,79,.16)',  bg2:'rgba(255,196,79,.06)',  seg:'rgba(255,196,79,.24)',  txt:'#6e4f16', sub:'#96733a' }
 ];
 var _TL_PXMIN = 3;   // pixels per minute
 
@@ -11102,19 +11106,22 @@ function _tlDateISO() {
 
 // What the group's call-out arithmetic says RIGHT NOW (never cached).
 function _tlDerived(g) {
+  // v5.07 (Kathryn, 2026-08-23): built from the ACTUAL saved 12xx claim
+  // rows, not re-derived from the standard-ladder formula. The old version
+  // always drew base+inc per the normal math, so a CCFPP-linked consult
+  // (no base row, shifted-ladder units) or any just-recomputed claim showed
+  // stale/wrong bands even though the claim rows themselves were correct —
+  // the timeline now shows exactly what bills.
   if (!g.consult) return null;
-  var c = g.consult, iso = _tlDateISO();
-  var mod = getModifier(c.startTime, iso);
-  if (!mod) return null;
-  var raw = consultIncUnits(c.startTime, c.endTime);
-  var cap = calloutIncUnitsCapped(c.startTime, iso, raw);
-  var sM  = t2m(c.startTime);
+  var c = g.consult;
+  var segs = (g.mods || [])
+    .filter(function(m){ return m.startTime && m.endTime; })
+    .map(function(m){ return { fee: m.fee, units: parseInt(m.units, 10) || 1,
+                               start: m.startTime, end: m.endTime }; })
+    .sort(function(a, b){ return t2m(a.start) - t2m(b.start); });
+  if (!segs.length) return null;
   return {
-    mod: mod, incUnits: cap, incRaw: raw,
-    baseStart: c.startTime, baseEnd: minsToTime((sM + 30) % 1440),
-    incStart: minsToTime((sM + 30) % 1440),
-    incEnd: cap > 0 ? (cap < raw ? minsToTime((sM + 30 + 30 * cap) % 1440) : c.endTime) : null,
-    winEndM: sM + 30 * (1 + cap),
+    segs: segs,
     ccfpp: (function(){ var m = /CCFPP:\s*([^|]+)/.exec(String(c.notes || '')); return m ? m[1].trim() : ''; })()
   };
 }
@@ -11184,21 +11191,23 @@ function _tlRender() {
 
     var band = '';
     if (der) {
-      var winTop = Y(der.baseStart), winBot = Y(der.incEnd || der.baseEnd);
+      // v5.07: one segment per ACTUAL saved 12xx row (a linked consult has
+      // no base seg; units render as ×N) — never the re-derived formula.
+      var winTop = Y(der.segs[0].start);
+      var winBot = Y(der.segs[der.segs.length - 1].end);
       var bandH = Math.max(winBot - winTop, 20);
-      var baseH = Math.max(Y(der.baseEnd) - winTop, 12);
-      band = '<div class="tl-band" style="border-left:1px solid ' + C.bd + '">' +
-        '<div class="tl-seg" style="height:' + Math.round(100 * baseH / bandH) + '%;background:' + C.seg +
-          ';border-bottom:1px solid ' + C.bd + '"><b style="color:' + C.txt + '">' + der.mod.base + '</b>' +
-          '<i style="color:' + C.sub + '">' + der.baseStart + '–' + der.baseEnd + '</i>' +
-          (der.ccfpp ? '<span class="tl-ccfpp">CCFPP ' + der.ccfpp.split('(')[0].trim() + '</span>' : '') +
-        '</div>' +
-        (der.incUnits > 0
-          ? '<div class="tl-seg" style="flex:1;background:' + C.seg + '"><b style="color:' + C.txt + '">' +
-            der.mod.inc + (der.incUnits > 1 ? ' ×' + der.incUnits : '') + '</b>' +
-            '<i style="color:' + C.sub + '">' + der.incStart + '–' + der.incEnd + '</i></div>'
-          : '') +
-        '</div>';
+      var segsHtml = der.segs.map(function(sg, si){
+        var isLast = si === der.segs.length - 1;
+        var h = Math.max(Y(sg.end) - Y(sg.start), 12);
+        return '<div class="tl-seg" style="' +
+          (isLast ? 'flex:1' : 'height:' + Math.round(100 * h / bandH) + '%') +
+          ';background:' + C.seg + (isLast ? '' : ';border-bottom:1px solid ' + C.bd) + '">' +
+          '<b style="color:' + C.txt + '">' + sg.fee + (sg.units > 1 ? ' ×' + sg.units : '') + '</b>' +
+          '<i style="color:' + C.sub + '">' + sg.start + '–' + sg.end + '</i>' +
+          (si === 0 && der.ccfpp ? '<span class="tl-ccfpp">CCFPP ' + der.ccfpp.split('(')[0].trim() + '</span>' : '') +
+          '</div>';
+      }).join('');
+      band = '<div class="tl-band" style="border-left:1px solid ' + C.bd + '">' + segsHtml + '</div>';
       if (winBot > bot) bot = winBot;   // box covers the whole call-out window
     }
 
@@ -11298,11 +11307,11 @@ function _tlRender() {
     var c = g.consult, der = _tlDerived(g);
     sum += '<b>' + g.last + '</b> · ' + c.fee + ' ' + c.startTime + '–' + c.endTime;
     if (der) {
-      sum += ' · ' + der.mod.base + ' (' + der.baseStart + '–' + der.baseEnd + ')';
-      if (der.incUnits > 0) sum += ' + ' + der.mod.inc +
-        (der.incUnits > 1 ? ' ×' + der.incUnits : '') + ' (' + der.incStart + '–' + der.incEnd + ')';
-      if (der.incRaw > der.incUnits) sum += ' — ' + (der.incRaw - der.incUnits) + ' half-hour' +
-        ((der.incRaw - der.incUnits) > 1 ? 's' : '') + ' past the cut-off dropped';
+      // v5.07: the actual saved rows, not the formula.
+      der.segs.forEach(function(sg){
+        sum += ' · ' + sg.fee + (sg.units > 1 ? ' ×' + sg.units : '') +
+               ' (' + sg.start + '–' + sg.end + ')';
+      });
       if (der.ccfpp) sum += ' · noted "CCFPP: ' + der.ccfpp + '"';
     } else {
       sum += ' · no call-out';
