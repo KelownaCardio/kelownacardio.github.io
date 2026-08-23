@@ -472,8 +472,18 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // adjusted?" with an inline time picker that rewrites the start field
 // (_incAdjustStart) and recomputes the banner. End time deliberately stays.
 // Frontend-only; no cache-format change.
-var APP_VERSION = 'v5.05';
-var APP_BUILT   = '2026-08-20';
+// v5.06 (2026-08-22): version bump only in this file — makes every open
+// phone show the update banner so it picks up the 22/08 Call-out Decision
+// deployment (proximity/overlap decision card, sequential-claims CCFPP
+// billing, Day Timeline decision card, Add-Patient submit gating). That
+// deployment shipped in 02_constants/04_billing/07_consult/09_patient/
+// index.template without touching this file, so cached sessions saw
+// v5.05 == v5.05 and were never prompted — Dr Hoskin's phone ran the old
+// build all of 22/08 as a result (the Shunter stray-CCFPP incident; the
+// new build's recompute self-healed the data at first use that evening).
+// No cache-format change; BUILD_ID deliberately NOT bumped (no re-login).
+var APP_VERSION = 'v5.06';
+var APP_BUILT   = '2026-08-22';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
