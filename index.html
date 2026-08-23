@@ -2706,8 +2706,19 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // build all of 22/08 as a result (the Shunter stray-CCFPP incident; the
 // new build's recompute self-healed the data at first use that evening).
 // No cache-format change; BUILD_ID deliberately NOT bumped (no re-login).
-var APP_VERSION = 'v5.06';
-var APP_BUILT   = '2026-08-22';
+// v5.07 (2026-08-23): CCFPP billing rule finalized per Kathryn — "we bill
+// for the time spent in 30-min intervals (or majority thereof); the only
+// decision is whether we're continuing the same call-out." (1) The
+// "absorbed predecessor" rule is REMOVED (04_billing.js): a consult named
+// in a successor's CCFPP note keeps ALL its own charges — the link only
+// affects the successor (no 1200-series base, 15-min-first-unit ladder).
+// (2) The Call-out Decision proximity window is now STRICTLY under 60 min
+// — a gap of exactly 60 is a new call-back (no card, no CCFPP); "a new
+// consult [is] >60min from the end time of the last one, or as confirmed
+// by MD". (3) Card/summary wording updated to match. No cache-format
+// change; BUILD_ID not bumped (no re-login).
+var APP_VERSION = 'v5.07';
+var APP_BUILT   = '2026-08-23';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -4250,25 +4261,13 @@ var CCFPP_MAX_GAP_MIN = 15;
 // choice needed there, only the raw time conflict is resolved.
 var CCFPP_DECISION_MAX_GAP_MIN = 60;
 
-// v4.93: does SOME OTHER same-alias consult's CCFPP note name THIS consult's
-// patient as its predecessor? If so, this consult's own continuing care has
-// moved onto that successor's claim — see rebuildConsultModifiers_'s
-// `absorbed` branch. Scans the CCFPP tag's own "(phn)" — not date-scoped,
-// since a CCFPP link is only ever formed between date-adjacent consults by
-// construction (calloutDecisionPredecessor_ / consultOverlapPeer_).
-function _ccfppIsAbsorbedPredecessor_(consult, alias) {
-  if (!consult || !consult.phn) return false;
-  var re = /CCFPP:\s*[^|]*?\(([^)]+)\)/i;
-  for (var i = 0; i < st.claims.length; i++) {
-    var c = st.claims[i];
-    if (c.alias !== alias) continue;
-    if (c.fee !== '33010' && c.fee !== '33012') continue;
-    if (_ccfppPhnEq(c.phn, consult.phn)) continue;   // not itself
-    var m = re.exec(String(c.notes || ''));
-    if (m && _ccfppPhnEq(m[1], consult.phn)) return true;
-  }
-  return false;
-}
+// v4.93 had an "absorbed predecessor" rule here (a consult named in a
+// successor's CCFPP note lost its own 1205–1207 row — the charge "moved
+// downstream"). REMOVED in v5.07 (Kathryn, 2026-08-23): "we bill for the
+// time spent in 30-min intervals (or majority thereof)" — every patient's
+// account bills its OWN face time. Being someone's CCFPP predecessor
+// changes NOTHING on the predecessor's claim; the link only affects the
+// SUCCESSOR (no 1200-series base charge, 15-min-first-unit ladder).
 
 // Format a patient's name as "Last, First" for CCFPP notes.
 function _ccfppName(p) {
@@ -4459,7 +4458,10 @@ function calloutDecisionPredecessor_(consult, alias) {
 
     var gap = thisStartM - prevEndM;
     if (gap < 0) continue;                              // real overlap — not this function's job
-    if (gap > CCFPP_DECISION_MAX_GAP_MIN) continue;
+    // v5.07 (Kathryn, 2026-08-23): STRICTLY under 60 — "define a new
+    // consult [as] >60min from the end time of the last one". A gap of
+    // exactly 60 minutes is a new call-back: no card, no CCFPP.
+    if (gap >= CCFPP_DECISION_MAX_GAP_MIN) continue;
 
     if (prevEndM > bestEndM) {
       bestEndM = prevEndM;
@@ -4545,9 +4547,9 @@ function ccfppRecomputeForAliasDates_(alias, dateFmts) {
 // not just notes — for every modifier-eligible consult in dateFmts. Run
 // AFTER ccfppRecomputeForAliasDates_ so every consult's .notes (the single
 // source of truth rebuildConsultModifiers_ reads) are already final: a
-// successor's CCFPP tag decides ITS OWN base-suppression + shifted ladder,
-// and — via _ccfppIsAbsorbedPredecessor_ — its predecessor's own inc-row
-// suppression. Makes the whole neighbourhood self-healing on every edit:
+// consult's own CCFPP tag decides ITS OWN base-suppression + shifted
+// ladder (v5.07: nothing else's — predecessors keep their own rows).
+// Makes the whole neighbourhood self-healing on every edit:
 // linking, re-linking, or un-linking a pair correctly moves the continuing-
 // care charge and restores/removes each side's rows without any special-
 // casing at the call sites (submit, Day Timeline save, overlap trim).
@@ -5056,18 +5058,12 @@ function rebuildConsultModifiers_(consult) {
   // ccfppRecomputeForAliasDates_'s matching skip-logic).
   var ccfppLinked = /(^|\|)\s*CCFPP:/i.test(String(consult.notes || ''));
 
-  // v4.93: the flip side of ccfppLinked — this consult is a PREDECESSOR that
-  // some OTHER consult's CCFPP note now names. Its own continuing care has
-  // moved onto that successor's claim (one continuous call-out bills
-  // continuing care against whichever patient the doctor was actually with),
-  // so it keeps its 1200-series base charge but drops its own inc row
-  // entirely, regardless of its own duration.
-  var absorbed = !ccfppLinked && _ccfppIsAbsorbedPredecessor_(consult, alias);
-
+  // v5.07 (Kathryn, 2026-08-23): the old "absorbed predecessor" branch is
+  // GONE — being named in a successor's CCFPP note no longer strips this
+  // consult's own continuing-care row. Every patient bills their own face
+  // time; only the SUCCESSOR's claim changes (no base, shifted ladder).
   var incRaw, incUnits;
-  if (absorbed) {
-    incRaw = 0; incUnits = 0;             // continuing care moved to the successor's claim
-  } else if (ccfppLinked) {
+  if (ccfppLinked) {
     incRaw   = modBase ? ccfppContinuingUnits(start, end) : 0;
     incUnits = modBase ? ccfppContinuingUnitsCapped(start, dateISO, incRaw) : 0;
   } else {
@@ -10536,8 +10532,8 @@ function updateConsultUI() {
                 '</span></button>' +
               '<div class="cod-adjust" style="display:' + (_codChoice1Open ? 'block' : 'none') + '">' +
                 '<div class="cod-adjust-note">' + esc(overlapPeer.last) + ' becomes ' + peerStart12 + '–' + target12 +
-                  ' (' + newDur + ' min) — keeps <b>' + (peerMod ? peerMod.base : overlapPeer.fee) + ' only</b>. ' +
-                  'Its continuing care already carries forward to this claim regardless (CCFPP).</div>' +
+                  ' (' + newDur + ' min) — its call-out charges re-derive from the shorter time. ' +
+                  'This consult continues the same call-out (CCFPP noted).</div>' +
                 '<button class="cod-apply-btn" onclick="_codApplyChoice1()">Apply — trim ' + esc(overlapPeer.last) + ' to ' + target12 + '</button>' +
               '</div>' +
             '</div>' +
@@ -10582,8 +10578,7 @@ function updateConsultUI() {
             ') — continuing the same call-out.' +
             (incUnits > 0 ? ' <b>' + modBase.inc + ' ×' + incUnits + '</b>' : ' Under 15 min so far — no continuing-care surcharge yet.') +
             '</div></div>' +
-          '<div class="c-harrison-note">' + esc(linkPred.name) + '\'s claim: ' + (predMod ? predMod.base : '') +
-            ' only — its continuing care now bills on this claim instead (CCFPP).</div>';
+          '<div class="c-harrison-note">' + esc(linkPred.name) + '\'s own claim is unchanged — each patient bills their own time (CCFPP noted on both).</div>';
         _codUpdateSubmitBtn(false);
       }
     } else {
@@ -11250,8 +11245,9 @@ function _tlRender() {
           ', which overlaps another consult already on the clock. ' + _trimList + '.' +
           (_tlCanLink
             ? ' This is treated as one continuous call-out (sequential claims) — ' + esc(sel.last) +
-              ' will carry a CCFPP note naming the trimmed consult, and its own continuing-care count moves ' +
-              'onto ' + esc(sel.last) + '\'s claim.'
+              ' will carry a CCFPP note naming the trimmed consult and bill its own time on the ' +
+              'continuing-care ladder with no separate call-out charge; the trimmed consult\'s ' +
+              'own charges just re-derive from its shorter time.'
             : '') + '</div>' +
           '<button class="cod-apply-btn" onclick="_tlApplyCod()">' +
             (_tlCanLink ? 'Apply — trim and link CCFPP' : 'Apply — trim the times') + '</button>' +
@@ -11421,7 +11417,10 @@ function tlSaveTimes() {
   // absorbed predecessor — an already-resolved link isn't re-litigated by
   // just nudging times a few minutes; the amounts sweep below still keeps
   // it correct either way.
-  if (!/CCFPP:\s*[^|]+/i.test(String(sel.notes || '')) && !_ccfppIsAbsorbedPredecessor_(sel, sel.alias)) {
+  // v5.07: the old "absorbed predecessor" skip is gone — being named in a
+  // successor's note no longer affects this consult's own billing, so only
+  // its OWN existing link suppresses the card.
+  if (!/CCFPP:\s*[^|]+/i.test(String(sel.notes || ''))) {
     var decision = _tlDecisionFor(sel, ns);
     if (decision) {
       _tlCod = { mode: 'B', ns: ns, ne: ne, pred: decision.pred, choice: null };
