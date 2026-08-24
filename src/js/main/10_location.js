@@ -49,6 +49,14 @@ function stayDaysAt(p, dischMs) {
 
 // ── Location Change Screen ─────────────────────────────
 function openLocScreen(pid) {
+  // v5.08: this screen is reachable ONLY from the claim screen's "Change
+  // location" button, which a resident can never open (06_claim_screen.js
+  // guard). The location editor a resident actually uses is the ward-chip
+  // modal — openLocationEdit (06d_patient_edit.js) → buildLocationCard
+  // (09_patient.js), where the role/MRP controls are omitted for residents
+  // in the markup itself rather than hidden after the fact.
+  if (isResident()) { showToast('Not available for this login'); return; }
+
   _locPid  = pid;
   var p    = getP(pid);
 
@@ -159,6 +167,10 @@ function toggleLocRole(role) {
 //            confirmed discharge date
 //
 function openDischModal(pid) {
+  // v5.08: discharge is billing (78717/78720 + claim-gap review) — MD-only
+  // (Kathryn 2026-08-24). The D/C footer button is already hidden for
+  // residents (05_render.js cardFootHtml); this is defense-in-depth.
+  if (isResident()) { showToast('Not available for this login'); return; }
   _claimPid = pid;
   var p = getP(pid);
   if (!p) return;

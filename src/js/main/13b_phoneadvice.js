@@ -119,6 +119,12 @@ function paAskUrl() {
 
 // ── Open / render ──────────────────────────────────────────────────
 function openPhoneAdvice() {
+  // v5.08: this form creates a real MSP claim (fee pills 10001/10002/78711)
+  // and queues an EMR letter, and it posts to the SEPARATE PhoneAdvice Apps
+  // Script deployment — which the main Router's resident allowlist does not
+  // protect. MD only. The footer launcher is also hidden for residents
+  // (applyResidentChrome in 14_init.js); this is the enforcement.
+  if (isResident()) { showToast('Not available for this login'); return; }
   paRenderForm();
   showModal('pa-modal');
 }
@@ -452,6 +458,7 @@ function paFillFromOCR(p, bar) {
 
 // ── Submit ─────────────────────────────────────────────────────────
 function paSubmit() {
+  if (isResident()) { showToast('Not available for this login'); return; }
   // v4.81: caller from the directory search; ICDs from pills + search.
   var callerNum  = paV('pa-ref-num');                              // MSP # when matched
   var callerName = (paV('pa-ref-name') || paV('pa-ref-search'))

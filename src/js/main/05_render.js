@@ -19,13 +19,35 @@ function pencilBtn(pid) {
 
 // Clipboard (claim history) button
 function chartBtn(pid) {
-  return '<button class="row-icon-btn" data-pid="' + pid + '" title="Claim history" onclick="event.stopPropagation();rowIconAction(this,\'summary\')">' +
+  return '<button class="row-icon-btn" data-pid="' + pid + '" title="' + (isResident() ? 'Patient summary' : 'Claim history') + '" onclick="event.stopPropagation();rowIconAction(this,\'summary\')">' +
          '<svg viewBox="0 0 24 24">' +
            '<path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>' +
            '<rect x="9" y="3" width="6" height="4" rx="1"/>' +
            '<line x1="9" y1="12" x2="15" y2="12"/>' +
            '<line x1="9" y1="16" x2="13" y2="16"/>' +
          '</svg></button>';
+}
+
+// v5.08: the "+ Claim" button on every patient row. Residents never bill, so
+// it isn't rendered for them at all (wpAddClaim is guarded too — this just
+// keeps a dead button off the card).
+function addClaimBtnHtml(p) {
+  if (isResident()) return '';
+  return '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>';
+}
+
+// v5.08: the row pencil opens the full Edit Patient screen (demographics,
+// referrer, ICD, MRP, OOP/private-pay). A resident's savePatient is rebuilt
+// server-side from the sheet and only accepts summary/ward/bed/list, so an
+// edit made there would appear to save and then silently revert on the next
+// sync — worse than not offering it. Hidden for residents; openPatientEdit
+// is guarded as well.
+function rowPencilHtml(p, title) {
+  if (isResident()) return '';
+  return '<button class="row-pencil-btn" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'edit\')"' +
+         (title ? ' title="' + title + '"' : '') + '>' +
+           '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
+         '</button>';
 }
 
 // Discharge button
@@ -43,6 +65,9 @@ function rowIcons(pid) {
 // Dispatch function — avoids inline quote issues
 function rowIconAction(btn, action) {
   var pid = btn.getAttribute('data-pid');
+  // v5.08: 'edit' (full patient edit) and 'disch' are MD-only; 'summary'
+  // self-redirects to the notes modal for a resident (06c_patient_summary.js).
+  if (isResident() && action !== 'summary') { showToast('Not available for this login'); return; }
   if (action === 'edit')    openPatientEdit(pid);
   if (action === 'summary') openPatientSummary(pid);
   if (action === 'disch')   openDischModal(pid);
@@ -73,6 +98,7 @@ function isHandover(p) {
 }
 
 function clearHandover(pid) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   var p = getP(pid);
   if (!p) return;
   p.handover = false;
@@ -85,6 +111,7 @@ function clearHandover(pid) {
 
 // v4.61: Toggle handover flag on/off directly from a patient card
 function toggleHandoverFlag(pid) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   var p = getP(pid);
   if (!p) return;
   var wasOn = !!p.handover && p.handover !== 'false';
@@ -100,6 +127,11 @@ function toggleHandoverFlag(pid) {
 // Fixed order on every card (Handover / Claim Hx / D/C) for muscle memory.
 // Names are a FIXED size in CSS (.wp-name) — the v4.61 JS auto-fit is gone.
 function cardFootHtml(p) {
+  // v5.08: residents get the card itself (view), the name tap → summary
+  // notes, and the ward chip tap → location — no footer row at all.
+  // Handover/Claim Hx/D-C are all outside what Kathryn asked for
+  // (2026-08-24: view list + edit summary + edit location, nothing else).
+  if (isResident()) return '';
   var on = !!p.handover && p.handover !== 'false';
   return '<div class="card-foot">' +
     '<button class="foot-btn foot-flag' + (on ? ' on' : '') + '" data-pid="' + p.id + '"' +
@@ -125,9 +157,10 @@ function handoverSectionHtml(patients) {
     '<div class="ward-hdr">' +
       '<div class="ward-lbl" style="color:#7a6d00">\u2691 For Handover (' + patients.length + ')</div>' +
     '</div>' +
-    '<div style="padding:0 12px 4px;font-size:10px;color:#7a6d00;line-height:1.4">' +
-      'Tap the \u2691 Handover button to clear.' +
-    '</div>' +
+    (isResident() ? '' :
+      '<div style="padding:0 12px 4px;font-size:10px;color:#7a6d00;line-height:1.4">' +
+        'Tap the \u2691 Handover button to clear.' +
+      '</div>') +
     safeRowMap(patients, handoverRow) +
     '</div>';
 }
@@ -367,14 +400,12 @@ function wardHtml(ward) {
                  '<span class="wp-name" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' +
                    esc(String(p.last || '')) + ', ' + esc(String(p.first || '')) +
                  '</span>' +
-                 '<button class="row-pencil-btn" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'edit\')" title="Edit">' +
-                   '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
-                 '</button>' +
+                 rowPencilHtml(p, 'Edit') +
                '</div>' +
                '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + '</div>' +
                '<div class="wp-acts">' +
                  wardActBtns(p) +
-                 '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
+                 addClaimBtnHtml(p) +
                '</div>' +
              '</div>' +
              '</div>' +
@@ -390,7 +421,8 @@ function wardHtml(ward) {
   }
 
   var notYet = pts.filter(function(p) { return !claimedToday(p); }).length;
-  if (isCCU) {
+  // v5.08: "Round all" bulk-bills the whole ward — MD only.
+  if (isCCU && !isResident()) {
     h += '<button class="batch-btn" style="margin-top:8px" onclick="batchRoundWard(this)" data-ward="' + ward + '">' +
          '<span>Round all ' + wdef.label + (notYet ? ' (' + notYet + ' pending)' : ' \u2713 all done') + '</span>' +
          '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>' +
@@ -612,13 +644,11 @@ function offRow(p) {
     '<div class="wp-main">' +
       '<div class="wp-name-row">' +
         '<span class="wp-name" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(String(p.last || '')) + ', ' + esc(String(p.first || '')) + '</span>' +
-        '<button class="row-pencil-btn" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'edit\')">' +
-          '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
-        '</button>' +
+        rowPencilHtml(p, '') +
       '</div>' +
       '<div class="wp-meta">' + row3 + lastSeen + '</div>' +
       '<div class="wp-acts">' + quickActBtns(p) +
-        '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
+        addClaimBtnHtml(p) +
       '</div>' +
     '</div>' +
     '</div>' +
@@ -665,13 +695,11 @@ function alphaRow(p) {
     '<div class="wp-main">' +
       '<div class="wp-name-row">' +
         '<span class="wp-name" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(String(p.last || '')) + ', ' + esc(String(p.first || '')) + '</span>' +
-        '<button class="row-pencil-btn" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'edit\')">' +
-          '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
-        '</button>' +
+        rowPencilHtml(p, '') +
       '</div>' +
       '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + lastBilledChip(p) + lastSeen + '</div>' +
       '<div class="wp-acts">' + quickActBtns(p) +
-        '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
+        addClaimBtnHtml(p) +
       '</div>' +
     '</div>' +
     '</div>' +
@@ -692,6 +720,11 @@ function mrpLabel(p) {
 // - CCU/ICU MRP      → + CCU daily
 // - Consulting       → + Directive  + Combined daily
 function wardActBtns(p) {
+  // v5.08: every button this returns creates a CLAIM (+ CCU daily / + Daily /
+  // Directive / Combined daily). Residents don't bill — and with claims
+  // stripped server-side their "done ✓" state could never be right anyway,
+  // so the buttons would read as "nothing is billed" on every patient.
+  if (isResident()) return '';
   if (showsCCUDaily(p)) {
     var ccuDone = claimedTodayFee(p, ['CCU_DAILY','1411','1421','1431']);
     return ccuDone
@@ -736,6 +769,7 @@ function quickActBtns(p) {
 }
 // ── Batch round ────────────────────────────────────────
 function batchRound(ward) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   if (!checkDoc()) return;
   var pts = st.patients.filter(function(p) {
     return p.ward === ward && p.list === 'on' && !claimedToday(p);
@@ -893,6 +927,7 @@ function validateRequiredForClaim(p) {
 }
 
 function quickDailyBtn(btn) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   var pid = btn.getAttribute('data-pid');
   if (!checkDoc()) return;
   // If already billed — toggle off (undo)
@@ -949,6 +984,7 @@ function quickDailyBtn(btn) {
 }
 
 function quickDirectiveBtn(btn) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   var pid = btn.getAttribute('data-pid');
   if (!checkDoc()) return;
   // If already billed today — toggle off (undo), same as daily/CCU
@@ -982,6 +1018,7 @@ function quickDirectiveBtn(btn) {
 }
 
 function quickCCUBtn(btn) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   var pid = btn.getAttribute('data-pid');
   if (!checkDoc()) return;
   // If already billed — toggle off (undo)
@@ -1022,10 +1059,14 @@ function lastBilledChip(p) {
 }
 
 // Named wrappers for data-ward buttons (avoid inline quote issues)
-function batchRoundWard(btn) { batchRound(btn.getAttribute('data-ward')); }
+function batchRoundWard(btn) {
+  if (isResident()) { showToast('Not available for this login'); return; }
+  batchRound(btn.getAttribute('data-ward'));
+}
 function openAddWard(btn)    { openAdd(btn.getAttribute('data-ward')); }
 
 function wpAddClaim(btn) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   openClaimScreen(btn.getAttribute('data-pid'));
 }
 

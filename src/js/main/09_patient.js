@@ -368,15 +368,6 @@ async function _mergeAndReadmit() {
   // merge/savePatient call — re-upserting it in the batch is a harmless no-op).
   // v4.94: same rule as apSubmit — in-card performing pick, else signed-in doctor.
   var cAlias = _billingAliasForAdd();
-  // v4.95 — same rule as the new-patient atomic-save path below: claim-
-  // creation functions can return false (e.g. an unresolved Call-out
-  // Decision card) and that must never be silently swallowed. Unlike the
-  // new-patient path, the patient row here is already saved (merge/readmit
-  // happened above), so there's nothing to roll back — but the doctor still
-  // needs to be told plainly that no claim was created, not shown the normal
-  // success toast.
-  var _mgClaimsValid = true;
-  var _mgClaimAttempted = false;
   if (cAlias) {
     var billingLoc = (document.getElementById('f-billing-loc') || {}).value || 'I';
 
@@ -384,8 +375,7 @@ async function _mergeAndReadmit() {
     window._batchClaimCollect = _mgBatch;
     try {
       if (_apClaimType === 'consult') {
-        _mgClaimAttempted = true;
-        _mgClaimsValid = submitConsultClaims(p, cAlias, billingLoc) !== false;
+        submitConsultClaims(p, cAlias, billingLoc);
       } else if (_apClaimType === 'ccu-admit') {
         var caDateISO = (document.getElementById('ap-ca-date')  || {}).value || '';
         var caNotes   = (document.getElementById('ap-ca-notes') || {}).value || '';
@@ -396,14 +386,13 @@ async function _mergeAndReadmit() {
       } else if (_apClaimType === 'other') {
         var ocLocEl = document.getElementById('oc-loc');
         if (ocLocEl) ocLocEl.value = billingLoc;
-        _mgClaimAttempted = true;
-        _mgClaimsValid = submitOtherClaimFor(p, cAlias) !== false;
+        submitOtherClaimFor(p, cAlias);
       }
     } finally {
       window._batchClaimCollect = null;
     }
     sv('claims', st.claims);
-    if (_mgClaimsValid && _mgBatch.length && SHEETS_URL) {
+    if (_mgBatch.length && SHEETS_URL) {
       var okClaims = await push('savePatientWithClaims', {
         id:      p.id,
         patient: p,
@@ -421,23 +410,9 @@ async function _mergeAndReadmit() {
   } else {
     // v4.94 BACKSTOP — the patient row is already saved on this path, so the
     // only honest outcome is to say so out loud. Never silent.
-    _mgClaimsValid = false;
     showToast('Patient saved but NO claim was created — no doctor selected. '
             + 'Tap your name, then add the claim from the patient card.');
     if (typeof showModal === 'function') showModal('doc-modal');
-  }
-
-  if (!_mgClaimsValid && _mgClaimAttempted) {
-    // v4.95 — claim was blocked (unresolved Call-out Decision card, missing
-    // fee/date on an Other claim, etc. — the claim function already toasted
-    // the specific reason). Stay on the form rather than clearing/navigating
-    // away, so the doctor can fix it and tap submit again — the patient
-    // merge itself already landed and re-submitting is a harmless no-op on
-    // that part. Wording is generic on purpose: the cause varies.
-    showToast('Patient saved but NO claim was added — fix the claim '
-             + 'above, then tap submit again.');
-    _hideSubmitOverlay();
-    return;
   }
 
   // v4.69: plain-language toast — say what happened, not which internal path ran.
@@ -539,15 +514,27 @@ function buildLocationCard(prefix, p, requireChoice) {
   h += '<div id="' + X + '-room-pills" class="room-pills"></div>';
   h += '</div></div>';
   // Row 2 — Cardiology role
+  // v5.08: residents CAN change Cardiology role (Kathryn 2026-08-24) — these
+  // pills are shown to everyone.
   h += '<label style="margin-top:8px">Cardiology role</label>';
   h += '<div id="' + X + '-role-row" class="fl" style="gap:8px;margin-top:4px">';
   h += '<button type="button" class="ap-list-pill' + (role === 'mrp' ? ' on' : '') + '" id="' + X + '-role-mrp" onclick="locRolePill(\'' + X + '\',\'mrp\')">MRP</button>';
   h += '<button type="button" class="ap-list-pill' + (role === 'consultant' ? ' on' : '') + '" id="' + X + '-role-con" onclick="locRolePill(\'' + X + '\',\'consultant\')">Consulting</button>';
   h += '</div>';
-  h += '<input id="' + X + '-role" type="hidden" value="' + role + '">';
   // Row 3 — MRP service
+  // v5.08: NOT shown to residents. Which service is most-responsible is a
+  // billing-determining field of its own, and Kathryn's scope is the role
+  // pills only. The MRP/Consulting → MRP-service link that locRolePill
+  // normally applies is reproduced SERVER-SIDE for residents instead
+  // (Crud v3.19 residentSavePatient_), so tapping MRP still lands
+  // 'Cardiology' on the sheet exactly as it does for an MD. locRolePill and
+  // locMrpChange are both null-safe against the missing select.
+  if (!((typeof isResident === 'function') && isResident())) {
   h += '<label style="margin-top:8px">MRP service</label>';
   h += '<select id="' + X + '-mrp" onchange="locMrpChange(\'' + X + '\')">' + mrpOpts + '</select>';
+  }
+  // Hidden role value — the pills write into this; saveLocationEdit reads it.
+  h += '<input id="' + X + '-role" type="hidden" value="' + role + '">';
   // Row 4 — On / Off service
   h += '<label style="margin-top:8px">On / Off service</label>';
   h += '<div id="' + X + '-list-row" class="fl" style="gap:8px;margin-top:4px">';
@@ -1050,18 +1037,6 @@ function apSelectClaimType(type) {
     // Other claim — unified form self-inits its date + performing selector.
     area.innerHTML = buildApOtherClaimArea();
   }
-  // v4.95: switching AWAY from the consult form while its Call-out Decision
-  // card was unresolved would otherwise leave the two Add-Patient submit
-  // buttons stuck disabled (nothing re-runs updateConsultUI once the form is
-  // gone). CCU-admit/Other claims have no such card — reset the buttons
-  // directly. The consult branch needs nothing: initAddPatientConsult →
-  // updateConsultUI re-derives the correct state itself.
-  if (type !== 'consult') {
-    var _apL = document.getElementById('ap-submit-list');
-    var _apO = document.getElementById('ap-submit-only');
-    if (_apL) { _apL.disabled = false; _apL.className = 'btn btn-p'; }
-    if (_apO) { _apO.disabled = false; _apO.className = 'btn btn-s'; }
-  }
 }
 
 
@@ -1199,6 +1174,11 @@ function _billingAliasForAdd() {
 }
 
 async function apSubmit(addToList, _skipDupCheck) {
+  // v5.08: belt-and-suspenders — nav() already blocks a resident from
+  // reaching this tab at all, and the backend allowlist (Router v3.14)
+  // would reject the resulting save regardless. Only an MD adds patients
+  // (Kathryn 2026-08-24).
+  if (isResident()) { showToast('Ask the attending to add new patients'); return; }
   // v4.26: Submit overlay — reuse the same guard and overlay as claimSubmitOnce
   if (_submitGuard) return;
   window._apPendingAddToList = addToList;

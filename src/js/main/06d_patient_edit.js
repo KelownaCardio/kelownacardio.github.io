@@ -6,6 +6,11 @@
 
 
 function openPatientEdit(pid) {
+  // v5.08: the full Edit Patient screen changes demographics, referring MD,
+  // ICD, MRP/role and OOP/private-pay — none of which a resident login may
+  // write (Crud v3.19 rebuilds the row and keeps only summary/ward/bed/list).
+  // Blocked here so an edit can never appear to save and then revert.
+  if (isResident()) { showToast('Not available for this login'); return; }
   var p = getP(pid);
   if (!p || !p.id) return;
 
@@ -169,6 +174,7 @@ function peRoleChange() {
 }
 
 function savePatientEdit(pid) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   var p = getP(pid);
   if (!p || !p.id) return;
 

@@ -47,6 +47,11 @@ function ebcDisp(t24) {
 }
 
 function _openClaimScreen(pid) {
+  // v5.08: single choke point for every "+Claim" entry (card, summary
+  // screen, discharged list) — residents never bill (Kathryn 2026-08-24).
+  // The backend would reject saveClaim anyway (Router v3.14 allowlist), but
+  // this keeps a resident from ever seeing a form they can't submit.
+  if (isResident()) { showToast('Not available for this login'); return; }
   _claimPid = pid;
   _incUnits = 1;
   _mostOn   = true;

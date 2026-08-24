@@ -58,6 +58,7 @@
 
 var st = {
   doc:        null,  // { alias, num, name }
+  role:       null,  // v5.08: 'md' | 'resident' — captured from the ping response at sign-in
   patients:   [],    // array of patient objects
   claims:     [],    // array of claim objects (including raw CCU_DAILY taps)
   refs:       [],    // referrer directory
@@ -67,6 +68,11 @@ var st = {
   recentRefs: [],    // recently used referrers
   loaded:     false
 };
+
+// v5.08: true only for the resident (read-only) login. Devices that signed
+// in before this build have st.role === null/undefined, which this treats
+// as 'md' — unchanged behaviour for every existing device.
+function isResident() { return st.role === 'resident'; }
 
 // UI state
 var _listView = 'on';   // 'on' | 'off'
@@ -482,19 +488,30 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // build all of 22/08 as a result (the Shunter stray-CCFPP incident; the
 // new build's recompute self-healed the data at first use that evening).
 // No cache-format change; BUILD_ID deliberately NOT bumped (no re-login).
-// v5.07 (2026-08-23): CCFPP billing rule finalized per Kathryn — "we bill
-// for the time spent in 30-min intervals (or majority thereof); the only
-// decision is whether we're continuing the same call-out." (1) The
-// "absorbed predecessor" rule is REMOVED (04_billing.js): a consult named
-// in a successor's CCFPP note keeps ALL its own charges — the link only
-// affects the successor (no 1200-series base, 15-min-first-unit ladder).
-// (2) The Call-out Decision proximity window is now STRICTLY under 60 min
-// — a gap of exactly 60 is a new call-back (no card, no CCFPP); "a new
-// consult [is] >60min from the end time of the last one, or as confirmed
-// by MD". (3) Card/summary wording updated to match. No cache-format
-// change; BUILD_ID not bumped (no re-login).
-var APP_VERSION = 'v5.07';
-var APP_BUILT   = '2026-08-23';
+// v5.08 (2026-08-24): RESIDENT (READ-ONLY) ROLE. New generic shared login
+// (separate password, no per-person picker) that can view the patient list,
+// edit the clinical summary (tap name → same notes modal as MDs use), and
+// edit ward/bed/on-off-service + Cardiology role (tap the ward chip →
+// trimmed location screen, MRP-service dropdown hidden) — nothing else. No claims, no billing $,
+// no add-patient tab, no discharge, no exports/leaderboard. Enforcement is
+// backend (Router v3.14 + Crud v3.19 residentSavePatient_ + Config v2.48) —
+// this build only hides the surfaces a resident login isn't meant to use;
+// the server rejects everything outside the allowlist regardless of what
+// the client sends. New `st.role` ('md'|'resident'), captured from the
+// ping response at sign-in and persisted like st.doc. See
+// 14_init.js/05_render.js/06_claim_screen.js/06c_patient_summary.js/
+// 05_render.js (card footer, + Claim, quick-daily/CCU/Directive buttons,
+// row pencil, Round-all), 06_claim_screen.js, 06b_discharged.js (restore +
+// archive pull), 06c_patient_summary.js, 06d_patient_edit.js (Edit Patient),
+// 09_patient.js (buildLocationCard omits role/MRP for residents; Add
+// Patient), 10_location.js, 11_export.js and 14_init.js for the per-screen
+// gating. 14_init.js also re-stamps st.role from every 30s ping, so a device
+// that loses its stored role self-heals instead of falling back to MD chrome.
+// No cache-format change to EXISTING keys; BUILD_ID not bumped (no
+// re-login) — st.role is simply null/undefined on devices that predate it,
+// which the isResident() helper treats as role='md' (unchanged behaviour).
+var APP_VERSION = 'v5.08';
+var APP_BUILT   = '2026-08-24';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -529,7 +546,7 @@ function dedupById(list) {
       // Wipe every kgh5:* key EXCEPT user-preference keys that should survive a build bump.
       // v4.66: keep the app password (APP_PW_LS_KEY = 'kgh5:appPw') too — otherwise every
       // deploy re-prompts every device for the KCA password (2026-07-10).
-      var preserve = ['kgh5:doc', 'kgh5:recentIcds', 'kgh5:recentRefs', 'kgh5:customWards', APP_PW_LS_KEY];
+      var preserve = ['kgh5:doc', 'kgh5:role', 'kgh5:recentIcds', 'kgh5:recentRefs', 'kgh5:customWards', APP_PW_LS_KEY];
       var toWipe = [];
       for (var i = 0; i < localStorage.length; i++) {
         var k = localStorage.key(i);
@@ -543,6 +560,9 @@ function dedupById(list) {
 })();
 
 async function loadLocal() {
+  // v5.08: 'role' added — plain string, not JSON, so it's read/written
+  // directly (see below) rather than through the JSON.parse branch used by
+  // the object/array keys.
   var localOnlyKeys = ['doc','recentIcds','recentRefs'];
   for (var i = 0; i < localOnlyKeys.length; i++) {
     var k = localOnlyKeys[i];
@@ -554,6 +574,12 @@ async function loadLocal() {
       }
     } catch(e) {}
   }
+  try {
+    // v5.08: written via the normal sv('role', st.role) — same JSON-string
+    // convention as every other sv() key — so it must be parsed the same way.
+    var rRole = await LS.get(STORAGE_PREFIX + 'role');
+    if (rRole && rRole.value) st.role = JSON.parse(rRole.value);
+  } catch (e) {}
   // Clear any stale clinical data from localStorage to avoid confusion.
   // Use direct localStorage.removeItem since it's synchronous and always available.
   ['patients','claims','doctors','changelog','refs'].forEach(function(k) {
@@ -603,7 +629,11 @@ async function loadLocal() {
       if (p.first != null) p.first = fmtName(p.first);
       var hadBadRef = looksLikeMRPService(p.refbyName);
       sanitizeReferrer(p);
-      if (hadBadRef && SHEETS_URL) push('savePatient', p);  // push the clean version back to Sheets
+      // v5.08: the backend drops refbyName from a resident's save (not on the
+      // whitelist), so this would re-push the same no-op fix on EVERY sync —
+      // each one stamping lastWriteAt and evicting the shared getAll cache,
+      // making every MD device do a cold full pull. MD devices still heal it.
+      if (hadBadRef && SHEETS_URL && !isResident()) push('savePatient', p);  // push the clean version back to Sheets
     });
   }
 }
@@ -986,7 +1016,11 @@ async function syncFromSheets() {
         if (p.first != null) p.first = fmtName(p.first);
         var hadBadRef = looksLikeMRPService(p.refbyName);
         sanitizeReferrer(p);
-        if (hadBadRef && SHEETS_URL) push('savePatient', p);  // overwrite stale bad data on Sheets
+        // v5.08: the backend drops refbyName from a resident's save (not on the
+        // whitelist), so this would re-push the same no-op fix on EVERY sync —
+        // each one stamping lastWriteAt and evicting the shared getAll cache,
+        // making every MD device do a cold full pull. MD devices still heal it.
+        if (hadBadRef && SHEETS_URL && !isResident()) push('savePatient', p);  // overwrite stale bad data on Sheets
       });
 
       // Back-fill blank refby/refbyName on patient from their claim history
@@ -1099,7 +1133,7 @@ async function syncFromSheets() {
         if (c.feeCode)   c.feeCode   = String(c.feeCode).trim();
         if (c.icd)       c.icd       = String(c.icd).trim();
         if (c.phn != null) c.phn = String(c.phn);
-        if (hadBadRef && SHEETS_URL) push('saveClaim', c);
+        if (hadBadRef && SHEETS_URL && !isResident()) push('saveClaim', c);   // v5.08: saveClaim is blocked for residents anyway
       });
       // Normalise startTime — Sheets returns time-only fields as ISO with 1899 epoch
       d.claims.forEach(function(c) {
@@ -1271,7 +1305,10 @@ async function syncFromSheets() {
     // ship any buffered failure records. Fire-and-forget; a flush that
     // fails leaves the buffer intact for the next sync and is never itself
     // logged, so this cannot storm.
-    try { netlogFlush(); } catch (eNl) {}
+    // v5.08: logClientErrors is not on the resident allowlist, so a flush from
+    // a resident device is refused and the buffer is dropped. Skip it — the
+    // telemetry stays buffered locally rather than being thrown away.
+    try { if (!isResident()) netlogFlush(); } catch (eNl) {}
     render();
     // If user is currently viewing the Recently Discharged pane, refresh it too
     var dischPane = document.getElementById('p-discharged');

@@ -98,11 +98,24 @@ async function submitAppPassword() {
   var ov = document.getElementById('apppw-modal');
   if (ov) ov.classList.remove('on');
   _appPwOpen = false;
-  // v4.94: authorising the device is HALF the login. The password says "this
-  // device may see patient data"; it does not say who is billing. Chain the
-  // doctor picker straight onto it so "log in on a random PC" is one flow that
-  // always ends with a name selected. (Kathryn 2026-08-11.)
-  if (!st.doc) _forceSignIn();
+  // v5.08: the ping response now says which role this password grants —
+  // 'md' (default, unchanged) or 'resident'. Residents get a fixed generic
+  // identity and skip the doctor picker entirely; there's no per-resident
+  // password, so there's nothing to pick (Kathryn 2026-08-24: generic
+  // shared login).
+  st.role = (d && d.role) || 'md';
+  sv('role', st.role);
+  if (isResident()) {
+    st.doc = { alias: 'Resident', num: '', name: 'Resident' };
+    sv('doc', st.doc);
+    applyResidentChrome();
+  } else if (!st.doc) {
+    // v4.94: authorising the device is HALF the login. The password says "this
+    // device may see patient data"; it does not say who is billing. Chain the
+    // doctor picker straight onto it so "log in on a random PC" is one flow that
+    // always ends with a name selected. (Kathryn 2026-08-11.)
+    _forceSignIn();
+  }
   var res = _appPwResolve; _appPwResolve = null;
   if (res) res();
 }
@@ -164,6 +177,7 @@ async function init() {
   }
   updateDailyTotal();
   await loadLocal();
+  try { applyResidentChrome(); } catch (e) {}   // v5.08: role restored from storage
   purgeOldPatients(); // remove patients discharged > 21 days ago
   st.loaded = true;
   if (st.doc) {
@@ -204,6 +218,7 @@ async function init() {
   wardChange();
   renderRefs('');
   _injectLeaderboardUI(); // 🏆 retro arcade leaderboard button + modal
+  try { applyResidentChrome(); } catch (e) {}   // v5.08: trophy is injected above, so hide it after
   // Show loading state immediately
   render();
   if (SHEETS_URL) {
@@ -268,6 +283,22 @@ async function init() {
           return;
         }
         var d = await r.json();
+        // v5.08: ping is the one call every device makes all day, and it now
+        // reports the role this password grants. Re-stamp it here so a device
+        // whose stored role was lost (cleared site data, storage eviction,
+        // a resident device that first signed in on an older build) self-heals
+        // to the right UI on the next tick instead of falling back to the MD
+        // layout. Cheap: only touches state when it actually differs.
+        if (d && d.role && d.role !== st.role) {
+          st.role = d.role;
+          sv('role', st.role);
+          if (isResident() && (!st.doc || st.doc.alias !== 'Resident')) {
+            st.doc = { alias: 'Resident', num: '', name: 'Resident' };
+            sv('doc', st.doc);
+          }
+          try { applyResidentChrome(); } catch (eC) {}
+          try { render(); } catch (eR) {}
+        }
         if (!d || !d.lastWriteAt) return;          // old backend / no writes yet
         var seen = window._lastSeenWriteAt;
         if (seen === undefined || seen === null) { // first tick — baseline only
@@ -313,7 +344,14 @@ async function resetLocalData() {
   st.doctors   = [];
   st.changelog = [];
   st.doc       = null;
-  document.getElementById('doc-label').textContent = 'Sign in';
+  // v5.08: 'role' is deliberately NOT in the wipe list above — a resident who
+  // resets local data must come back as a resident, not fall through to the
+  // mandatory doctor picker. Restore the fixed identity right here.
+  if (isResident()) {
+    st.doc = { alias: 'Resident', num: '', name: 'Resident' };
+    sv('doc', st.doc);
+  }
+  document.getElementById('doc-label').textContent = isResident() ? 'Resident' : 'Sign in';
   document.getElementById('doc-dot').classList.remove('on');
   hideModal('doc-modal');
   showToast('Local data cleared — syncing from Sheets…');
@@ -361,7 +399,56 @@ function showPane(id) {
   for (var i = 0; i < stragglers.length; i++) { stragglers[i].remove(); }
 }
 
+// v5.08: hide the static chrome that lives in index.template.html (so it
+// can't be gated inside a render function) whenever this device is signed in
+// as a resident. Every one of these leads somewhere a resident is blocked
+// from, so leaving them visible is just a dead tap. Safe to call repeatedly
+// and safe when an element is absent. Called after sign-in, on init, and
+// from the 30s ping self-heal.
+function applyResidentChrome() {
+  var res = (typeof isResident === 'function') && isResident();
+  var sels = [
+    '.doc-chip',            // doctor picker — a resident must stay 'Resident'
+    '.mit-btn',             // "Import from Meditech" + "Export list for QuickChart"
+    '.lb-trophy-btn',       // revenue leaderboard trophy (injected at runtime)
+    '#wifi-banner-report'   // "Report to KB" (posts logClientErrors — not allowed)
+  ];
+  function _hide(sel) {
+    try {
+      document.querySelectorAll(sel).forEach(function(el) {
+        if (res) {
+          // Remember whatever inline display the shell had (often '', but
+          // #wifi-banner-report ships with display:none) so un-hiding restores
+          // it exactly instead of clearing a style the app relies on.
+          if (el.getAttribute('data-res-prev-display') === null) {
+            el.setAttribute('data-res-prev-display', el.style.display || '');
+          }
+          el.style.display = 'none';
+        } else if (el.getAttribute('data-res-prev-display') !== null) {
+          el.style.display = el.getAttribute('data-res-prev-display');
+          el.removeAttribute('data-res-prev-display');
+        }
+      });
+    } catch (e) {}
+  }
+  sels.forEach(_hide);
+  // Add Patient nav button — matched by its handler, since the nav buttons
+  // carry no distinguishing id or class in the shell.
+  _hide('[onclick^="nav(1"]');
+  // Phone Advice launcher in the footer — no id/class, matched by its handler.
+  _hide('[onclick*="openPhoneAdvice"]');
+  // "Search all discharged (incl. >7-day archive)" — needs getAllForDataCheck.
+  _hide('[onclick*="archiveSearch"]');
+}
+
 function nav(n, el) {
+  // v5.08: Add Patient tab is MD-only (Kathryn 2026-08-24: only an MD adds
+  // patients). Blocked here too as a belt-and-suspenders on top of
+  // apSubmit()'s own guard — this way a resident never even sees the form.
+  if (n === 1 && isResident()) {
+    showToast('Ask the attending to add new patients');
+    return;
+  }
   document.querySelectorAll('.nb').forEach(function(b, i) { b.classList.toggle('on', i === n); });
   var paneMap = { 0:'p0', 1:'p1', 2:'p-discharged' };
   showPane(paneMap[n] || 'p0');
@@ -457,6 +544,14 @@ var _signInMandatory = false;
 
 function _forceSignIn() {
   if (st.doc) return;
+  // v5.08: residents never sign in as a doctor — restore the fixed identity
+  // instead of opening the mandatory picker (which has no Cancel button).
+  if (isResident()) {
+    st.doc = { alias: 'Resident', num: '', name: 'Resident' };
+    sv('doc', st.doc);
+    var dl = document.getElementById('doc-label'); if (dl) dl.textContent = 'Resident';
+    return;
+  }
   _signInMandatory = true;
   showModal('doc-modal');
   var t = document.querySelector('#doc-modal .modal-title');
@@ -498,6 +593,11 @@ function selectDocEl(el) {
 }
 
 function selectDoc(alias, num, name) {
+  // v5.08: a resident stays 'Resident'. Without this a resident could pick
+  // an attending from the picker and every edit they make would be logged
+  // under that attending's name. (The backend now stamps 'Resident' on the
+  // Patients row and the ChangeLog regardless — this keeps the UI honest too.)
+  if (isResident()) { showToast('Signed in as Resident'); hideModal('doc-modal'); return; }
   st.doc = { alias:alias, num:num, name:name };
   sv('doc', st.doc);
   _releaseSignIn();                                   // v4.94

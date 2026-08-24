@@ -190,6 +190,12 @@ function savePatientNotes(pid) {
 // ── Claim history view (existing) ──────────────────────────────────────
 
 function openPatientSummary(pid) {
+  // v5.08: this is the claims/billing "baseball card" screen — the D/C and
+  // Claim-Hx footer buttons that lead here are already hidden for residents
+  // (05_render.js cardFootHtml), but this redirect is defense-in-depth for
+  // any other path in. Send a resident to the plain notes modal instead —
+  // that's the actual summary-edit surface they're meant to use.
+  if (isResident()) { openPatientNotes(pid); return; }
   var p = getP(pid);
   // v4.99: never fail silently. Before, a missing patient (the archive-recall
   // bug) made this function return with no UI change at all — the tap simply

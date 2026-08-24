@@ -93,6 +93,11 @@ function dischargedSearch(query) {
 // Uses getAllForDataCheck (all patients + all sheet claims, incl. unsubmitted).
 var _archiveCache = null;   // { patients:[], claims:[], at: ts }
 async function archiveSearch() {
+  // v5.08: this reads getAllForDataCheck (every patient + EVERY claim on the
+  // sheet) — not on the resident allowlist. Without this guard the forbidden
+  // response was cached as an empty result for 2 minutes and the resident was
+  // told "No off-list patient matches that" — a refusal shown as an absence.
+  if (isResident()) { showToast('Not available for this login'); return; }
   var term = ((document.getElementById('discharged-search') || {}).value || '').trim();
   var box  = document.getElementById('archive-results');
   if (!box) return;
@@ -121,8 +126,9 @@ async function archiveSearch() {
         + '<div><div style="font-weight:700;font-size:13px">' + esc(p.last) + ', ' + esc(p.first) + '</div>'
         + '<div style="font-size:11px;color:var(--text2)">PHN …' + esc(String(p.phn || '').slice(-4)) + dd + ' &middot; ' + claimN + ' claim' + (claimN === 1 ? '' : 's') + '</div></div>'
         + '<div style="display:flex;gap:6px">'
-        + '<button class="btn btn-p" style="margin:0;font-size:12px;padding:6px 12px" onclick="pullArchivedPatient(\'' + esc(p.id) + '\')">Pull claims</button>'
-        + '<button class="btn btn-s" style="margin:0;font-size:12px;padding:6px 12px" onclick="pullArchivedAndClaim(\'' + esc(p.id) + '\')">+ Claim</button>'
+        + (isResident() ? '' :
+            '<button class="btn btn-p" style="margin:0;font-size:12px;padding:6px 12px" onclick="pullArchivedPatient(\'' + esc(p.id) + '\')">Pull claims</button>'
+          + '<button class="btn btn-s" style="margin:0;font-size:12px;padding:6px 12px" onclick="pullArchivedAndClaim(\'' + esc(p.id) + '\')">+ Claim</button>')
         + '</div>'
         + '</div>';
     }).join('');
@@ -173,6 +179,7 @@ function _normArchiveClaim(raw) {
 }
 
 function pullArchivedPatient(pid) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   if (!_archiveCache) return;
   var raw = _archiveCache.patients.filter(function(x){ return String(x.id) === String(pid); })[0];
   if (!raw) { showToast('Could not load that patient — re-run the search.'); return; }
@@ -222,6 +229,7 @@ function pullArchivedPatient(pid) {
 // the "add missing claims to an archived patient" path that previously
 // required restoring to a list or the browser console.
 function pullArchivedAndClaim(pid) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   pullArchivedPatient(pid);
   var p = getP(pid);
   if (!p || !p.id) return;             // v4.99: .id test (see note above)
@@ -371,14 +379,19 @@ function dischargedRow(p) {
       '<div class="wp-chips" style="margin-top:4px">' + careChip + ' ' + statusChip + '</div>' +
     '</div>' +
     '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;padding-top:8px">' +
-      '<button class="bb bb-rnd" style="font-size:10px;padding:5px 9px" ' +
-        'onclick="event.stopPropagation();restorePatient(\'' + esc(pid) + '\')">↩ Restore</button>' +
+      (isResident() ? '' :
+        '<button class="bb bb-rnd" style="font-size:10px;padding:5px 9px" ' +
+        'onclick="event.stopPropagation();restorePatient(\'' + esc(pid) + '\')">↩ Restore</button>') +
       chartBtn(pid) +
     '</div>' +
   '</div>';
 }
 
 function openClaimFromDischarged(pid) {
+  // v5.08: tapping a discharged patient normally opens the claim screen.
+  // A resident can't bill, but should still be able to read/update the
+  // clinical summary of a recently discharged patient — send them there.
+  if (isResident()) { openPatientNotes(pid); return; }
   _claimOriginPane   = 'p-discharged';
   _claimOriginNavIdx = 2;
   _openClaimScreen(pid);
@@ -442,6 +455,7 @@ function _isoToDMY(iso) {
 
 // Restore — show on/off service choice using data attributes (no inline quote nesting)
 function restorePatient(pid) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   var p = (st.patients || []).find(function(x) { return x.id === pid; });
   if (!p || !isDischarged(p)) return;
   var prevWard = wardLabel(p.ward) || '';
@@ -465,6 +479,7 @@ function restorePatient(pid) {
 // v5.02: inpatients are asked the readmission question first; everyone
 // else (phone-advice-only, non-MRP) restores exactly as before.
 function _doRestore(pid, list) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   var p = (st.patients || []).find(function(x) { return x.id === pid; });
   if (!p) return;
   if (needsReadmitConfirm(p)) { _askReadmit(pid, list); return; }
@@ -472,6 +487,7 @@ function _doRestore(pid, list) {
 }
 
 function _askReadmit(pid, list) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   var p = (st.patients || []).find(function(x) { return x.id === pid; });
   if (!p) return;
   var body  = document.getElementById('merge-body');
@@ -515,6 +531,7 @@ function _askReadmit(pid, list) {
 // mode 'same' = the discharge was an error: nothing is filed, because the
 //               patient never left and those days ARE billable.
 function _doRestoreCommit(pid, list, mode, isoDate) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   var p = (st.patients || []).find(function(x) { return x.id === pid; });
   if (!p) return;
   hideModal('merge-modal');

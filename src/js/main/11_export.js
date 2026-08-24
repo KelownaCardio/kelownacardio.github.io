@@ -36,6 +36,10 @@ var _qcCcuOrder = 'desc'; // 'desc' | 'asc'
 var _qcWards    = { CCU: true, '2S': true, '2W': true };
 
 function openQuickChartExport() {
+  // v5.08: bulk PHI export (name/DOB/PHN/sex/ward/bed) with save-as-image.
+  // No billing content, but exports are outside the resident scope — say so
+  // here rather than in the button, which is hidden by applyResidentChrome().
+  if (isResident()) { showToast('Not available for this login'); return; }
   _qcListMode = 'on';
   _qcCcuOrder = 'desc';
   _qcWards    = { CCU: true, '2S': true, '2W': true };
@@ -778,6 +782,11 @@ function _injectLeaderboardUI() {
 
 // ── Show / hide ──────────────────────────────────────
 async function showLeaderboard() {
+  // v5.08: the leaderboard's trophies include revenue — billing info
+  // (Kathryn 2026-08-24: none for residents). Also avoids a resident
+  // hitting the now-blocked getLeaderboard action (Router v3.14 allowlist)
+  // and seeing a broken/empty screen.
+  if (isResident()) { showToast('Not available for this login'); return; }
   var overlay = document.getElementById('lb-overlay');
   if (!overlay) return;
   overlay.classList.add('open');
