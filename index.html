@@ -2282,6 +2282,7 @@ function selectIcd(code, label, dropdownId, hiddenId, inputId) {
 
 var st = {
   doc:        null,  // { alias, num, name }
+  role:       null,  // v5.08: 'md' | 'resident' — captured from the ping response at sign-in
   patients:   [],    // array of patient objects
   claims:     [],    // array of claim objects (including raw CCU_DAILY taps)
   refs:       [],    // referrer directory
@@ -2291,6 +2292,11 @@ var st = {
   recentRefs: [],    // recently used referrers
   loaded:     false
 };
+
+// v5.08: true only for the resident (read-only) login. Devices that signed
+// in before this build have st.role === null/undefined, which this treats
+// as 'md' — unchanged behaviour for every existing device.
+function isResident() { return st.role === 'resident'; }
 
 // UI state
 var _listView = 'on';   // 'on' | 'off'
@@ -2706,19 +2712,30 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // build all of 22/08 as a result (the Shunter stray-CCFPP incident; the
 // new build's recompute self-healed the data at first use that evening).
 // No cache-format change; BUILD_ID deliberately NOT bumped (no re-login).
-// v5.07 (2026-08-23): CCFPP billing rule finalized per Kathryn — "we bill
-// for the time spent in 30-min intervals (or majority thereof); the only
-// decision is whether we're continuing the same call-out." (1) The
-// "absorbed predecessor" rule is REMOVED (04_billing.js): a consult named
-// in a successor's CCFPP note keeps ALL its own charges — the link only
-// affects the successor (no 1200-series base, 15-min-first-unit ladder).
-// (2) The Call-out Decision proximity window is now STRICTLY under 60 min
-// — a gap of exactly 60 is a new call-back (no card, no CCFPP); "a new
-// consult [is] >60min from the end time of the last one, or as confirmed
-// by MD". (3) Card/summary wording updated to match. No cache-format
-// change; BUILD_ID not bumped (no re-login).
-var APP_VERSION = 'v5.07';
-var APP_BUILT   = '2026-08-23';
+// v5.08 (2026-08-24): RESIDENT (READ-ONLY) ROLE. New generic shared login
+// (separate password, no per-person picker) that can view the patient list,
+// edit the clinical summary (tap name → same notes modal as MDs use), and
+// edit ward/bed/on-off-service + Cardiology role (tap the ward chip →
+// trimmed location screen, MRP-service dropdown hidden) — nothing else. No claims, no billing $,
+// no add-patient tab, no discharge, no exports/leaderboard. Enforcement is
+// backend (Router v3.14 + Crud v3.19 residentSavePatient_ + Config v2.48) —
+// this build only hides the surfaces a resident login isn't meant to use;
+// the server rejects everything outside the allowlist regardless of what
+// the client sends. New `st.role` ('md'|'resident'), captured from the
+// ping response at sign-in and persisted like st.doc. See
+// 14_init.js/05_render.js/06_claim_screen.js/06c_patient_summary.js/
+// 05_render.js (card footer, + Claim, quick-daily/CCU/Directive buttons,
+// row pencil, Round-all), 06_claim_screen.js, 06b_discharged.js (restore +
+// archive pull), 06c_patient_summary.js, 06d_patient_edit.js (Edit Patient),
+// 09_patient.js (buildLocationCard omits role/MRP for residents; Add
+// Patient), 10_location.js, 11_export.js and 14_init.js for the per-screen
+// gating. 14_init.js also re-stamps st.role from every 30s ping, so a device
+// that loses its stored role self-heals instead of falling back to MD chrome.
+// No cache-format change to EXISTING keys; BUILD_ID not bumped (no
+// re-login) — st.role is simply null/undefined on devices that predate it,
+// which the isResident() helper treats as role='md' (unchanged behaviour).
+var APP_VERSION = 'v5.08';
+var APP_BUILT   = '2026-08-24';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -2753,7 +2770,7 @@ function dedupById(list) {
       // Wipe every kgh5:* key EXCEPT user-preference keys that should survive a build bump.
       // v4.66: keep the app password (APP_PW_LS_KEY = 'kgh5:appPw') too — otherwise every
       // deploy re-prompts every device for the KCA password (2026-07-10).
-      var preserve = ['kgh5:doc', 'kgh5:recentIcds', 'kgh5:recentRefs', 'kgh5:customWards', APP_PW_LS_KEY];
+      var preserve = ['kgh5:doc', 'kgh5:role', 'kgh5:recentIcds', 'kgh5:recentRefs', 'kgh5:customWards', APP_PW_LS_KEY];
       var toWipe = [];
       for (var i = 0; i < localStorage.length; i++) {
         var k = localStorage.key(i);
@@ -2767,6 +2784,9 @@ function dedupById(list) {
 })();
 
 async function loadLocal() {
+  // v5.08: 'role' added — plain string, not JSON, so it's read/written
+  // directly (see below) rather than through the JSON.parse branch used by
+  // the object/array keys.
   var localOnlyKeys = ['doc','recentIcds','recentRefs'];
   for (var i = 0; i < localOnlyKeys.length; i++) {
     var k = localOnlyKeys[i];
@@ -2778,6 +2798,12 @@ async function loadLocal() {
       }
     } catch(e) {}
   }
+  try {
+    // v5.08: written via the normal sv('role', st.role) — same JSON-string
+    // convention as every other sv() key — so it must be parsed the same way.
+    var rRole = await LS.get(STORAGE_PREFIX + 'role');
+    if (rRole && rRole.value) st.role = JSON.parse(rRole.value);
+  } catch (e) {}
   // Clear any stale clinical data from localStorage to avoid confusion.
   // Use direct localStorage.removeItem since it's synchronous and always available.
   ['patients','claims','doctors','changelog','refs'].forEach(function(k) {
@@ -2827,7 +2853,11 @@ async function loadLocal() {
       if (p.first != null) p.first = fmtName(p.first);
       var hadBadRef = looksLikeMRPService(p.refbyName);
       sanitizeReferrer(p);
-      if (hadBadRef && SHEETS_URL) push('savePatient', p);  // push the clean version back to Sheets
+      // v5.08: the backend drops refbyName from a resident's save (not on the
+      // whitelist), so this would re-push the same no-op fix on EVERY sync —
+      // each one stamping lastWriteAt and evicting the shared getAll cache,
+      // making every MD device do a cold full pull. MD devices still heal it.
+      if (hadBadRef && SHEETS_URL && !isResident()) push('savePatient', p);  // push the clean version back to Sheets
     });
   }
 }
@@ -3210,7 +3240,11 @@ async function syncFromSheets() {
         if (p.first != null) p.first = fmtName(p.first);
         var hadBadRef = looksLikeMRPService(p.refbyName);
         sanitizeReferrer(p);
-        if (hadBadRef && SHEETS_URL) push('savePatient', p);  // overwrite stale bad data on Sheets
+        // v5.08: the backend drops refbyName from a resident's save (not on the
+        // whitelist), so this would re-push the same no-op fix on EVERY sync —
+        // each one stamping lastWriteAt and evicting the shared getAll cache,
+        // making every MD device do a cold full pull. MD devices still heal it.
+        if (hadBadRef && SHEETS_URL && !isResident()) push('savePatient', p);  // overwrite stale bad data on Sheets
       });
 
       // Back-fill blank refby/refbyName on patient from their claim history
@@ -3323,7 +3357,7 @@ async function syncFromSheets() {
         if (c.feeCode)   c.feeCode   = String(c.feeCode).trim();
         if (c.icd)       c.icd       = String(c.icd).trim();
         if (c.phn != null) c.phn = String(c.phn);
-        if (hadBadRef && SHEETS_URL) push('saveClaim', c);
+        if (hadBadRef && SHEETS_URL && !isResident()) push('saveClaim', c);   // v5.08: saveClaim is blocked for residents anyway
       });
       // Normalise startTime — Sheets returns time-only fields as ISO with 1899 epoch
       d.claims.forEach(function(c) {
@@ -3495,7 +3529,10 @@ async function syncFromSheets() {
     // ship any buffered failure records. Fire-and-forget; a flush that
     // fails leaves the buffer intact for the next sync and is never itself
     // logged, so this cannot storm.
-    try { netlogFlush(); } catch (eNl) {}
+    // v5.08: logClientErrors is not on the resident allowlist, so a flush from
+    // a resident device is refused and the buffer is dropped. Skip it — the
+    // telemetry stays buffered locally rather than being thrown away.
+    try { if (!isResident()) netlogFlush(); } catch (eNl) {}
     render();
     // If user is currently viewing the Recently Discharged pane, refresh it too
     var dischPane = document.getElementById('p-discharged');
@@ -5366,13 +5403,35 @@ function pencilBtn(pid) {
 
 // Clipboard (claim history) button
 function chartBtn(pid) {
-  return '<button class="row-icon-btn" data-pid="' + pid + '" title="Claim history" onclick="event.stopPropagation();rowIconAction(this,\'summary\')">' +
+  return '<button class="row-icon-btn" data-pid="' + pid + '" title="' + (isResident() ? 'Patient summary' : 'Claim history') + '" onclick="event.stopPropagation();rowIconAction(this,\'summary\')">' +
          '<svg viewBox="0 0 24 24">' +
            '<path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>' +
            '<rect x="9" y="3" width="6" height="4" rx="1"/>' +
            '<line x1="9" y1="12" x2="15" y2="12"/>' +
            '<line x1="9" y1="16" x2="13" y2="16"/>' +
          '</svg></button>';
+}
+
+// v5.08: the "+ Claim" button on every patient row. Residents never bill, so
+// it isn't rendered for them at all (wpAddClaim is guarded too — this just
+// keeps a dead button off the card).
+function addClaimBtnHtml(p) {
+  if (isResident()) return '';
+  return '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>';
+}
+
+// v5.08: the row pencil opens the full Edit Patient screen (demographics,
+// referrer, ICD, MRP, OOP/private-pay). A resident's savePatient is rebuilt
+// server-side from the sheet and only accepts summary/ward/bed/list, so an
+// edit made there would appear to save and then silently revert on the next
+// sync — worse than not offering it. Hidden for residents; openPatientEdit
+// is guarded as well.
+function rowPencilHtml(p, title) {
+  if (isResident()) return '';
+  return '<button class="row-pencil-btn" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'edit\')"' +
+         (title ? ' title="' + title + '"' : '') + '>' +
+           '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
+         '</button>';
 }
 
 // Discharge button
@@ -5390,6 +5449,9 @@ function rowIcons(pid) {
 // Dispatch function — avoids inline quote issues
 function rowIconAction(btn, action) {
   var pid = btn.getAttribute('data-pid');
+  // v5.08: 'edit' (full patient edit) and 'disch' are MD-only; 'summary'
+  // self-redirects to the notes modal for a resident (06c_patient_summary.js).
+  if (isResident() && action !== 'summary') { showToast('Not available for this login'); return; }
   if (action === 'edit')    openPatientEdit(pid);
   if (action === 'summary') openPatientSummary(pid);
   if (action === 'disch')   openDischModal(pid);
@@ -5420,6 +5482,7 @@ function isHandover(p) {
 }
 
 function clearHandover(pid) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   var p = getP(pid);
   if (!p) return;
   p.handover = false;
@@ -5432,6 +5495,7 @@ function clearHandover(pid) {
 
 // v4.61: Toggle handover flag on/off directly from a patient card
 function toggleHandoverFlag(pid) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   var p = getP(pid);
   if (!p) return;
   var wasOn = !!p.handover && p.handover !== 'false';
@@ -5447,6 +5511,11 @@ function toggleHandoverFlag(pid) {
 // Fixed order on every card (Handover / Claim Hx / D/C) for muscle memory.
 // Names are a FIXED size in CSS (.wp-name) — the v4.61 JS auto-fit is gone.
 function cardFootHtml(p) {
+  // v5.08: residents get the card itself (view), the name tap → summary
+  // notes, and the ward chip tap → location — no footer row at all.
+  // Handover/Claim Hx/D-C are all outside what Kathryn asked for
+  // (2026-08-24: view list + edit summary + edit location, nothing else).
+  if (isResident()) return '';
   var on = !!p.handover && p.handover !== 'false';
   return '<div class="card-foot">' +
     '<button class="foot-btn foot-flag' + (on ? ' on' : '') + '" data-pid="' + p.id + '"' +
@@ -5472,9 +5541,10 @@ function handoverSectionHtml(patients) {
     '<div class="ward-hdr">' +
       '<div class="ward-lbl" style="color:#7a6d00">\u2691 For Handover (' + patients.length + ')</div>' +
     '</div>' +
-    '<div style="padding:0 12px 4px;font-size:10px;color:#7a6d00;line-height:1.4">' +
-      'Tap the \u2691 Handover button to clear.' +
-    '</div>' +
+    (isResident() ? '' :
+      '<div style="padding:0 12px 4px;font-size:10px;color:#7a6d00;line-height:1.4">' +
+        'Tap the \u2691 Handover button to clear.' +
+      '</div>') +
     safeRowMap(patients, handoverRow) +
     '</div>';
 }
@@ -5714,14 +5784,12 @@ function wardHtml(ward) {
                  '<span class="wp-name" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' +
                    esc(String(p.last || '')) + ', ' + esc(String(p.first || '')) +
                  '</span>' +
-                 '<button class="row-pencil-btn" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'edit\')" title="Edit">' +
-                   '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
-                 '</button>' +
+                 rowPencilHtml(p, 'Edit') +
                '</div>' +
                '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + '</div>' +
                '<div class="wp-acts">' +
                  wardActBtns(p) +
-                 '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
+                 addClaimBtnHtml(p) +
                '</div>' +
              '</div>' +
              '</div>' +
@@ -5737,7 +5805,8 @@ function wardHtml(ward) {
   }
 
   var notYet = pts.filter(function(p) { return !claimedToday(p); }).length;
-  if (isCCU) {
+  // v5.08: "Round all" bulk-bills the whole ward — MD only.
+  if (isCCU && !isResident()) {
     h += '<button class="batch-btn" style="margin-top:8px" onclick="batchRoundWard(this)" data-ward="' + ward + '">' +
          '<span>Round all ' + wdef.label + (notYet ? ' (' + notYet + ' pending)' : ' \u2713 all done') + '</span>' +
          '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>' +
@@ -5959,13 +6028,11 @@ function offRow(p) {
     '<div class="wp-main">' +
       '<div class="wp-name-row">' +
         '<span class="wp-name" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(String(p.last || '')) + ', ' + esc(String(p.first || '')) + '</span>' +
-        '<button class="row-pencil-btn" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'edit\')">' +
-          '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
-        '</button>' +
+        rowPencilHtml(p, '') +
       '</div>' +
       '<div class="wp-meta">' + row3 + lastSeen + '</div>' +
       '<div class="wp-acts">' + quickActBtns(p) +
-        '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
+        addClaimBtnHtml(p) +
       '</div>' +
     '</div>' +
     '</div>' +
@@ -6012,13 +6079,11 @@ function alphaRow(p) {
     '<div class="wp-main">' +
       '<div class="wp-name-row">' +
         '<span class="wp-name" data-pid="' + p.id + '" onclick="openSummaryEl(this)">' + esc(String(p.last || '')) + ', ' + esc(String(p.first || '')) + '</span>' +
-        '<button class="row-pencil-btn" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'edit\')">' +
-          '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
-        '</button>' +
+        rowPencilHtml(p, '') +
       '</div>' +
       '<div class="wp-meta">' + calcAgeGender(p) + ' &bull; ' + mrpLabel(p) + lastBilledChip(p) + lastSeen + '</div>' +
       '<div class="wp-acts">' + quickActBtns(p) +
-        '<button class="bb bb-add" data-pid="' + p.id + '" onclick="event.stopPropagation();wpAddClaim(this)">+ Claim</button>' +
+        addClaimBtnHtml(p) +
       '</div>' +
     '</div>' +
     '</div>' +
@@ -6039,6 +6104,11 @@ function mrpLabel(p) {
 // - CCU/ICU MRP      → + CCU daily
 // - Consulting       → + Directive  + Combined daily
 function wardActBtns(p) {
+  // v5.08: every button this returns creates a CLAIM (+ CCU daily / + Daily /
+  // Directive / Combined daily). Residents don't bill — and with claims
+  // stripped server-side their "done ✓" state could never be right anyway,
+  // so the buttons would read as "nothing is billed" on every patient.
+  if (isResident()) return '';
   if (showsCCUDaily(p)) {
     var ccuDone = claimedTodayFee(p, ['CCU_DAILY','1411','1421','1431']);
     return ccuDone
@@ -6083,6 +6153,7 @@ function quickActBtns(p) {
 }
 // ── Batch round ────────────────────────────────────────
 function batchRound(ward) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   if (!checkDoc()) return;
   var pts = st.patients.filter(function(p) {
     return p.ward === ward && p.list === 'on' && !claimedToday(p);
@@ -6240,6 +6311,7 @@ function validateRequiredForClaim(p) {
 }
 
 function quickDailyBtn(btn) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   var pid = btn.getAttribute('data-pid');
   if (!checkDoc()) return;
   // If already billed — toggle off (undo)
@@ -6296,6 +6368,7 @@ function quickDailyBtn(btn) {
 }
 
 function quickDirectiveBtn(btn) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   var pid = btn.getAttribute('data-pid');
   if (!checkDoc()) return;
   // If already billed today — toggle off (undo), same as daily/CCU
@@ -6329,6 +6402,7 @@ function quickDirectiveBtn(btn) {
 }
 
 function quickCCUBtn(btn) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   var pid = btn.getAttribute('data-pid');
   if (!checkDoc()) return;
   // If already billed — toggle off (undo)
@@ -6369,10 +6443,14 @@ function lastBilledChip(p) {
 }
 
 // Named wrappers for data-ward buttons (avoid inline quote issues)
-function batchRoundWard(btn) { batchRound(btn.getAttribute('data-ward')); }
+function batchRoundWard(btn) {
+  if (isResident()) { showToast('Not available for this login'); return; }
+  batchRound(btn.getAttribute('data-ward'));
+}
 function openAddWard(btn)    { openAdd(btn.getAttribute('data-ward')); }
 
 function wpAddClaim(btn) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   openClaimScreen(btn.getAttribute('data-pid'));
 }
 
@@ -6425,6 +6503,11 @@ function ebcDisp(t24) {
 }
 
 function _openClaimScreen(pid) {
+  // v5.08: single choke point for every "+Claim" entry (card, summary
+  // screen, discharged list) — residents never bill (Kathryn 2026-08-24).
+  // The backend would reject saveClaim anyway (Router v3.14 allowlist), but
+  // this keeps a resident from ever seeing a form they can't submit.
+  if (isResident()) { showToast('Not available for this login'); return; }
   _claimPid = pid;
   _incUnits = 1;
   _mostOn   = true;
@@ -7180,6 +7263,11 @@ function dischargedSearch(query) {
 // Uses getAllForDataCheck (all patients + all sheet claims, incl. unsubmitted).
 var _archiveCache = null;   // { patients:[], claims:[], at: ts }
 async function archiveSearch() {
+  // v5.08: this reads getAllForDataCheck (every patient + EVERY claim on the
+  // sheet) — not on the resident allowlist. Without this guard the forbidden
+  // response was cached as an empty result for 2 minutes and the resident was
+  // told "No off-list patient matches that" — a refusal shown as an absence.
+  if (isResident()) { showToast('Not available for this login'); return; }
   var term = ((document.getElementById('discharged-search') || {}).value || '').trim();
   var box  = document.getElementById('archive-results');
   if (!box) return;
@@ -7208,8 +7296,9 @@ async function archiveSearch() {
         + '<div><div style="font-weight:700;font-size:13px">' + esc(p.last) + ', ' + esc(p.first) + '</div>'
         + '<div style="font-size:11px;color:var(--text2)">PHN …' + esc(String(p.phn || '').slice(-4)) + dd + ' &middot; ' + claimN + ' claim' + (claimN === 1 ? '' : 's') + '</div></div>'
         + '<div style="display:flex;gap:6px">'
-        + '<button class="btn btn-p" style="margin:0;font-size:12px;padding:6px 12px" onclick="pullArchivedPatient(\'' + esc(p.id) + '\')">Pull claims</button>'
-        + '<button class="btn btn-s" style="margin:0;font-size:12px;padding:6px 12px" onclick="pullArchivedAndClaim(\'' + esc(p.id) + '\')">+ Claim</button>'
+        + (isResident() ? '' :
+            '<button class="btn btn-p" style="margin:0;font-size:12px;padding:6px 12px" onclick="pullArchivedPatient(\'' + esc(p.id) + '\')">Pull claims</button>'
+          + '<button class="btn btn-s" style="margin:0;font-size:12px;padding:6px 12px" onclick="pullArchivedAndClaim(\'' + esc(p.id) + '\')">+ Claim</button>')
         + '</div>'
         + '</div>';
     }).join('');
@@ -7260,6 +7349,7 @@ function _normArchiveClaim(raw) {
 }
 
 function pullArchivedPatient(pid) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   if (!_archiveCache) return;
   var raw = _archiveCache.patients.filter(function(x){ return String(x.id) === String(pid); })[0];
   if (!raw) { showToast('Could not load that patient — re-run the search.'); return; }
@@ -7309,6 +7399,7 @@ function pullArchivedPatient(pid) {
 // the "add missing claims to an archived patient" path that previously
 // required restoring to a list or the browser console.
 function pullArchivedAndClaim(pid) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   pullArchivedPatient(pid);
   var p = getP(pid);
   if (!p || !p.id) return;             // v4.99: .id test (see note above)
@@ -7458,14 +7549,19 @@ function dischargedRow(p) {
       '<div class="wp-chips" style="margin-top:4px">' + careChip + ' ' + statusChip + '</div>' +
     '</div>' +
     '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;padding-top:8px">' +
-      '<button class="bb bb-rnd" style="font-size:10px;padding:5px 9px" ' +
-        'onclick="event.stopPropagation();restorePatient(\'' + esc(pid) + '\')">↩ Restore</button>' +
+      (isResident() ? '' :
+        '<button class="bb bb-rnd" style="font-size:10px;padding:5px 9px" ' +
+        'onclick="event.stopPropagation();restorePatient(\'' + esc(pid) + '\')">↩ Restore</button>') +
       chartBtn(pid) +
     '</div>' +
   '</div>';
 }
 
 function openClaimFromDischarged(pid) {
+  // v5.08: tapping a discharged patient normally opens the claim screen.
+  // A resident can't bill, but should still be able to read/update the
+  // clinical summary of a recently discharged patient — send them there.
+  if (isResident()) { openPatientNotes(pid); return; }
   _claimOriginPane   = 'p-discharged';
   _claimOriginNavIdx = 2;
   _openClaimScreen(pid);
@@ -7529,6 +7625,7 @@ function _isoToDMY(iso) {
 
 // Restore — show on/off service choice using data attributes (no inline quote nesting)
 function restorePatient(pid) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   var p = (st.patients || []).find(function(x) { return x.id === pid; });
   if (!p || !isDischarged(p)) return;
   var prevWard = wardLabel(p.ward) || '';
@@ -7552,6 +7649,7 @@ function restorePatient(pid) {
 // v5.02: inpatients are asked the readmission question first; everyone
 // else (phone-advice-only, non-MRP) restores exactly as before.
 function _doRestore(pid, list) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   var p = (st.patients || []).find(function(x) { return x.id === pid; });
   if (!p) return;
   if (needsReadmitConfirm(p)) { _askReadmit(pid, list); return; }
@@ -7559,6 +7657,7 @@ function _doRestore(pid, list) {
 }
 
 function _askReadmit(pid, list) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   var p = (st.patients || []).find(function(x) { return x.id === pid; });
   if (!p) return;
   var body  = document.getElementById('merge-body');
@@ -7602,6 +7701,7 @@ function _askReadmit(pid, list) {
 // mode 'same' = the discharge was an error: nothing is filed, because the
 //               patient never left and those days ARE billable.
 function _doRestoreCommit(pid, list, mode, isoDate) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   var p = (st.patients || []).find(function(x) { return x.id === pid; });
   if (!p) return;
   hideModal('merge-modal');
@@ -7827,6 +7927,12 @@ function savePatientNotes(pid) {
 // ── Claim history view (existing) ──────────────────────────────────────
 
 function openPatientSummary(pid) {
+  // v5.08: this is the claims/billing "baseball card" screen — the D/C and
+  // Claim-Hx footer buttons that lead here are already hidden for residents
+  // (05_render.js cardFootHtml), but this redirect is defense-in-depth for
+  // any other path in. Send a resident to the plain notes modal instead —
+  // that's the actual summary-edit surface they're meant to use.
+  if (isResident()) { openPatientNotes(pid); return; }
   var p = getP(pid);
   // v4.99: never fail silently. Before, a missing patient (the archive-recall
   // bug) made this function return with no UI change at all — the tap simply
@@ -9614,6 +9720,11 @@ function hideClaimEditModal() { hideModal('claim-edit-modal'); }
 
 
 function openPatientEdit(pid) {
+  // v5.08: the full Edit Patient screen changes demographics, referring MD,
+  // ICD, MRP/role and OOP/private-pay — none of which a resident login may
+  // write (Crud v3.19 rebuilds the row and keeps only summary/ward/bed/list).
+  // Blocked here so an edit can never appear to save and then revert.
+  if (isResident()) { showToast('Not available for this login'); return; }
   var p = getP(pid);
   if (!p || !p.id) return;
 
@@ -9777,6 +9888,7 @@ function peRoleChange() {
 }
 
 function savePatientEdit(pid) {
+  if (isResident()) { showToast('Not available for this login'); return; }
   var p = getP(pid);
   if (!p || !p.id) return;
 
@@ -12133,15 +12245,6 @@ async function _mergeAndReadmit() {
   // merge/savePatient call — re-upserting it in the batch is a harmless no-op).
   // v4.94: same rule as apSubmit — in-card performing pick, else signed-in doctor.
   var cAlias = _billingAliasForAdd();
-  // v4.95 — same rule as the new-patient atomic-save path below: claim-
-  // creation functions can return false (e.g. an unresolved Call-out
-  // Decision card) and that must never be silently swallowed. Unlike the
-  // new-patient path, the patient row here is already saved (merge/readmit
-  // happened above), so there's nothing to roll back — but the doctor still
-  // needs to be told plainly that no claim was created, not shown the normal
-  // success toast.
-  var _mgClaimsValid = true;
-  var _mgClaimAttempted = false;
   if (cAlias) {
     var billingLoc = (document.getElementById('f-billing-loc') || {}).value || 'I';
 
@@ -12149,8 +12252,7 @@ async function _mergeAndReadmit() {
     window._batchClaimCollect = _mgBatch;
     try {
       if (_apClaimType === 'consult') {
-        _mgClaimAttempted = true;
-        _mgClaimsValid = submitConsultClaims(p, cAlias, billingLoc) !== false;
+        submitConsultClaims(p, cAlias, billingLoc);
       } else if (_apClaimType === 'ccu-admit') {
         var caDateISO = (document.getElementById('ap-ca-date')  || {}).value || '';
         var caNotes   = (document.getElementById('ap-ca-notes') || {}).value || '';
@@ -12161,14 +12263,13 @@ async function _mergeAndReadmit() {
       } else if (_apClaimType === 'other') {
         var ocLocEl = document.getElementById('oc-loc');
         if (ocLocEl) ocLocEl.value = billingLoc;
-        _mgClaimAttempted = true;
-        _mgClaimsValid = submitOtherClaimFor(p, cAlias) !== false;
+        submitOtherClaimFor(p, cAlias);
       }
     } finally {
       window._batchClaimCollect = null;
     }
     sv('claims', st.claims);
-    if (_mgClaimsValid && _mgBatch.length && SHEETS_URL) {
+    if (_mgBatch.length && SHEETS_URL) {
       var okClaims = await push('savePatientWithClaims', {
         id:      p.id,
         patient: p,
@@ -12186,23 +12287,9 @@ async function _mergeAndReadmit() {
   } else {
     // v4.94 BACKSTOP — the patient row is already saved on this path, so the
     // only honest outcome is to say so out loud. Never silent.
-    _mgClaimsValid = false;
     showToast('Patient saved but NO claim was created — no doctor selected. '
             + 'Tap your name, then add the claim from the patient card.');
     if (typeof showModal === 'function') showModal('doc-modal');
-  }
-
-  if (!_mgClaimsValid && _mgClaimAttempted) {
-    // v4.95 — claim was blocked (unresolved Call-out Decision card, missing
-    // fee/date on an Other claim, etc. — the claim function already toasted
-    // the specific reason). Stay on the form rather than clearing/navigating
-    // away, so the doctor can fix it and tap submit again — the patient
-    // merge itself already landed and re-submitting is a harmless no-op on
-    // that part. Wording is generic on purpose: the cause varies.
-    showToast('Patient saved but NO claim was added — fix the claim '
-             + 'above, then tap submit again.');
-    _hideSubmitOverlay();
-    return;
   }
 
   // v4.69: plain-language toast — say what happened, not which internal path ran.
@@ -12304,15 +12391,27 @@ function buildLocationCard(prefix, p, requireChoice) {
   h += '<div id="' + X + '-room-pills" class="room-pills"></div>';
   h += '</div></div>';
   // Row 2 — Cardiology role
+  // v5.08: residents CAN change Cardiology role (Kathryn 2026-08-24) — these
+  // pills are shown to everyone.
   h += '<label style="margin-top:8px">Cardiology role</label>';
   h += '<div id="' + X + '-role-row" class="fl" style="gap:8px;margin-top:4px">';
   h += '<button type="button" class="ap-list-pill' + (role === 'mrp' ? ' on' : '') + '" id="' + X + '-role-mrp" onclick="locRolePill(\'' + X + '\',\'mrp\')">MRP</button>';
   h += '<button type="button" class="ap-list-pill' + (role === 'consultant' ? ' on' : '') + '" id="' + X + '-role-con" onclick="locRolePill(\'' + X + '\',\'consultant\')">Consulting</button>';
   h += '</div>';
-  h += '<input id="' + X + '-role" type="hidden" value="' + role + '">';
   // Row 3 — MRP service
+  // v5.08: NOT shown to residents. Which service is most-responsible is a
+  // billing-determining field of its own, and Kathryn's scope is the role
+  // pills only. The MRP/Consulting → MRP-service link that locRolePill
+  // normally applies is reproduced SERVER-SIDE for residents instead
+  // (Crud v3.19 residentSavePatient_), so tapping MRP still lands
+  // 'Cardiology' on the sheet exactly as it does for an MD. locRolePill and
+  // locMrpChange are both null-safe against the missing select.
+  if (!((typeof isResident === 'function') && isResident())) {
   h += '<label style="margin-top:8px">MRP service</label>';
   h += '<select id="' + X + '-mrp" onchange="locMrpChange(\'' + X + '\')">' + mrpOpts + '</select>';
+  }
+  // Hidden role value — the pills write into this; saveLocationEdit reads it.
+  h += '<input id="' + X + '-role" type="hidden" value="' + role + '">';
   // Row 4 — On / Off service
   h += '<label style="margin-top:8px">On / Off service</label>';
   h += '<div id="' + X + '-list-row" class="fl" style="gap:8px;margin-top:4px">';
@@ -12815,18 +12914,6 @@ function apSelectClaimType(type) {
     // Other claim — unified form self-inits its date + performing selector.
     area.innerHTML = buildApOtherClaimArea();
   }
-  // v4.95: switching AWAY from the consult form while its Call-out Decision
-  // card was unresolved would otherwise leave the two Add-Patient submit
-  // buttons stuck disabled (nothing re-runs updateConsultUI once the form is
-  // gone). CCU-admit/Other claims have no such card — reset the buttons
-  // directly. The consult branch needs nothing: initAddPatientConsult →
-  // updateConsultUI re-derives the correct state itself.
-  if (type !== 'consult') {
-    var _apL = document.getElementById('ap-submit-list');
-    var _apO = document.getElementById('ap-submit-only');
-    if (_apL) { _apL.disabled = false; _apL.className = 'btn btn-p'; }
-    if (_apO) { _apO.disabled = false; _apO.className = 'btn btn-s'; }
-  }
 }
 
 
@@ -12964,6 +13051,11 @@ function _billingAliasForAdd() {
 }
 
 async function apSubmit(addToList, _skipDupCheck) {
+  // v5.08: belt-and-suspenders — nav() already blocks a resident from
+  // reaching this tab at all, and the backend allowlist (Router v3.14)
+  // would reject the resulting save regardless. Only an MD adds patients
+  // (Kathryn 2026-08-24).
+  if (isResident()) { showToast('Ask the attending to add new patients'); return; }
   // v4.26: Submit overlay — reuse the same guard and overlay as claimSubmitOnce
   if (_submitGuard) return;
   window._apPendingAddToList = addToList;
@@ -14850,6 +14942,14 @@ function stayDaysAt(p, dischMs) {
 
 // ── Location Change Screen ─────────────────────────────
 function openLocScreen(pid) {
+  // v5.08: this screen is reachable ONLY from the claim screen's "Change
+  // location" button, which a resident can never open (06_claim_screen.js
+  // guard). The location editor a resident actually uses is the ward-chip
+  // modal — openLocationEdit (06d_patient_edit.js) → buildLocationCard
+  // (09_patient.js), where the role/MRP controls are omitted for residents
+  // in the markup itself rather than hidden after the fact.
+  if (isResident()) { showToast('Not available for this login'); return; }
+
   _locPid  = pid;
   var p    = getP(pid);
 
@@ -14960,6 +15060,10 @@ function toggleLocRole(role) {
 //            confirmed discharge date
 //
 function openDischModal(pid) {
+  // v5.08: discharge is billing (78717/78720 + claim-gap review) — MD-only
+  // (Kathryn 2026-08-24). The D/C footer button is already hidden for
+  // residents (05_render.js cardFootHtml); this is defense-in-depth.
+  if (isResident()) { showToast('Not available for this login'); return; }
   _claimPid = pid;
   var p = getP(pid);
   if (!p) return;
@@ -15920,6 +16024,10 @@ var _qcCcuOrder = 'desc'; // 'desc' | 'asc'
 var _qcWards    = { CCU: true, '2S': true, '2W': true };
 
 function openQuickChartExport() {
+  // v5.08: bulk PHI export (name/DOB/PHN/sex/ward/bed) with save-as-image.
+  // No billing content, but exports are outside the resident scope — say so
+  // here rather than in the button, which is hidden by applyResidentChrome().
+  if (isResident()) { showToast('Not available for this login'); return; }
   _qcListMode = 'on';
   _qcCcuOrder = 'desc';
   _qcWards    = { CCU: true, '2S': true, '2W': true };
@@ -16662,6 +16770,11 @@ function _injectLeaderboardUI() {
 
 // ── Show / hide ──────────────────────────────────────
 async function showLeaderboard() {
+  // v5.08: the leaderboard's trophies include revenue — billing info
+  // (Kathryn 2026-08-24: none for residents). Also avoids a resident
+  // hitting the now-blocked getLeaderboard action (Router v3.14 allowlist)
+  // and seeing a broken/empty screen.
+  if (isResident()) { showToast('Not available for this login'); return; }
   var overlay = document.getElementById('lb-overlay');
   if (!overlay) return;
   overlay.classList.add('open');
@@ -17979,6 +18092,12 @@ function paAskUrl() {
 
 // ── Open / render ──────────────────────────────────────────────────
 function openPhoneAdvice() {
+  // v5.08: this form creates a real MSP claim (fee pills 10001/10002/78711)
+  // and queues an EMR letter, and it posts to the SEPARATE PhoneAdvice Apps
+  // Script deployment — which the main Router's resident allowlist does not
+  // protect. MD only. The footer launcher is also hidden for residents
+  // (applyResidentChrome in 14_init.js); this is the enforcement.
+  if (isResident()) { showToast('Not available for this login'); return; }
   paRenderForm();
   showModal('pa-modal');
 }
@@ -18312,6 +18431,7 @@ function paFillFromOCR(p, bar) {
 
 // ── Submit ─────────────────────────────────────────────────────────
 function paSubmit() {
+  if (isResident()) { showToast('Not available for this login'); return; }
   // v4.81: caller from the directory search; ICDs from pills + search.
   var callerNum  = paV('pa-ref-num');                              // MSP # when matched
   var callerName = (paV('pa-ref-name') || paV('pa-ref-search'))
@@ -18514,11 +18634,24 @@ async function submitAppPassword() {
   var ov = document.getElementById('apppw-modal');
   if (ov) ov.classList.remove('on');
   _appPwOpen = false;
-  // v4.94: authorising the device is HALF the login. The password says "this
-  // device may see patient data"; it does not say who is billing. Chain the
-  // doctor picker straight onto it so "log in on a random PC" is one flow that
-  // always ends with a name selected. (Kathryn 2026-08-11.)
-  if (!st.doc) _forceSignIn();
+  // v5.08: the ping response now says which role this password grants —
+  // 'md' (default, unchanged) or 'resident'. Residents get a fixed generic
+  // identity and skip the doctor picker entirely; there's no per-resident
+  // password, so there's nothing to pick (Kathryn 2026-08-24: generic
+  // shared login).
+  st.role = (d && d.role) || 'md';
+  sv('role', st.role);
+  if (isResident()) {
+    st.doc = { alias: 'Resident', num: '', name: 'Resident' };
+    sv('doc', st.doc);
+    applyResidentChrome();
+  } else if (!st.doc) {
+    // v4.94: authorising the device is HALF the login. The password says "this
+    // device may see patient data"; it does not say who is billing. Chain the
+    // doctor picker straight onto it so "log in on a random PC" is one flow that
+    // always ends with a name selected. (Kathryn 2026-08-11.)
+    _forceSignIn();
+  }
   var res = _appPwResolve; _appPwResolve = null;
   if (res) res();
 }
@@ -18580,6 +18713,7 @@ async function init() {
   }
   updateDailyTotal();
   await loadLocal();
+  try { applyResidentChrome(); } catch (e) {}   // v5.08: role restored from storage
   purgeOldPatients(); // remove patients discharged > 21 days ago
   st.loaded = true;
   if (st.doc) {
@@ -18620,6 +18754,7 @@ async function init() {
   wardChange();
   renderRefs('');
   _injectLeaderboardUI(); // 🏆 retro arcade leaderboard button + modal
+  try { applyResidentChrome(); } catch (e) {}   // v5.08: trophy is injected above, so hide it after
   // Show loading state immediately
   render();
   if (SHEETS_URL) {
@@ -18684,6 +18819,22 @@ async function init() {
           return;
         }
         var d = await r.json();
+        // v5.08: ping is the one call every device makes all day, and it now
+        // reports the role this password grants. Re-stamp it here so a device
+        // whose stored role was lost (cleared site data, storage eviction,
+        // a resident device that first signed in on an older build) self-heals
+        // to the right UI on the next tick instead of falling back to the MD
+        // layout. Cheap: only touches state when it actually differs.
+        if (d && d.role && d.role !== st.role) {
+          st.role = d.role;
+          sv('role', st.role);
+          if (isResident() && (!st.doc || st.doc.alias !== 'Resident')) {
+            st.doc = { alias: 'Resident', num: '', name: 'Resident' };
+            sv('doc', st.doc);
+          }
+          try { applyResidentChrome(); } catch (eC) {}
+          try { render(); } catch (eR) {}
+        }
         if (!d || !d.lastWriteAt) return;          // old backend / no writes yet
         var seen = window._lastSeenWriteAt;
         if (seen === undefined || seen === null) { // first tick — baseline only
@@ -18729,7 +18880,14 @@ async function resetLocalData() {
   st.doctors   = [];
   st.changelog = [];
   st.doc       = null;
-  document.getElementById('doc-label').textContent = 'Sign in';
+  // v5.08: 'role' is deliberately NOT in the wipe list above — a resident who
+  // resets local data must come back as a resident, not fall through to the
+  // mandatory doctor picker. Restore the fixed identity right here.
+  if (isResident()) {
+    st.doc = { alias: 'Resident', num: '', name: 'Resident' };
+    sv('doc', st.doc);
+  }
+  document.getElementById('doc-label').textContent = isResident() ? 'Resident' : 'Sign in';
   document.getElementById('doc-dot').classList.remove('on');
   hideModal('doc-modal');
   showToast('Local data cleared — syncing from Sheets…');
@@ -18777,7 +18935,56 @@ function showPane(id) {
   for (var i = 0; i < stragglers.length; i++) { stragglers[i].remove(); }
 }
 
+// v5.08: hide the static chrome that lives in index.template.html (so it
+// can't be gated inside a render function) whenever this device is signed in
+// as a resident. Every one of these leads somewhere a resident is blocked
+// from, so leaving them visible is just a dead tap. Safe to call repeatedly
+// and safe when an element is absent. Called after sign-in, on init, and
+// from the 30s ping self-heal.
+function applyResidentChrome() {
+  var res = (typeof isResident === 'function') && isResident();
+  var sels = [
+    '.doc-chip',            // doctor picker — a resident must stay 'Resident'
+    '.mit-btn',             // "Import from Meditech" + "Export list for QuickChart"
+    '.lb-trophy-btn',       // revenue leaderboard trophy (injected at runtime)
+    '#wifi-banner-report'   // "Report to KB" (posts logClientErrors — not allowed)
+  ];
+  function _hide(sel) {
+    try {
+      document.querySelectorAll(sel).forEach(function(el) {
+        if (res) {
+          // Remember whatever inline display the shell had (often '', but
+          // #wifi-banner-report ships with display:none) so un-hiding restores
+          // it exactly instead of clearing a style the app relies on.
+          if (el.getAttribute('data-res-prev-display') === null) {
+            el.setAttribute('data-res-prev-display', el.style.display || '');
+          }
+          el.style.display = 'none';
+        } else if (el.getAttribute('data-res-prev-display') !== null) {
+          el.style.display = el.getAttribute('data-res-prev-display');
+          el.removeAttribute('data-res-prev-display');
+        }
+      });
+    } catch (e) {}
+  }
+  sels.forEach(_hide);
+  // Add Patient nav button — matched by its handler, since the nav buttons
+  // carry no distinguishing id or class in the shell.
+  _hide('[onclick^="nav(1"]');
+  // Phone Advice launcher in the footer — no id/class, matched by its handler.
+  _hide('[onclick*="openPhoneAdvice"]');
+  // "Search all discharged (incl. >7-day archive)" — needs getAllForDataCheck.
+  _hide('[onclick*="archiveSearch"]');
+}
+
 function nav(n, el) {
+  // v5.08: Add Patient tab is MD-only (Kathryn 2026-08-24: only an MD adds
+  // patients). Blocked here too as a belt-and-suspenders on top of
+  // apSubmit()'s own guard — this way a resident never even sees the form.
+  if (n === 1 && isResident()) {
+    showToast('Ask the attending to add new patients');
+    return;
+  }
   document.querySelectorAll('.nb').forEach(function(b, i) { b.classList.toggle('on', i === n); });
   var paneMap = { 0:'p0', 1:'p1', 2:'p-discharged' };
   showPane(paneMap[n] || 'p0');
@@ -18873,6 +19080,14 @@ var _signInMandatory = false;
 
 function _forceSignIn() {
   if (st.doc) return;
+  // v5.08: residents never sign in as a doctor — restore the fixed identity
+  // instead of opening the mandatory picker (which has no Cancel button).
+  if (isResident()) {
+    st.doc = { alias: 'Resident', num: '', name: 'Resident' };
+    sv('doc', st.doc);
+    var dl = document.getElementById('doc-label'); if (dl) dl.textContent = 'Resident';
+    return;
+  }
   _signInMandatory = true;
   showModal('doc-modal');
   var t = document.querySelector('#doc-modal .modal-title');
@@ -18914,6 +19129,11 @@ function selectDocEl(el) {
 }
 
 function selectDoc(alias, num, name) {
+  // v5.08: a resident stays 'Resident'. Without this a resident could pick
+  // an attending from the picker and every edit they make would be logged
+  // under that attending's name. (The backend now stamps 'Resident' on the
+  // Patients row and the ChangeLog regardless — this keeps the UI honest too.)
+  if (isResident()) { showToast('Signed in as Resident'); hideModal('doc-modal'); return; }
   st.doc = { alias:alias, num:num, name:name };
   sv('doc', st.doc);
   _releaseSignIn();                                   // v4.94
