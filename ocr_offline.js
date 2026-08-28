@@ -1,10 +1,21 @@
 // ===================================================================
 // ocr_offline.js  —  KGH offline OCR engine
 // -------------------------------------------------------------------
-// Version:    v1.4
+// Version:    v1.5
 // Built:      2026-05-10 23:30 UTC
 // Repo:       github.com/KelownaCardio/kelownacardio.github.io
 // -------------------------------------------------------------------
+// Changes in v1.5 (2026-08-28):
+//   - Returns `age` — the age printed on a Meditech header ("71, F"). The
+//     same token was already parsed for the sex and the digits thrown
+//     away. The consumer (ocrDobFromRaw in 09_patient.js) cross-checks the
+//     DOB against it in code and blanks the DOB on a mismatch.
+//     Deliberately NOT used here to "correct" anything: validateAndRescueDOB
+//     already rewrites an invalid date to its nearest digit-confusion guess,
+//     and a guess that nothing checks is how a wrong DOB gets billed.
+//     Sticker parsing is unchanged — stickers print no age, so those return
+//     no age and the consumer leaves that path exactly as it was.
+//
 // Changes in v1.4:
 //   - Learned corrections infrastructure: OCROffline.loadCorrections(rows)
 //     accepts an array of { field, ocr_value, corrected_value, engine } objects
@@ -1094,6 +1105,19 @@
       }
     }
 
+    // 2026-08-28: the SAME "71, F" token carries the printed AGE. Hand it
+    // back so the consumer can cross-check the DOB against it in code (see
+    // ocrDobFromRaw in 09_patient.js). Deliberately NOT used here to
+    // "correct" anything: validateAndRescueDOB above already rewrites an
+    // invalid date to its nearest digit-confusion guess, and a guess that
+    // nothing checks is exactly how a wrong DOB gets billed.
+    var ageOut = '';
+    var medAgeMatch = text.match(/\b(\d{1,3})\s*,\s*[MF]\b/);
+    if (medAgeMatch) {
+      var _a = parseInt(medAgeMatch[1], 10);
+      if (_a >= 0 && _a <= 120) { ageOut = String(_a); log('Age (printed): ' + ageOut); }
+    }
+
     // MRP
     var KNOWN_SERVICES = ['Cardiology', 'Hospitalist', 'CTU', 'ICU', 'CSICU', 'Cardiac Surgery',
       'General Surgery', 'Orthopedics', 'Neurology', 'Nephrology', 'Internal Medicine',
@@ -1128,7 +1152,7 @@
     }
 
     return {
-      last: last, first: first, phn: phn, dob: dob, sex: sex,
+      last: last, first: first, phn: phn, dob: dob, sex: sex, age: ageOut,
       mrp: mrp, ward: ward, room: room,
       _flags: { nameClipped: nameClipped, phnClipped: phnClipped,
                 phnRescued: phnRescued, phnInvalid: phnInvalid, phnNote: phnNote,
