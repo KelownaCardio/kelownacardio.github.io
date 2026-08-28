@@ -368,6 +368,19 @@ async function _mergeAndReadmit() {
   // merge/savePatient call — re-upserting it in the batch is a harmless no-op).
   // v4.94: same rule as apSubmit — in-card performing pick, else signed-in doctor.
   var cAlias = _billingAliasForAdd();
+  // v4.95 — same rule as the new-patient atomic-save path below: claim-
+  // creation functions can return false (e.g. an unresolved Call-out
+  // Decision card) and that must never be silently swallowed. Unlike the
+  // new-patient path, the patient row here is already saved (merge/readmit
+  // happened above), so there's nothing to roll back — but the doctor still
+  // needs to be told plainly that no claim was created, not shown the normal
+  // success toast.
+  // RESTORED 2026-08-28: this block was present in the 2026-08-22 build and
+  // absent from the v5.08 build shipped 2026-08-24 — verified missing from
+  // the live index.html. A GITHUB-UPLOAD folder assembled from a stale base
+  // reverted it. Do not lose it again.
+  var _mgClaimsValid = true;
+  var _mgClaimAttempted = false;
   if (cAlias) {
     var billingLoc = (document.getElementById('f-billing-loc') || {}).value || 'I';
 
@@ -375,7 +388,8 @@ async function _mergeAndReadmit() {
     window._batchClaimCollect = _mgBatch;
     try {
       if (_apClaimType === 'consult') {
-        submitConsultClaims(p, cAlias, billingLoc);
+        _mgClaimAttempted = true;
+        _mgClaimsValid = submitConsultClaims(p, cAlias, billingLoc) !== false;
       } else if (_apClaimType === 'ccu-admit') {
         var caDateISO = (document.getElementById('ap-ca-date')  || {}).value || '';
         var caNotes   = (document.getElementById('ap-ca-notes') || {}).value || '';
@@ -386,13 +400,14 @@ async function _mergeAndReadmit() {
       } else if (_apClaimType === 'other') {
         var ocLocEl = document.getElementById('oc-loc');
         if (ocLocEl) ocLocEl.value = billingLoc;
-        submitOtherClaimFor(p, cAlias);
+        _mgClaimAttempted = true;
+        _mgClaimsValid = submitOtherClaimFor(p, cAlias) !== false;
       }
     } finally {
       window._batchClaimCollect = null;
     }
     sv('claims', st.claims);
-    if (_mgBatch.length && SHEETS_URL) {
+    if (_mgClaimsValid && _mgBatch.length && SHEETS_URL) {
       var okClaims = await push('savePatientWithClaims', {
         id:      p.id,
         patient: p,
@@ -410,9 +425,23 @@ async function _mergeAndReadmit() {
   } else {
     // v4.94 BACKSTOP — the patient row is already saved on this path, so the
     // only honest outcome is to say so out loud. Never silent.
+    _mgClaimsValid = false;
     showToast('Patient saved but NO claim was created — no doctor selected. '
             + 'Tap your name, then add the claim from the patient card.');
     if (typeof showModal === 'function') showModal('doc-modal');
+  }
+
+  if (!_mgClaimsValid && _mgClaimAttempted) {
+    // v4.95 — claim was blocked (unresolved Call-out Decision card, missing
+    // fee/date on an Other claim, etc. — the claim function already toasted
+    // the specific reason). Stay on the form rather than clearing/navigating
+    // away, so the doctor can fix it and tap submit again — the patient
+    // merge itself already landed and re-submitting is a harmless no-op on
+    // that part. Wording is generic on purpose: the cause varies.
+    showToast('Patient saved but NO claim was added — fix the claim '
+             + 'above, then tap submit again.');
+    _hideSubmitOverlay();
+    return;
   }
 
   // v4.69: plain-language toast — say what happened, not which internal path ran.
@@ -1036,6 +1065,19 @@ function apSelectClaimType(type) {
   } else {
     // Other claim — unified form self-inits its date + performing selector.
     area.innerHTML = buildApOtherClaimArea();
+  }
+  // v4.95: switching AWAY from the consult form while its Call-out Decision
+  // card was unresolved would otherwise leave the two Add-Patient submit
+  // buttons stuck disabled (nothing re-runs updateConsultUI once the form is
+  // gone). CCU-admit/Other claims have no such card — reset the buttons
+  // directly. The consult branch needs nothing: initAddPatientConsult →
+  // updateConsultUI re-derives the correct state itself.
+  // RESTORED 2026-08-28 — lost in the same v5.08 stale-base revert.
+  if (type !== 'consult') {
+    var _apL = document.getElementById('ap-submit-list');
+    var _apO = document.getElementById('ap-submit-only');
+    if (_apL) { _apL.disabled = false; _apL.className = 'btn btn-p'; }
+    if (_apO) { _apO.disabled = false; _apO.className = 'btn btn-s'; }
   }
 }
 
@@ -2228,12 +2270,58 @@ function runDemogOCR(dataUrl) {
   return _runAppsScriptOCR(m[2], m[1], DEMOG_PROMPT, 600);
 }
 
+// ── DOB from OCR: deterministic ordering + age cross-check ────────
+// Added 2026-08-28. Takes the date and age EXACTLY as printed and decides in
+// code whether they agree. Never trusts a model-formatted date.
+// Returns {ok:true, day, month, year} or {ok:false, why}.
+//
+// Why: on 2026-08-27 the phone-advice OCR relay FABRICATED a DOB — the chart
+// read "Aucello,Maria  71, F · 06/05/1955" and it returned 1955-09-12.
+// Neither number was on the screen; every other field it read was correct.
+// Its prompt already told it to sanity-check against the printed age, and
+// that did not save it. A prompt is not an enforcement mechanism.
+//
+// KGH Meditech prints DD/MM/YYYY — confirmed from a live header
+// ("74, M · 27/12/1951"; 27 cannot be a month). We parse day-first HERE
+// rather than asking the model to convert, so a transposition can never
+// originate in the model.
+//
+// The age must match EXACTLY, never +/-1: the fabrication was 70 vs 71 and a
+// one-year tolerance would have waved it straight through. If Meditech ever
+// prints age-at-admission instead of current age this refuses to fill and
+// the user types it — a safe failure.
+function ocrDobFromRaw(dobRaw, ageRaw) {
+  var m = String(dobRaw || '').trim().match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if (!m) return { ok: false, why: 'the date on the chart could not be read' };
+
+  var d = parseInt(m[1], 10), mo = parseInt(m[2], 10), y = parseInt(m[3], 10);
+  if (mo < 1 || mo > 12) return { ok: false, why: mo + ' is not a real month' };
+  var dim = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mo - 1];
+  if (d < 1 || d > dim) return { ok: false, why: d + ' is not a valid day for that month' };
+
+  var now = new Date();
+  if (y < 1900 || y > now.getFullYear()) return { ok: false, why: y + ' is not a plausible birth year' };
+
+  var age = now.getFullYear() - y;
+  var mNow = now.getMonth() + 1;
+  if (mNow < mo || (mNow === mo && now.getDate() < d)) age--;
+
+  var printed = String(ageRaw == null ? '' : ageRaw).replace(/\D/g, '');
+  if (!printed) return { ok: false, why: 'no age was printed to check it against' };
+  printed = parseInt(printed, 10);
+  if (printed !== age) {
+    return { ok: false, why: 'the chart says age ' + printed + ' but ' +
+             ('0' + d).slice(-2) + '/' + ('0' + mo).slice(-2) + '/' + y + ' gives ' + age };
+  }
+  return { ok: true, month: ('0' + mo).slice(-2), day: ('0' + d).slice(-2), year: String(y) };
+}
+
 var STICKER_PROMPT =
   'Hospital patient sticker or Meditech chart header from Kelowna ' +
   'General Hospital (KGH). Extract the printed fields ONLY — ignore ' +
   'any handwriting.\n\n' +
   'Return a single JSON object with exactly these fields:\n' +
-  '  last, first, phn, dob, sex, mrp, admitDate, locationCode, roomBed\n\n' +
+  '  last, first, phn, dob, dobRaw, age, sex, mrp, admitDate, locationCode, roomBed\n\n' +
   'Rules:\n' +
   '  last / first  — from "Last,First" name line\n' +
   '  phn           — the HCN number (10 digits after "HCN")\n' +
@@ -2242,6 +2330,17 @@ var STICKER_PROMPT =
   '                  A screen date "03/09/1934" means 3rd September 1934.\n' +
   '                  Always return as DD Mon YYYY e.g. "03 Sep 1934".\n' +
   '                  NEVER assume American MM/DD order.\n' +
+  '  dobRaw        — the date of birth EXACTLY as printed, character for\n' +
+  '                  character, e.g. "06/05/1955". Do NOT reorder it, do\n' +
+  '                  NOT convert it, do NOT correct it. Just copy the\n' +
+  '                  digits you can see. "" if you cannot read it.\n' +
+  '  age           — the age EXACTLY as printed, if the screen shows one\n' +
+  '                  (a Meditech chart header prints it just before the\n' +
+  '                  sex, e.g. "71, F" gives "71"). Digits only. Most\n' +
+  '                  patient stickers do NOT print an age — return "" then.\n' +
+  '                  NEVER calculate it yourself: it is used to\n' +
+  '                  independently check dobRaw, so a calculated age is\n' +
+  '                  worse than no age at all.\n' +
   '  sex           — M or F (from "L:M" or "L:F" field, or "Sex: M/F")\n' +
   '  mrp           — text after "MRP" e.g. "CardiologyMRP,KGH Kelowna"\n' +
   '  admitDate     — date after "ADM", same DD Mon YYYY format as dob\n' +
@@ -2745,6 +2844,34 @@ function handleOCRResult(data, bar) {
   // Persist the full OCR result for debugging:
   //   window._lastOCR — inspect from console: console.log(window._lastOCR._meta)
   window._lastOCR = p;
+
+  // ── v5.09 (2026-08-28): DOB verified in CODE against the printed age ──
+  // See ocrDobFromRaw() above for the incident this comes from. When the
+  // screen prints an age we no longer take the model's word for the date at
+  // all: it transcribes, we do the ordering and the arithmetic. Two failure
+  // modes die — wrong ORDER (we order it) and wrong DIGITS (age must match).
+  // A mismatch leaves the DOB EMPTY with a toast, never a plausible lie.
+  //
+  // Most patient stickers print no age; those fall through to the old path
+  // untouched. This is strictly additive — never a new refusal on a sticker.
+  var _ocrAge = String(p.age == null ? '' : p.age).replace(/\D/g, '');
+  var _ocrRaw = String(p.dobRaw || '').trim();
+  // The offline engine (ocr_offline.js) has no dobRaw but already builds its
+  // dob day-first from the printed digits — good enough to check. That also
+  // puts a guard on its validateAndRescueDOB(), which silently rewrites an
+  // invalid date to its nearest digit-confusion guess.
+  if (!_ocrRaw && /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(String(p.dob || '').trim())) {
+    _ocrRaw = String(p.dob).trim();
+  }
+  if (_ocrAge && _ocrRaw) {
+    var _ocrChk = ocrDobFromRaw(_ocrRaw, _ocrAge);
+    if (_ocrChk.ok) {
+      p.dob = _ocrChk.day + '/' + _ocrChk.month + '/' + _ocrChk.year;
+    } else {
+      showToast('DOB not filled — ' + _ocrChk.why + '. Enter it manually.', 'error');
+      p.dob = '';
+    }
+  }
 
   // v4.20: DOB sanity check — reject if age < 2 or date is in the future.
   // KGH stickers have admission date adjacent to DOB; OCR sometimes grabs
