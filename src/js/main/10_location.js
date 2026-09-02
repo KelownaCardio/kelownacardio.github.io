@@ -175,6 +175,25 @@ function openDischModal(pid) {
   var p = getP(pid);
   if (!p) return;
 
+  // ── v5.10 (2026-09-01): no discharge without a date of birth ───────
+  // The other end of the Add Patient "DOB not available at time of
+  // admission" escape. That escape exists so a claim is never lost at the
+  // bedside -- but once a patient is off the list nobody looks at them
+  // again, the DOB is never filled, and the claim fails at MSP weeks
+  // later. So the debt is called in here, at the last moment anyone is
+  // still looking at the patient. Runs BEFORE the gap gate: no point
+  // walking the doctor through unbilled days for a patient whose claims
+  // cannot be submitted at all. (Kathryn 2026-09-01.)
+  // v5.10a: valid, not merely present. A DOB the backend will refuse
+  // (dobNormDMY '' -- e.g. "5/3/1948") is no better than a blank one, and
+  // accepting it here would let the doctor type their way past this gate
+  // while the sheet keeps the blank.
+  if (!(typeof dobNormDMY === 'function' ? dobNormDMY(p.dob) : String(p.dob || '').trim())) {
+    showToast('Date of birth needed before discharge \u2014 MSP will refuse every claim without it', 'error');
+    openPatientEdit(pid, true);
+    return;
+  }
+
   // v4.20 — check for billing gaps first. If any exist, open the patient
   // summary calendar so the doctor can review and correct them before
   // discharging. The discharge modal is NOT opened in this case.

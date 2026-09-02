@@ -510,7 +510,7 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // No cache-format change to EXISTING keys; BUILD_ID not bumped (no
 // re-login) — st.role is simply null/undefined on devices that predate it,
 // which the isResident() helper treats as role='md' (unchanged behaviour).
-var APP_VERSION = 'v5.09';
+var APP_VERSION = 'v5.10';
 var APP_BUILT   = '2026-08-28';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -1236,8 +1236,18 @@ async function syncFromSheets() {
           last:         fmtName(src.last || ''),
           first:        fmtName(src.first || ''),
           phn:          phn,
-          dob:          '',
-          sex:          '',
+          // v5.10: the orphan healer used to hardcode a blank DOB even when
+          // the claim it is rebuilding from carried one, manufacturing the
+          // exact defect the rest of this release closes. Take what the
+          // source claim has; needsReview + the data check still catch the
+          // genuinely empty ones.
+          // Normalised, not raw: claim rows are not DOB-normalised on the
+          // sync path, and Crud.gs PERMANENTLY rejects a malformed DOB --
+          // which push() then drops from the retry queue, so the orphan is
+          // re-detected and re-rejected on every sync and never heals. A
+          // blank is filed instead and the data check picks it up.
+          dob:          (typeof dobNormDMY === 'function' ? dobNormDMY(src.dob) : ''),
+          sex:          src.sex || '',
           ward:         '',
           bed:          '',
           fac:          'OA040',

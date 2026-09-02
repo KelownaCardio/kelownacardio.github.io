@@ -5,7 +5,10 @@
 // Edit opened via pencil icon on claim screen banner
 
 
-function openPatientEdit(pid) {
+// v5.10 (2026-09-01): optional focusDob -- set by the discharge DOB gate in
+// 10_location.js so the doctor lands on the one field that is blocking them
+// instead of hunting for it on a long form.
+function openPatientEdit(pid, focusDob) {
   // v5.08: the full Edit Patient screen changes demographics, referring MD,
   // ICD, MRP/role and OOP/private-pay — none of which a resident login may
   // write (Crud v3.19 rebuilds the row and keeps only summary/ward/bed/list).
@@ -117,6 +120,15 @@ function openPatientEdit(pid) {
   // buildLocationCard, so nothing else needs restoring here.
   setTimeout(function() {
     renderRoomPills(p.ward, 'pe-bed', 'pe-room-pills');
+    // v5.10: sent here by the discharge gate -- flag and focus the DOB.
+    if (focusDob) {
+      var _peDob = document.getElementById('pe-dob');
+      if (_peDob) {
+        _peDob.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)';
+        _peDob.focus();
+        if (_peDob.scrollIntoView) _peDob.scrollIntoView({ block: 'center' });
+      }
+    }
   }, 50);
 }
 
@@ -193,10 +205,41 @@ function savePatientEdit(pid) {
   var role = (document.getElementById('pe-role') || {}).value || 'consultant';
   var ward = (document.getElementById('pe-ward') || {}).value || p.ward;
 
+  // ── v5.10a: DOB validity, checked BEFORE anything is written to p ──
+  // Crud.gs refuses a DOB that is not a padded DD/MM/YYYY and drops the
+  // WHOLE row update silently (nothing reads patientBlocked), so ward and
+  // list edits made in the same save would be lost with it. This is also
+  // the screen the discharge gate sends people to, so letting "5/3/1948"
+  // through here would defeat that gate.
+  //
+  // The early return MUST come before the p.last/p.first/p.phn writes
+  // below: those mutate the live record even on a failed save, and the
+  // pre-edit snapshot above would then re-read the already-changed values
+  // on the doctor's second attempt -- _phnChanged would read false and the
+  // v4.31 claim-retag would never run, orphaning every prior claim.
+  //
+  // Only a DOB the doctor actually TYPED is judged. A patient whose stored
+  // DOB is malformed (a legacy row, or one hand-fixed on the sheet) must
+  // still be editable for ward, list, MRP and everything else -- one bad
+  // cell cannot be allowed to make a patient unmanageable.
+  var _peDobEl   = document.getElementById('pe-dob');
+  var _peDobRaw  = String((_peDobEl || {}).value || '').trim();
+  var _peDobWas  = String(dispDate(p.dob) || '').trim();
+  var _peDobNorm = (typeof dobNormDMY === 'function') ? dobNormDMY(_peDobRaw) : '';
+  if (_peDobRaw && _peDobRaw !== _peDobWas && !_peDobNorm) {
+    if (_peDobEl) {
+      _peDobEl.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)';
+      _peDobEl.focus();
+      _peDobEl.select && _peDobEl.select();
+    }
+    showToast('Date of birth "' + _peDobRaw + '" is not a real date \u2014 use DD Mon YYYY.', 'error');
+    return;
+  }
+
   p.last      = fmtName((document.getElementById('pe-last')  || {}).value || p.last);
   p.first     = fmtName((document.getElementById('pe-first') || {}).value || p.first);
   p.phn       = (document.getElementById('pe-phn')   || {}).value || p.phn;
-  p.dob       = fmtClaimDate((document.getElementById('pe-dob') || {}).value || p.dob);
+  p.dob       = _peDobNorm || p.dob;
   p.sex       = (document.getElementById('pe-sex')   || {}).value || p.sex;
   p.ward      = ward;
   var _peBed = document.getElementById('pe-bed');
