@@ -614,23 +614,7 @@ function confirmMediteachImport() {
   if (!checkDoc()) return;
 
   // ── Discharges first (so re-imports of same names don't re-add them) ──
-  // v5.10 (2026-09-01): the census sweep is a THIRD way off the list, and
-  // the silent one -- nobody is looking at the patient when it fires. A
-  // patient still carrying the "DOB not available at admission" escape is
-  // held back here exactly as openDischModal holds them, so a bulk action
-  // can never write off the DOB debt. They stay on the list and are named
-  // in the toast; discharge them by hand once the DOB is in.
-  var _mitDobHeld = [];
-  var toDisch = _mitDisch.filter(function(d) {
-    if (!d._include) return false;
-    var _mp = st.patients.find(function(pp) { return pp.id === d.pid; });
-    if (!_mp) return true;
-    var _mpOk = (typeof dobNormDMY === 'function')
-                  ? !!dobNormDMY(_mp.dob) : !!String(_mp.dob || '').trim();
-    if (_mpOk) return true;
-    _mitDobHeld.push(String(_mp.last || 'unnamed'));
-    return false;
-  });
+  var toDisch = _mitDisch.filter(function(d) { return d._include; });
   toDisch.forEach(function(d) {
     var p = st.patients.find(function(pp) { return pp.id === d.pid; });
     if (!p) return;
@@ -696,17 +680,7 @@ function confirmMediteachImport() {
   if (toTransition.length) msg.push(toTransition.length + ' MRP changed');
   if (toDisch.length)      msg.push(toDisch.length      + ' discharged');
   if (newOnMeditech)       msg.push(newOnMeditech + ' new on Meditech NOT imported — add via Add Patient');
-  // v5.10: a discharge the doctor explicitly ticked and did NOT get is the
-  // most important thing on this screen, so it gets its own red 3.5s toast
-  // rather than being appended to the end of a 1.6s single-line summary
-  // that overflows the phone. The held patients stay visible on the list.
-  if (_mitDobHeld.length) {
-    showToast(_mitDobHeld.length + ' NOT discharged \u2014 no DOB (' +
-              _mitDobHeld.join(', ') + '). Enter it, then discharge by hand.' +
-              (msg.length ? ' \u00B7 ' + msg.join(', ') : ''), 'error');
-  } else {
-    showToast(msg.length ? msg.join(', ') : 'Nothing to change');
-  }
+  showToast(msg.length ? msg.join(', ') : 'Nothing to change');
 
   _mitPats  = [];
   _mitDisch = [];
