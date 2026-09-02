@@ -2734,7 +2734,7 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // No cache-format change to EXISTING keys; BUILD_ID not bumped (no
 // re-login) — st.role is simply null/undefined on devices that predate it,
 // which the isResident() helper treats as role='md' (unchanged behaviour).
-var APP_VERSION = 'v5.09';
+var APP_VERSION = 'v5.10';
 var APP_BUILT   = '2026-08-28';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -3460,8 +3460,18 @@ async function syncFromSheets() {
           last:         fmtName(src.last || ''),
           first:        fmtName(src.first || ''),
           phn:          phn,
-          dob:          '',
-          sex:          '',
+          // v5.10: the orphan healer used to hardcode a blank DOB even when
+          // the claim it is rebuilding from carried one, manufacturing the
+          // exact defect the rest of this release closes. Take what the
+          // source claim has; needsReview + the data check still catch the
+          // genuinely empty ones.
+          // Normalised, not raw: claim rows are not DOB-normalised on the
+          // sync path, and Crud.gs PERMANENTLY rejects a malformed DOB --
+          // which push() then drops from the retry queue, so the orphan is
+          // re-detected and re-rejected on every sync and never heals. A
+          // blank is filed instead and the data check picks it up.
+          dob:          (typeof dobNormDMY === 'function' ? dobNormDMY(src.dob) : ''),
+          sex:          src.sex || '',
           ward:         '',
           bed:          '',
           fac:          'OA040',
@@ -9719,7 +9729,10 @@ function hideClaimEditModal() { hideModal('claim-edit-modal'); }
 // Edit opened via pencil icon on claim screen banner
 
 
-function openPatientEdit(pid) {
+// v5.10 (2026-09-01): optional focusDob -- set by the discharge DOB gate in
+// 10_location.js so the doctor lands on the one field that is blocking them
+// instead of hunting for it on a long form.
+function openPatientEdit(pid, focusDob) {
   // v5.08: the full Edit Patient screen changes demographics, referring MD,
   // ICD, MRP/role and OOP/private-pay — none of which a resident login may
   // write (Crud v3.19 rebuilds the row and keeps only summary/ward/bed/list).
@@ -9831,6 +9844,15 @@ function openPatientEdit(pid) {
   // buildLocationCard, so nothing else needs restoring here.
   setTimeout(function() {
     renderRoomPills(p.ward, 'pe-bed', 'pe-room-pills');
+    // v5.10: sent here by the discharge gate -- flag and focus the DOB.
+    if (focusDob) {
+      var _peDob = document.getElementById('pe-dob');
+      if (_peDob) {
+        _peDob.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)';
+        _peDob.focus();
+        if (_peDob.scrollIntoView) _peDob.scrollIntoView({ block: 'center' });
+      }
+    }
   }, 50);
 }
 
@@ -9907,10 +9929,41 @@ function savePatientEdit(pid) {
   var role = (document.getElementById('pe-role') || {}).value || 'consultant';
   var ward = (document.getElementById('pe-ward') || {}).value || p.ward;
 
+  // ── v5.10a: DOB validity, checked BEFORE anything is written to p ──
+  // Crud.gs refuses a DOB that is not a padded DD/MM/YYYY and drops the
+  // WHOLE row update silently (nothing reads patientBlocked), so ward and
+  // list edits made in the same save would be lost with it. This is also
+  // the screen the discharge gate sends people to, so letting "5/3/1948"
+  // through here would defeat that gate.
+  //
+  // The early return MUST come before the p.last/p.first/p.phn writes
+  // below: those mutate the live record even on a failed save, and the
+  // pre-edit snapshot above would then re-read the already-changed values
+  // on the doctor's second attempt -- _phnChanged would read false and the
+  // v4.31 claim-retag would never run, orphaning every prior claim.
+  //
+  // Only a DOB the doctor actually TYPED is judged. A patient whose stored
+  // DOB is malformed (a legacy row, or one hand-fixed on the sheet) must
+  // still be editable for ward, list, MRP and everything else -- one bad
+  // cell cannot be allowed to make a patient unmanageable.
+  var _peDobEl   = document.getElementById('pe-dob');
+  var _peDobRaw  = String((_peDobEl || {}).value || '').trim();
+  var _peDobWas  = String(dispDate(p.dob) || '').trim();
+  var _peDobNorm = (typeof dobNormDMY === 'function') ? dobNormDMY(_peDobRaw) : '';
+  if (_peDobRaw && _peDobRaw !== _peDobWas && !_peDobNorm) {
+    if (_peDobEl) {
+      _peDobEl.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)';
+      _peDobEl.focus();
+      _peDobEl.select && _peDobEl.select();
+    }
+    showToast('Date of birth "' + _peDobRaw + '" is not a real date \u2014 use DD Mon YYYY.', 'error');
+    return;
+  }
+
   p.last      = fmtName((document.getElementById('pe-last')  || {}).value || p.last);
   p.first     = fmtName((document.getElementById('pe-first') || {}).value || p.first);
   p.phn       = (document.getElementById('pe-phn')   || {}).value || p.phn;
-  p.dob       = fmtClaimDate((document.getElementById('pe-dob') || {}).value || p.dob);
+  p.dob       = _peDobNorm || p.dob;
   p.sex       = (document.getElementById('pe-sex')   || {}).value || p.sex;
   p.ward      = ward;
   var _peBed = document.getElementById('pe-bed');
@@ -11939,7 +11992,13 @@ function _dupPrep(existing, newData) {
   _DUP_DEMO_FIELDS.forEach(function(f) {
     var oldV = String(f.key === 'phn'
       ? (existing.phn || '').replace(/\D/g, '')
-      : f.key === 'dob' && existing.dob ? fmtClaimDate(existing.dob)
+      // v5.10a: normalise the stored side too. Without this an existing
+      // "5/3/1948" scores as a conflict against a new "05/03/1948" (same
+      // date, reconcile modal for nothing), and worse, tapping "existing"
+      // writes the malformed value straight back -- which Crud.gs refuses,
+      // silently dropping the entire readmission row update.
+      : f.key === 'dob' && existing.dob
+          ? (dobNormDMY(existing.dob) || fmtClaimDate(existing.dob))
       : (existing[f.key] || '')).trim();
     var newV = String(newData[f.key] || '').trim();
     window._dupFieldVals[f.key] = { old: oldV, 'new': newV };
@@ -12083,6 +12142,10 @@ async function _mergeAndReadmit() {
   ['last', 'first', 'phn', 'dob', 'sex'].forEach(function(key) {
     var which = window._dupSelections[key] || 'new';
     var val = window._dupFieldVals[key][which];
+    // v5.10a: whichever side wins, a DOB reaching the sheet must be one
+    // Crud.gs will accept -- this is the third write path and the last one
+    // where a malformed value could silently kill the whole row update.
+    if (key === 'dob' && val) val = dobNormDMY(val) || val;
     if (val) p[key] = (key === 'last' || key === 'first') ? fmtName(val) : val;
   });
 
@@ -12093,6 +12156,16 @@ async function _mergeAndReadmit() {
     return String(_oldDemo[key] || '').trim() !== String(p[key] || '').trim();
   });
   if (_demoChanged && _oldPhn) p._mergeOldPhn = _oldPhn;
+
+  // v5.10a: the merge path saves a patient too, and a blank-DOB patient
+  // matches an existing blank-DOB stub at 2-of-2 -- so this is a LIKELIER
+  // landing point for an override than the new-patient branch, not a rarer
+  // one. Without this the ChangeLog records the save with no trace of the
+  // acknowledgement. (Not a sheet column; Crud.gs logs it only.)
+  if (!String(p.dob || '').trim() && _apDobOverrideFor &&
+      _apDobOverrideFor === _apDobIdent()) {
+    p.dobOverride = true;
+  }
 
   var _hotSnap = snapHot(p);   // v4.73: stamp changed hot groups (readmit path)
 
@@ -12923,6 +12996,82 @@ function saveCustomWard()  { return locSaveCustomWard('f'); }
 // ── Add-patient v2 — claim type selector + submit ──────────────────
 var _apClaimType = 'consult';
 
+// ── v5.10 (2026-09-01): DATE OF BIRTH IS A REQUIRED FIELD ─────────────
+// Kathryn 2026-09-01. Three patients reached the sheet with no DOB
+// (Grandjambis / Steeves / Wevers, 28-31 Aug) with unsubmitted claims
+// behind them. Cause: DOB was never in this form's required-field list,
+// so only OCR ever filled it -- every hand-typed patient could save
+// blank. MSP needs the DOB exactly as it needs the PHN.
+//
+// Two acknowledgements, each recorded against the patient it was given for
+// (see _apDobIdent below):
+//   _apDobOverrideFor -- the doctor tapped "Not available at admission".
+//     The save proceeds with a blank DOB so a claim is never lost at the
+//     bedside; the patient then shows HIGH on the data check and
+//     openDischModal() will not let them off the list until it is in.
+//   _apDobAgeAckFor -- the doctor kept a DOB that disagrees with the age
+//     printed on the scanned chart header (judged the printed age wrong).
+// v5.10a: these are keyed to the patient they were granted FOR, not to the
+// form. clearAddForm() is only reached on a SUCCESSFUL save (or the manual
+// Clear button) -- openAdd()/nav() do not call it -- so a plain boolean
+// would survive an abandoned add and silently wave the next patient
+// through. An identity key fails safe: change the PHN or the last name and
+// the gate asks again.
+var _apDobOverrideFor = '';   // "not available at admission", per patient
+var _apDobAgeAckFor   = '';   // "DOB is right, printed age is wrong", per patient
+// The age printed on the scanned chart header, with the identity it was
+// read from. window._lastOCR is NOT used here: it survives clearAddForm and
+// would let the previous patient's printed age raise a false mismatch on
+// the next hand-typed one.
+var _apOcrPrintedAge    = '';
+var _apOcrPrintedAgeFor = '';
+
+// Identity of whoever is currently in the Add Patient form.
+function _apDobIdent() {
+  return String(gv('f-phn') || '').replace(/\D/g, '') + '|' +
+         String(gv('f-last') || '').trim().toLowerCase();
+}
+
+// A scan still belongs to the patient in the form if EITHER half of the
+// identity still matches -- the doctor correcting one OCR'd field (a
+// truncated PHN, a misread name) must not throw the age check away, but
+// two different fields means a different patient.
+function _apOcrStillThisPatient() {
+  if (!_apOcrPrintedAgeFor) return false;
+  var was = _apOcrPrintedAgeFor.split('|'), now = _apDobIdent().split('|');
+  // A scan that yielded neither PHN nor name (the amber "fields empty" bar)
+  // has no identity to compare -- but it is still THIS form's scan until
+  // clearAddForm wipes it, so the printed age is usable rather than thrown
+  // away on the one scan that most needs a cross-check.
+  if (!was[0] && !was[1]) return true;
+  return (!!was[0] && was[0] === now[0]) || (!!was[1] && was[1] === now[1]);
+}
+
+// Normalise a date of birth to a REAL, padded DD/MM/YYYY, or '' if it is
+// not one. Presence is not validity: fmtClaimDate returns anything it does
+// not recognise unchanged, so "5/3/1948" or "unknown" would sail through a
+// blank check and then be refused by Crud.gs (isValidDMY wants two-digit
+// day and month). On the batch path that refusal blocks the PATIENT ROW
+// while still writing the claims -- an orphan claim, worse than the blank
+// DOB this release exists to prevent, and invisible because nothing reads
+// patientBlocked. So the frontend settles it before the payload is built.
+function dobNormDMY(raw) {
+  var t = fmtClaimDate(String(raw == null ? '' : raw).trim());
+  var m = String(t).match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if (!m) return '';
+  var d = parseInt(m[1], 10), mo = parseInt(m[2], 10), y = parseInt(m[3], 10);
+  if (mo < 1 || mo > 12) return '';
+  var leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  var dim  = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mo - 1];
+  if (d < 1 || d > dim) return '';
+  var now = new Date();
+  if (y < 1900 || y > now.getFullYear()) return '';
+  var ms = new Date(y, mo - 1, d).getTime();
+  // isNaN only -- `!ms` would reject a real epoch-zero date.
+  if (isNaN(ms) || ms > now.getTime()) return '';
+  return ('0' + d).slice(-2) + '/' + ('0' + mo).slice(-2) + '/' + y;
+}
+
 function apSelectClaimType(type) {
   _apClaimType = type;
   var clsFor = { consult:'ct-on-consult', 'ccu-admit':'ct-on-ccu', other:'ct-on-consult' };
@@ -13334,6 +13483,48 @@ async function apSubmit(addToList, _skipDupCheck) {
     return;
   }
 
+  // ── v5.10: date of birth ──────────────────────────────────────────
+  // Deliberately AFTER the addMissing block: the doctor is never offered
+  // the "not available" escape while the form is still half-filled, so
+  // the escape can't become the reflex way through a slow form.
+  window._apDobResume = { addToList: !!addToList, skipDup: !!_skipDupCheck };
+  var _apDobIdentNow = _apDobIdent();
+  var _apDobRaw  = gv('f-dob');
+  var _apDobNorm = dobNormDMY(_apDobRaw);
+  if (!String(_apDobRaw || '').trim()) {
+    if (!_apDobCanOverride() || _apDobOverrideFor !== _apDobIdentNow) {
+      _apDobMissingPrompt(); return;
+    }
+  } else if (!_apDobNorm) {
+    // Something IS typed but it is not a real date. A typo, not an absence,
+    // so no override is offered -- it is fixed, not acknowledged.
+    var _apDobBadEl = document.getElementById('f-dob');
+    if (_apDobBadEl) {
+      _apDobBadEl.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)';
+      _apDobBadEl.focus();
+      _apDobBadEl.select && _apDobBadEl.select();
+    }
+    showToast('Date of birth "' + _apDobRaw + '" is not a real date \u2014 use DD Mon YYYY.', 'error');
+    return;
+  } else if (_apDobAgeAckFor !== _apDobIdentNow) {
+    // The age printed on the scanned chart header, checked against what is
+    // in the field RIGHT NOW. handleOCRResult's v5.09 check only validates
+    // the OCR's own transcription; this catches a DOB typed or corrected
+    // by hand afterwards, which is the path that produced the 28-31 Aug
+    // blanks. Most patient stickers print no age -- those skip this.
+    if (_apOcrPrintedAge && _apOcrStillThisPatient()) {
+      var _apAgeChk = ocrDobFromRaw(_apDobNorm, _apOcrPrintedAge);
+      if (!_apAgeChk.ok) { _apDobAgePrompt(_apAgeChk.why); return; }
+    }
+  }
+  // Show back exactly what will be saved, so the doctor's last look at the
+  // field is the normalised value and not their shorthand.
+  if (_apDobNorm) {
+    var _apDobShowEl = document.getElementById('f-dob');
+    if (_apDobShowEl) _apDobShowEl.value = dispDate(_apDobNorm);
+    if (typeof updateApDobAge === 'function') updateApDobAge();
+  }
+
   // v4.46: Guard + overlay BEFORE async dup check — instant feedback,
   // prevents double-tap during the network round-trip.
   _submitGuard = true;
@@ -13394,13 +13585,19 @@ async function apSubmit(addToList, _skipDupCheck) {
   var p = {
     id: 'p' + Date.now(), fac: 'OA040', roundedToday: null,
     last: fmtName(last), first: fmtName(gv('f-first')),
-    phn: phn, dob: fmtClaimDate(gv('f-dob')), sex: gv('f-sex'),
+    phn: phn, dob: _apDobNorm, sex: gv('f-sex'),
     refby:     gv('cb-refby') || gv('oc-refby'),
     refbyName: gv('cb-refby-name') || gv('oc-refby-name'),
     icd: icd,
     createdBy: (st.doc && st.doc.alias) || '',
     createdAt: Date.now()
   };
+
+  // v5.10: mark a blank DOB as a deliberate, acknowledged override rather
+  // than a field that was quietly skipped. NOT a stored column -- Crud.gs
+  // only writes it into the ChangeLog detail, so there is no schema change
+  // and no migration.
+  if (!p.dob && _apDobOverrideFor === _apDobIdentNow) p.dobOverride = true;
 
   // v2.30: Out of Province billing fields (only when ticked).
   if (_oop) {
@@ -13773,11 +13970,122 @@ function validatePatientFieldsLive() {
   validateLastLive();
 }
 
+// ── v5.10 DOB gates (2026-09-01) ──────────────────────────────────────
+// Both prompts reuse the generic merge-modal shell (title + body + its own
+// Cancel button), so index.template.html is untouched by this change.
+
+function _apDobResumeSubmit() {
+  hideModal('merge-modal');
+  var r = window._apDobResume || { addToList: false, skipDup: false };
+  apSubmit(r.addToList, r.skipDup);
+}
+
+// Focus the DOB field and flag it amber, same treatment as any other
+// blank required field.
+function _apDobGoEnter() {
+  hideModal('merge-modal');
+  var el = document.getElementById('f-dob');
+  if (!el) return;
+  el.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)';
+  el.focus();
+  if (el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+}
+
+// No DOB entered. Not a silent pass, and not a dead end either: a doctor at
+// the bedside with an unidentified transfer must still be able to record the
+// claim. They either go back and enter it, or record that it was not
+// available -- which saves blank, leaves the patient HIGH on the data check,
+// and blocks their discharge until it is filled (Kathryn 2026-09-01).
+function _apDobMissingPrompt() {
+  var h =
+    '<div style="font-size:13px;line-height:1.5;color:var(--text2)">' +
+      'MSP will not accept a claim without a date of birth \u2014 it is required exactly as the PHN is.' +
+    '</div>' +
+    // The escape is offered ONLY where the debt can be collected later.
+    // A patient added to the list meets the discharge gate in
+    // 10_location.js and the Meditech hold in 13_meditech.js. A
+    // consult-only patient is created ALREADY discharged, straight to
+    // Recently Discharged, and passes neither -- so an override there is a
+    // blank DOB with nothing behind it but a data-check line nobody is
+    // obliged to read. On that path the DOB is simply required.
+    // (Kathryn 2026-09-01.)
+    (_apDobCanOverride()
+      ? '<div style="font-size:12px;line-height:1.5;color:var(--text2);margin-top:9px">' +
+          'If it genuinely is not available yet you can record that and carry on. The patient will show as ' +
+          '<b>HIGH</b> on the data check and <b>cannot be discharged off the list</b> until the DOB is entered.' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;margin-top:14px">' +
+          '<button class="btn btn-p" style="flex:1;margin:0" onclick="_apDobGoEnter()">Enter DOB</button>' +
+          '<button class="btn btn-s" style="flex:1;margin:0" onclick="_apDobConfirmOverride()">Not available at admission</button>' +
+        '</div>'
+      : '<div style="font-size:12px;line-height:1.5;color:var(--text2);margin-top:9px">' +
+          'This is a <b>consult-only</b> claim \u2014 the patient goes straight to Recently Discharged and never ' +
+          'passes a discharge check, so there is no later point at which a missing DOB would be caught. ' +
+          'It has to be entered now.' +
+        '</div>' +
+        '<div style="font-size:11px;line-height:1.5;color:var(--text3);margin-top:7px">' +
+          'If you truly cannot get it, add the patient to a list instead \u2014 that path allows ' +
+          '\u201CNot available at admission\u201D and holds them until the DOB is in.' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;margin-top:14px">' +
+          '<button class="btn btn-p" style="flex:1;margin:0" onclick="_apDobGoEnter()">Enter DOB</button>' +
+        '</div>');
+  document.getElementById('merge-title').textContent = 'Date of birth missing';
+  document.getElementById('merge-body').innerHTML = h;
+  showModal('merge-modal');
+}
+
+// The escape exists only where something downstream will collect the debt:
+// the discharge gate (openDischModal) and the Meditech census hold, both of
+// which act on patients ON a list. A consult-only add is created already
+// discharged and meets neither.
+function _apDobCanOverride() {
+  return !!((window._apDobResume || {}).addToList);
+}
+
+function _apDobConfirmOverride() {
+  // Defence in depth: the button is not rendered on the consult-only path,
+  // but a stale modal must not be able to grant an override there either.
+  if (!_apDobCanOverride()) { _apDobGoEnter(); return; }
+  _apDobOverrideFor = _apDobIdent();
+  _apDobResumeSubmit();
+}
+
+// The scanned chart header printed an age and it disagrees with the DOB now
+// in the field. One of the two is wrong and the doctor is the only one who
+// can say which, so this asks rather than silently picking a winner.
+function _apDobAgePrompt(why) {
+  var h =
+    '<div style="font-size:13px;line-height:1.5;color:var(--text2)">' + esc(why) + '.</div>' +
+    '<div style="font-size:12px;line-height:1.5;color:var(--text2);margin-top:9px">' +
+      'One of the two is wrong. Check the DOB against the chart before keeping it.' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;margin-top:14px">' +
+      '<button class="btn btn-p" style="flex:1;margin:0" onclick="_apDobGoEnter()">Fix the DOB</button>' +
+      '<button class="btn btn-s" style="flex:1;margin:0" onclick="_apDobKeepAgeMismatch()">DOB is right</button>' +
+    '</div>';
+  document.getElementById('merge-title').textContent = 'DOB does not match the age on the chart';
+  document.getElementById('merge-body').innerHTML = h;
+  showModal('merge-modal');
+}
+
+function _apDobKeepAgeMismatch() {
+  _apDobAgeAckFor = _apDobIdent();
+  _apDobResumeSubmit();
+}
+
 function clearAddForm() {
   // v4.33: Cancel any in-flight OCR background loop and unlock fields.
   _ocrGeneration++;
   _unlockDemoFields();
   window._ocrLocDecode = null;  // drop any stale chart-header decode snapshot
+  // v5.10: fresh patient, fresh DOB gate -- an override must never carry
+  // over from the previous add.
+  _apDobOverrideFor    = '';
+  _apDobAgeAckFor      = '';
+  _apOcrPrintedAge     = '';
+  _apOcrPrintedAgeFor  = '';
+  window._apDobResume  = null;
 
   ['f-last','f-first','f-phn','f-dob'].forEach(function(id) {
     var el = document.getElementById(id);
@@ -14721,6 +15029,10 @@ function handleOCRResult(data, bar) {
   // Persist the full OCR result for debugging:
   //   window._lastOCR — inspect from console: console.log(window._lastOCR._meta)
   window._lastOCR = p;
+  // v5.10: form-scoped copy for the submit-time DOB age check.
+  _apOcrPrintedAge    = String(p.age == null ? '' : p.age).replace(/\D/g, '');
+  _apOcrPrintedAgeFor = String(p.phn || '').replace(/\D/g, '') + '|' +
+                        String(p.last || '').trim().toLowerCase();
 
   // ── v5.09 (2026-08-28): DOB verified in CODE against the printed age ──
   // See ocrDobFromRaw() above for the incident this comes from. When the
@@ -15194,6 +15506,25 @@ function openDischModal(pid) {
   _claimPid = pid;
   var p = getP(pid);
   if (!p) return;
+
+  // ── v5.10 (2026-09-01): no discharge without a date of birth ───────
+  // The other end of the Add Patient "DOB not available at time of
+  // admission" escape. That escape exists so a claim is never lost at the
+  // bedside -- but once a patient is off the list nobody looks at them
+  // again, the DOB is never filled, and the claim fails at MSP weeks
+  // later. So the debt is called in here, at the last moment anyone is
+  // still looking at the patient. Runs BEFORE the gap gate: no point
+  // walking the doctor through unbilled days for a patient whose claims
+  // cannot be submitted at all. (Kathryn 2026-09-01.)
+  // v5.10a: valid, not merely present. A DOB the backend will refuse
+  // (dobNormDMY '' -- e.g. "5/3/1948") is no better than a blank one, and
+  // accepting it here would let the doctor type their way past this gate
+  // while the sheet keeps the blank.
+  if (!(typeof dobNormDMY === 'function' ? dobNormDMY(p.dob) : String(p.dob || '').trim())) {
+    showToast('Date of birth needed before discharge \u2014 MSP will refuse every claim without it', 'error');
+    openPatientEdit(pid, true);
+    return;
+  }
 
   // v4.20 — check for billing gaps first. If any exist, open the patient
   // summary calendar so the doctor can review and correct them before
@@ -18026,7 +18357,23 @@ function confirmMediteachImport() {
   if (!checkDoc()) return;
 
   // ── Discharges first (so re-imports of same names don't re-add them) ──
-  var toDisch = _mitDisch.filter(function(d) { return d._include; });
+  // v5.10 (2026-09-01): the census sweep is a THIRD way off the list, and
+  // the silent one -- nobody is looking at the patient when it fires. A
+  // patient still carrying the "DOB not available at admission" escape is
+  // held back here exactly as openDischModal holds them, so a bulk action
+  // can never write off the DOB debt. They stay on the list and are named
+  // in the toast; discharge them by hand once the DOB is in.
+  var _mitDobHeld = [];
+  var toDisch = _mitDisch.filter(function(d) {
+    if (!d._include) return false;
+    var _mp = st.patients.find(function(pp) { return pp.id === d.pid; });
+    if (!_mp) return true;
+    var _mpOk = (typeof dobNormDMY === 'function')
+                  ? !!dobNormDMY(_mp.dob) : !!String(_mp.dob || '').trim();
+    if (_mpOk) return true;
+    _mitDobHeld.push(String(_mp.last || 'unnamed'));
+    return false;
+  });
   toDisch.forEach(function(d) {
     var p = st.patients.find(function(pp) { return pp.id === d.pid; });
     if (!p) return;
@@ -18092,7 +18439,17 @@ function confirmMediteachImport() {
   if (toTransition.length) msg.push(toTransition.length + ' MRP changed');
   if (toDisch.length)      msg.push(toDisch.length      + ' discharged');
   if (newOnMeditech)       msg.push(newOnMeditech + ' new on Meditech NOT imported — add via Add Patient');
-  showToast(msg.length ? msg.join(', ') : 'Nothing to change');
+  // v5.10: a discharge the doctor explicitly ticked and did NOT get is the
+  // most important thing on this screen, so it gets its own red 3.5s toast
+  // rather than being appended to the end of a 1.6s single-line summary
+  // that overflows the phone. The held patients stay visible on the list.
+  if (_mitDobHeld.length) {
+    showToast(_mitDobHeld.length + ' NOT discharged \u2014 no DOB (' +
+              _mitDobHeld.join(', ') + '). Enter it, then discharge by hand.' +
+              (msg.length ? ' \u00B7 ' + msg.join(', ') : ''), 'error');
+  } else {
+    showToast(msg.length ? msg.join(', ') : 'Nothing to change');
+  }
 
   _mitPats  = [];
   _mitDisch = [];
