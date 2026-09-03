@@ -298,6 +298,45 @@ input[type=file] { display:none; }
 .mu-btn { width:28px; height:28px; border-radius:50%; border:none; font-size:18px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; font-family:inherit; background:rgba(0,0,0,.12); color:inherit; }
 .mod-count { font-size:15px; font-weight:700; min-width:18px; text-align:center; }
 
+/* v4.93 CALL-OUT DECISION CARD (Kathryn, 2026-08-22) — replaces the passive
+   CCFPP box when a same-doctor call-out consult started within 60 min of
+   the prior one's end (Scenario B: proximity, a real choice) or genuinely
+   overlaps it (Scenario C: a time conflict resolved in-form instead of a
+   native confirm()). See 07_consult.js updateConsultUI/submitConsultClaims. */
+.cod { margin-top:9px; border-radius:var(--rsm); border:1.5px solid #d4a84a; background:#fff8e8; padding:10px 11px; }
+.cod-hdr { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+.cod-title { font-size:10px; font-weight:700; color:var(--amber-t); text-transform:uppercase; letter-spacing:.4px; }
+.cod-req { font-size:9px; font-weight:700; color:#fff; background:var(--amber); padding:2px 7px; border-radius:var(--rpill); letter-spacing:.3px; }
+.cod-context { font-size:11px; color:var(--text2); margin-bottom:9px; line-height:1.45; }
+.cod-context b { color:var(--text); }
+.cod-pill { display:flex; align-items:flex-start; gap:9px; width:100%; text-align:left; padding:10px 11px; border:1.5px solid var(--border2); border-radius:var(--r); background:var(--surface); font-family:inherit; cursor:pointer; margin-bottom:7px; color:var(--text); }
+.cod-pill:last-child { margin-bottom:0; }
+.cod-pill-radio { width:17px; height:17px; border-radius:50%; border:2px solid var(--border2); flex-shrink:0; margin-top:1px; position:relative; }
+.cod-pill.sel .cod-pill-radio { border-color:var(--blue); }
+.cod-pill.sel .cod-pill-radio::after { content:''; position:absolute; inset:2.5px; border-radius:50%; background:var(--blue); }
+.cod-pill-body { flex:1; min-width:0; }
+.cod-pill-lbl { font-size:13px; font-weight:700; color:var(--text); }
+.cod-pill-sub { font-size:10.5px; color:var(--text2); margin-top:2px; line-height:1.4; }
+.cod-pill.sel { border-color:var(--blue); background:var(--blue-bg); }
+.cod-pill.sel .cod-pill-lbl { color:var(--blue-t); }
+.cod-pill-adj { margin-bottom:7px; }
+.cod-pill-adj:last-child { margin-bottom:0; }
+.cod-pill-adj .cod-pill { margin-bottom:0; }
+.cod-adjust { border:1.5px solid var(--blue); border-top:none; border-radius:0 0 var(--r) var(--r); margin-top:-8px; padding:10px 11px 11px; background:var(--blue-bg); }
+.cod-adjust-note { font-size:10.5px; color:var(--blue-t); font-weight:600; margin-bottom:9px; line-height:1.4; }
+.cod-apply-btn { width:100%; padding:9px; border:none; border-radius:var(--rsm); background:var(--blue); color:#fff; font-size:12px; font-weight:700; cursor:pointer; font-family:inherit; }
+.cod-hint { display:flex; align-items:flex-start; gap:9px; width:100%; text-align:left; padding:10px 11px; border:1.5px dashed var(--border2); border-radius:var(--r); background:none; font-family:inherit; cursor:pointer; color:inherit; }
+.cod-hint-icn { font-size:15px; color:var(--text3); flex-shrink:0; line-height:1.3; }
+.cod-hint-lbl { font-size:12.5px; font-weight:700; color:var(--text2); }
+.c-field-flash { animation: cFieldFlash 1s ease; }
+@keyframes cFieldFlash { 0%,100% { box-shadow:none; } 30% { box-shadow:0 0 0 3px var(--blue-bg); } }
+.c-ccfpp-linked { border-radius:var(--rsm); border:1px solid var(--blue-t); background:var(--blue-bg); padding:9px 11px; margin-top:9px; }
+.c-ccfpp-linked-lbl { font-size:10px; font-weight:700; color:var(--blue-t); text-transform:uppercase; letter-spacing:.4px; margin-bottom:3px; }
+.c-ccfpp-linked-val { font-size:12.5px; color:var(--blue-t); line-height:1.45; }
+.c-ccfpp-linked-val b { font-weight:800; }
+.c-harrison-note { font-size:10.5px; color:var(--text3); margin-top:7px; line-height:1.4; }
+.cod-btn-disabled { background:var(--border2) !important; color:var(--text3) !important; cursor:not-allowed; }
+
 /* CLAIM PREVIEW */
 .cp { background:var(--surface2); border-radius:var(--rsm); padding:9px 12px; margin-bottom:10px; }
 .cp-title { font-size:10px; font-weight:700; color:var(--text3); text-transform:uppercase; letter-spacing:.5px; margin-bottom:7px; }
@@ -952,7 +991,7 @@ input[type=file] { display:none; }
   </div>
 
   <!-- Submit buttons — primary path first (add to list), exception below -->
-  <button class="btn btn-p" onclick="apSubmit(true)" style="margin-top:8px">Submit claim and add patient to list</button>
+  <button class="btn btn-p" id="ap-submit-list" onclick="apSubmit(true)" style="margin-top:8px">Submit claim and add patient to list</button>
 
   <!-- Billing location pills (I/P/Q) — applies to all claim types on Add Patient -->
   <div style="display:flex;gap:6px;margin-top:10px;align-items:center">
@@ -963,7 +1002,7 @@ input[type=file] { display:none; }
   </div>
   <input type="hidden" id="f-billing-loc" value="I">
 
-  <button class="btn btn-s" onclick="apSubmit(false)" style="margin-top:6px">Submit claim only &mdash; not following</button>
+  <button class="btn btn-s" id="ap-submit-only" onclick="apSubmit(false)" style="margin-top:6px">Submit claim only &mdash; not following</button>
 
   <button class="btn btn-s" onclick="clearAddForm()" style="margin-top:14px">Clear</button>
 </div>
