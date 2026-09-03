@@ -17,8 +17,9 @@
 // byte-identical to the original.
 // ═══════════════════════════════════════════════════════════════════
 
-var fs   = require('fs');
-var path = require('path');
+var fs     = require('fs');
+var path   = require('path');
+var crypto = require('crypto');
 
 var ROOT     = __dirname;
 var TEMPLATE = path.join(ROOT, 'src', 'index.template.html');
@@ -64,28 +65,98 @@ function build() {
     throw new Error('build.js: no KGHBUILD markers found in template');
   }
 
-  fs.writeFileSync(OUTPUT, html);
   console.log('Built index.html from ' + used.length + ' module(s):');
   used.forEach(function (n) { console.log('  - src/js/' + n); });
 
-  // ── Emit version.json ────────────────────────────────────────────
-  // The app fetches this tiny file when it returns to the foreground to
-  // detect a newer deploy and prompt a refresh. Single source of truth:
-  // APP_VERSION is read straight out of the just-built index.html, so the
-  // file can never drift from the running app.
+  // ── Content hash — the thing that makes updates automatic ────────
+  // 2026-09-02. Until now version.json carried only APP_VERSION, so a
+  // deploy that nobody remembered to hand-bump was INVISIBLE to every
+  // device: the client compared version strings, saw no change, and never
+  // prompted. That is a safety fix silently not reaching the doctors, and
+  // it is not a discipline problem to solve with a checklist — the build
+  // knows perfectly well whether the code changed.
+  //
+  // So: hash the built HTML. Any change to any src file changes the hash,
+  // and the client (14_init.js, v5.11+) arms a mandatory update on a hash
+  // mismatch. APP_VERSION becomes a human-readable label, not the
+  // mechanism. Hashing BEFORE the stamp is injected keeps it stable and
+  // independent of its own value.
+  var buildHash = crypto.createHash('sha256').update(html).digest('hex').slice(0, 12);
+
   var verMatch   = html.match(/var\s+APP_VERSION\s*=\s*'([^']+)'/);
   var buildMatch = html.match(/var\s+BUILD_ID\s*=\s*'([^']+)'/);
   if (!verMatch) {
     throw new Error('build.js: APP_VERSION not found in built index.html — cannot write version.json');
   }
+
+  // Inject the stamp so the running app knows which build it IS. Placed
+  // last so it is defined before any deferred code reads it, and guarded
+  // in the client with typeof for builds that predate this.
+  var stampTag = '<script>var BUILD_HASH = ' + JSON.stringify(buildHash) + ';</script>';
+  if (html.indexOf('</body>') !== -1) {
+    html = html.replace('</body>', stampTag + '</body>');
+  } else {
+    html += stampTag;
+  }
+  fs.writeFileSync(OUTPUT, html);
+
+  // ── Emit version.json ────────────────────────────────────────────
+  // The app fetches this tiny file to detect a newer deploy. Single source
+  // of truth: read straight out of the just-built index.html, so the file
+  // can never drift from the running app.
   var versionPayload = {
     version: verMatch[1],
-    buildId: buildMatch ? buildMatch[1] : verMatch[1]
+    buildId: buildMatch ? buildMatch[1] : verMatch[1],
+    hash:    buildHash
   };
   var VERSION_OUT = path.join(ROOT, 'version.json');
+  // Read the committed version.json BEFORE overwriting it. The CI checkout
+  // carries it, so this works on every run — an earlier draft used a scratch
+  // .prev file, which CI never commits and so never sees. Compare first,
+  // write second.
+  var prevPayload = null;
+  try { prevPayload = JSON.parse(fs.readFileSync(VERSION_OUT, 'utf8')); } catch (e) {}
   fs.writeFileSync(VERSION_OUT, JSON.stringify(versionPayload) + '\n');
   console.log('Wrote version.json → ' + versionPayload.version +
-              ' (buildId ' + versionPayload.buildId + ')');
+              ' (buildId ' + versionPayload.buildId + ', hash ' + buildHash + ')');
+
+  // ── Stamp the service worker's cache key ─────────────────────────
+  // sw.js is hand-maintained and its CACHE_VERSION had not been bumped
+  // since v3.26 while the app reached v5.10 — against the instruction in
+  // its own header. index.html is network-first so this did not cause the
+  // stale-version incident, but ocr_offline.js is in the cache-first SHELL
+  // and was therefore frozen on every device at whatever it first cached.
+  // Derive it from the hash so it can never be forgotten again.
+  var SW = path.join(ROOT, 'sw.js');
+  if (fs.existsSync(SW)) {
+    var sw = fs.readFileSync(SW, 'utf8');
+    var swRe = /(var\s+CACHE_VERSION\s*=\s*')([^']*)(')/;
+    if (swRe.test(sw)) {
+      var before = sw.match(swRe)[2];
+      var after  = verMatch[1] + '-' + buildHash;
+      if (before !== after) {
+        fs.writeFileSync(SW, sw.replace(swRe, '$1' + after + '$3'));
+        console.log('Stamped sw.js CACHE_VERSION → ' + after + ' (was ' + before + ')');
+      }
+    } else {
+      console.warn('build.js: CACHE_VERSION not found in sw.js — cache key NOT stamped');
+    }
+  } else {
+    console.warn('build.js: sw.js not found — cache key NOT stamped');
+  }
+
+  // ── Advisory: content changed but the label did not ──────────────
+  // Not fatal — the hash makes the update work regardless. This only keeps
+  // the footer version meaningful to a human reading a build log. Requires
+  // prev.hash, so the first build after this change stays quiet instead of
+  // warning about a version.json that predates hashing.
+  if (prevPayload && prevPayload.hash &&
+      prevPayload.hash !== buildHash &&
+      prevPayload.version === versionPayload.version) {
+    console.warn('build.js: NOTE — code changed but APP_VERSION is still ' +
+                 versionPayload.version + '. Devices WILL update (hash differs); ' +
+                 'consider bumping APP_VERSION so the footer means something.');
+  }
 }
 
 build();
