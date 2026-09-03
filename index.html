@@ -16854,7 +16854,7 @@ function _qcGenerate() {
     '},"image/png");}';
 
   html += '<\/script>';
-  html += '</body></html>';
+  html += '<script>var BUILD_HASH = "55fa82039353";</script></body></html>';
 
   var blob = new Blob([html], { type: 'text/html' });
   var url = URL.createObjectURL(blob);
