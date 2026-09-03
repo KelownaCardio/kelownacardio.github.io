@@ -2734,8 +2734,8 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // No cache-format change to EXISTING keys; BUILD_ID not bumped (no
 // re-login) — st.role is simply null/undefined on devices that predate it,
 // which the isResident() helper treats as role='md' (unchanged behaviour).
-var APP_VERSION = 'v5.10';
-var APP_BUILT   = '2026-08-28';
+var APP_VERSION = 'v5.11';
+var APP_BUILT   = '2026-09-02';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -3612,6 +3612,13 @@ if (!window._pendingPush) window._pendingPush = {};
 // from _pendingPush before the originals returned. Two concurrent saveClaim
 // requests for the same ID raced past the server lock.
 if (!window._pushInFlight) window._pushInFlight = {};
+// v5.11: a coarse "a write went out recently" stamp for the mandatory-update
+// reload gate in 14_init.js. _pushInFlight/_pendingPush only track
+// saveClaim/savePatient/saveGapNote; deleteClaim and the rest are
+// fire-and-forget, and aborting one of those mid-flight silently re-bills a
+// claim the doctor just un-billed. This is set for EVERY action, so the
+// reload simply waits out a quiet period instead.
+if (!window._lastPushAt) window._lastPushAt = 0;
 
 async function push(action, body) {
   if (!SHEETS_URL) return false;
@@ -3630,6 +3637,11 @@ async function push(action, body) {
     console.warn('push blocked — empty claim record', body);
     return false;
   }
+  // v5.11: stamp EVERY action that gets past the structural guards above, so
+  // the mandatory-update reload gate can wait out a quiet period rather than
+  // aborting an untracked write (deleteClaim, savePatients, the log* calls).
+  window._lastPushAt = Date.now();
+
   // v4.25: In-flight guard — if a fetch for this exact ID is already running,
   // skip silently. The pending retry will catch it on the next sync cycle
   // once the in-flight request completes.
@@ -19866,8 +19878,27 @@ document.addEventListener('visibilitychange', function() {
   // a missing file or offline state never shows a false prompt.
   if (document.visibilityState === 'visible' && st.loaded) {
     checkForNewVersion();
+    // v5.11: coming back to the app is the safest moment there is -- nothing
+    // is typed and no modal is up -- so take it if an update is armed.
+    _tryMandatoryReload();
   }
 });
+
+// v5.11: visibilitychange is the ONLY thing that used to trigger a version
+// check, and a doctor on rounds keeps the app in the foreground for hours --
+// so it never fired, and the device sat on old code all day. (AKhosla ran
+// v5.08 for two days straight; on 2026-09-02 three doctors were on three
+// different versions at once.) Poll as well, cheaply: version.json is ~40
+// bytes and this is once every 5 minutes.
+setInterval(function() {
+  if (st.loaded) checkForNewVersion();
+}, 5 * 60 * 1000);
+
+// Retry the reload on a short timer, since "safe" is a moment that arrives
+// on its own between patients rather than something the doctor triggers.
+setInterval(function() {
+  if (_updateRequiredVersion) _tryMandatoryReload();
+}, 15 * 1000);
 
 // v4.15: version check + update banner. Fetches version.json (written by
 // build.js on every deploy) with a cache-buster so the device never reads a
@@ -19901,33 +19932,175 @@ function checkForNewVersion() {
     .then(function(data) {
       _versionCheckInFlight = false;
       if (!data || !data.version) return;            // missing/malformed → silent
-      if (_verCmp(data.version, APP_VERSION) <= 0) return; // same or OLDER → no prompt (fixes downgrade-nag)
-      showUpdateBanner(data.version);                // only strictly-newer reaches here
+      // Never arm on an OLDER deployed version. This is the 2026-06-27
+      // downgrade-nag guard and it stays in front of BOTH paths below: a
+      // device running ahead of the deployed build (a hand-built rig) must
+      // not reload itself backwards, and with a hash compare it would
+      // otherwise mismatch forever and loop.
+      if (_verCmp(data.version, APP_VERSION) < 0) return;
+      // v5.11: prefer the CONTENT HASH (build.js, 2026-09-02). Comparing
+      // version strings meant a deploy nobody remembered to hand-bump was
+      // invisible to every device — the fix shipped and no one ran it. The
+      // hash changes whenever any src file changes, so the update no longer
+      // depends on anyone remembering anything.
+      if (data.hash && typeof BUILD_HASH !== 'undefined' && BUILD_HASH) {
+        if (data.hash === BUILD_HASH) return;        // byte-identical build
+        _armMandatoryUpdate(data.version, data.hash);
+        return;
+      }
+      // Fallback for a version.json or an index.html that predates the hash
+      // (either side of the rollout): strictly-newer only, as before.
+      if (_verCmp(data.version, APP_VERSION) <= 0) return;
+      _armMandatoryUpdate(data.version, null);
     })
     .catch(function() { _versionCheckInFlight = false; }); // offline/error → silent
 }
 
-function showUpdateBanner(newVersion) {
-  if (document.getElementById('kgh-update-banner')) return; // already showing
-  var b = document.createElement('div');
-  b.id = 'kgh-update-banner';
-  b.setAttribute('role', 'button');
+// ═══════════════════════════════════════════════════════════════════
+// v5.11 (2026-09-02): THE UPDATE IS MANDATORY, NOT ELECTIVE
+// ───────────────────────────────────────────────────────────────────
+// The old banner had a ✕ and only appeared on visibilitychange. A doctor
+// with the app open on rounds never triggered it, and one tap on the ✕
+// deferred it indefinitely — so a deploy did not mean the doctors were
+// running it. On 2026-09-02 the DOB-mandatory fix went live at 07:50 and
+// an hour later three doctors were on three different builds (v5.08,
+// v5.09, v5.10). A safety fix nobody is running is not a fix.
+//
+// So: no dismiss, and the device reloads itself. The ONLY thing that is
+// negotiable is WHEN — never mid-entry. Reloading at the wrong moment is
+// worse than running old code for another two minutes, because
+// window._pendingPush is IN MEMORY ONLY (03_state.js) — a reload with a
+// queued claim in it loses that claim silently, which is the exact class
+// of bug the forced-sign-in work spent weeks chasing. Hence _safeToReload.
+var _updateRequiredVersion = null;
+var _updateArmedAt         = 0;
+
+// The resting state between patients: on a read-only list, nothing open,
+// nothing unsent. It arrives on its own within a minute or two of normal use.
+//
+// Written as a WHITELIST of panes rather than a hunt for typed content. The
+// first draft of this checked individual field ids and was wrong twice over:
+// `cb-start`/`cb-end` are PREFILLED by buildConsultForm (now, now+50), so the
+// test was true forever and nothing would ever have reloaded; and every cb-*
+// id exists in both the Add Patient pane and the claim screen, so
+// getElementById returns whichever comes first in the document — the exact
+// mistake 07_consult.js warns about in its header ("use cEl/cVal for EVERY
+// cb-* element, never document.getElementById"). Panes are hidden with
+// display:none and never destroyed, so their contents linger all session.
+//
+// p1 (Add Patient), p-claim and p-loc all hold unsaved working state; p0 and
+// p-discharged hold none. This mirrors _autoRefreshSync's own editing-screen
+// guard above — and a reload is far more destructive than the sync that
+// guard protects, so it must be at least as careful.
+function _safeToReload() {
+  if (!st.loaded) return false;
+  var pane = document.querySelector('.pane.on');
+  var pid  = pane ? pane.id : '';
+  if (pid !== 'p0' && pid !== 'p-discharged') return false;
+  // Any modal up = a decision in progress (discharge, merge, DOB, call-out).
+  // crop-overlay is NOT .overlay and holds a captured photo that exists
+  // nowhere else yet, so it is named explicitly.
+  if (document.querySelector('.overlay.on, .crop-overlay.on')) return false;
+  // Unsent or in-flight writes. _pendingPush does not survive a reload.
+  if (window._pendingPush  && Object.keys(window._pendingPush).length)  return false;
+  if (window._pushInFlight && Object.keys(window._pushInFlight).length) return false;
+  // push() only tracks saveClaim/savePatient/saveGapNote in those two maps;
+  // deleteClaim and friends are fire-and-forget, and aborting one silently
+  // re-bills a claim the doctor just un-billed. _lastPushAt (03_state.js)
+  // covers EVERY action — 45s clears the 20s timeout plus its retry.
+  if (window._lastPushAt && (Date.now() - window._lastPushAt) < 45000) return false;
+  if (typeof _submitGuard !== 'undefined' && _submitGuard) return false;
+  if (typeof _ocrInFlight !== 'undefined' && _ocrInFlight) return false;
+  if (typeof _cropPending !== 'undefined' && _cropPending) return false;
+  var ae = document.activeElement;
+  if (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName || '')) return false;
+  return true;
+}
+
+// Every device arms within the same 5-minute poll window, so without jitter
+// a deploy sends the whole service reloading at once into an Apps Script
+// backend that serializes on a script lock. Spread the first reload over two
+// minutes. (Only the FIRST — later retries are already spread by whenever
+// each doctor happens to become idle.)
+var _updateJitterMs = 0;
+
+// _updateKey is what the one-attempt guard keys on: the hash when we have
+// one, so two same-labelled deploys in a single session are each attempted,
+// and the version string otherwise.
+var _updateKey = '';
+function _armMandatoryUpdate(newVersion, newHash) {
+  var key = newHash || newVersion;
+  if (_updateKey === key) return;                      // already armed
+  _updateKey = key;
+  _updateRequiredVersion = newVersion;
+  _updateArmedAt  = Date.now();
+  _updateJitterMs = Math.floor(Math.random() * 120000);
+  _renderUpdateBanner();
+  _tryMandatoryReload();
+}
+
+// If a reload does not actually change the running version — CDN edge skew
+// between version.json (cache-busted) and index.html, or a half-online device
+// served the cached shell — re-arming would reload forever. One attempt per
+// version per tab; after that the banner stays up and the doctor is told to
+// close and reopen. sessionStorage, so a genuinely new tab starts clean.
+function _updateAlreadyTried(v) {
+  try { return sessionStorage.getItem('kgh:updTried') === v; } catch (e) { return false; }
+}
+function _markUpdateTried(v) {
+  try { sessionStorage.setItem('kgh:updTried', v); } catch (e) {}
+}
+
+function _tryMandatoryReload() {
+  if (!_updateRequiredVersion) return;
+  _renderUpdateBanner();                 // refresh the wording as time passes
+  if (_updateAlreadyTried(_updateKey)) return;
+  if ((Date.now() - _updateArmedAt) < _updateJitterMs) return;
+  if (!_safeToReload()) return;
+  _markUpdateTried(_updateKey);
+  location.reload(true);                 // fresh index.html → BUILD_ID purge fires
+}
+
+var _updateBannerState = '';
+function _renderUpdateBanner() {
+  if (!_updateRequiredVersion) return;
+  // Waiting a while means the doctor is genuinely mid-something. Say so
+  // rather than reloading over their work.
+  var waiting = (Date.now() - _updateArmedAt) > 10 * 60 * 1000;
+  var stuck   = _updateAlreadyTried(_updateKey);
+  var state   = _updateRequiredVersion + '|' + waiting + '|' + stuck;
+  var b = document.getElementById('kgh-update-banner');
+  if (b && state === _updateBannerState) return;   // no repaint, no VoiceOver re-announce
+  _updateBannerState = state;
+  if (!b) {
+    b = document.createElement('div');
+    b.id = 'kgh-update-banner';
+    b.setAttribute('role', 'button');
+    document.body.appendChild(b);
+    // NO dismiss control, by design. Tapping updates now, if it is safe.
+    b.onclick = function() {
+      if (_safeToReload()) { _markUpdateTried(_updateKey); location.reload(true); return; }
+      showToast('Go back to the rounds list and close anything open — then it will update', 'error');
+    };
+  }
+  // BOTTOM of the screen, not the top: the header carries the sync dot, the
+  // doctor chip (sign in / switch doctor) and "Sync & refresh", and a fixed
+  // top banner sat on all three AND swallowed their taps — the viewport meta
+  // has no viewport-fit=cover, so env(safe-area-inset-top) is 0 on iOS. The
+  // nav bar is also at the top (sticky under the header), so the bottom is
+  // clear. z-index 90 keeps it UNDER modals (100) and the crop overlay (200).
   b.style.cssText =
-    'position:fixed;left:50%;top:calc(env(safe-area-inset-top, 0px) + 12px);transform:translateX(-50%);' +
-    'background:var(--blue-t,#1a5fa8);color:#fff;padding:11px 18px;border-radius:22px;' +
-    'font-size:13px;font-weight:700;z-index:1000;cursor:pointer;white-space:nowrap;' +
-    'box-shadow:0 6px 18px rgba(0,0,0,.32);font-family:inherit;display:flex;align-items:center;gap:10px';
-  b.innerHTML =
-    '<span>New version (' + esc(newVersion) + ') \u2014 tap to update</span>' +
-    '<span id="kgh-update-dismiss" style="opacity:.7;font-weight:400;padding:0 4px">\u2715</span>';
-  b.onclick = function(e) {
-    if (e.target && e.target.id === 'kgh-update-dismiss') {
-      b.remove();          // dismiss only — they'll be prompted again on next focus
-      return;
-    }
-    location.reload(true); // full reload → fresh index.html → BUILD_ID purge fires
-  };
-  document.body.appendChild(b);
+    'position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom, 0px) + 14px);' +
+    'transform:translateX(-50%);' +
+    'background:' + ((waiting || stuck) ? 'var(--red-t,#b32020)' : 'var(--blue-t,#1a5fa8)') + ';color:#fff;' +
+    'padding:11px 18px;border-radius:22px;font-size:13px;font-weight:700;z-index:90;cursor:pointer;' +
+    'max-width:calc(100vw - 24px);text-align:center;line-height:1.35;' +
+    'box-shadow:0 6px 18px rgba(0,0,0,.32);font-family:inherit';
+  b.textContent = stuck
+    ? 'Update ' + _updateRequiredVersion + ' did not take \u2014 close the app fully and reopen it'
+    : (waiting
+        ? 'Update ' + _updateRequiredVersion + ' waiting \u2014 go back to the rounds list to let it finish'
+        : 'Updating to ' + _updateRequiredVersion + ' \u2014 saves first, then reloads');
 }
 
 // iOS Safari BFCache: when the page is restored from cache (back/forward, sometimes refresh),
