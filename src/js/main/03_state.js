@@ -510,8 +510,8 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // No cache-format change to EXISTING keys; BUILD_ID not bumped (no
 // re-login) — st.role is simply null/undefined on devices that predate it,
 // which the isResident() helper treats as role='md' (unchanged behaviour).
-var APP_VERSION = 'v5.10';
-var APP_BUILT   = '2026-08-28';
+var APP_VERSION = 'v5.11';
+var APP_BUILT   = '2026-09-02';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -1388,6 +1388,13 @@ if (!window._pendingPush) window._pendingPush = {};
 // from _pendingPush before the originals returned. Two concurrent saveClaim
 // requests for the same ID raced past the server lock.
 if (!window._pushInFlight) window._pushInFlight = {};
+// v5.11: a coarse "a write went out recently" stamp for the mandatory-update
+// reload gate in 14_init.js. _pushInFlight/_pendingPush only track
+// saveClaim/savePatient/saveGapNote; deleteClaim and the rest are
+// fire-and-forget, and aborting one of those mid-flight silently re-bills a
+// claim the doctor just un-billed. This is set for EVERY action, so the
+// reload simply waits out a quiet period instead.
+if (!window._lastPushAt) window._lastPushAt = 0;
 
 async function push(action, body) {
   if (!SHEETS_URL) return false;
@@ -1406,6 +1413,11 @@ async function push(action, body) {
     console.warn('push blocked — empty claim record', body);
     return false;
   }
+  // v5.11: stamp EVERY action that gets past the structural guards above, so
+  // the mandatory-update reload gate can wait out a quiet period rather than
+  // aborting an untracked write (deleteClaim, savePatients, the log* calls).
+  window._lastPushAt = Date.now();
+
   // v4.25: In-flight guard — if a fetch for this exact ID is already running,
   // skip silently. The pending retry will catch it on the next sync cycle
   // once the in-flight request completes.
