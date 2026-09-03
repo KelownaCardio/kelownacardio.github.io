@@ -997,13 +997,23 @@ function applyConsultTimes_(consult, newStart, newEnd) {
   if (!consult) return false;
   consult.startTime = newStart;
   consult.endTime   = newEnd;
-  var changed = rebuildConsultModifiers_(consult);
+  // v5.12: the CONSULT save gates every other claim write this edit causes
+  // — the rebuilt 12xx rows, the rows rebuild deletes, and the CCFPP note
+  // updates the recompute pushes on neighbouring consults. beginClaimGate()
+  // makes push() capture all of them; commitClaimGate() sends the consult
+  // first and flushes the rest only if it is accepted. Crud v3.21 refuses
+  // a consult edited on another device since this copy loaded; before the
+  // gate, its call-out rows still landed beside the other device's — a
+  // double call-out at a mismatched tier. See 03_state.js beginClaimGate.
+  var g = beginClaimGate();
+  try {
+    // rebuild returns the rows it updated IN PLACE (it never pushes those
+    // itself); the gate captures these pushes with everything else.
+    rebuildConsultModifiers_(consult).forEach(function(mc){ push('saveClaim', mc); });
+    ccfppRecomputeAround_(consult.alias, consult.date);
+  } finally { endClaimGate(); }
   sv('claims', st.claims);
-  if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL) {
-    push('saveClaim', consult);
-    changed.forEach(function(mc){ push('saveClaim', mc); });
-  }
-  ccfppRecomputeAround_(consult.alias, consult.date);
+  if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL) commitClaimGate(g, consult);
   return true;
 }
 

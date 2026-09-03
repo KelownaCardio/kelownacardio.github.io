@@ -1,3 +1,23 @@
+// ═══════════════════════════════════════════════════════════════════
+// v5.12 (2026-09-02): PHYSICIAN REVIEW MODE — plumbing that lets
+// 15_review.js run on top of the normal boot.
+//   • window.REVIEW_TOKEN — from ?review=<token>. Truthy = review mode.
+//   • window._kghReady    — a promise resolved AFTER the first
+//     syncFromSheets (or its failure). init() returns no promise and
+//     st.loaded is set BEFORE sync, so nothing else can be awaited.
+//   • window._reviewEditing — the 30s/5-min sync guard honours it, so a
+//     doctor retyping times on the review page is never clobbered.
+//   • In review mode the doctor-picker (_forceSignIn) is NOT forced:
+//     15_review.js sets st.doc IN MEMORY from the token's doctor and never
+//     writes kgh5:doc, so a shared hospital PC's own sign-in is untouched.
+// ═══════════════════════════════════════════════════════════════════
+window.REVIEW_TOKEN = (function(){
+  try { return new URLSearchParams(location.search).get('review') || ''; } catch (e) { return ''; }
+})();
+function isReviewMode() { return !!window.REVIEW_TOKEN; }
+window._reviewEditing = false;
+window._kghReady = new Promise(function(resolve){ window._kghReadyResolve = resolve; });
+
 // 14_init.js — App init, navigation, fee codes, doctor modal,
 //              and all utility/helper functions
 // ═══════════════════════════════════════════════════════
@@ -109,11 +129,13 @@ async function submitAppPassword() {
     st.doc = { alias: 'Resident', num: '', name: 'Resident' };
     sv('doc', st.doc);
     applyResidentChrome();
-  } else if (!st.doc) {
+  } else if (!st.doc && !isReviewMode()) {
     // v4.94: authorising the device is HALF the login. The password says "this
     // device may see patient data"; it does not say who is billing. Chain the
     // doctor picker straight onto it so "log in on a random PC" is one flow that
     // always ends with a name selected. (Kathryn 2026-08-11.)
+    // v5.12: not in review mode — the token names the doctor, and the
+    // picker would write kgh5:doc for whoever uses this PC next.
     _forceSignIn();
   }
   var res = _appPwResolve; _appPwResolve = null;
@@ -194,7 +216,8 @@ async function init() {
 
   // v4.94: no signed-in doctor on this device → force the picker now, before
   // anything can be entered. Nothing on Add Patient may be billed without it.
-  if (!st.doc) _forceSignIn();
+  // v5.12: not in review mode — the token names the doctor (15_review.js).
+  if (!st.doc && !isReviewMode()) _forceSignIn();
 
   // (test patients removed for live deployment)
     // Restore any custom wards saved from previous sessions
@@ -228,8 +251,13 @@ async function init() {
     try {
       await syncFromSheets();
       render(); // re-render after claims load so green tints are correct
+      // v5.12: syncFromSheets RETURNS (does not throw) on unauthorized /
+      // transport failure, so "ok" must mean a sync actually landed.
+      if (window._kghReadyResolve) window._kghReadyResolve({ ok: !!window._lastSyncOkAt,
+        error: window._lastSyncOkAt ? '' : (window._lastSyncError || 'first sync did not complete') });
     } catch(e) {
       setSyncState('error');
+      if (window._kghReadyResolve) window._kghReadyResolve({ ok:false, error:String(e && e.message || e) });  // v5.12
     }
 
     // v4.39: Auto-refresh every 5 min so other doctors' changes (including
@@ -246,7 +274,8 @@ async function init() {
       var dischOpen = document.getElementById('disch-modal') &&
                       document.getElementById('disch-modal').classList.contains('on');
       var ocrBusy   = typeof _ocrInFlight !== 'undefined' && _ocrInFlight;
-      if (claimOpen || addOpen || dischOpen || ocrBusy) {
+      var reviewBusy = !!window._reviewEditing;                                 // v5.12
+      if (claimOpen || addOpen || dischOpen || ocrBusy || reviewBusy) {
         console.log('[' + tag + '] skipped — editing in progress');
         return;
       }
@@ -393,6 +422,12 @@ var ALL_PANES = ['p0','p1','p-discharged','p-claim','p-loc'];
 function showPane(id) {
   ALL_PANES.forEach(function(pid) { document.getElementById(pid).classList.remove('on'); });
   document.getElementById(id).classList.add('on');
+  // v5.12: a stale-claim refusal that arrived under an open editor deferred
+  // its resync (03_state.js). Leaving the editor is the moment to run it.
+  if (id === 'p0' && window._staleResyncPending) {
+    window._staleResyncPending = false;
+    try { syncFromSheets().then(function(){ try { render(); } catch (e) {} }); } catch (e) {}
+  }
   // Sweep any visible toasts so they don't hang over the new pane
   clearTimeout(_toastTimer);
   var stragglers = document.querySelectorAll('.kgh-toast');
@@ -990,7 +1025,14 @@ function _safeToReload() {
   if (!st.loaded) return false;
   var pane = document.querySelector('.pane.on');
   var pid  = pane ? pane.id : '';
-  if (pid !== 'p0' && pid !== 'p-discharged') return false;
+  // v5.12: the Physician Review pane counts as resting only when no app
+  // screen is open from it and no Notes-to-KB text is sitting unsent —
+  // both live in memory and would vanish with the reload.
+  if (pid === 'p-review') {
+    if (window._reviewEditing) return false;
+    if (typeof RV !== 'undefined' && RV && RV.notes &&
+        Object.keys(RV.notes).some(function(k){ return String(RV.notes[k] || '').trim(); })) return false;
+  } else if (pid !== 'p0' && pid !== 'p-discharged') return false;
   // Any modal up = a decision in progress (discharge, merge, DOB, call-out).
   // crop-overlay is NOT .overlay and holds a captured photo that exists
   // nowhere else yet, so it is named explicitly.

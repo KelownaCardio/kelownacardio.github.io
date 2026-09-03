@@ -1899,6 +1899,8 @@ function saveClaimEdit(btn) {
   var _wasConsult   = (_oldFee === '33010' || _oldFee === '33012');
   var _movedKey     = (_ccfppOldDate !== c.date || _ccfppOldAlias !== c.alias);
   var _cascadeChanged = [];
+  var _g = beginClaimGate();   // v5.12: consult save gates the cascade — see 03_state.js
+  try {                        // ← closed in the finally below; nothing between may leave the gate open
   if (_wasConsult || _isConsultNow) {
     // Bring the consult's 12xx rows along on a date/alias move FIRST, so the
     // rebuild finds them under the new key instead of leaving strays behind.
@@ -1940,14 +1942,20 @@ function saveClaimEdit(btn) {
   }
 
   sv('claims', st.claims);
-  if (SHEETS_URL) {
-    push('saveClaim', c);
-    _cascadeChanged.forEach(function(mc){ push('saveClaim', mc); });
-  }
   // v4.49: refresh CCFPP for the edited claim's window (and old date/alias if moved).
+  // v5.12: still inside the gate, so its pushes are captured too.
   ccfppRecomputeAround_(c.alias, c.date);
   if (_ccfppOldDate && (_ccfppOldDate !== c.date || _ccfppOldAlias !== c.alias))
     ccfppRecomputeAround_(_ccfppOldAlias, _ccfppOldDate);
+  } finally { endClaimGate(); }
+  if (SHEETS_URL) {
+    // The cascade rows (and everything the recompute touched) were captured
+    // by the gate; commitClaimGate sends `c` first and flushes them only if
+    // it is accepted. _cascadeChanged is pushed through the gate so nothing
+    // in it is missed if it was not otherwise touched.
+    _cascadeChanged.forEach(function(mc){ _g.ops.push({ action:'saveClaim', body: mc }); });
+    commitClaimGate(_g, c);
+  }
   hideClaimEditModal();
 
   // Reopen summary to show updated claim

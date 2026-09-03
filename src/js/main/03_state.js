@@ -510,7 +510,7 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // No cache-format change to EXISTING keys; BUILD_ID not bumped (no
 // re-login) — st.role is simply null/undefined on devices that predate it,
 // which the isResident() helper treats as role='md' (unchanged behaviour).
-var APP_VERSION = 'v5.11';
+var APP_VERSION = 'v5.12';
 var APP_BUILT   = '2026-09-02';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
@@ -843,6 +843,7 @@ function syncWithGuardIfStale() {
 
 var _syncInFlight = false;
 async function syncFromSheets() {
+
   if (!SHEETS_URL) return;
   // v4.46: Dedup guard — visibilitychange + pageshow both fire on iOS resume,
   // causing two simultaneous getAll calls (8s instead of 4s). Drop the second.
@@ -1144,9 +1145,29 @@ async function syncFromSheets() {
 
       var mergedClaims = d.claims.slice();
 
-      // Clear pending entries that now appear in Sheets (push succeeded)
+      // Clear pending entries that now appear in Sheets (push succeeded) —
+      // v5.12: unless the entry was queued AFTER this sync began, in which
+      // case it is a newer edit still waiting its turn: re-send it instead.
       d.claims.forEach(function(c) {
-        if (window._pendingPush && window._pendingPush[c.id]) delete window._pendingPush[c.id];
+        var pe = window._pendingPush && window._pendingPush[c.id];
+        if (!pe) return;
+        // `queued` = a newer body parked behind an in-flight save (push's
+        // in-flight guard). It has never been sent. Send it now; the
+        // entry it replaces is what the sheet is showing.
+        if (pe.queued && pe.action) {
+          delete window._pendingPush[c.id];
+          // The remote row is the OLDER edit; show the queued one while it
+          // goes, or the UI reverts for a sync cycle and a further local
+          // edit could carry old values under a fresh stamp.
+          // Do NOT copy the remote savedAt onto the queued body: if the
+          // in-flight save was refused as stale, the queued one must be
+          // refused too, not smuggled past arbitration with a fresh stamp.
+          var _mi = mergedClaims.indexOf(c);
+          if (_mi >= 0 && pe.action === 'saveClaim' && pe.body) mergedClaims[_mi] = pe.body;
+          if (SHEETS_URL) push(pe.action, pe.body);
+          return;
+        }
+        delete window._pendingPush[c.id];
       });
 
       // Keep local claims that are either in-flight (< 2 min) OR pending unconfirmed push.
@@ -1396,7 +1417,83 @@ if (!window._pushInFlight) window._pushInFlight = {};
 // reload simply waits out a quiet period instead.
 if (!window._lastPushAt) window._lastPushAt = 0;
 
+// ═══════════════════════════════════════════════════════════════════
+// v5.12 — CLAIM-WRITE GATE
+// A consult edit fans out into many claim writes (its 12xx rows rebuilt,
+// some deleted, CCFPP notes on neighbours). Crud v3.21 can refuse the
+// consult itself as stale. If the fan-out has already gone, the sheet
+// ends up holding ANOTHER device's consult under THIS device's call-out
+// rows — a double call-out at a mismatched tier.
+//   beginClaimGate()  — push() starts CAPTURING saveClaim/deleteClaim
+//   endClaimGate()    — stop capturing (always in a finally)
+//   commitClaimGate() — send the consult; accepted → flush the captured
+//                       ops (deduped, in order); refused (stale) → drop
+//                       every row created inside the gate from st.claims so
+//                       the sync's 2-minute grace re-push cannot resurrect
+//                       it, and let the resync restore the truth.
+//   A TRANSIENT failure (timeout / lock) is treated the same way, with a
+//   "please redo" toast: the app's own retry of an EXISTING row is not
+//   reliable (the next sync clears the pending entry), so flushing the
+//   call-out rows on a maybe-saved consult is the double-bill again.
+// ═══════════════════════════════════════════════════════════════════
+function beginClaimGate() {
+  var g = { ops: [], beforeIds: {}, t0: Date.now() };
+  (st.claims || []).forEach(function(c){ if (c && c.id) g.beforeIds[String(c.id)] = 1; });
+  window._claimGate = g;
+  return g;
+}
+function endClaimGate() { var g = window._claimGate; window._claimGate = null; return g; }
+async function commitClaimGate(g, consult) {
+  if (!g || !consult) return true;
+  var ok = await push('saveClaim', consult);          // gate is closed — a real send
+  if (ok) {
+    // Keep the LAST write per row, in order. A row that is DELETED inside
+    // the gate must not also be saved — the delete would land first and
+    // the save would bounce off its tombstone with a spurious "changed on
+    // another device". A deleted row is deleted.
+    var deleted = {};
+    g.ops.forEach(function(op){ if (op.action === 'deleteClaim') deleted[String(op.body && op.body.id)] = 1; });
+    var seen = {}, ops = [];
+    for (var i = g.ops.length - 1; i >= 0; i--) {
+      var op = g.ops[i], id = String(op.body && op.body.id), k = op.action + '|' + id;
+      if (seen[k]) continue; seen[k] = 1;
+      if (op.action === 'saveClaim' && (deleted[id] || id === String(consult.id))) continue;
+      ops.unshift(op);
+    }
+    ops.forEach(function(op){ push(op.action, op.body); });
+    return true;
+  }
+  // Not accepted — stale (another device edited it) OR a transient failure
+  // (timeout / lock). Either way NOTHING else is sent: the app's own retry
+  // of an existing row is not reliable (the next sync clears it), so
+  // flushing the call-out rows here would leave them on the sheet under
+  // the OLD consult. Rows born inside the gate never reached the sheet and
+  // must not survive locally either, or the merge's grace re-push would
+  // create them. The doctor is told plainly and re-does the edit.
+  var transient = !!(window._pendingPush && window._pendingPush[String(consult.id)]);
+  if (transient) {
+    delete window._pendingPush[String(consult.id)];
+    try { showToast('Not saved — billing did not answer in time. Please redo that change.', 'error'); } catch (e) {}
+  }
+  st.claims = (st.claims || []).filter(function(c){ return g.beforeIds[String(c && c.id)]; });
+  try { sv('claims', st.claims); } catch (e) {}
+  if (transient) setTimeout(function(){ try { syncFromSheets().then(function(){ try { render(); } catch (e) {} }); } catch (e) {} }, 400);
+  return false;
+}
+
 async function push(action, body) {
+  // v5.12: inside a claim gate, capture instead of sending (see above).
+  // Safety valve: a gate is synchronous and lives milliseconds. One left
+  // open by an exception would silently swallow every claim save for the
+  // rest of the session — so a gate older than 10s is discarded.
+  if (window._claimGate && (Date.now() - (window._claimGate.t0 || 0)) > 10000) {
+    console.warn('claim gate left open — discarded');
+    window._claimGate = null;
+  }
+  if (window._claimGate && (action === 'saveClaim' || action === 'deleteClaim') && body) {
+    window._claimGate.ops.push({ action: action, body: body });
+    return true;
+  }
   if (!SHEETS_URL) return false;
   // Guard: never push a patient or claim with no id — prevents blank row creation
   if ((action === 'savePatient' || action === 'saveClaim') && (!body || !body.id)) {
@@ -1435,7 +1532,7 @@ async function push(action, body) {
       // back in ~1s. Queue the NEWER body before returning, otherwise a
       // doctor who corrects a fee mid-retry gets a success toast for a
       // value that was never sent anywhere.
-      window._pendingPush[_pKey] = { action: action, body: body, ts: Date.now() };
+      window._pendingPush[_pKey] = { action: action, body: body, ts: Date.now(), queued: true };  // v5.12: tagged — see syncFromSheets
       return true;  // true = don't trigger error handling
     }
     window._pushInFlight[_pKey] = true;
@@ -1479,9 +1576,14 @@ async function push(action, body) {
       var _pCtrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
       var _pTid  = setTimeout(function() { if (_pCtrl) _pCtrl.abort(); }, 20000);
       try {
+        // v5.12: opt this build into Crud v3.21 claim arbitration. The flag
+        // rides on the wire only — never on the st.claims object.
+        var _pBody = (action === 'saveClaim')
+          ? JSON.stringify(Object.assign({}, body, { arbitrate: true }))
+          : JSON.stringify(body);
         _pr = await fetch(_pUrl, _pCtrl
-          ? { method: 'POST', body: JSON.stringify(body), signal: _pCtrl.signal }
-          : { method: 'POST', body: JSON.stringify(body) });
+          ? { method: 'POST', body: _pBody, signal: _pCtrl.signal }
+          : { method: 'POST', body: _pBody });
       } catch (_pex) { _pe = _pex; }
       clearTimeout(_pTid);
 
@@ -1548,6 +1650,25 @@ async function push(action, body) {
     // work" (lock timeout) from "retry can never work" (validation reject).
     if (data && (data.ok === false || (data.error && data.ok !== true))) {
       window._lastPushError = data.error || 'Server rejected the save';
+      // v5.12: Crud v3.21 write arbitration. The sheet holds a NEWER copy
+      // of this claim (edited on another device). Never retry blindly —
+      // drop the pending entry and pull the newer row so the next save
+      // starts from it. The toast is the only thing the doctor sees.
+      if (data.stale) {
+        if (_pKey && !_pendingIsNewer()) delete window._pendingPush[_pKey];
+        try { showToast('Changed on another device — refreshing this claim', 'warn'); } catch (e) {}
+        // Resync so the next save starts from the newer row — but never
+        // underneath an open editor (same guards as _autoRefreshSync); in
+        // that case leave a marker and let the editor's close trigger it.
+        setTimeout(function(){
+          var _ed = function(id){ var el = document.getElementById(id); return el && el.classList.contains('on'); };
+          var busy = _ed('p-claim') || _ed('p1') || _ed('disch-modal') || !!window._reviewEditing;
+          if (busy) { window._staleResyncPending = true; return; }
+          try { syncFromSheets().then(function(){ try { render(); } catch (e) {} }); } catch (e) {}
+        }, 400);
+        setSyncState('synced');
+        return false;
+      }
       // Permanent validation rejection → never succeeds on retry → drop it
       // from the pending-retry queue. Transient (thrown exception / bare
       // {error} from an old Router — assume transient) → KEEP it pending so
@@ -1565,6 +1686,16 @@ async function push(action, body) {
       return false;
     }
     window._lastPushError = null;
+    // v5.12: Crud v3.21 stamps `savedAt` on every claim write and returns
+    // it. Keep the local copy in step, or this device's NEXT save of the
+    // same claim would be refused as stale against its own write.
+    if (action === 'saveClaim' && data && data.savedAt && body && body.id) {
+      try {
+        body.savedAt = data.savedAt;
+        var _lc = st.claims.find(function(x){ return String(x.id) === String(body.id); });
+        if (_lc) _lc.savedAt = data.savedAt;
+      } catch (e) {}
+    }
     // v4.89: a gap-note save is confirmed by the server's locked write+flush
     // ({ok:true}) — clear its pending entry now rather than waiting for the
     // note to appear in a sync response.
