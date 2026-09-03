@@ -92,9 +92,17 @@ function build() {
   // Inject the stamp so the running app knows which build it IS. Placed
   // last so it is defined before any deferred code reads it, and guarded
   // in the client with typeof for builds that predate this.
+  // MUST be lastIndexOf + splice, never String.replace(). replace() with a
+  // string pattern hits the FIRST match, and the app's own JavaScript builds
+  // an HTML document as a string (the QuickChart export) which contains a
+  // literal </body>. Injecting there put a <script> tag inside a JS string
+  // literal, which closed the real script early and dumped the rest of the
+  // app onto the page as visible text — the whole app dead, 2026-09-02.
+  // The real closing tag is the LAST one in the document.
   var stampTag = '<script>var BUILD_HASH = ' + JSON.stringify(buildHash) + ';</script>';
-  if (html.indexOf('</body>') !== -1) {
-    html = html.replace('</body>', stampTag + '</body>');
+  var _bodyIdx = html.lastIndexOf('</body>');
+  if (_bodyIdx !== -1) {
+    html = html.slice(0, _bodyIdx) + stampTag + html.slice(_bodyIdx);
   } else {
     html += stampTag;
   }
