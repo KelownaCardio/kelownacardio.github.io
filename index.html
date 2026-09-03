@@ -16854,7 +16854,7 @@ function _qcGenerate() {
     '},"image/png");}';
 
   html += '<\/script>';
-  html += '<script>var BUILD_HASH = "55fa82039353";</script></body></html>';
+  html += '</body></html>';
 
   var blob = new Blob([html], { type: 'text/html' });
   var url = URL.createObjectURL(blob);
@@ -20372,5 +20372,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-</body>
+<script>var BUILD_HASH = "55fa82039353";</script></body>
 </html>
