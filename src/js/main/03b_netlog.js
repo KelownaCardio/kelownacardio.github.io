@@ -34,6 +34,25 @@
 //                             outage; correlate ts with the exec log.
 //   online=false            → the device really had no signal.
 // ═══════════════════════════════════════════════════════════════════
+//
+// v5.13 (2026-09-04): HTTP 404 IS A TRANSPORT ARTIFACT — RETRY IT.
+// Full-export review, Aug 18 → Sep 4: 387 rows with httpStatus 404,
+// recovered=FALSE on EVERY one, across 9 doctors / 68 sessions / every app
+// version, online=true throughout. Median 28.6 s elapsed before the 404
+// landed (a routing 404 returns in milliseconds). Cross-checked against
+// the server-side Perf Log (every request >4 s is recorded): only 13 of
+// 371 had any matching server entry — baseline coincidence 2.8 %. And the
+// Apps Script executions dashboard for the same 7 days shows exactly ONE
+// non-Completed run. So these requests never executed as failures inside
+// the script: the 404 comes from the leg in front of it (the /exec →
+// googleusercontent redirect, or Google's front door under the AM-rush
+// concurrency). It is the same shape as 'transport' — and until now the
+// "4xx can never succeed on retry" rule below made every one a hard stop
+// with a red banner. Now: http_404 → one retry, after a LONGER pause than
+// the 1.2 s transport retry (see netlogRetryDelay) so a burst of phones
+// hitting the same wall doesn't all re-hit it in the same second. Push
+// replays remain gated on NETLOG_IDEMPOTENT exactly as before.
+// ═══════════════════════════════════════════════════════════════════
 
 var NETLOG_KEY      = 'kgh5:netlog';
 var NETLOG_MAX      = 40;      // ring buffer — oldest dropped past this
@@ -106,6 +125,7 @@ function netlogExplain(code) {
   if (code === 'timeout')   return 'Server took too long to answer — tap Retry';
   if (code === 'transport') return 'Connection dropped before the server replied — tap Retry';
   if (code === 'bad_json')  return 'Server sent an unreadable reply — tap Retry';
+  if (code === 'http_404') return 'Connection to the server dropped (404) — tap Retry';   // v5.13
   if (code && code.indexOf('http_') === 0) return 'Server error ' + code.slice(5) + ' — tap Retry';
   if (code === 'rejected')  return 'Server rejected the request — tap Report';
   return "Can't reach the server — tap Retry";
@@ -340,10 +360,23 @@ function _netlogSleep(ms) {
   return new Promise(function (res) { setTimeout(res, ms + Math.floor(Math.random() * 300)); });
 }
 
+// v5.13: per-code pause before the retry. A 404 from the front door is
+// most often seen in multi-doctor clusters (the AM-rush minutes), so a
+// 1.2 s retry would have every phone re-hit the same wall together. Wait
+// longer, with wider jitter, so the retries spread out.
+var NETLOG_RETRY_DELAY_404_MS = 4000;
+function netlogRetryDelay(code) {
+  if (code === 'http_404') return NETLOG_RETRY_DELAY_404_MS + Math.floor(Math.random() * 2000);
+  return NETLOG_RETRY_DELAY_MS;
+}
+
 // Codes where a second try has a real chance. A 4xx or a server-side
-// rejection will fail identically, so those go straight to the banner.
+// rejection will fail identically, so those go straight to the banner —
+// with one exception: http_404 (v5.13, see header). Those never reach the
+// script, arrive after a ~30 s hang, and behave like a dropped leg.
 function netlogWorthRetry(code) {
   if (code === 'transport' || code === 'timeout' || code === 'bad_json') return true;
+  if (code === 'http_404') return true;                     // v5.13 — front-door/redirect 404
   if (code && code.indexOf('http_5') === 0) return true;   // 500/502/503/504
   // NOT http_429. A 429 means the Google-side quota is already spent;
   // retrying 1.2s later cannot succeed and doubles the load from every

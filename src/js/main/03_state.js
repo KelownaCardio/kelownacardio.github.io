@@ -510,8 +510,14 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // No cache-format change to EXISTING keys; BUILD_ID not bumped (no
 // re-login) — st.role is simply null/undefined on devices that predate it,
 // which the isResident() helper treats as role='md' (unchanged behaviour).
-var APP_VERSION = 'v5.12';
-var APP_BUILT   = '2026-09-02';
+// v5.13 (2026-09-04): HTTP 404 retry. 387 unrecovered 404s in the Client
+// Errors sheet (Aug 18 → Sep 4) were front-door/redirect-leg drops that never
+// reached the script (exec log clean, Perf Log unmatched) but were classed as
+// permanent 4xx. netlogWorthRetry now retries http_404 once after a longer,
+// jittered pause (netlogRetryDelay). No cache-format change; BUILD_ID not
+// bumped. Files: 03b_netlog.js, 03_state.js (this file).
+var APP_VERSION = 'v5.13';
+var APP_BUILT   = '2026-09-04';
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -936,7 +942,8 @@ async function syncFromSheets() {
 
       // Give up early when a second attempt provably cannot help (4xx,
       // offline) — no point making the doctor wait another 20s for the
-      // same answer.
+      // same answer. v5.13: http_404 is the exception — it is a front-door
+      // /redirect-leg drop, not a script answer (see 03b_netlog.js header).
       if (_try >= 2 || !netlogWorthRetry(_lastCode)) {
         window._lastSyncError = _err
           ? (_err.name === 'AbortError'
@@ -949,7 +956,7 @@ async function syncFromSheets() {
         setSyncState('error', { code: _lastCode });
         return;
       }
-      await _netlogSleep(NETLOG_RETRY_DELAY_MS);
+      await _netlogSleep(netlogRetryDelay(_lastCode));   // v5.13: longer pause after a 404
     }
 
     window._lastSyncResponse.checkpoint = 'fetch-returned';
@@ -1617,7 +1624,7 @@ async function push(action, body) {
         setSyncState('error', { code: _pCode });
         return false;
       }
-      await _netlogSleep(NETLOG_RETRY_DELAY_MS);
+      await _netlogSleep(netlogRetryDelay(_pCode));      // v5.13: longer pause after a 404
     }
     // v4.25: clear in-flight flag on completion (success or server rejection)
     if (_pKey) delete window._pushInFlight[_pKey];
