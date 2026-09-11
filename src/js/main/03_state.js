@@ -568,8 +568,10 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   checkpoints are suffixed @relay / @exec. Requires Router v3.22
 //   (relayEntry) on an API-executable deployment + the kgh-relay Worker.
 //   Files: 01_config.js, 03_state.js, 03b_netlog.js.
-var APP_VERSION = 'v5.20';
-var APP_BUILT   = '2026-09-10';
+// v5.21 (2026-09-11) — relay pilot widened to AKhosla (Android, on-service
+//   this week) alongside KBrown. 01_config.js RELAY_PILOT only. No other change.
+var APP_VERSION = 'v5.21';
+var APP_BUILT   = '2026-09-11';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
