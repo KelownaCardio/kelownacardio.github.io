@@ -21,7 +21,7 @@ var DOOR_FAILBACK_MS = 10 * 60 * 1000;
 // stays on /exec exactly as before. Flip RELAY_ALL to true (v5.21) to move
 // every device over; set RELAY_URL = '' to retire the relay entirely.
 var RELAY_ALL   = false;
-var RELAY_PILOT = ['KBrown', 'AKhosla'];   // v5.21 (2026-09-11): + AKhosla (Android, on service) as the second pilot
+var RELAY_PILOT = ['KBrown', 'AKhosla', 'DPatton'];   // v5.21: + AKhosla (Android, on service); v5.23 (2026-09-11): + DPatton — the weekend's two working doctors are both on the relay
 var _doorPref = '';
 try { _doorPref = localStorage.getItem('kgh5:door') || ''; } catch (e) {}
 // The signed-in doctor is not known until loadLocal() runs, so the app starts

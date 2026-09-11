@@ -574,7 +574,9 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   Client Errors errMsg. The relay answers 502 with {"error":"relay: <why>"}
 //   (Google API error / timeout / script error); AKhosla's 07:12 + 07:28
 //   double-502s showed only "HTTP 502". Diagnostic only.
-var APP_VERSION = 'v5.22';
+// v5.23 (2026-09-11) — relay pilot += DPatton for the weekend (with AKhosla,
+//   the only two doctors working). 01_config.js RELAY_PILOT only.
+var APP_VERSION = 'v5.23';
 var APP_BUILT   = '2026-09-11';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
