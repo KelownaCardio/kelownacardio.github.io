@@ -570,7 +570,11 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   Files: 01_config.js, 03_state.js, 03b_netlog.js.
 // v5.21 (2026-09-11) — relay pilot widened to AKhosla (Android, on-service
 //   this week) alongside KBrown. 01_config.js RELAY_PILOT only. No other change.
-var APP_VERSION = 'v5.21';
+// v5.22 (2026-09-11) — a non-OK reply's body (first 200 chars) is kept in the
+//   Client Errors errMsg. The relay answers 502 with {"error":"relay: <why>"}
+//   (Google API error / timeout / script error); AKhosla's 07:12 + 07:28
+//   double-502s showed only "HTTP 502". Diagnostic only.
+var APP_VERSION = 'v5.22';
 var APP_BUILT   = '2026-09-11';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
@@ -1159,6 +1163,10 @@ async function syncFromSheets(opts) {
         if (_resp && _resp.ok) {
           window._lastSyncResponse.checkpoint = 'parsing-json';
           _parsed = await _resp.json();
+        } else if (_resp) {
+          // v5.22: the relay answers 5xx with a JSON reason ("relay: …") —
+          // keep it so the Client Errors row says WHY, not just "HTTP 502".
+          try { _resp._bodyNote = String(await _resp.text() || '').slice(0, 200); } catch (eB) {}
         }
       } catch (fetchErr) {
         _err  = fetchErr;
@@ -1189,7 +1197,7 @@ async function syncFromSheets(opts) {
         code: _lastCode,
         errName: _err ? String(_err.name || '') : '',
         errMsg:  _err ? String(_err.message || _err)
-                      : ('HTTP ' + _resp.status + ' ' + (_resp.statusText || '')),
+                      : ('HTTP ' + _resp.status + ' ' + (_resp.statusText || '') + (_resp._bodyNote ? ' ' + _resp._bodyNote : '')),
         httpStatus: _resp ? _resp.status : '',
         attempt: _try, recovered: false, durationMs: Date.now() - _t0
       });
@@ -1862,11 +1870,13 @@ async function push(action, body, wire) {
       }
 
       _pCode = netlogClassify(_pe, _pr);
+      var _pNote = '';
+      if (_pr && !_pe) { try { _pNote = String(await _pr.text() || '').slice(0, 200); } catch (eB2) {} }   // v5.22: relay reason
       netlogRecord('push', {
         action: action, checkpoint: _pe ? 'post-failed' : 'http-error', code: _pCode,
         errName: _pe ? String(_pe.name || '') : '',
         errMsg:  _pe ? String(_pe.message || _pe)
-                     : ('HTTP ' + _pr.status + ' ' + (_pr.statusText || '')),
+                     : ('HTTP ' + _pr.status + ' ' + (_pr.statusText || '') + (_pNote ? ' ' + _pNote : '')),
         httpStatus: _pr ? _pr.status : '',
         attempt: _pt, recovered: false, durationMs: Date.now() - _pt0
       });
