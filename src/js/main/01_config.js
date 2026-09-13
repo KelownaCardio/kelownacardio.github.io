@@ -20,7 +20,7 @@ var DOOR_FAILBACK_MS = 10 * 60 * 1000;
 // PILOT (v5.20): only these signed-in aliases use the relay; everyone else
 // stays on /exec exactly as before. Flip RELAY_ALL to true (v5.21) to move
 // every device over; set RELAY_URL = '' to retire the relay entirely.
-var RELAY_ALL   = false;
+var RELAY_ALL   = true;    // v5.24 (2026-09-13): every device on the relay; RELAY_PILOT kept only as documentation
 var RELAY_PILOT = ['KBrown', 'AKhosla', 'DPatton'];   // v5.21: + AKhosla (Android, on service); v5.23 (2026-09-11): + DPatton — the weekend's two working doctors are both on the relay
 var _doorPref = '';
 try { _doorPref = localStorage.getItem('kgh5:door') || ''; } catch (e) {}

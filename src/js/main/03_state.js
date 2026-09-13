@@ -576,8 +576,12 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   double-502s showed only "HTTP 502". Diagnostic only.
 // v5.23 (2026-09-11) — relay pilot += DPatton for the weekend (with AKhosla,
 //   the only two doctors working). 01_config.js RELAY_PILOT only.
-var APP_VERSION = 'v5.23';
-var APP_BUILT   = '2026-09-11';
+// v5.24 (2026-09-13) — RELAY_ALL = true: every signed-in device uses the
+//   Cloudflare relay after a 2-day pilot (KBrown, AKhosla, DPatton; 0 relay
+//   final failures). /exec remains the automatic 10-min fallback.
+//   01_config.js RELAY_ALL only.
+var APP_VERSION = 'v5.24';
+var APP_BUILT   = '2026-09-13';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
