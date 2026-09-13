@@ -1243,7 +1243,7 @@ var DOOR_FAILBACK_MS = 10 * 60 * 1000;
 // PILOT (v5.20): only these signed-in aliases use the relay; everyone else
 // stays on /exec exactly as before. Flip RELAY_ALL to true (v5.21) to move
 // every device over; set RELAY_URL = '' to retire the relay entirely.
-var RELAY_ALL   = false;
+var RELAY_ALL   = true;    // v5.24 (2026-09-13): every device on the relay; RELAY_PILOT kept only as documentation
 var RELAY_PILOT = ['KBrown', 'AKhosla', 'DPatton'];   // v5.21: + AKhosla (Android, on service); v5.23 (2026-09-11): + DPatton — the weekend's two working doctors are both on the relay
 var _doorPref = '';
 try { _doorPref = localStorage.getItem('kgh5:door') || ''; } catch (e) {}
@@ -2875,8 +2875,12 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   double-502s showed only "HTTP 502". Diagnostic only.
 // v5.23 (2026-09-11) — relay pilot += DPatton for the weekend (with AKhosla,
 //   the only two doctors working). 01_config.js RELAY_PILOT only.
-var APP_VERSION = 'v5.23';
-var APP_BUILT   = '2026-09-11';
+// v5.24 (2026-09-13) — RELAY_ALL = true: every signed-in device uses the
+//   Cloudflare relay after a 2-day pilot (KBrown, AKhosla, DPatton; 0 relay
+//   final failures). /exec remains the automatic 10-min fallback.
+//   01_config.js RELAY_ALL only.
+var APP_VERSION = 'v5.24';
+var APP_BUILT   = '2026-09-13';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
@@ -21985,5 +21989,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "fb212911cc69";</script></body>
+<script>var BUILD_HASH = "b7a0faf583eb";</script></body>
 </html>
