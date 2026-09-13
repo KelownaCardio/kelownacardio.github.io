@@ -8,7 +8,7 @@
 //
 // Convention: keep this in sync with the main app's APP_VERSION.
 
-var CACHE_VERSION = 'v5.24-b7a0faf583eb';
+var CACHE_VERSION = 'v5.25-58831b812f68';
 var CACHE         = 'kgh-' + CACHE_VERSION;
 
 var SHELL = [
