@@ -1038,6 +1038,91 @@ function _markUpdateTried(v) {
   try { sessionStorage.setItem('kgh:updTried', v); } catch (e) {}
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// v5.25 (2026-09-13): STALE-CLIENT LOCKOUT
+// ───────────────────────────────────────────────────────────────────
+// Router v3.23 refuses every request from a build below its floor. That
+// floor is v5.11 — the first build that can force its own update — so a
+// device that hits this is one that has been open, untouched and unable
+// to update itself for weeks. The live example: a shared Windows tab on
+// v5.08 that logged 413 errors over 15 days from 2 sessions, and which
+// predates DOB-mandatory (v5.10) and so could still write a patient with
+// no DOB for Crud to silently drop.
+//
+// Why a full block and not a quiet toast: the doctor must be TOLD, and
+// told what to do. A red sync banner reads as "wifi" — they keep billing,
+// and the writes go nowhere. This takes the screen, cannot be dismissed,
+// and spells out the fix. It is deliberately plain HTML with inline
+// styles and no dependency on the app's CSS, because the build showing it
+// is by definition an old one whose stylesheet we cannot rely on.
+//
+// Idempotent: repeated 403-equivalents from sync AND push both land here.
+var _staleLockoutShown = false;
+function _staleClientLockout(data) {
+  if (_staleLockoutShown) return;
+  _staleLockoutShown = true;
+  var msg = (data && data.error) ? String(data.error) : 'This app is out of date. Close it completely and reopen it.';
+  var ver = (data && data.clientVersion) ? String(data.clientVersion) : (typeof APP_VERSION !== 'undefined' ? APP_VERSION : '?');
+
+  // Stop talking to the backend. Nothing this build sends will be accepted,
+  // and a blocked poll every 60s is pure noise in the Client Errors tab.
+  // The polls are anonymous setIntervals with no stored handles, so this is
+  // a flag that syncFromSheets() and push() check on entry (03_state.js)
+  // rather than a clearInterval. netlogFlush is deliberately NOT stopped —
+  // logClientErrors is exempt from the server gate precisely so a blocked
+  // device still reports itself into the Client Errors tab.
+  window._staleLocked = true;
+
+  var wrap = document.createElement('div');
+  wrap.id = 'stale-lockout';
+  wrap.setAttribute('style',
+    'position:fixed;inset:0;z-index:2147483647;background:#7f1d1d;color:#fff;' +
+    'font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;' +
+    'padding:24px;overflow:auto;-webkit-overflow-scrolling:touch;');
+  var body = document.createElement('div');
+  body.setAttribute('style', 'max-width:520px;margin:0 auto;');
+  var h = document.createElement('div');
+  h.setAttribute('style', 'font-size:20px;font-weight:800;margin-bottom:12px;');
+  h.textContent = 'Update required — billing is blocked on this device';
+  body.appendChild(h);
+  // textContent + white-space:pre-line keeps the server's numbered steps as
+  // written and cannot inject markup.
+  var pEl = document.createElement('div');
+  pEl.setAttribute('style', 'white-space:pre-line;margin-bottom:20px;');
+  pEl.textContent = msg;
+  body.appendChild(pEl);
+  var btn = document.createElement('button');
+  btn.setAttribute('style',
+    'width:100%;padding:16px;font-size:17px;font-weight:700;border:0;border-radius:10px;' +
+    'background:#fff;color:#7f1d1d;cursor:pointer;');
+  btn.textContent = 'Try to update now';
+  btn.onclick = function () {
+    btn.disabled = true;
+    btn.textContent = 'Updating…';
+    // Best effort: clear the service-worker caches first, so the reload
+    // cannot be served the same stale shell that got us here. sw.js is
+    // network-first for HTML, but ocr_offline.js and friends are cache-first
+    // and a wedged CACHE_VERSION is one way a device gets stuck this far back.
+    var done = function () { try { location.reload(true); } catch (e) { location.href = location.pathname; } };
+    try {
+      if (window.caches && caches.keys) {
+        caches.keys().then(function (ks) {
+          return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+        }).then(done, done);
+        setTimeout(done, 4000);   // never hang on a wedged cache API
+      } else { done(); }
+    } catch (e) { done(); }
+  };
+  body.appendChild(btn);
+  var foot = document.createElement('div');
+  foot.setAttribute('style', 'margin-top:16px;font-size:12px;opacity:.8;');
+  foot.textContent = 'This device is running ' + ver +
+    '. If the button does not help, close every tab or window of the app and open it again from your home-screen icon.';
+  body.appendChild(foot);
+  wrap.appendChild(body);
+  try { document.body.appendChild(wrap); } catch (e) { alert(msg); }
+}
+
 function _tryMandatoryReload() {
   if (!_updateRequiredVersion) return;
   _renderUpdateBanner();                 // refresh the wording as time passes

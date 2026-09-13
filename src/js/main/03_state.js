@@ -580,7 +580,22 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   Cloudflare relay after a 2-day pilot (KBrown, AKhosla, DPatton; 0 relay
 //   final failures). /exec remains the automatic 10-min fallback.
 //   01_config.js RELAY_ALL only.
-var APP_VERSION = 'v5.24';
+// v5.25 (2026-09-13) — STALE-CLIENT STAMP + LEGACY-ALIAS SELF-HEAL.
+//   (a) Every request to the backend now carries `av=<APP_VERSION>` so the
+//       server can refuse a build too old to update itself (Router v3.23).
+//       The stamp is applied by ONE scoped fetch wrapper below rather than by
+//       editing all 13 call sites across 9 files — this codebase's scars are
+//       almost all whole-file-paste regressions, so one file beats nine.
+//   (b) A `staleClient` answer raises a full-screen, non-dismissible block
+//       with recovery instructions (14_init.js _staleClientLockout).
+//   (c) A login stored under a RETIRED short alias ('AK' rather than
+//       'AKhosla') is migrated through ALIAS_MAP at load. st.doc lives in
+//       localStorage and has never been re-validated since the 2026-07-27
+//       standardization, so a device that signed in before then has been
+//       writing under the old name ever since — splitting that doctor's
+//       tally and tripping DataCheck's UNKNOWN_ALIAS. ALIAS_MAP has sat in
+//       01_config.js unreferenced since v4.85 waiting for exactly this.
+var APP_VERSION = 'v5.25';
 var APP_BUILT   = '2026-09-13';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
@@ -614,6 +629,46 @@ function _doorMaybeRestore() {
     }
   } catch (e) {}
 }
+
+// ─── v5.25: `av` STAMP ─────────────────────────────────────────────
+// Router v3.23 blocks any client below its floor, so the stamp has to be on
+// EVERY backend request — a missed call site would get the device blocked
+// for no reason. Wrapping fetch once, scoped strictly to our own backend
+// hosts, is the only way to guarantee that AND to cover call sites added
+// later. Never touches GitHub Pages requests (version.json), other origins,
+// or a URL that already carries an `av`.
+function _avIsBackendUrl(u) {
+  try {
+    var hosts = [];
+    if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL) hosts.push(SHEETS_URL);
+    if (typeof EXEC_URL   !== 'undefined' && EXEC_URL)   hosts.push(EXEC_URL);
+    if (typeof RELAY_URL  !== 'undefined' && RELAY_URL)  hosts.push(RELAY_URL);
+    for (var i = 0; i < hosts.length; i++) {
+      if (hosts[i] && u.indexOf(hosts[i]) === 0) return true;
+    }
+  } catch (e) {}
+  return false;
+}
+(function _avStampInstall() {
+  try {
+    if (typeof window === 'undefined' || !window.fetch || window._avStamped) return;
+    window._avStamped = true;
+    var _origFetch = window.fetch.bind(window);
+    window.fetch = function (input, init) {
+      try {
+        var u = (typeof input === 'string') ? input : (input && input.url) || '';
+        if (u && u.indexOf('av=') < 0 && _avIsBackendUrl(u)) {
+          var stamped = u + (u.indexOf('?') >= 0 ? '&' : '?') + 'av=' + encodeURIComponent(APP_VERSION);
+          // Every one of our call sites passes a STRING url + init, so this is
+          // the live path. The Request branch is defensive only.
+          if (typeof input === 'string') input = stamped;
+          else input = new Request(stamped, input);
+        }
+      } catch (e) {}          // a stamping failure must never break a request
+      return _origFetch(input, init);
+    };
+  } catch (e) {}
+})();
 
 console.log('%c[KGH Billing] ' + APP_VERSION + ' · built ' + APP_BUILT,
             'color:#1a5fa8;font-weight:600');
@@ -676,6 +731,19 @@ async function loadLocal() {
       }
     } catch(e) {}
   }
+  // v5.25: heal a login stored under a RETIRED short alias. st.doc is written
+  // once at sign-in and never re-checked, so a device that signed in before
+  // the 2026-07-27 standardization has been writing as 'AK' ever since. The
+  // map is 01_config.js ALIAS_MAP, which has existed for exactly this since
+  // v4.85 and was never wired up. Silent on purpose — the doctor's identity
+  // is unchanged, only its spelling.
+  try {
+    if (st.doc && st.doc.alias && typeof ALIAS_MAP !== 'undefined' && ALIAS_MAP[st.doc.alias]) {
+      console.warn('[alias] migrating stored login ' + st.doc.alias + ' -> ' + ALIAS_MAP[st.doc.alias]);
+      st.doc.alias = ALIAS_MAP[st.doc.alias];
+      sv('doc', st.doc);
+    }
+  } catch (e) {}
   try {
     // v5.08: written via the normal sv('role', st.role) — same JSON-string
     // convention as every other sv() key — so it must be parsed the same way.
@@ -1107,6 +1175,9 @@ function _retryPendingPushes() {
 async function syncFromSheets(opts) {
 
   if (!SHEETS_URL) return;
+  // v5.25: blocked by Router v3.23 as too old — every further call would be
+  // refused and logged. Stop. Only a reload clears this.
+  if (window._staleLocked) return;
   // v4.46: Dedup guard — visibilitychange + pageshow both fire on iOS resume,
   // causing two simultaneous getAll calls (8s instead of 4s). Drop the second.
   if (_syncInFlight) { console.log('[sync] already in flight — skipping'); return; }
@@ -1257,6 +1328,17 @@ async function syncFromSheets(opts) {
     if (d.error === 'unauthorized') {
       setSyncState('auth');
       handleUnauthorized().then(function () { syncFromSheets().catch(function(){}); });
+      return;
+    }
+    // v5.25: Router v3.23 refused us for being too old to self-update. This
+    // is terminal for the session — there is no retry that can help — so
+    // block the UI outright rather than leaving a red banner the doctor
+    // reads as "wifi", keeps billing through, and loses work behind.
+    if (d && d.staleClient) {
+      window._lastSyncError = d.error || 'App out of date';
+      window._lastSyncResponse.checkpoint = 'stale-client';
+      setSyncState('error', { code: 'stale_client' });
+      try { _staleClientLockout(d); } catch (eSc) {}
       return;
     }
     if (typeof resetUnauthCount === 'function') resetUnauthCount();  // v4.66: authorized → clear transient-unauth counter
@@ -1767,6 +1849,7 @@ async function push(action, body, wire) {
     return true;
   }
   if (!SHEETS_URL) return false;
+  if (window._staleLocked) return false;   // v5.25: see syncFromSheets
   // Guard: never push a patient or claim with no id — prevents blank row creation
   if ((action === 'savePatient' || action === 'saveClaim') && (!body || !body.id)) {
     console.warn('push blocked — no id on', action, body);
@@ -1932,6 +2015,30 @@ async function push(action, body, wire) {
     // work" (lock timeout) from "retry can never work" (validation reject).
     if (data && (data.ok === false || (data.error && data.ok !== true))) {
       window._lastPushError = data.error || 'Server rejected the save';
+      // v5.25: too old to be allowed to write. Drop the pending entry (a
+      // retry can never make an old build new) and block the UI.
+      if (data.staleClient) {
+        if (_pKey && !_pendingIsNewer()) delete window._pendingPush[_pKey];
+        setSyncState('error', { code: 'stale_client' });
+        try { _staleClientLockout(data); } catch (eSc2) {}
+        return false;
+      }
+      // v5.25: signed in under a retired alias ('AK' not 'AKhosla'). The
+      // load-time ALIAS_MAP migration should have prevented this, so reaching
+      // here means a spelling the map does not know. Clear the login and force
+      // the picker — the doctor re-signs and saves again. NOT silent: the
+      // server's message names the old alias and says nothing was billed.
+      if (data.badAlias) {
+        if (_pKey && !_pendingIsNewer()) delete window._pendingPush[_pKey];
+        try { showToast(data.error, 'error'); } catch (eA1) {}
+        try {
+          st.doc = null; sv('doc', null);
+          var _dl = document.getElementById('doc-label'); if (_dl) _dl.textContent = '';
+          if (typeof _forceSignIn === 'function') _forceSignIn();
+        } catch (eA2) {}
+        setSyncState('synced');
+        return false;
+      }
       // v5.12: Crud v3.21 write arbitration. The sheet holds a NEWER copy
       // of this claim (edited on another device). Never retry blindly —
       // drop the pending entry and pull the newer row so the next save
