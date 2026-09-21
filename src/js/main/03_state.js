@@ -620,23 +620,22 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   no in-app entry point until now) and shows on the "Claims to Follow"
 //   tab and as the flag icon's tooltip. No backend change needed. No
 //   cache-format change, BUILD_ID not bumped.
-// v5.29 (2026-09-21) — Two combined UI/billing refinements (Kathryn spec):
-//   1. Claims-follow-up flag (_cfFlagBtn) recolored GREEN (var(--green)/
-//      var(--green-t)) — was amber, same as the unrelated handover flag,
-//      which read as confusing on the Today's Claims list. cf-note-modal
-//      retitled "Flag for KB Billing Follow Up" with new prompt copy, and
-//      the note is now MANDATORY — no "flag without note" option, an empty
-//      note shows an inline error and the modal stays open. "Cancel"
-//      replaces the old skip button.
-//   2. 01172 Sedation — start AND end time are now mandatory on the Other-
-//      claim form (same validation pattern as 00081), and units are
-//      calculated automatically: MSP bills this code per completed 15 min
-//      or any part thereof, so units = ceil(duration / 15) with no minimum-
-//      duration threshold (1 min = 1 unit). Confirmed with Kathryn this is
-//      a straight ceiling, NOT the majority-portion rule 00081 uses. No
-//      backend change — Claims.units is an existing generic column and
-//      every total/export already multiplies rate × units.
-//   No cache-format change, BUILD_ID not bumped.
+// v5.29 (2026-09-21) — PACEMAKER DISCHARGE quick-entry preset. Added to the
+//   unified consult form (07_consult.js), shared by +Claim and Add Patient.
+//   A new "Pacemaker Discharge" button sits directly under the RACE admit
+//   button: selects 33012 (Limited consult), sets a 30-min consult length,
+//   turns MOST (78720) off, sets diagnosis to 427 (Cardiac Dysrhythmias —
+//   arrhythmia), reveals tap-pills for the 5 vascular surgeons who refer
+//   these (Fung/Harris/Pasenau/Mostowy/Yang — MSP #s from the physician
+//   directory, NOT independently verified against MSP records), and on the
+//   Add Patient screen auto-selects KGH Outpatient billing location and
+//   flips the emphasis from "Submit claim and add patient to list" to
+//   "Submit claim only — not following" (btn-g green, matching the app's
+//   existing claim-only convention — no new submission logic, reuses
+//   apSubmit(false) exactly as today). Toggling the button off restores all
+//   of the above to the form's normal defaults, and clearAddForm() (09_patient.js)
+//   resets it again for the next patient. No backend change. No
+//   cache-format change, BUILD_ID not bumped.
 var APP_VERSION = 'v5.29';
 var APP_BUILT   = '2026-09-21';
 

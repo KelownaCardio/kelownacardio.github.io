@@ -2180,6 +2180,12 @@ function clearAddForm() {
   if (typeof apTogglePrivate === 'function') apTogglePrivate();
   // v4.19: reset billing location pills to Inpatient default.
   apBillingLocPill('I');
+  // v5.29: reset Pacemaker Discharge's submit-button emphasis for the next
+  // patient — rebuilding #ap-claim-area below resets _pacemakerOn itself,
+  // but ap-submit-list/ap-submit-only live outside that area and don't get
+  // rebuilt, so their btn-g/btn-s classes would otherwise carry over.
+  var _apSL = document.getElementById('ap-submit-list'); if (_apSL) _apSL.className = 'btn btn-p';
+  var _apSO = document.getElementById('ap-submit-only'); if (_apSO) _apSO.className = 'btn btn-s';
   var ocr = document.getElementById('ocr-bar'); if (ocr) ocr.style.display = 'none';
   // v4.11: rebuild the Location & list card in fresh unselected state — no
   // ward, no role, no list. Otherwise the next Add Patient inherits the last

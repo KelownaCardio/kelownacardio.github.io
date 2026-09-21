@@ -10,6 +10,26 @@
 // MOST toggle state — reset to ON every time a fresh consult form builds.
 var _mostOn = true;
 
+// v5.29 (2026-09-21): PACEMAKER DISCHARGE quick-entry preset — state +
+// surgeon roster. Reset to false every time a fresh consult form builds
+// (alongside _mostOn, below in buildConsultForm).
+var _pacemakerOn = false;
+
+// Vascular surgeons who do the Monday pacemaker-discharge safety review.
+// MSP #s pulled from BC_PHYSICIANS_LOCAL (00_physicians.js) 2026-09-21 by
+// name match — NOT independently verified against MSP/College records.
+// Note: Harris/Pasenau/Mostowy show as "General Surgery" in that directory
+// (only Fung/Yang show "Vascular Surgery") — Kathryn named all five as
+// her vascular-surgery referral group; flagging the directory's specialty
+// tag as unconfirmed, not the MSP numbers themselves.
+var PACEMAKER_SURGEONS = [
+  { name: 'Dr. Adrian Fung',     short: 'Fung, A.',     msp: '36987' },
+  { name: 'Dr. Jeremy Harris',   short: 'Harris, J.',   msp: '66225' },
+  { name: 'Dr. Stephan Mostowy', short: 'Mostowy, S.',  msp: '29365' },
+  { name: 'Dr. Jeffrey Pasenau', short: 'Pasenau, J.',  msp: '27731' },
+  { name: 'Dr. Gary Yang',       short: 'Yang, G.',     msp: '30954' }
+];
+
 // Which screen the consult form is on — set by the caller (+Claim vs Add
 // Patient) so the live CCFPP field can resolve the right patient context.
 var _consultCtx = 'claim';
@@ -77,6 +97,8 @@ function buildConsultForm(p, opts) {
 
   // A freshly-built form always renders MOST as ON — keep the global in sync.
   _mostOn = true;
+  // v5.29: a freshly-built form always starts with Pacemaker Discharge off.
+  _pacemakerOn = false;
   // v4.93: a freshly-built form always starts with no Call-out Decision made.
   _codChoice = null; _codChoicePhn = null; _codOverlapOrigin = false; _codChoice1Open = false;
 
@@ -107,6 +129,13 @@ function buildConsultForm(p, opts) {
        'border:.5px solid var(--border2);border-radius:var(--rsm);padding:7px 9px;margin-bottom:9px">' +
        'No 33010/33012 will be added — the consult is billed through the RACE clinic. ' +
        'Referring MD and diagnosis below ride on the MOST (78720) claim.</div>';
+
+  // v5.29: PACEMAKER DISCHARGE — quick-entry preset for the Monday
+  // pacemaker-discharge safety review (limited consult under the vascular
+  // surgeon who implanted). Sits directly under the RACE admit button per
+  // Kathryn 2026-09-21.
+  h += '<button id="cb-pacemaker" class="ct-btn" style="width:100%;margin-bottom:9px" ' +
+       'onclick="togglePacemakerDischarge()">Pacemaker D/C - Lmtd Cons</button>';
 
   // MOST button
   h += '<button class="most-btn on" id="cb-most" onclick="toggleMost()">' +
@@ -165,6 +194,19 @@ function buildConsultForm(p, opts) {
   // Pre-filled from the patient; editable per-claim (rides on the claim row,
   // does not overwrite the patient baseline).
   h += buildIcdRefCard(p);
+
+  // v5.29: vascular-surgeon tap pills — shown only while Pacemaker
+  // Discharge is on; tapping one sets the referring MD fields above
+  // directly (cb-refby / cb-refby-name / cb-ref-search), no typing/search.
+  h += '<div class="card" id="cb-pacemaker-surgeons" style="display:none">' +
+       '<div class="card-title" style="font-size:12px">Vascular surgeon (referring)</div>' +
+       '<div class="fl" style="flex-wrap:wrap;gap:6px">' +
+       PACEMAKER_SURGEONS.map(function(s) {
+         return '<button type="button" class="ap-list-pill" id="cb-pmsurg-' + s.msp + '" ' +
+                'onclick="selectPacemakerSurgeon(\'' + s.name.replace(/'/g, "\\'") + '\',\'' + s.msp + '\')" ' +
+                'style="flex:0 0 auto">' + esc(s.short) + '</button>';
+       }).join('') +
+       '</div></div>';
 
   if (withSubmit) {
     h += '<button class="btn btn-p" id="cb-submit-btn" onclick="claimSubmitOnce(submitConsult)">Add consult claims</button>';
@@ -282,6 +324,9 @@ function cbTimeBlur(which) {
 
 
 function toggleConsultCode(code) {
+  // v5.29: choosing 33010 or RACE explicitly steps out of Pacemaker
+  // Discharge mode (33012 is part of that mode, so it does not).
+  if (code !== '33012' && _pacemakerOn) _pacemakerSetOn(false);
   // v4.83: third mode 'RACE' — no consult fee (billed in the RACE clinic).
   // Hides the time fields + modifier banner (nothing here carries times);
   // the date stays because it dates the MOST claim.
@@ -318,6 +363,68 @@ function _incAdjustStart(t24) {
 function toggleMost() {
   _mostOn = !_mostOn;
   cEl('cb-most').className = 'most-btn' + (_mostOn ? ' on' : '');
+}
+
+// v5.29: PACEMAKER DISCHARGE preset — applies/reverts the whole bundle
+// of field defaults in one tap. Add-Patient-only effects (billing location
+// pill, submit-button emphasis) are guarded by _consultCtx since the +Claim
+// screen has neither ap-bloc-* pills nor ap-submit-* buttons.
+function _pacemakerSetOn(on) {
+  _pacemakerOn = on;
+  var btn = cEl('cb-pacemaker');
+  if (btn) btn.className = 'ct-btn' + (on ? ' ct-on-consult' : '');
+  var pillWrap = cEl('cb-pacemaker-surgeons');
+
+  if (on) {
+    // Limited consult (33012) — clears 33010/RACE via the normal path.
+    toggleConsultCode('33012');
+    // Fixed 30-minute consult length for this preset (Kathryn 2026-09-21) —
+    // still editable afterward like any other claim field.
+    var s24 = consultTime24('start');
+    if (s24) {
+      var parts = s24.split(':');
+      var mins  = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10) + 30;
+      cbSetTime('end', minsToTime(mins));
+    }
+    // MOST isn't billed alongside a pacemaker-discharge review.
+    if (_mostOn) toggleMost();
+    // Diagnosis — code 427 (Cardiac Dysrhythmias); shown to the doctor
+    // as plain "Arrhythmia" per Kathryn 2026-09-21, same code either way.
+    var icdHidden = cEl('cb-icd'); if (icdHidden) icdHidden.value = '427';
+    var icdSearch = cEl('cb-icd-search'); if (icdSearch) icdSearch.value = 'Arrhythmia';
+    if (pillWrap) pillWrap.style.display = 'block';
+  } else {
+    if (pillWrap) pillWrap.style.display = 'none';
+  }
+
+  if (_consultCtx === 'addpatient') {
+    if (on) {
+      apBillingLocPill('P'); // KGH Outpatient
+    } else {
+      apBillingLocPill('I'); // back to the Add Patient default
+    }
+    var apL = document.getElementById('ap-submit-list');
+    var apO = document.getElementById('ap-submit-only');
+    if (apL) apL.className = 'btn ' + (on ? 'btn-s' : 'btn-p');
+    if (apO) apO.className = 'btn ' + (on ? 'btn-g' : 'btn-s');
+  }
+}
+
+function togglePacemakerDischarge() {
+  _pacemakerSetOn(!_pacemakerOn);
+}
+
+// Tapping a vascular-surgeon pill sets the referring-MD fields directly —
+// same fields a manual search-and-pick would set (cb-refby is the MSP #,
+// cb-refby-name the display name), plus the visible search box text.
+function selectPacemakerSurgeon(name, msp) {
+  var rb = cEl('cb-refby');      if (rb) rb.value = msp;
+  var rn = cEl('cb-refby-name'); if (rn) rn.value = name;
+  var rs = cEl('cb-ref-search'); if (rs) rs.value = name;
+  PACEMAKER_SURGEONS.forEach(function(s) {
+    var b = cEl('cb-pmsurg-' + s.msp);
+    if (b) b.className = 'ap-list-pill' + (s.msp === msp ? ' on' : '');
+  });
 }
 
 // 24h "HH:MM" (minutes may exceed 1440 for a past-midnight extension) → a
