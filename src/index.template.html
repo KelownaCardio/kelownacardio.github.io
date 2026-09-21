@@ -1146,6 +1146,25 @@ input[type=file] { display:none; }
   </div>
 </div>
 
+<!-- v5.28: optional note when flagging a claim for follow-up (Claims to
+     Follow tab). Opened by the flag icon on a Today's-Claims row
+     (_cfFlagBtn / toggleClaimFollowUp, 05_render.js) only when turning a
+     flag ON — clearing a flag stays a silent, instant toggle. -->
+<div class="overlay" id="cf-note-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Flag for follow-up</div>
+    <div style="font-size:11px;color:var(--text2);margin-bottom:10px">Optional — add a note, or just flag it.</div>
+    <textarea id="cf-note-input" rows="3" autocomplete="off" placeholder="e.g. New combo with 01172, check if MSP pays"
+      style="width:100%;padding:11px;border:.5px solid var(--border2);border-radius:8px;font-size:14px;font-family:inherit;background:var(--surface2);resize:vertical"></textarea>
+    <input type="hidden" id="cf-note-claim-id">
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="btn btn-s" style="flex:1;margin-bottom:0" onclick="cfSkipFollowUpNote()">Flag without note</button>
+      <button class="btn btn-p" style="flex:1;margin-bottom:0" onclick="cfSaveFollowUpNote()">Save note &amp; flag</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="mit-modal">
   <div class="modal">
     <div class="modal-handle"></div>
