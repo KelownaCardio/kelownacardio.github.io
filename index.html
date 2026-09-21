@@ -6287,15 +6287,17 @@ function toggleHandoverFlag(pid) {
   render();
 }
 
-// v5.27: Flag/unflag a claim for follow-up. Called from the flag icon on
-// each Today's-Claims row (_cfFlagBtn, 02_constants.js). Backend: Claims
-// gains 'followUp'/'followUpNote' (Config v2.50); DataCheck v2.54 copies any
-// flagged claim onto the "Claims to Follow" tab on its next run — this is a
-// watchlist, not an error, so nothing more happens here.
-// v5.28: turning a flag ON now opens a small optional-note modal
-// (cf-note-modal) instead of toggling immediately, so a note can be
-// attached at flag time without opening the Claims sheet. Turning a flag
-// OFF stays a silent, instant toggle — no modal, no toast — same as before.
+// v5.27: Flag/unflag a claim for KB billing follow-up. Called from the
+// flag icon on each Today's-Claims row (_cfFlagBtn, 02_constants.js).
+// Backend: Claims gains 'followUp'/'followUpNote' (Config v2.50); DataCheck
+// v2.54 copies any flagged claim onto the "Claims to Follow" tab on its
+// next run — this is a watchlist, not an error, so nothing more happens
+// here. Turning a flag OFF stays a silent, instant toggle — no modal, no
+// toast.
+// v5.29: turning a flag ON opens cf-note-modal and now REQUIRES a note
+// (Kathryn, 2026-09-21) — the note is what tells her what to actually
+// follow up on for that MSP claim, so an empty flag isn't useful. "Cancel"
+// backs out without flagging; there is no "flag with no note" option.
 function toggleClaimFollowUp(claimId) {
   var c = (st.claims || []).find(function(x){ return String(x.id) === String(claimId); });
   if (!c) return;
@@ -6307,32 +6309,43 @@ function toggleClaimFollowUp(claimId) {
     if (typeof openDailyClaimsList === 'function') openDailyClaimsList(_dailyClaimsFilter);
     return;
   }
-  var idEl = document.getElementById('cf-note-claim-id');
-  var taEl = document.getElementById('cf-note-input');
+  var idEl  = document.getElementById('cf-note-claim-id');
+  var taEl  = document.getElementById('cf-note-input');
+  var errEl = document.getElementById('cf-note-err');
   if (idEl) idEl.value = claimId;
   if (taEl) taEl.value = '';
+  if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
   showModal('cf-note-modal');
   setTimeout(function() { if (taEl) try { taEl.focus(); } catch (e) {} }, 200);
 }
 
-// v5.28: shared finish step for both cf-note-modal buttons.
-function _cfFinishFollowUpFlag(note) {
+// v5.29: back out of the flag-note modal without flagging anything.
+function cfCancelFollowUpNote() {
+  hideModal('cf-note-modal');
+}
+
+// v5.29: MANDATORY — no note, no flag (mirrors the dup-claim-sheet's
+// required-note pattern in 04_billing.js). Shows an inline error and keeps
+// the modal open instead of closing it, so nothing is silently lost.
+function cfSaveFollowUpNote() {
+  var taEl  = document.getElementById('cf-note-input');
+  var errEl = document.getElementById('cf-note-err');
+  var note  = String((taEl && taEl.value) || '').trim();
+  if (!note) {
+    if (errEl) { errEl.textContent = 'Add a note so KB knows what to follow up on.'; errEl.style.display = 'block'; }
+    return;
+  }
   var claimId = (document.getElementById('cf-note-claim-id') || {}).value;
   hideModal('cf-note-modal');
   var c = (st.claims || []).find(function(x){ return String(x.id) === String(claimId); });
   if (!c) return;
   c.followUp     = true;
-  c.followUpNote = String(note || '').trim();
+  c.followUpNote = note;
   sv('claims', st.claims);
   if (SHEETS_URL) push('saveClaim', c);
-  logChange(c, 'Flagged claim for follow-up',
-    (c.fee || '') + ' on ' + (c.date || '') + (c.followUpNote ? ' \u2014 ' + c.followUpNote : ''));
+  logChange(c, 'Flagged claim for KB billing follow-up',
+    (c.fee || '') + ' on ' + (c.date || '') + ' \u2014 ' + note);
   if (typeof openDailyClaimsList === 'function') openDailyClaimsList(_dailyClaimsFilter);
-}
-function cfSkipFollowUpNote() { _cfFinishFollowUpFlag(''); }
-function cfSaveFollowUpNote() {
-  var taEl = document.getElementById('cf-note-input');
-  _cfFinishFollowUpFlag(taEl ? taEl.value : '');
 }
 
 // v4.62: bordered footer row with the three card-level actions.
@@ -22304,5 +22317,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "778d152c667d";</script></body>
+<script>var BUILD_HASH = "9e4ef48fa8f3";</script></body>
 </html>
