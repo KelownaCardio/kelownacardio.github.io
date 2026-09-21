@@ -561,13 +561,15 @@ input[type=file] { display:none; }
 .foot-flag.on { color:#fff; border-color:#c9a800; background:#c9a800; }
 .foot-flag.on svg { stroke:#fff; }
 .foot-flag:active { opacity:.7; }
-/* v5.27: flag-for-follow-up icon on each Today's-Claims row. Same amber as
-   .foot-flag above, sized for an inline row rather than a card footer. */
+/* v5.29: flag-for-KB-billing-follow-up icon on each Today's-Claims row.
+   Deliberately GREEN (var(--green-t)/var(--green)) — distinct from the
+   amber .foot-flag (handover) so the two flags are never confused at a
+   glance. Sized for an inline row rather than a card footer. */
 .cf-flag-btn { display:inline-flex; align-items:center; justify-content:center;
   width:22px; height:22px; flex-shrink:0; margin-top:1px; padding:0;
-  border:1.5px solid #c9a800; border-radius:6px; background:transparent; cursor:pointer; }
-.cf-flag-btn svg { width:12px; height:12px; stroke:#7a6d00; stroke-width:2; fill:none; }
-.cf-flag-btn.on { background:#c9a800; }
+  border:1.5px solid var(--green); border-radius:6px; background:transparent; cursor:pointer; }
+.cf-flag-btn svg { width:12px; height:12px; stroke:var(--green-t); stroke-width:2; fill:none; }
+.cf-flag-btn.on { background:var(--green); }
 .cf-flag-btn.on svg { stroke:#fff; }
 .cf-flag-btn:active { opacity:.7; }
 
@@ -1146,21 +1148,22 @@ input[type=file] { display:none; }
   </div>
 </div>
 
-<!-- v5.28: optional note when flagging a claim for follow-up (Claims to
-     Follow tab). Opened by the flag icon on a Today's-Claims row
+<!-- v5.29: MANDATORY note when flagging a claim for KB billing follow-up
+     (Claims to Follow tab). Opened by the flag icon on a Today's-Claims row
      (_cfFlagBtn / toggleClaimFollowUp, 05_render.js) only when turning a
      flag ON — clearing a flag stays a silent, instant toggle. -->
 <div class="overlay" id="cf-note-modal">
   <div class="modal">
     <div class="modal-handle"></div>
-    <div class="modal-title">Flag for follow-up</div>
-    <div style="font-size:11px;color:var(--text2);margin-bottom:10px">Optional — add a note, or just flag it.</div>
+    <div class="modal-title">Flag for KB Billing Follow Up</div>
+    <div style="font-size:11px;color:var(--text2);margin-bottom:10px">Add details of what KB should follow up with on the MSP claim.</div>
     <textarea id="cf-note-input" rows="3" autocomplete="off" placeholder="e.g. New combo with 01172, check if MSP pays"
       style="width:100%;padding:11px;border:.5px solid var(--border2);border-radius:8px;font-size:14px;font-family:inherit;background:var(--surface2);resize:vertical"></textarea>
+    <div id="cf-note-err" style="display:none;font-size:12px;color:var(--red-t);margin-top:8px"></div>
     <input type="hidden" id="cf-note-claim-id">
     <div style="display:flex;gap:8px;margin-top:14px">
-      <button class="btn btn-s" style="flex:1;margin-bottom:0" onclick="cfSkipFollowUpNote()">Flag without note</button>
-      <button class="btn btn-p" style="flex:1;margin-bottom:0" onclick="cfSaveFollowUpNote()">Save note &amp; flag</button>
+      <button class="btn btn-s" style="flex:1;margin-bottom:0" onclick="cfCancelFollowUpNote()">Cancel</button>
+      <button class="btn btn-p" style="flex:1;margin-bottom:0" onclick="cfSaveFollowUpNote()">Flag for KB Billing Follow Up</button>
     </div>
   </div>
 </div>
@@ -22317,5 +22320,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "9e4ef48fa8f3";</script></body>
+<script>var BUILD_HASH = "9e4345a6e90f";</script></body>
 </html>
