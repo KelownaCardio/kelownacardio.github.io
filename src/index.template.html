@@ -561,6 +561,15 @@ input[type=file] { display:none; }
 .foot-flag.on { color:#fff; border-color:#c9a800; background:#c9a800; }
 .foot-flag.on svg { stroke:#fff; }
 .foot-flag:active { opacity:.7; }
+/* v5.27: flag-for-follow-up icon on each Today's-Claims row. Same amber as
+   .foot-flag above, sized for an inline row rather than a card footer. */
+.cf-flag-btn { display:inline-flex; align-items:center; justify-content:center;
+  width:22px; height:22px; flex-shrink:0; margin-top:1px; padding:0;
+  border:1.5px solid #c9a800; border-radius:6px; background:transparent; cursor:pointer; }
+.cf-flag-btn svg { width:12px; height:12px; stroke:#7a6d00; stroke-width:2; fill:none; }
+.cf-flag-btn.on { background:#c9a800; }
+.cf-flag-btn.on svg { stroke:#fff; }
+.cf-flag-btn:active { opacity:.7; }
 
 /* wp-main replaces wp-info for new layout */
 .wp-main { flex:1; min-width:0; overflow:hidden; }
