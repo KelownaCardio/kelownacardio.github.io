@@ -1396,6 +1396,19 @@ function dispDateMdy(d) {
 // v4.46: filter param — 'all' (default) or 'consults' (33010/33012/1411/CCU_DAILY).
 var _dailyClaimsFilter = 'all';
 var _CONSULT_ADMIT_FEES = { '33010':1, '33012':1, '1411':1, 'CCU_DAILY':1 };
+
+// v5.27: small flag icon shown on each Today's-Claims row. Tapping calls
+// toggleClaimFollowUp (05_render.js) — a silent toggle, same pattern as the
+// existing handover flag (no toast/confirm). Amber styling (.cf-flag-btn)
+// reuses the app's existing flag colour (see .foot-flag in the template).
+function _cfFlagBtn(c) {
+  var on = !!c.followUp;
+  return '<button class="cf-flag-btn' + (on ? ' on' : '') + '" data-cid="' + esc(String(c.id||'')) + '"' +
+    ' onclick="event.stopPropagation();toggleClaimFollowUp(this.getAttribute(\'data-cid\'))"' +
+    ' title="' + (on ? 'Unflag' : 'Flag for follow-up') + '">' +
+    '<svg viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>' +
+  '</button>';
+}
 function openDailyClaimsList(filter) {
   if (!st.doc) { showToast('Sign in first'); return; }
   _dailyClaimsFilter = filter || _dailyClaimsFilter || 'all';
@@ -1512,6 +1525,7 @@ function openDailyClaimsList(filter) {
             '</div>' +
             (timeRange ? '<div style="font-size:11px;color:var(--teal);margin-top:1px">' + esc(timeRange) + '</div>' : '') +
           '</div>' +
+          _cfFlagBtn(c) +
           '<div style="font-size:12px;font-weight:700;color:' + (amt > 0 ? 'var(--green)' : 'var(--text3)') + ';flex-shrink:0">' +
             (amt > 0 ? '$' + amt.toFixed(0) : '\u2014') +
           '</div>' +
@@ -1529,6 +1543,7 @@ function openDailyClaimsList(filter) {
             (time ? ' &middot; ' + esc(time) : '') +
           '</div>' +
         '</div>' +
+        _cfFlagBtn(c) +
         '<div style="font-size:12px;font-weight:700;color:' + (amt > 0 ? 'var(--green)' : 'var(--text3)') + ';flex-shrink:0">' +
           (amt > 0 ? '$' + amt.toFixed(0) : '\u2014') +
         '</div>' +
@@ -2903,7 +2918,18 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   FEES picker (02_constants.js, Procedure category). Rate re-verified against
 //   msc_payment_schedule_may_31_2026.pdf. No cache-format change, BUILD_ID not
 //   bumped.
-var APP_VERSION = 'v5.26';
+// v5.27 (2026-09-21) — CLAIMS FOLLOW-UP WATCHLIST. Added a silent flag
+//   toggle (amber icon, _cfFlagBtn) to each row of the Today's Claims list
+//   — same interaction pattern as the existing handover flag (no toast/
+//   confirm). toggleClaimFollowUp (05_render.js) sets Claims.followUp and
+//   pushes the claim. Backend: Config v2.50 adds the followUp/followUpNote
+//   columns; DataCheck v2.54 copies any flagged claim (set from the app OR
+//   by hand on the Claims sheet) onto the new "Claims to Follow" tab on
+//   every run, with a manual Resolved tick carried across rebuilds. Not an
+//   error queue — a watchlist for new fee-code combinations or claims
+//   Kathryn wants to confirm MSP pays. No cache-format change, BUILD_ID
+//   not bumped.
+var APP_VERSION = 'v5.27';
 var APP_BUILT   = '2026-09-21';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
@@ -6219,6 +6245,23 @@ function toggleHandoverFlag(pid) {
   if (SHEETS_URL) push('savePatient', p);
   logChange(p, wasOn ? 'Handover flag cleared' : 'Flagged for handover', (st.doc && st.doc.alias) || '');
   render();
+}
+
+// v5.27: Flag/unflag a claim for follow-up — a silent toggle (no toast or
+// confirm), same interaction pattern as toggleHandoverFlag above. Called
+// from the flag icon on each Today's-Claims row (_cfFlagBtn, 02_constants.js).
+// Backend: Claims gains 'followUp'/'followUpNote' (Config v2.50); DataCheck
+// v2.54 copies any flagged claim onto the "Claims to Follow" tab on its next
+// run — this is a watchlist, not an error, so nothing more happens here.
+function toggleClaimFollowUp(claimId) {
+  var c = (st.claims || []).find(function(x){ return String(x.id) === String(claimId); });
+  if (!c) return;
+  c.followUp = !c.followUp;
+  sv('claims', st.claims);
+  if (SHEETS_URL) push('saveClaim', c);
+  logChange(c, c.followUp ? 'Flagged claim for follow-up' : 'Follow-up flag cleared',
+    (c.fee || '') + ' on ' + (c.date || ''));
+  if (typeof openDailyClaimsList === 'function') openDailyClaimsList(_dailyClaimsFilter);
 }
 
 // v4.62: bordered footer row with the three card-level actions.
@@ -22190,5 +22233,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "bf4a28f92616";</script></body>
+<script>var BUILD_HASH = "da3c5edafa38";</script></body>
 </html>
