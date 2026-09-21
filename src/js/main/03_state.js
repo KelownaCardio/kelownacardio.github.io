@@ -620,7 +620,24 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   no in-app entry point until now) and shows on the "Claims to Follow"
 //   tab and as the flag icon's tooltip. No backend change needed. No
 //   cache-format change, BUILD_ID not bumped.
-var APP_VERSION = 'v5.28';
+// v5.29 (2026-09-21) — Two combined UI/billing refinements (Kathryn spec):
+//   1. Claims-follow-up flag (_cfFlagBtn) recolored GREEN (var(--green)/
+//      var(--green-t)) — was amber, same as the unrelated handover flag,
+//      which read as confusing on the Today's Claims list. cf-note-modal
+//      retitled "Flag for KB Billing Follow Up" with new prompt copy, and
+//      the note is now MANDATORY — no "flag without note" option, an empty
+//      note shows an inline error and the modal stays open. "Cancel"
+//      replaces the old skip button.
+//   2. 01172 Sedation — start AND end time are now mandatory on the Other-
+//      claim form (same validation pattern as 00081), and units are
+//      calculated automatically: MSP bills this code per completed 15 min
+//      or any part thereof, so units = ceil(duration / 15) with no minimum-
+//      duration threshold (1 min = 1 unit). Confirmed with Kathryn this is
+//      a straight ceiling, NOT the majority-portion rule 00081 uses. No
+//      backend change — Claims.units is an existing generic column and
+//      every total/export already multiplies rate × units.
+//   No cache-format change, BUILD_ID not bumped.
+var APP_VERSION = 'v5.29';
 var APP_BUILT   = '2026-09-21';
 
 // ─── v5.20: door failover ───────────────────────────────────────────

@@ -60,9 +60,10 @@ var _dailyClaimsFilter = 'all';
 var _CONSULT_ADMIT_FEES = { '33010':1, '33012':1, '1411':1, 'CCU_DAILY':1 };
 
 // v5.27: small flag icon shown on each Today's-Claims row. Tapping calls
-// toggleClaimFollowUp (05_render.js) — a silent toggle, same pattern as the
-// existing handover flag (no toast/confirm). Amber styling (.cf-flag-btn)
-// reuses the app's existing flag colour (see .foot-flag in the template).
+// toggleClaimFollowUp (05_render.js) — turning it ON opens a mandatory-note
+// modal, turning it OFF is a silent toggle. v5.29: GREEN styling
+// (.cf-flag-btn) — deliberately distinct from the amber .foot-flag
+// (handover) so the two flags read differently at a glance.
 function _cfFlagBtn(c) {
   var on = !!c.followUp;
   // v5.28: show the note (if any) as the tooltip so it's visible at a glance
@@ -70,7 +71,7 @@ function _cfFlagBtn(c) {
   var onTitle = c.followUpNote ? 'Flagged \u2014 ' + c.followUpNote + ' (tap to unflag)' : 'Flagged (tap to unflag)';
   return '<button class="cf-flag-btn' + (on ? ' on' : '') + '" data-cid="' + esc(String(c.id||'')) + '"' +
     ' onclick="event.stopPropagation();toggleClaimFollowUp(this.getAttribute(\'data-cid\'))"' +
-    ' title="' + esc(on ? onTitle : 'Flag for follow-up') + '">' +
+    ' title="' + esc(on ? onTitle : 'Flag for KB Billing Follow Up') + '">' +
     '<svg viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>' +
   '</button>';
 }
