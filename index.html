@@ -1429,9 +1429,10 @@ var _dailyClaimsFilter = 'all';
 var _CONSULT_ADMIT_FEES = { '33010':1, '33012':1, '1411':1, 'CCU_DAILY':1 };
 
 // v5.27: small flag icon shown on each Today's-Claims row. Tapping calls
-// toggleClaimFollowUp (05_render.js) — a silent toggle, same pattern as the
-// existing handover flag (no toast/confirm). Amber styling (.cf-flag-btn)
-// reuses the app's existing flag colour (see .foot-flag in the template).
+// toggleClaimFollowUp (05_render.js) — turning it ON opens a mandatory-note
+// modal, turning it OFF is a silent toggle. v5.29: GREEN styling
+// (.cf-flag-btn) — deliberately distinct from the amber .foot-flag
+// (handover) so the two flags read differently at a glance.
 function _cfFlagBtn(c) {
   var on = !!c.followUp;
   // v5.28: show the note (if any) as the tooltip so it's visible at a glance
@@ -1439,7 +1440,7 @@ function _cfFlagBtn(c) {
   var onTitle = c.followUpNote ? 'Flagged \u2014 ' + c.followUpNote + ' (tap to unflag)' : 'Flagged (tap to unflag)';
   return '<button class="cf-flag-btn' + (on ? ' on' : '') + '" data-cid="' + esc(String(c.id||'')) + '"' +
     ' onclick="event.stopPropagation();toggleClaimFollowUp(this.getAttribute(\'data-cid\'))"' +
-    ' title="' + esc(on ? onTitle : 'Flag for follow-up') + '">' +
+    ' title="' + esc(on ? onTitle : 'Flag for KB Billing Follow Up') + '">' +
     '<svg viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>' +
   '</button>';
 }
@@ -2972,7 +2973,24 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   no in-app entry point until now) and shows on the "Claims to Follow"
 //   tab and as the flag icon's tooltip. No backend change needed. No
 //   cache-format change, BUILD_ID not bumped.
-var APP_VERSION = 'v5.28';
+// v5.29 (2026-09-21) — Two combined UI/billing refinements (Kathryn spec):
+//   1. Claims-follow-up flag (_cfFlagBtn) recolored GREEN (var(--green)/
+//      var(--green-t)) — was amber, same as the unrelated handover flag,
+//      which read as confusing on the Today's Claims list. cf-note-modal
+//      retitled "Flag for KB Billing Follow Up" with new prompt copy, and
+//      the note is now MANDATORY — no "flag without note" option, an empty
+//      note shows an inline error and the modal stays open. "Cancel"
+//      replaces the old skip button.
+//   2. 01172 Sedation — start AND end time are now mandatory on the Other-
+//      claim form (same validation pattern as 00081), and units are
+//      calculated automatically: MSP bills this code per completed 15 min
+//      or any part thereof, so units = ceil(duration / 15) with no minimum-
+//      duration threshold (1 min = 1 unit). Confirmed with Kathryn this is
+//      a straight ceiling, NOT the majority-portion rule 00081 uses. No
+//      backend change — Claims.units is an existing generic column and
+//      every total/export already multiplies rate × units.
+//   No cache-format change, BUILD_ID not bumped.
+var APP_VERSION = 'v5.29';
 var APP_BUILT   = '2026-09-21';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
@@ -7346,6 +7364,32 @@ function ebcDisp(t24) {
   return v.disp ? v.disp + v.ap : t24;
 }
 
+// ── 01172 Sedation (anesthesia intensity/complexity, Level 2) ──────
+// v5.29 (2026-09-21, Kathryn spec): start AND end time are now mandatory
+// for 01172 on the Other-claim form (same pattern as 00081) so the app can
+// calculate how many 15-min service units to bill — MSP pays this code
+// "per 15 min or part thereof". Confirmed with Kathryn: this is a straight
+// CEILING, no minimum-duration threshold and no majority-portion rule like
+// 00081's — 1 min = 1 unit, 15 min = 1 unit, 16 min = 2 units, etc.
+var SEDATION_CODE = '01172';
+var SEDATION_EXPLANATION = 'Billed per completed 15 minutes or any part thereof';
+
+// Generic HH:MM duration in minutes (handles midnight wrap). Mirrors
+// ebcDurMins exactly but kept as its own function — ebcDurMins is left
+// untouched so the existing 00081 path can't be affected by this change.
+function ocDurMins(start24, end24) {
+  if (!start24 || !end24) return 0;
+  var s = t2m(start24), e = t2m(end24);
+  if (e < s) e += 24 * 60;
+  return e - s;
+}
+
+// Ceiling to the next 15-min unit; 0 min (no valid window) bills nothing.
+function sedationUnitsFromDur(durMins) {
+  if (!durMins || durMins <= 0) return 0;
+  return Math.ceil(durMins / 15);
+}
+
 function _openClaimScreen(pid) {
   // v5.08: single choke point for every "+Claim" entry (card, summary
   // screen, discharged list) — residents never bill (Kathryn 2026-08-24).
@@ -7484,6 +7528,17 @@ function selectFeeCode(code, desc) {
     }
     // 00081: surface the billing rule right under the fee-code picker.
     if (code === EBC_CODE && disp) disp.textContent = EBC_EXPLANATION;
+  } else if (code === SEDATION_CODE) {
+    // v5.29: start/end mandatory to compute 15-min service units — notes
+    // stay optional, this code has no MSP-mandated description requirement.
+    if (endWrap)  endWrap.style.display = 'block';
+    if (startLbl) startLbl.innerHTML = 'Start time <span style="color:var(--red-t)">*</span>';
+    if (notesEl) {
+      notesEl.placeholder = 'Optional';
+      notesEl.style.cssText = '';
+      notesEl.removeAttribute('data-required');
+    }
+    if (disp) disp.textContent = SEDATION_EXPLANATION;
   } else {
     if (endWrap)  endWrap.style.display = 'none';
     if (startLbl) startLbl.innerHTML = 'Start time <span style="font-size:10px;color:var(--text3)">(if required)</span>';
@@ -7704,6 +7759,24 @@ function updateOtherPreview() {
     extra += '<div style="font-size:11px;color:var(--text3);margin-top:3px">' + esc(EBC_EXPLANATION) + '</div>';
   }
 
+  // v5.29: 01172 Sedation — live 15-min-unit calculation from start/end times.
+  if (fee === SEDATION_CODE) {
+    var sS   = ocTime24('start');
+    var sE   = ocTime24('end');
+    var sDur = ocDurMins(sS, sE);
+    var sU   = sedationUnitsFromDur(sDur);
+    var sRate = FEE_RATES[SEDATION_CODE] || 0;
+    if (sDur > 0) {
+      extra = '<div class="cp-row" style="font-size:12px;margin-top:4px">' + sDur +
+        ' min &rarr; ' + sU + ' &times; 15-min unit' + (sU === 1 ? '' : 's') +
+        ' = <b>$' + (sU * sRate).toFixed(2) + '</b></div>';
+    } else {
+      extra = '<div style="font-size:11px;color:var(--text3);margin-top:4px">Enter start and end time &mdash; ' +
+        'billed per 15 min or part thereof.</div>';
+    }
+    extra += '<div style="font-size:11px;color:var(--text3);margin-top:3px">' + esc(SEDATION_EXPLANATION) + '</div>';
+  }
+
   prev.innerHTML = '<div class="cp-title">Claim to add</div>' +
     '<div class="cp-row" style="display:flex;align-items:center;gap:6px">' +
     '<span class="cp-code">' + esc(fee) + '</span>' +
@@ -7751,8 +7824,23 @@ function submitOtherClaimFor(p, alias, opts) {
     }
   }
 
+  // v5.29: 01172 Sedation — start and end time are mandatory (notes stay
+  // optional) so the app can calculate 15-min service units.
+  if (fee === SEDATION_CODE) {
+    var sm = [];
+    if (!start)   sm.push('start time');
+    if (!endTime) sm.push('end time');
+    if (sm.length) {
+      if (!start)   { var _ss = document.getElementById('oc-start'); if (_ss) _ss.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
+      if (!endTime) { var _se2 = document.getElementById('oc-end');  if (_se2) _se2.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
+      showToast('Required for ' + fee + ': ' + sm.join(', '));
+      return false;
+    }
+  }
+
   var dateFmt = fmtD(parseISODate(dateISO));
-  // Units are always 1 for an Other claim — except 00081 (per-30-min).
+  // Units are always 1 for an Other claim — except 00081 (per-30-min) and
+  // 01172 (per-15-min, v5.29).
   var pClone  = Object.assign({}, p, { icd: icd, refby: refby, refbyName: refName });
 
   // v4.96: 00081 Emergency Bedside Care — units from the bedside window;
@@ -7762,6 +7850,22 @@ function submitOtherClaimFor(p, alias, opts) {
       dateISO: dateISO, dateFmt: dateFmt, start: start, end: endTime,
       loc: loc, notes: notes
     });
+  }
+
+  // v5.29: 01172 Sedation — units computed from the mandatory start/end
+  // window (ceiling to the next 15-min period); no consult-split sheet
+  // (that's an 00081-specific MSP rule that doesn't apply here).
+  if (fee === SEDATION_CODE) {
+    var sedDur = ocDurMins(start, endTime);
+    if (sedDur <= 0) { showToast('01172: end time must be after start time'); return false; }
+    var sedUnits = sedationUnitsFromDur(sedDur);
+    var sedResult = addClaim(pClone, fee, fee, sedUnits, dateFmt, loc, start, notes, endTime, alias);
+    if (!sedResult) return false;  // dedup blocked — stay on form, error toast visible
+    sv('claims', st.claims);
+    // No unit-specific toast here — the generic caller (submitOtherClaim)
+    // already toasts "<fee> claim added for <name>"; the unit count is
+    // visible in the preview before submit and as ×N on the claims list.
+    return true;
   }
 
   // v4.79: Echo bundles — one tap creates each component claim with its
@@ -22320,5 +22424,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "9e4345a6e90f";</script></body>
+<script>var BUILD_HASH = "bd4ba08a142d";</script></body>
 </html>
