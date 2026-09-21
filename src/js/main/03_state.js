@@ -600,7 +600,18 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   FEES picker (02_constants.js, Procedure category). Rate re-verified against
 //   msc_payment_schedule_may_31_2026.pdf. No cache-format change, BUILD_ID not
 //   bumped.
-var APP_VERSION = 'v5.26';
+// v5.27 (2026-09-21) — CLAIMS FOLLOW-UP WATCHLIST. Added a silent flag
+//   toggle (amber icon, _cfFlagBtn) to each row of the Today's Claims list
+//   — same interaction pattern as the existing handover flag (no toast/
+//   confirm). toggleClaimFollowUp (05_render.js) sets Claims.followUp and
+//   pushes the claim. Backend: Config v2.50 adds the followUp/followUpNote
+//   columns; DataCheck v2.54 copies any flagged claim (set from the app OR
+//   by hand on the Claims sheet) onto the new "Claims to Follow" tab on
+//   every run, with a manual Resolved tick carried across rebuilds. Not an
+//   error queue — a watchlist for new fee-code combinations or claims
+//   Kathryn wants to confirm MSP pays. No cache-format change, BUILD_ID
+//   not bumped.
+var APP_VERSION = 'v5.27';
 var APP_BUILT   = '2026-09-21';
 
 // ─── v5.20: door failover ───────────────────────────────────────────

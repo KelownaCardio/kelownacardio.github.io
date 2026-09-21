@@ -58,6 +58,19 @@ function dispDateMdy(d) {
 // v4.46: filter param — 'all' (default) or 'consults' (33010/33012/1411/CCU_DAILY).
 var _dailyClaimsFilter = 'all';
 var _CONSULT_ADMIT_FEES = { '33010':1, '33012':1, '1411':1, 'CCU_DAILY':1 };
+
+// v5.27: small flag icon shown on each Today's-Claims row. Tapping calls
+// toggleClaimFollowUp (05_render.js) — a silent toggle, same pattern as the
+// existing handover flag (no toast/confirm). Amber styling (.cf-flag-btn)
+// reuses the app's existing flag colour (see .foot-flag in the template).
+function _cfFlagBtn(c) {
+  var on = !!c.followUp;
+  return '<button class="cf-flag-btn' + (on ? ' on' : '') + '" data-cid="' + esc(String(c.id||'')) + '"' +
+    ' onclick="event.stopPropagation();toggleClaimFollowUp(this.getAttribute(\'data-cid\'))"' +
+    ' title="' + (on ? 'Unflag' : 'Flag for follow-up') + '">' +
+    '<svg viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>' +
+  '</button>';
+}
 function openDailyClaimsList(filter) {
   if (!st.doc) { showToast('Sign in first'); return; }
   _dailyClaimsFilter = filter || _dailyClaimsFilter || 'all';
@@ -174,6 +187,7 @@ function openDailyClaimsList(filter) {
             '</div>' +
             (timeRange ? '<div style="font-size:11px;color:var(--teal);margin-top:1px">' + esc(timeRange) + '</div>' : '') +
           '</div>' +
+          _cfFlagBtn(c) +
           '<div style="font-size:12px;font-weight:700;color:' + (amt > 0 ? 'var(--green)' : 'var(--text3)') + ';flex-shrink:0">' +
             (amt > 0 ? '$' + amt.toFixed(0) : '\u2014') +
           '</div>' +
@@ -191,6 +205,7 @@ function openDailyClaimsList(filter) {
             (time ? ' &middot; ' + esc(time) : '') +
           '</div>' +
         '</div>' +
+        _cfFlagBtn(c) +
         '<div style="font-size:12px;font-weight:700;color:' + (amt > 0 ? 'var(--green)' : 'var(--text3)') + ';flex-shrink:0">' +
           (amt > 0 ? '$' + amt.toFixed(0) : '\u2014') +
         '</div>' +

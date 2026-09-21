@@ -123,6 +123,23 @@ function toggleHandoverFlag(pid) {
   render();
 }
 
+// v5.27: Flag/unflag a claim for follow-up — a silent toggle (no toast or
+// confirm), same interaction pattern as toggleHandoverFlag above. Called
+// from the flag icon on each Today's-Claims row (_cfFlagBtn, 02_constants.js).
+// Backend: Claims gains 'followUp'/'followUpNote' (Config v2.50); DataCheck
+// v2.54 copies any flagged claim onto the "Claims to Follow" tab on its next
+// run — this is a watchlist, not an error, so nothing more happens here.
+function toggleClaimFollowUp(claimId) {
+  var c = (st.claims || []).find(function(x){ return String(x.id) === String(claimId); });
+  if (!c) return;
+  c.followUp = !c.followUp;
+  sv('claims', st.claims);
+  if (SHEETS_URL) push('saveClaim', c);
+  logChange(c, c.followUp ? 'Flagged claim for follow-up' : 'Follow-up flag cleared',
+    (c.fee || '') + ' on ' + (c.date || ''));
+  if (typeof openDailyClaimsList === 'function') openDailyClaimsList(_dailyClaimsFilter);
+}
+
 // v4.62: bordered footer row with the three card-level actions.
 // Fixed order on every card (Handover / Claim Hx / D/C) for muscle memory.
 // Names are a FIXED size in CSS (.wp-name) — the v4.61 JS auto-fit is gone.
