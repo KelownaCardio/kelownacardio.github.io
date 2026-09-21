@@ -281,6 +281,10 @@ var FEES = [
   { code:'33030', desc:'Temporary pacemaker placement (TVP)',                            amount:'$180.05', cat:'Procedure',    clr:'chip-purple'   },  // v5.00: MSC May 31 2026 (was $176.07, Jan 2026)
   { code:'00751',  desc:'Pericardiocentesis (pericardial puncture)',                      amount:'$258.25', cat:'Procedure',    clr:'chip-purple'   },
   { code:'00017',  desc:'Central line insertion',                                         amount:'$26.63',  cat:'Procedure',    clr:'chip-purple'   },
+  // v5.26 (2026-09-21): added at Kathryn's request. Rate re-verified against
+  // msc_payment_schedule_may_31_2026.pdf, Anesthesiology ch., Intensity/
+  // Complexity Level 2 (per 15 min or part thereof).
+  { code:'01172',  desc:'Sedation — anesthesia intensity/complexity Level 2 (per 15 min or part thereof)', amount:'$51.66',  cat:'Procedure',    clr:'chip-purple'   },
 
   // ── Diagnostics ─────────────────────────────────────────────────
   { code:'33035', desc:'Treadmill Test (GXT)',                                            amount:'$47.11',  cat:'Diagnostics', clr:'chip-teal'  },

@@ -595,8 +595,13 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //       writing under the old name ever since — splitting that doctor's
 //       tally and tripping DataCheck's UNKNOWN_ALIAS. ALIAS_MAP has sat in
 //       01_config.js unreferenced since v4.85 waiting for exactly this.
-var APP_VERSION = 'v5.25';
-var APP_BUILT   = '2026-09-13';
+// v5.26 (2026-09-21) — added MSP fee code 01172 (Sedation — anesthesia
+//   intensity/complexity Level 2, per 15 min or part thereof, $51.66) to the
+//   FEES picker (02_constants.js, Procedure category). Rate re-verified against
+//   msc_payment_schedule_may_31_2026.pdf. No cache-format change, BUILD_ID not
+//   bumped.
+var APP_VERSION = 'v5.26';
+var APP_BUILT   = '2026-09-21';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
