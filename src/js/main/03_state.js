@@ -611,7 +611,16 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   error queue — a watchlist for new fee-code combinations or claims
 //   Kathryn wants to confirm MSP pays. No cache-format change, BUILD_ID
 //   not bumped.
-var APP_VERSION = 'v5.27';
+// v5.28 (2026-09-21) — OPTIONAL NOTE WHEN FLAGGING A CLAIM. Turning a
+//   follow-up flag ON (Today's Claims list) now opens a small modal
+//   (cf-note-modal) to type an optional reason before it saves — "Flag
+//   without note" or "Save note & flag". Turning a flag OFF is still a
+//   silent, instant toggle, unchanged. The note is stored in
+//   Claims.followUpNote (already existed since v5.27/Config v2.50, just had
+//   no in-app entry point until now) and shows on the "Claims to Follow"
+//   tab and as the flag icon's tooltip. No backend change needed. No
+//   cache-format change, BUILD_ID not bumped.
+var APP_VERSION = 'v5.28';
 var APP_BUILT   = '2026-09-21';
 
 // ─── v5.20: door failover ───────────────────────────────────────────

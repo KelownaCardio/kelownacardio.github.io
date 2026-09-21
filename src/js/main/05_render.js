@@ -123,21 +123,52 @@ function toggleHandoverFlag(pid) {
   render();
 }
 
-// v5.27: Flag/unflag a claim for follow-up — a silent toggle (no toast or
-// confirm), same interaction pattern as toggleHandoverFlag above. Called
-// from the flag icon on each Today's-Claims row (_cfFlagBtn, 02_constants.js).
-// Backend: Claims gains 'followUp'/'followUpNote' (Config v2.50); DataCheck
-// v2.54 copies any flagged claim onto the "Claims to Follow" tab on its next
-// run — this is a watchlist, not an error, so nothing more happens here.
+// v5.27: Flag/unflag a claim for follow-up. Called from the flag icon on
+// each Today's-Claims row (_cfFlagBtn, 02_constants.js). Backend: Claims
+// gains 'followUp'/'followUpNote' (Config v2.50); DataCheck v2.54 copies any
+// flagged claim onto the "Claims to Follow" tab on its next run — this is a
+// watchlist, not an error, so nothing more happens here.
+// v5.28: turning a flag ON now opens a small optional-note modal
+// (cf-note-modal) instead of toggling immediately, so a note can be
+// attached at flag time without opening the Claims sheet. Turning a flag
+// OFF stays a silent, instant toggle — no modal, no toast — same as before.
 function toggleClaimFollowUp(claimId) {
   var c = (st.claims || []).find(function(x){ return String(x.id) === String(claimId); });
   if (!c) return;
-  c.followUp = !c.followUp;
+  if (c.followUp) {
+    c.followUp = false;
+    sv('claims', st.claims);
+    if (SHEETS_URL) push('saveClaim', c);
+    logChange(c, 'Follow-up flag cleared', (c.fee || '') + ' on ' + (c.date || ''));
+    if (typeof openDailyClaimsList === 'function') openDailyClaimsList(_dailyClaimsFilter);
+    return;
+  }
+  var idEl = document.getElementById('cf-note-claim-id');
+  var taEl = document.getElementById('cf-note-input');
+  if (idEl) idEl.value = claimId;
+  if (taEl) taEl.value = '';
+  showModal('cf-note-modal');
+  setTimeout(function() { if (taEl) try { taEl.focus(); } catch (e) {} }, 200);
+}
+
+// v5.28: shared finish step for both cf-note-modal buttons.
+function _cfFinishFollowUpFlag(note) {
+  var claimId = (document.getElementById('cf-note-claim-id') || {}).value;
+  hideModal('cf-note-modal');
+  var c = (st.claims || []).find(function(x){ return String(x.id) === String(claimId); });
+  if (!c) return;
+  c.followUp     = true;
+  c.followUpNote = String(note || '').trim();
   sv('claims', st.claims);
   if (SHEETS_URL) push('saveClaim', c);
-  logChange(c, c.followUp ? 'Flagged claim for follow-up' : 'Follow-up flag cleared',
-    (c.fee || '') + ' on ' + (c.date || ''));
+  logChange(c, 'Flagged claim for follow-up',
+    (c.fee || '') + ' on ' + (c.date || '') + (c.followUpNote ? ' \u2014 ' + c.followUpNote : ''));
   if (typeof openDailyClaimsList === 'function') openDailyClaimsList(_dailyClaimsFilter);
+}
+function cfSkipFollowUpNote() { _cfFinishFollowUpFlag(''); }
+function cfSaveFollowUpNote() {
+  var taEl = document.getElementById('cf-note-input');
+  _cfFinishFollowUpFlag(taEl ? taEl.value : '');
 }
 
 // v4.62: bordered footer row with the three card-level actions.
