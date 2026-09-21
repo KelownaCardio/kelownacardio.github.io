@@ -1619,6 +1619,10 @@ var FEES = [
   { code:'33030', desc:'Temporary pacemaker placement (TVP)',                            amount:'$180.05', cat:'Procedure',    clr:'chip-purple'   },  // v5.00: MSC May 31 2026 (was $176.07, Jan 2026)
   { code:'00751',  desc:'Pericardiocentesis (pericardial puncture)',                      amount:'$258.25', cat:'Procedure',    clr:'chip-purple'   },
   { code:'00017',  desc:'Central line insertion',                                         amount:'$26.63',  cat:'Procedure',    clr:'chip-purple'   },
+  // v5.26 (2026-09-21): added at Kathryn's request. Rate re-verified against
+  // msc_payment_schedule_may_31_2026.pdf, Anesthesiology ch., Intensity/
+  // Complexity Level 2 (per 15 min or part thereof).
+  { code:'01172',  desc:'Sedation — anesthesia intensity/complexity Level 2 (per 15 min or part thereof)', amount:'$51.66',  cat:'Procedure',    clr:'chip-purple'   },
 
   // ── Diagnostics ─────────────────────────────────────────────────
   { code:'33035', desc:'Treadmill Test (GXT)',                                            amount:'$47.11',  cat:'Diagnostics', clr:'chip-teal'  },
@@ -2894,8 +2898,13 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //       writing under the old name ever since — splitting that doctor's
 //       tally and tripping DataCheck's UNKNOWN_ALIAS. ALIAS_MAP has sat in
 //       01_config.js unreferenced since v4.85 waiting for exactly this.
-var APP_VERSION = 'v5.25';
-var APP_BUILT   = '2026-09-13';
+// v5.26 (2026-09-21) — added MSP fee code 01172 (Sedation — anesthesia
+//   intensity/complexity Level 2, per 15 min or part thereof, $51.66) to the
+//   FEES picker (02_constants.js, Procedure category). Rate re-verified against
+//   msc_payment_schedule_may_31_2026.pdf. No cache-format change, BUILD_ID not
+//   bumped.
+var APP_VERSION = 'v5.26';
+var APP_BUILT   = '2026-09-21';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
@@ -22181,5 +22190,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "58831b812f68";</script></body>
+<script>var BUILD_HASH = "bf4a28f92616";</script></body>
 </html>
