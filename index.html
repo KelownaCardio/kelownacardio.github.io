@@ -2989,8 +2989,34 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   of the above to the form's normal defaults, and clearAddForm() (09_patient.js)
 //   resets it again for the next patient. No backend change. No
 //   cache-format change, BUILD_ID not bumped.
-var APP_VERSION = 'v5.29';
-var APP_BUILT   = '2026-09-21';
+// v5.30 (2026-09-22) — PACEMAKER DISCHARGE tweaks, per Kathryn: (1) the
+//   "Submit claim only — not following" button now takes the purple/primary
+//   fill (btn-p) when Pacemaker Discharge is active, instead of green — same
+//   attention-grabbing weight the default "add to list" button normally has,
+//   just handed to the other button. (2) the claim note (cb-notes) auto-fills
+//   with "Asked to review patient for safety for discharge post PPM
+//   insertion" when the preset turns on — rides on the claim exactly like a
+//   hand-typed note, no new submit logic. Both in 07_consult.js only. No
+//   backend change. No cache-format change, BUILD_ID not bumped.
+// v5.31 (2026-09-24) — ONE-AT-A-TIME WRITE QUEUE. A rounding doctor who
+//   sees several patients and then taps their daily-visit pills in a row
+//   (EMMassie 24/09 10:09 PT: 7 pills in 14 s) fired 7+ saveClaims at once.
+//   Every one queued server-side behind the Claims script lock, waits grew
+//   to 15–34 s, the client's 20 s ceiling aborted them, and the retries of
+//   saves that HAD landed (logged as edit_claim) piled on more load — 61
+//   timeouts from one phone that morning, 3 lock refusals, zero data lost.
+//   push() now sends sheet writes (saveClaim / savePatient / savePatients /
+//   savePatientWithClaims / deleteClaim / deletePatient / saveGapNote /
+//   mergePatientDemographics) ONE AT A TIME per device, in tap order. The
+//   20 s timeout clock starts when a write is actually sent, not while it
+//   waits its turn. Everything synchronous (claim gate capture, in-flight
+//   guard, _pendingPush marking) still happens at tap time, unchanged.
+//   Log/lookup calls (logChange, log*, addPhysician, saveRef…) are not
+//   queued. Safety valve: a write holding the queue >60 s releases it.
+//   14_init.js: the mandatory-update reload also waits for the queue to
+//   drain. No backend change. No cache-format change, BUILD_ID not bumped.
+var APP_VERSION = 'v5.31';
+var APP_BUILT   = '2026-09-24';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
@@ -4226,6 +4252,44 @@ async function commitClaimGate(g, consult) {
   return false;
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// v5.31 — ONE-AT-A-TIME WRITE QUEUE (see version note above)
+// FIFO promise chain. _writeQAcquire() resolves with a release function
+// once every earlier queued write has released. depth = writes waiting or
+// sending (read by the mandatory-update gate in 14_init.js).
+// ═══════════════════════════════════════════════════════════════════
+var WRITE_Q_ACTIONS_ = {
+  saveClaim: 1, savePatient: 1, savePatients: 1, savePatientWithClaims: 1,
+  deleteClaim: 1, deletePatient: 1, saveGapNote: 1, mergePatientDemographics: 1
+};
+var WRITE_Q_STALL_MS_ = 60000;   // > worst single push (20 + ~5 + 20 s)
+if (!window._writeQ) window._writeQ = { tail: Promise.resolve(), depth: 0 };
+function _writeQAcquire() {
+  var q = window._writeQ;
+  q.depth++;
+  var prev = q.tail, release;
+  q.tail = new Promise(function(r){ release = r; });
+  var _t0 = Date.now();
+  return prev.then(function(){
+    var released = false, valve = null;
+    var rel = function(){
+      if (released) return;
+      released = true;
+      if (valve) clearTimeout(valve);
+      q.depth = Math.max(0, q.depth - 1);
+      window._lastPushAt = Date.now();
+      release();
+    };
+    valve = setTimeout(function(){
+      if (!released) { console.warn('[writeQ] a write held the queue >60s — releasing'); rel(); }
+    }, WRITE_Q_STALL_MS_);
+    window._lastPushAt = Date.now();
+    var waited = Date.now() - _t0;
+    if (waited > 1000) console.log('[writeQ] waited ' + waited + 'ms, ' + (q.depth - 1) + ' behind');
+    return rel;
+  });
+}
+
 async function push(action, body, wire) {
   // v5.19: `wire` = fields that ride on the request ONLY (never stored on
   // the st.* object) — the notes editor's summaryBase. Same idea as the
@@ -4307,6 +4371,18 @@ async function push(action, body, wire) {
     return !!(q && q.ts > _pStart);
   };
   setSyncState('syncing');
+  // v5.31: wait for this device's earlier writes to finish before sending.
+  var _qRel = null;
+  if (WRITE_Q_ACTIONS_[action]) {
+    _qRel = await _writeQAcquire();
+    // Locked out as too old while we waited — same as the early guard.
+    if (window._staleLocked) {
+      _qRel(); _qRel = null;
+      if (_pKey) delete window._pushInFlight[_pKey];
+      return false;
+    }
+  }
+  try {
   try {
     // ─── v5.04: AUTO-RETRY + TELEMETRY (writes) ─────────────────────
     // Two things were wrong here. (1) No timeout at all — a hung POST sat
@@ -4371,6 +4447,7 @@ async function push(action, body, wire) {
         window._lastPushError = _pe ? (_pe.message || String(_pe))
                                     : ('HTTP ' + _pr.status);
         if (_pCode !== 'offline' && (_pe || (_pr && _pr.status >= 500)) && _doorFailover('push')) {
+          if (_qRel) { _qRel(); _qRel = null; }   // v5.31: free the queue first or the re-push waits on itself
           return await push(action, body, wire);   // v5.20: same write, other door, right now
         }
         setSyncState('error', { code: _pCode });
@@ -4517,6 +4594,9 @@ async function push(action, body, wire) {
     });
     setSyncState('error', { code: _ec });
     return false;
+  }
+  } finally {
+    if (_qRel) _qRel();   // v5.31: always hand the queue to the next write
   }
 }
 // ═══════════════════════════════════════════════════════════════════
@@ -11563,6 +11643,11 @@ function _pacemakerSetOn(on) {
     // as plain "Arrhythmia" per Kathryn 2026-09-21, same code either way.
     var icdHidden = cEl('cb-icd'); if (icdHidden) icdHidden.value = '427';
     var icdSearch = cEl('cb-icd-search'); if (icdSearch) icdSearch.value = 'Arrhythmia';
+    // v5.30: standard note for this preset (Kathryn 2026-09-22) — rides on
+    // the claim exactly like a hand-typed note (submitConsult reads cb-notes
+    // as userNote). Overwrites whatever was there, same as dx/referrer above.
+    var notesEl = cEl('cb-notes');
+    if (notesEl) notesEl.value = 'Asked to review patient for safety for discharge post PPM insertion';
     if (pillWrap) pillWrap.style.display = 'block';
   } else {
     if (pillWrap) pillWrap.style.display = 'none';
@@ -11576,8 +11661,12 @@ function _pacemakerSetOn(on) {
     }
     var apL = document.getElementById('ap-submit-list');
     var apO = document.getElementById('ap-submit-only');
+    // v5.30: Kathryn wants "Submit claim only" to carry the purple/primary
+    // fill (btn-p) when active, not green — same visual weight as the
+    // default "Submit claim and add patient to list" gets normally, just
+    // handed to the other button so it draws the eye.
     if (apL) apL.className = 'btn ' + (on ? 'btn-s' : 'btn-p');
-    if (apO) apO.className = 'btn ' + (on ? 'btn-g' : 'btn-s');
+    if (apO) apO.className = 'btn ' + (on ? 'btn-p' : 'btn-s');
   }
 }
 
@@ -20274,6 +20363,8 @@ window._kghReady = new Promise(function(resolve){ window._kghReadyResolve = reso
 
 // 14_init.js — App init, navigation, fee codes, doctor modal,
 //              and all utility/helper functions
+// v5.31 (2026-09-24): mandatory-update reload gate also waits while the
+//              new one-at-a-time write queue (03_state.js) is non-empty.
 // ═══════════════════════════════════════════════════════
 
 // ── Init ──────────────────────────────────────────────
@@ -21245,6 +21336,9 @@ function _safeToReload() {
   // Unsent or in-flight writes. _pendingPush does not survive a reload.
   if (window._pendingPush  && Object.keys(window._pendingPush).length)  return false;
   if (window._pushInFlight && Object.keys(window._pushInFlight).length) return false;
+  // v5.31: writes waiting in the one-at-a-time queue (03_state.js) —
+  // deleteClaim is not in _pushInFlight, so check the queue itself.
+  if (window._writeQ && window._writeQ.depth) return false;
   // push() only tracks saveClaim/savePatient/saveGapNote in those two maps;
   // deleteClaim and friends are fire-and-forget, and aborting one silently
   // re-bills a claim the doctor just un-billed. _lastPushAt (03_state.js)
@@ -22536,5 +22630,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "4a91a19aa8f8";</script></body>
+<script>var BUILD_HASH = "5c17ec677a88";</script></body>
 </html>
