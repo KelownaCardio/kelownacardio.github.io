@@ -392,6 +392,11 @@ function _pacemakerSetOn(on) {
     // as plain "Arrhythmia" per Kathryn 2026-09-21, same code either way.
     var icdHidden = cEl('cb-icd'); if (icdHidden) icdHidden.value = '427';
     var icdSearch = cEl('cb-icd-search'); if (icdSearch) icdSearch.value = 'Arrhythmia';
+    // v5.30: standard note for this preset (Kathryn 2026-09-22) — rides on
+    // the claim exactly like a hand-typed note (submitConsult reads cb-notes
+    // as userNote). Overwrites whatever was there, same as dx/referrer above.
+    var notesEl = cEl('cb-notes');
+    if (notesEl) notesEl.value = 'Asked to review patient for safety for discharge post PPM insertion';
     if (pillWrap) pillWrap.style.display = 'block';
   } else {
     if (pillWrap) pillWrap.style.display = 'none';
@@ -405,8 +410,12 @@ function _pacemakerSetOn(on) {
     }
     var apL = document.getElementById('ap-submit-list');
     var apO = document.getElementById('ap-submit-only');
+    // v5.30: Kathryn wants "Submit claim only" to carry the purple/primary
+    // fill (btn-p) when active, not green — same visual weight as the
+    // default "Submit claim and add patient to list" gets normally, just
+    // handed to the other button so it draws the eye.
     if (apL) apL.className = 'btn ' + (on ? 'btn-s' : 'btn-p');
-    if (apO) apO.className = 'btn ' + (on ? 'btn-g' : 'btn-s');
+    if (apO) apO.className = 'btn ' + (on ? 'btn-p' : 'btn-s');
   }
 }
 

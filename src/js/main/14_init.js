@@ -20,6 +20,8 @@ window._kghReady = new Promise(function(resolve){ window._kghReadyResolve = reso
 
 // 14_init.js — App init, navigation, fee codes, doctor modal,
 //              and all utility/helper functions
+// v5.31 (2026-09-24): mandatory-update reload gate also waits while the
+//              new one-at-a-time write queue (03_state.js) is non-empty.
 // ═══════════════════════════════════════════════════════
 
 // ── Init ──────────────────────────────────────────────
@@ -991,6 +993,9 @@ function _safeToReload() {
   // Unsent or in-flight writes. _pendingPush does not survive a reload.
   if (window._pendingPush  && Object.keys(window._pendingPush).length)  return false;
   if (window._pushInFlight && Object.keys(window._pushInFlight).length) return false;
+  // v5.31: writes waiting in the one-at-a-time queue (03_state.js) —
+  // deleteClaim is not in _pushInFlight, so check the queue itself.
+  if (window._writeQ && window._writeQ.depth) return false;
   // push() only tracks saveClaim/savePatient/saveGapNote in those two maps;
   // deleteClaim and friends are fire-and-forget, and aborting one silently
   // re-bills a claim the doctor just un-billed. _lastPushAt (03_state.js)
