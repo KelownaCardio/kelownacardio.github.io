@@ -123,17 +123,15 @@ function toggleHandoverFlag(pid) {
   render();
 }
 
-// v5.27: Flag/unflag a claim for KB billing follow-up. Called from the
-// flag icon on each Today's-Claims row (_cfFlagBtn, 02_constants.js).
-// Backend: Claims gains 'followUp'/'followUpNote' (Config v2.50); DataCheck
-// v2.54 copies any flagged claim onto the "Claims to Follow" tab on its
-// next run — this is a watchlist, not an error, so nothing more happens
-// here. Turning a flag OFF stays a silent, instant toggle — no modal, no
-// toast.
-// v5.29: turning a flag ON opens cf-note-modal and now REQUIRES a note
-// (Kathryn, 2026-09-21) — the note is what tells her what to actually
-// follow up on for that MSP claim, so an empty flag isn't useful. "Cancel"
-// backs out without flagging; there is no "flag with no note" option.
+// v5.27: Flag/unflag a claim for follow-up. Called from the flag icon on
+// each Today's-Claims row (_cfFlagBtn, 02_constants.js). Backend: Claims
+// gains 'followUp'/'followUpNote' (Config v2.50); DataCheck v2.54 copies any
+// flagged claim onto the "Claims to Follow" tab on its next run — this is a
+// watchlist, not an error, so nothing more happens here.
+// v5.28: turning a flag ON now opens a small optional-note modal
+// (cf-note-modal) instead of toggling immediately, so a note can be
+// attached at flag time without opening the Claims sheet. Turning a flag
+// OFF stays a silent, instant toggle — no modal, no toast — same as before.
 function toggleClaimFollowUp(claimId) {
   var c = (st.claims || []).find(function(x){ return String(x.id) === String(claimId); });
   if (!c) return;
@@ -145,43 +143,32 @@ function toggleClaimFollowUp(claimId) {
     if (typeof openDailyClaimsList === 'function') openDailyClaimsList(_dailyClaimsFilter);
     return;
   }
-  var idEl  = document.getElementById('cf-note-claim-id');
-  var taEl  = document.getElementById('cf-note-input');
-  var errEl = document.getElementById('cf-note-err');
+  var idEl = document.getElementById('cf-note-claim-id');
+  var taEl = document.getElementById('cf-note-input');
   if (idEl) idEl.value = claimId;
   if (taEl) taEl.value = '';
-  if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
   showModal('cf-note-modal');
   setTimeout(function() { if (taEl) try { taEl.focus(); } catch (e) {} }, 200);
 }
 
-// v5.29: back out of the flag-note modal without flagging anything.
-function cfCancelFollowUpNote() {
-  hideModal('cf-note-modal');
-}
-
-// v5.29: MANDATORY — no note, no flag (mirrors the dup-claim-sheet's
-// required-note pattern in 04_billing.js). Shows an inline error and keeps
-// the modal open instead of closing it, so nothing is silently lost.
-function cfSaveFollowUpNote() {
-  var taEl  = document.getElementById('cf-note-input');
-  var errEl = document.getElementById('cf-note-err');
-  var note  = String((taEl && taEl.value) || '').trim();
-  if (!note) {
-    if (errEl) { errEl.textContent = 'Add a note so KB knows what to follow up on.'; errEl.style.display = 'block'; }
-    return;
-  }
+// v5.28: shared finish step for both cf-note-modal buttons.
+function _cfFinishFollowUpFlag(note) {
   var claimId = (document.getElementById('cf-note-claim-id') || {}).value;
   hideModal('cf-note-modal');
   var c = (st.claims || []).find(function(x){ return String(x.id) === String(claimId); });
   if (!c) return;
   c.followUp     = true;
-  c.followUpNote = note;
+  c.followUpNote = String(note || '').trim();
   sv('claims', st.claims);
   if (SHEETS_URL) push('saveClaim', c);
-  logChange(c, 'Flagged claim for KB billing follow-up',
-    (c.fee || '') + ' on ' + (c.date || '') + ' \u2014 ' + note);
+  logChange(c, 'Flagged claim for follow-up',
+    (c.fee || '') + ' on ' + (c.date || '') + (c.followUpNote ? ' \u2014 ' + c.followUpNote : ''));
   if (typeof openDailyClaimsList === 'function') openDailyClaimsList(_dailyClaimsFilter);
+}
+function cfSkipFollowUpNote() { _cfFinishFollowUpFlag(''); }
+function cfSaveFollowUpNote() {
+  var taEl = document.getElementById('cf-note-input');
+  _cfFinishFollowUpFlag(taEl ? taEl.value : '');
 }
 
 // v4.62: bordered footer row with the three card-level actions.
@@ -844,7 +831,7 @@ function batchRound(ward) {
   });
   sv('patients', st.patients);
   sv('claims', st.claims);
-  showToast('Rounded ' + pts.length + ' on ' + ward + ' — tap any to adjust');
+  showSaved('Rounded ' + pts.length + ' on ' + ward + ' — tap any to adjust');
   render();
 }
 
@@ -994,7 +981,7 @@ function quickDailyBtn(btn) {
   // If already billed — toggle off (undo)
   if (alreadyBilledToday(pid, ['33008'])) {
     if (unbillToday(pid, ['33008'])) {
-      showToast('Daily removed — ' + getP(pid).last);
+      showSaved('Daily removed — ' + getP(pid).last);
       render();
     }
     return;
@@ -1021,7 +1008,7 @@ function quickDailyBtn(btn) {
         addClaim(p2, '33008', '33008', 1, TODAY, 'I', null, p2.combinedDailyReason || '');
         p2.lastBilled = 'Combined daily';
         sv('patients', st.patients); sv('claims', st.claims);
-        showToast('✓ Combined daily — ' + p2.last);
+        showSaved('✓ Combined daily — ' + p2.last);
         requestAnimationFrame(render);
       });
       return;
@@ -1030,7 +1017,7 @@ function quickDailyBtn(btn) {
     addClaim(p, '33008', '33008', 1, TODAY, 'I', null, p.combinedDailyReason || '');
     p.lastBilled = 'Combined daily';
     sv('patients', st.patients); sv('claims', st.claims);
-    showToast('✓ Combined daily — ' + p.last);
+    showSaved('✓ Combined daily — ' + p.last);
     requestAnimationFrame(render);
     return;
   }
@@ -1040,7 +1027,7 @@ function quickDailyBtn(btn) {
   p.lastBilled   = label;
   sv('patients', st.patients);
   sv('claims', st.claims);
-  showToast('✓ ' + label + ' — ' + p.last);
+  showSaved('✓ ' + label + ' — ' + p.last);
   requestAnimationFrame(render);
 }
 
@@ -1051,7 +1038,7 @@ function quickDirectiveBtn(btn) {
   // If already billed today — toggle off (undo), same as daily/CCU
   if (alreadyBilledToday(pid, ['33006'])) {
     if (unbillToday(pid, ['33006'])) {
-      showToast('Directive removed — ' + getP(pid).last);
+      showSaved('Directive removed — ' + getP(pid).last);
       render();
     }
     return;
@@ -1074,7 +1061,7 @@ function quickDirectiveBtn(btn) {
   p.lastBilled   = 'Directive';
   sv('patients', st.patients);
   sv('claims', st.claims);
-  showToast('✓ Directive — ' + p.last);
+  showSaved('✓ Directive — ' + p.last);
   requestAnimationFrame(render);
 }
 
@@ -1085,7 +1072,7 @@ function quickCCUBtn(btn) {
   // If already billed — toggle off (undo)
   if (alreadyBilledToday(pid, ['CCU_DAILY','1411','1421','1431'])) {
     if (unbillToday(pid, ['CCU_DAILY','1411','1421','1431'])) {
-      showToast('CCU daily removed — ' + getP(pid).last);
+      showSaved('CCU daily removed — ' + getP(pid).last);
       render();
     }
     return;
@@ -1109,7 +1096,7 @@ function quickCCUBtn(btn) {
   p.lastBilled   = 'CCU day';
   sv('patients', st.patients);
   sv('claims', st.claims);
-  showToast('✓ CCU day — ' + p.last);
+  showSaved('✓ CCU day — ' + p.last);
   requestAnimationFrame(render);
 }
 

@@ -558,7 +558,7 @@ function _doRestoreCommit(pid, list, mode, isoDate) {
       ? 'New admission ' + p.admitDate +
         (prevDisch ? ' — previous stay closed ' + prevDisch : '')
       : 'Returned to ' + (list === 'on' ? 'On Service' : 'Off Service'));
-  showToast(mode === 'new'
+  showSaved(mode === 'new'
     ? p.last + ' readmitted — new stay from ' + p.admitDate
     : p.last + ' restored to ' + (list === 'on' ? 'on-service' : 'off-service') + ' list');
   renderDischarged(document.getElementById('discharged-search') ? document.getElementById('discharged-search').value : '');

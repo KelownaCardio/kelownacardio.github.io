@@ -406,9 +406,16 @@ function netlogWorthRetry(code) {
 // 2 can call findRowIndex before attempt 1's append has committed, miss it,
 // and append a SECOND row with the same id/alias. Upsert-by-key is only
 // idempotent when the read-modify-write is serialized. It is not, here.
+// v5.32 (2026-09-25): + savePatientWithClaims and mergePatientDemographics.
+// Both are safe to repeat: the batch upserts patient + claims by id and the
+// server blocks same-day duplicates (25/09 log: two writes of Whaley's batch
+// → exactly 3 claim rows); the merge finds the kept row by id and the
+// absorbed rows are already gone on a second pass. Without this, a 7am
+// timeout on Add Patient got ONE attempt and then "Not saved".
 var NETLOG_IDEMPOTENT = {
   savePatient: 1, saveClaim: 1, saveGapNote: 1,
-  deletePatient: 1, deleteClaim: 1
+  deletePatient: 1, deleteClaim: 1,
+  savePatientWithClaims: 1, mergePatientDemographics: 1
 };
 
 // ── Throttled variant, for high-frequency probes ───────────────────

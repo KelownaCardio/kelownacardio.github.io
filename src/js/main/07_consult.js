@@ -921,8 +921,9 @@ function submitConsultClaims(p, alias, locOverride) {
     p.admitVia = 'RACE';
     sv('patients', st.patients);
     sv('claims', st.claims);
-    showToast(_mostOn ? 'RACE admit — MOST (78720) added, no consult fee'
-                      : 'RACE admit — no claims added (consult billed in RACE clinic)');
+    // v5.32: success is silent; "nothing billed" is still said out loud.
+    if (_mostOn) showSaved('RACE admit — MOST (78720) added, no consult fee');
+    else showToast('RACE admit — no claims added (consult billed in RACE clinic)');
     return true;
   }
   // CCFPP — one-directional detection (single most-recent overlapping
@@ -1060,7 +1061,7 @@ function submitConsult() {
   if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
   if (!submitConsultClaims(p, getPerformingAlias())) return;
   sv('patients', st.patients);
-  showToast('Consult claims added for ' + p.last);
+  showSaved('Consult claims added for ' + p.last);
   closeClaimScreen();
 }
 
@@ -1558,7 +1559,7 @@ function tlSaveTimes() {
 
   _tlCommitTimes(sel, ns, ne, null);
   trims.forEach(function(t){ if (!t.self) applyConsultTimes_(t.c, t.ns, t.ne); });
-  showToast('Times updated — call-out blocks re-built');
+  showSaved('Times updated — call-out blocks re-built');
   _tlSel = null;
   _tlCod = null;
   _tlRender();
@@ -1582,7 +1583,7 @@ function _tlApplyCod() {
     : null;
   _tlCommitTimes(sel, _tlCod.ns, _tlCod.ne, ccNote);
   _tlCod.trims.forEach(function(t){ applyConsultTimes_(t.c, t.ns, t.ne); });
-  showToast(canLink ? 'Times updated — call-out blocks re-built, CCFPP noted'
+  showSaved(canLink ? 'Times updated — call-out blocks re-built, CCFPP noted'
                     : 'Times updated — call-out blocks re-built');
   _tlSel = null;
   _tlCod = null;
@@ -1599,7 +1600,7 @@ function _tlCodSelectPill(which) {
     ? _ccfppMerge(_ccfppStrip(sel.notes), 'CCFPP: ' + _tlCod.pred.name + ' (' + _tlCod.pred.phn + ')')
     : (_ccfppStrip(sel.notes) || null);
   _tlCommitTimes(sel, _tlCod.ns, _tlCod.ne, ccNote);
-  showToast(which === 'ccfpp' ? 'Times updated — linked as continuing care (CCFPP)'
+  showSaved(which === 'ccfpp' ? 'Times updated — linked as continuing care (CCFPP)'
                                : 'Times updated — billed as a new call-back');
   _tlSel = null;
   _tlCod = null;

@@ -337,7 +337,7 @@ function savePatientEdit(pid) {
   logChange(p, 'Demographics edited', _detailParts.join(' \u2014 '));
   hideModal('pt-edit-modal');
   render();
-  showToast(p.last + ' updated' + (_claimsTouched > 0 ? ' (\u2713 ' + _claimsTouched + ' claim row(s) updated)' : ''));
+  showSaved(p.last + ' updated' + (_claimsTouched > 0 ? ' (\u2713 ' + _claimsTouched + ' claim row(s) updated)' : ''));
 }
 
 // ═══════════════════════════════════════════════════════
@@ -434,6 +434,6 @@ function saveLocationEdit(pid) {
   var toastBits = [];
   if (oldWard !== newWard || oldBed !== newBed) toastBits.push((WARDS[newWard]||{}).label || newWard);
   if (newBed) toastBits.push(newBed);
-  showToast(p.last + ' moved' + (toastBits.length ? ' → ' + toastBits.join(' ') : ''));
+  showSaved(p.last + ' moved' + (toastBits.length ? ' → ' + toastBits.join(' ') : ''));
 }
 

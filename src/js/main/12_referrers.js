@@ -296,9 +296,9 @@ function submitNewPhysician(dropdownId, hiddenId, nameId) {
   // in later once Kathryn looks it up.
   selectRef(num, display, dropdownId, hiddenId, nameId);
   hideModal('add-phys-modal'); // v4.68: close the bottom sheet on save
-  showToast(num
-    ? ('Dr. ' + last + ' added to physician directory')
-    : ('Dr. ' + last + ' saved — MSP # will be emailed to Kathryn to look up'));
+  // v5.32: silent when complete; the no-MSP case still says what happens next.
+  if (num) showSaved('Dr. ' + last + ' added to physician directory');
+  else showToast('Dr. ' + last + ' saved — MSP # will be emailed to Kathryn to look up');
 }
 
 // ── selectRefRow / selectRef ───────────────────────────
@@ -390,7 +390,7 @@ function addRef() {
   if (SHEETS_URL) push('saveRef', r);
   ['r-last','r-first','r-num','r-spec'].forEach(function(id) { document.getElementById(id).value = ''; });
   renderRefs('');
-  showToast('Referrer saved');
+  showSaved('Referrer saved');
 }
 
 // Close dropdowns on outside click

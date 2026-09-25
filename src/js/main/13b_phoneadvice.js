@@ -546,7 +546,7 @@ function paSubmit() {
       if (j && j.ok) {
         paStatus('✓ Submitted: ' + ((j.result && j.result.message) || 'done') +
                  ' — letter queued, claim in billing.', 'ok');
-        showToast('Phone advice submitted ✓', 'ok');
+        showSaved('Phone advice submitted ✓');
       } else {
         var msg = (j && (j.error || (j.result && j.result.error))) || 'Submission failed';
         // 'Unauthorized' → likely APP_PW mismatch on the PhoneAdvice project.

@@ -1214,6 +1214,6 @@ function confirmDupClaim() {
         return;
       }
     }
-    showToast('Second ' + a.fee + ' billed at ' + time + ' with your note');
+    showSaved('Second ' + a.fee + ' billed at ' + time + ' with your note');
   }
 }

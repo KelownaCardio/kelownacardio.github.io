@@ -816,6 +816,16 @@ function chkIco10() {
 
 // Toast notification
 var _toastTimer;
+// v5.32 (2026-09-25, Kathryn): NO toast when a save succeeds or is queued —
+// the doctor sees the result on screen (pill turns billed, card moves).
+// Every former "added / updated / saved / discharged" toast now calls this
+// instead. It only logs, so the wording is still there for debugging and
+// any one of them can be switched back to showToast by name. Validation
+// messages and real failures still use showToast.
+function showSaved(msg) {
+  try { console.log('[saved] ' + msg); } catch (e) {}
+}
+
 function showToast(msg, kind) {
   // v4.29: If addClaim just blocked a duplicate (within last 2s), don't
   // let a success toast overwrite the error toast. The caller doesn't

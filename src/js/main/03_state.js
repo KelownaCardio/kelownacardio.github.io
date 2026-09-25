@@ -662,8 +662,54 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   queued. Safety valve: a write holding the queue >60 s releases it.
 //   14_init.js: the mandatory-update reload also waits for the queue to
 //   drain. No backend change. No cache-format change, BUILD_ID not bumped.
-var APP_VERSION = 'v5.31';
-var APP_BUILT   = '2026-09-24';
+// v5.32 (2026-09-25) — QUIET SAVES: NO FAILURE BANNER UNLESS A SAVE IS
+//   REALLY STUCK, NO "PLEASE RESAVE" PROMPTS, NO SUCCESS TOASTS. KBrown
+//   25/09 07:33 PT (Whaley): Add Patient's savePatientWithClaims took 16 s
+//   server-side at the 7am rush, the phone's 20 s clock ran out, the app
+//   rolled the patient + claims back, toasted "Not saved" and raised the
+//   red "unable to connect / Retry" banner — but the server HAD written
+//   all 3 claims. The doctor re-submitted; the server's duplicate guard
+//   blocked all 3 (no harm this time). A timeout means "no answer yet",
+//   not "failed". Kathryn's rule: no toast when a save succeeds or is
+//   queued; no failure banner unless it is actually failing.
+//   push():
+//   • A transient failure (timeout / transport / 5xx / lock) of a keyed
+//     write now leaves it QUEUED (it already stayed in _pendingPush for the
+//     background retry) and turns the dot AMBER — no red banner. The first
+//     failure time is kept on the entry (failAt) across retries.
+//   • RED banner only when it is actually failing: a queued write still
+//     unsent after 3 min, OR no successful sync for 3 min (checked every
+//     15 s by _evalNetHealth). It clears itself when things recover.
+//     Server faults (rejected / stale client / app password) stay red at
+//     once, as before — those ARE failures.
+//   • savePatientWithClaims joins the retry-safe list (NETLOG_IDEMPOTENT,
+//     03b_netlog.js). Proven safe in the 25/09 log: two writes of the same
+//     batch left exactly 3 claim rows — claims upsert by id and the server
+//     blocks same-day duplicates. On a transient failure the patient and
+//     every claim in the batch are registered as ordinary pending
+//     savePatient / saveClaim entries, so the sync keeps them on screen and
+//     the background retry re-sends them (same ids → upsert, no duplicates).
+//   • mergePatientDemographics and deleteClaim / deletePatient are now
+//     queued the same way (keys 'mpd|id' / 'del|id'); a queued delete
+//     stops the sync from re-showing the row until the delete lands.
+//   • savePatientWithClaims / mergePatientDemographics get 30 s instead of
+//     20 s (16 s server time is normal at 7am). Write-queue valve 60→75 s.
+//   • log* calls (logChange etc.) never raise the banner — they are audit
+//     trail, not the doctor's data.
+//   • wasQueued(body) tells a caller "not confirmed yet, but queued and
+//     retrying" — callers treat that as done: no rollback, no toast.
+//   • Banner "Retry" now re-sends queued writes immediately, then syncs
+//     (it used to only re-read the sheet).
+//   commitClaimGate (consult edits): a transient failure now re-sends the
+//   consult once more before giving up (the server answers an identical
+//   re-send of a write that landed with ok/unchanged), instead of going
+//   straight to "Not saved — please redo".
+//   Success/"added"/"updated" toasts removed app-wide via showSaved()
+//   (14_init.js) — a no-op that only logs to the console. Validation and
+//   real-failure toasts are unchanged.
+//   No backend change. No cache-format change, BUILD_ID not bumped.
+var APP_VERSION = 'v5.32';
+var APP_BUILT   = '2026-09-25';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
@@ -940,6 +986,13 @@ function sanitizeReferrer(obj) {
 // fall back to the last recorded netlog event, so every existing call
 // site keeps working and still gets a better message than before.
 function setSyncState(s, detail) {
+  // v5.32: 'synced' while a failed write is still queued stays AMBER —
+  // green must mean "nothing of yours is waiting".
+  if (s === 'synced' && _oldestUnsentAge() >= 0) s = 'syncing';
+  // v5.32: remember whether a red banner came from the soft 3-min rule
+  // (_evalNetHealth may clear it) or from a hard fault (it may not).
+  window._netRedSoft = (s === 'error') ? !!(detail && detail.soft) : false;
+  window._netState = s;
   var dot = document.getElementById('sync-dot');
   if (dot) dot.className = 'sync-dot ' + s;
 
@@ -969,7 +1022,14 @@ function setSyncState(s, detail) {
     if (txt) txt.textContent = netlogExplain(_code);
     if (btn) {
       btn.textContent = (_code === 'offline') ? 'Try anyway' : 'Retry';
-      btn.onclick = function() { setSyncState('syncing'); syncFromSheets(); };
+      // v5.32: re-send queued writes NOW, then re-read the sheet. Before,
+      // this only re-read — nothing was re-sent, so the doctor re-did the
+      // save by hand and it landed twice.
+      btn.onclick = function() {
+        setSyncState('syncing');
+        try { _retryPendingPushes(true); } catch (eR) {}
+        syncFromSheets();
+      };
     }
     // One tap, sends itself, nothing for them to describe or remember.
     // Also re-labelled on every error so a previous "Reported ✓" does not
@@ -1162,6 +1222,7 @@ function _applySyncDelta(d) {
   ((d.deleted && d.deleted.claims)   || []).forEach(function(id) { delC[String(id)] = 1; });
 
   (d.patients || []).forEach(function(rp) {
+    if (_pendingDel(rp.id)) return;   // v5.32: our delete is still on its way
     _normRemotePatient(rp);
     sanitizeReferrer(rp);
     var idx = -1;
@@ -1179,6 +1240,7 @@ function _applySyncDelta(d) {
   }
 
   (d.claims || []).forEach(function(rc) {
+    if (_pendingDel(rc.id)) return;   // v5.32: our delete is still on its way
     _normRemoteClaim(rc);
     sanitizeReferrer(rc);
     var idx = -1;
@@ -1213,12 +1275,101 @@ function _applySyncDelta(d) {
   });
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// v5.32 — QUIET SAVES (see version note). Amber = "queued, retrying";
+// red only when actually failing (unsent >3 min, or no sync for 3 min).
+// ═══════════════════════════════════════════════════════════════════
+var NET_STUCK_MS_ = 180000;
+if (!window._appStartAt) window._appStartAt = Date.now();
+if (!window._pushQ) { try { window._pushQ = new WeakMap(); } catch (eWm) { window._pushQ = null; } }
+// Caller-side: "push() returned false, but the write is queued and the app
+// will keep re-sending it" — treat as done (no rollback, no toast).
+function wasQueued(body) {
+  try { return !!(body && typeof body === 'object' && window._pushQ && window._pushQ.get(body)); }
+  catch (e) { return false; }
+}
+// A delete this device has sent but not had confirmed — the sync must not
+// put the row back on screen meanwhile.
+function _pendingDel(id) {
+  var pp = window._pendingPush;
+  return !!(pp && id != null && pp['del|' + String(id)]);
+}
+// Age (ms) of the oldest write that FAILED and is still waiting to be
+// re-sent; -1 when none. Writes merely awaiting sync confirmation do not
+// count — only ones that actually failed (failAt stamped by _pushSoftFail).
+function _oldestUnsentAge() {
+  var pp = window._pendingPush || {}, now = Date.now(), max = -1;
+  Object.keys(pp).forEach(function(k) {
+    var e = pp[k];
+    if (e && e.failAt) { var a = now - e.failAt; if (a > max) max = a; }
+  });
+  return max;
+}
+function _evalNetHealth() {
+  if (window._staleLocked) return;
+  var cur = window._netState;
+  if (cur === 'auth') return;
+  if (cur === 'error' && !window._netRedSoft) return;   // hard fault: only a real success clears it
+  var unsent = _oldestUnsentAge();
+  var base = Math.max(window._lastSyncOkAt || 0, window._appStartAt || 0);
+  var syncDown = !!window._syncFailing && (Date.now() - base) > NET_STUCK_MS_;
+  if (unsent > NET_STUCK_MS_ || syncDown) {
+    if (cur !== 'error') setSyncState('error', { code: window._netSoftCode || '', soft: true });
+  } else if (unsent >= 0 || window._syncFailing) {
+    if (cur !== 'syncing') setSyncState('syncing');
+  } else if (cur === 'error') {
+    setSyncState('synced');   // recovered on its own — take the red banner down
+  }
+}
+setInterval(function() { try { _evalNetHealth(); } catch (e) {} }, 15000);
+function _syncSoftFail(code) {
+  window._syncFailing = true;
+  window._netSoftCode = code;
+  if (!(window._netState === 'error' && !window._netRedSoft)) setSyncState('syncing');
+  _evalNetHealth();
+}
+// A write got no usable answer (timeout / transport / 5xx / lock). If it is
+// queued for re-send, go amber and say nothing; if nothing will ever re-send
+// it, that is a real failure → red, as before.
+function _pushSoftFail(action, body, key, code) {
+  var pp = window._pendingPush || (window._pendingPush = {});
+  var now = Date.now(), queued = false;
+  window._netSoftCode = code;
+  if (/^log/.test(String(action || ''))) {   // audit trail, never the banner
+    if (_oldestUnsentAge() < 0 && !window._syncFailing && window._netState === 'syncing') setSyncState('synced');
+    return false;
+  }
+  if (action === 'savePatientWithClaims' && body && body.patient && body.patient.id) {
+    // Re-send as ordinary keyed saves: same ids → upsert, never a duplicate.
+    // The sync keeps pending rows on screen and _retryPendingPushes re-sends.
+    var reg = function(k, act, b) {
+      var pe = pp[k];
+      if (pe && pe.queued) return;   // a newer edit is already parked there
+      pp[k] = { action: act, body: b, ts: now, failAt: (pe && pe.failAt) || now };
+    };
+    reg(String(body.patient.id), 'savePatient', body.patient);
+    (body.claims || []).forEach(function(c) { if (c && c.id) reg(String(c.id), 'saveClaim', c); });
+    queued = true;
+  } else if (key && pp[key]) {
+    if (!pp[key].failAt) pp[key].failAt = now;
+    queued = true;
+  }
+  if (queued) {
+    try { if (body && typeof body === 'object' && window._pushQ) window._pushQ.set(body, true); } catch (e) {}
+    if (!(window._netState === 'error' && !window._netRedSoft)) setSyncState('syncing');
+    _evalNetHealth();
+  } else {
+    setSyncState('error', { code: code });   // nothing will re-send it — a real failure
+  }
+  return false;
+}
+
 // v5.19: a failed write used to wait for the next FULL sync to be re-sent
 // (the full merge re-pushes pending rows). Deltas don't walk the whole list,
 // so re-send stragglers here — anything pending >30s and not in flight.
 // Every action that reaches _pendingPush is upsert-keyed, so a re-send of a
 // write that actually landed is a no-op server-side.
-function _retryPendingPushes() {
+function _retryPendingPushes(force) {
   if (!SHEETS_URL) return;
   var pp = window._pendingPush || {};
   var now = Date.now();
@@ -1226,9 +1377,10 @@ function _retryPendingPushes() {
     var e = pp[k];
     if (!e || !e.action || !e.body) return;
     if (window._pushInFlight && window._pushInFlight[k]) return;
-    if (now - (e.ts || 0) < 30000) return;
+    if (!force && now - (e.ts || 0) < 30000) return;   // v5.32: banner Retry forces
     // A `queued` entry (parked behind an in-flight save) whose in-flight
     // save has long finished has no other sender for patients — send it.
+    var _fa = e.failAt || 0;   // v5.32: the first-failure clock must survive the re-registration below
     if (e.queued) delete pp[k];
     // Only rows that still exist locally: a save whose row was since
     // deleted/un-billed on this device must not be resurrected (review
@@ -1236,6 +1388,7 @@ function _retryPendingPushes() {
     if (e.action === 'saveClaim'   && !(st.claims   || []).some(function(c) { return String(c.id) === String(k); })) { delete pp[k]; return; }
     if (e.action === 'savePatient' && !(st.patients || []).some(function(p) { return String(p.id) === String(k); })) { delete pp[k]; return; }
     push(e.action, e.body, e.wire || undefined);
+    if (_fa && pp[k] && !pp[k].failAt) pp[k].failAt = _fa;   // push() registers synchronously before its first await
   });
 }
 
@@ -1366,7 +1519,7 @@ async function syncFromSheets(opts) {
           _syncInFlight = false;
           return await syncFromSheets(opts);       // same request, other door, right now
         }
-        setSyncState('error', { code: _lastCode });
+        _syncSoftFail(_lastCode);   // v5.32: amber; red only if still down after 3 min
         return;
       }
       await _netlogSleep(netlogRetryDelay(_lastCode));   // v5.13: longer pause after a 404
@@ -1422,7 +1575,7 @@ async function syncFromSheets(opts) {
       if (d.ver) window._syncVer = Number(d.ver) || window._syncVer;
       if (d.lastWriteAt) window._lastSeenWriteAt = String(d.lastWriteAt);
       window._lastSyncResponse.checkpoint = 'no-change';
-      window._lastSyncOkAt = Date.now();
+      window._lastSyncOkAt = Date.now(); window._syncFailing = false;
       setSyncState('synced');
       try { if (!isResident()) netlogFlush(); } catch (eNl0) {}
       _retryPendingPushes();
@@ -1438,7 +1591,7 @@ async function syncFromSheets(opts) {
       window._lastSyncResponse.checkpoint = 'delta-applied';
       window._lastSyncResponse.deltaPatients = (d.patients || []).length;
       window._lastSyncResponse.deltaClaims   = (d.claims || []).length;
-      window._lastSyncOkAt = Date.now();
+      window._lastSyncOkAt = Date.now(); window._syncFailing = false;
       setSyncState('synced');
       try { if (!isResident()) netlogFlush(); } catch (eNl1) {}
       render();
@@ -1506,7 +1659,7 @@ async function syncFromSheets(opts) {
       // v5.19: per-row merge + pending confirmation now live in
       // _mergeRemotePatient / _confirmPendingPatient (shared with the delta
       // path) — same v4.72 rules, unchanged.
-      var merged = d.patients.map(function(rp) {
+      var merged = d.patients.filter(function(rp) { return !_pendingDel(rp.id); }).map(function(rp) {   // v5.32
         var lp = st.patients.find(function(p) { return p.id === rp.id; });
         return _mergeRemotePatient(rp, lp);
       });
@@ -1556,7 +1709,7 @@ async function syncFromSheets(opts) {
       var remoteClaimIds = {};
       d.claims.forEach(function(c) { remoteClaimIds[c.id] = true; });
 
-      var mergedClaims = d.claims.slice();
+      var mergedClaims = d.claims.filter(function(c) { return !_pendingDel(c.id); });   // v5.32: was .slice()
 
       // Clear pending entries that now appear in Sheets (push succeeded) —
       // v5.12: unless the entry was queued AFTER this sync began, in which
@@ -1742,7 +1895,7 @@ async function syncFromSheets(opts) {
     window._lastSyncResponse.completedAt = new Date().toISOString();
     window._lastSyncResponse.stPatientsFinal = st.patients.length;
     window._lastSyncResponse.stClaimsFinal = st.claims.length;
-    window._lastSyncOkAt = Date.now();   // v4.73: resume-guard staleness marker
+    window._lastSyncOkAt = Date.now(); window._syncFailing = false;   // v4.73: resume-guard staleness marker
     if (d.lastWriteAt) window._lastSeenWriteAt = String(d.lastWriteAt);   // v4.75: ping-sync re-baseline
     // v5.19: a full pull is the delta baseline. No `ver` in the reply means
     // Router < v3.21 — _syncVer stays 0 and every sync remains a full pull.
@@ -1782,7 +1935,7 @@ async function syncFromSheets(opts) {
       errName: String(e && e.name || ''), errMsg: String(e && e.message || e),
       attempt: 1, recovered: false
     });
-    setSyncState('error', { code: _c });
+    _syncSoftFail(_c);   // v5.32: amber; red only if still failing after 3 min
   } finally {
     _syncInFlight = false;
   }
@@ -1864,6 +2017,21 @@ function endClaimGate() { var g = window._claimGate; window._claimGate = null; r
 async function commitClaimGate(g, consult) {
   if (!g || !consult) return true;
   var ok = await push('saveClaim', consult);          // gate is closed — a real send
+  // v5.32: a timeout is "no answer yet", not "refused". Re-send the SAME
+  // consult once more (after any background re-send of it finishes). If
+  // the first one landed, Crud v3.21 sees an identical payload and answers
+  // ok/unchanged — so this can never double-bill. Only if that fails too
+  // do we fall through to the old "Not saved — please redo".
+  if (!ok && wasQueued(consult)) {
+    var _gw0 = Date.now(), _cid = String(consult.id);
+    while (window._pushInFlight && window._pushInFlight[_cid] && (Date.now() - _gw0) < 30000) {
+      await _netlogSleep(500);
+    }
+    await _netlogSleep(3000);
+    ok = await push('saveClaim', consult);
+    var _gpe = window._pendingPush && window._pendingPush[_cid];
+    if (ok && _gpe && _gpe.queued) ok = false;   // only parked, not confirmed
+  }
   if (ok) {
     // Keep the LAST write per row, in order. A row that is DELETED inside
     // the gate must not also be saved — the delete would land first and
@@ -1909,7 +2077,7 @@ var WRITE_Q_ACTIONS_ = {
   saveClaim: 1, savePatient: 1, savePatients: 1, savePatientWithClaims: 1,
   deleteClaim: 1, deletePatient: 1, saveGapNote: 1, mergePatientDemographics: 1
 };
-var WRITE_Q_STALL_MS_ = 60000;   // > worst single push (20 + ~5 + 20 s)
+var WRITE_Q_STALL_MS_ = 75000;   // > worst single push (30 + ~5 + 30 s) — v5.32: was 60 s
 if (!window._writeQ) window._writeQ = { tail: Promise.resolve(), depth: 0 };
 function _writeQAcquire() {
   var q = window._writeQ;
@@ -1928,7 +2096,7 @@ function _writeQAcquire() {
       release();
     };
     valve = setTimeout(function(){
-      if (!released) { console.warn('[writeQ] a write held the queue >60s — releasing'); rel(); }
+      if (!released) { console.warn('[writeQ] a write held the queue >75s — releasing'); rel(); }
     }, WRITE_Q_STALL_MS_);
     window._lastPushAt = Date.now();
     var waited = Date.now() - _t0;
@@ -1936,6 +2104,10 @@ function _writeQAcquire() {
     return rel;
   });
 }
+
+// v5.32: per-action write timeout. The Add-Patient batch and the demographics
+// merge legitimately take ~16 s server-side at the 7am rush (Perf Log 25/09).
+var PUSH_TIMEOUT_MS_ = { savePatientWithClaims: 30000, mergePatientDemographics: 30000 };
 
 async function push(action, body, wire) {
   // v5.19: `wire` = fields that ride on the request ONLY (never stored on
@@ -1953,6 +2125,7 @@ async function push(action, body, wire) {
     window._claimGate.ops.push({ action: action, body: body });
     return true;
   }
+  try { if (body && typeof body === 'object' && window._pushQ) window._pushQ.delete(body); } catch (eQd) {}   // v5.32
   if (!SHEETS_URL) return false;
   if (window._staleLocked) return false;   // v5.25: see syncFromSheets
   // Guard: never push a patient or claim with no id — prevents blank row creation
@@ -1990,6 +2163,11 @@ async function push(action, body, wire) {
   if (action === 'saveGapNote' && body) {
     _pKey = 'g|' + String(body.phn || '').replace(/\D/g, '') + '|' + String(body.date || '');
   }
+  // v5.32: queued re-send for these too (both are safe to repeat — see
+  // version note). Keys are prefixed so they never collide with the
+  // patient/claim ids the sync merge looks up.
+  if (action === 'mergePatientDemographics' && body && body.id) _pKey = 'mpd|' + body.id;
+  if ((action === 'deleteClaim' || action === 'deletePatient') && body && body.id) _pKey = 'del|' + body.id;
   if (_pKey) {
     if (window._pushInFlight[_pKey]) {
       // v5.04: the in-flight window grew (retry + 20s abort ceiling), so
@@ -1997,7 +2175,9 @@ async function push(action, body, wire) {
       // back in ~1s. Queue the NEWER body before returning, otherwise a
       // doctor who corrects a fee mid-retry gets a success toast for a
       // value that was never sent anywhere.
-      window._pendingPush[_pKey] = { action: action, body: body, ts: Date.now(), queued: true, wire: wire || null };  // v5.12: tagged — see syncFromSheets; v5.19: keeps wire
+      var _qPrev = window._pendingPush[_pKey];
+      window._pendingPush[_pKey] = { action: action, body: body, ts: Date.now(), queued: true, wire: wire || null,
+                                     failAt: (_qPrev && _qPrev.failAt) || 0 };  // v5.12: tagged — see syncFromSheets; v5.19: keeps wire; v5.32: keeps failAt
       return true;  // true = don't trigger error handling
     }
     window._pushInFlight[_pKey] = true;
@@ -2005,7 +2185,9 @@ async function push(action, body, wire) {
   // Mark as pending until next successful sync confirms it
   var _pStart = Date.now();
   if (_pKey) {
-    window._pendingPush[_pKey] = { action: action, body: body, ts: _pStart, wire: wire || null };   // v5.19: wire kept for retries
+    var _pPrev = window._pendingPush[_pKey];
+    window._pendingPush[_pKey] = { action: action, body: body, ts: _pStart, wire: wire || null,   // v5.19: wire kept for retries
+                                   failAt: (_pPrev && _pPrev.failAt) || 0 };                      // v5.32: first-failure time survives re-sends
   }
   // v5.04 review fix: with the retry chain, this push can be in flight for
   // up to ~25s — long enough for the doctor to save the SAME record again.
@@ -2051,7 +2233,7 @@ async function push(action, body, wire) {
       // 20s matches the sync ceiling. Worst case 20 + 1.35 + 20 ~= 41s,
       // still under the old single 45s wait.
       var _pCtrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-      var _pTid  = setTimeout(function() { if (_pCtrl) _pCtrl.abort(); }, 20000);
+      var _pTid  = setTimeout(function() { if (_pCtrl) _pCtrl.abort(); }, PUSH_TIMEOUT_MS_[action] || 20000);   // v5.32: per-action
       try {
         // v5.12: opt this build into Crud v3.21 claim arbitration. The flag
         // rides on the wire only — never on the st.claims object.
@@ -2097,8 +2279,7 @@ async function push(action, body, wire) {
           if (_qRel) { _qRel(); _qRel = null; }   // v5.31: free the queue first or the re-push waits on itself
           return await push(action, body, wire);   // v5.20: same write, other door, right now
         }
-        setSyncState('error', { code: _pCode });
-        return false;
+        return _pushSoftFail(action, body, _pKey, _pCode);   // v5.32: queued → amber, not red
       }
       await _netlogSleep(netlogRetryDelay(_pCode));      // v5.13: longer pause after a 404
     }
@@ -2122,8 +2303,7 @@ async function push(action, body, wire) {
         errName: String(_parseErr.name || ''), errMsg: String(_parseErr.message || _parseErr),
         httpStatus: resp.status, attempt: 1, recovered: false
       });
-      setSyncState('error', { code: 'bad_json' });
-      return false;
+      return _pushSoftFail(action, body, _pKey, 'bad_json');   // v5.32
     }
     // v4.76: a response carrying `error` is a FAILURE even without ok:false.
     // Router ≤v3.05 returned bare {error} for thrown backend exceptions (lock
@@ -2203,10 +2383,19 @@ async function push(action, body, wire) {
       // Connection is fine — we got a clean 200 + JSON. This is a data
       // rejection, not a connectivity failure, so do NOT raise the wifi
       // banner; the caller surfaces the specific error to the user.
+      // v5.32: a TRANSIENT rejection (lock timeout) is still queued for
+      // re-send — mark it so the caller treats it as done, not failed.
+      if (_transient) return _pushSoftFail(action, body, _pKey, 'lock');
       setSyncState('synced');
       return false;
     }
     window._lastPushError = null;
+    // v5.32: sent and answered — no longer "unsent". Prefixed keys have no
+    // sync confirmation, so they are done now.
+    if (_pKey && window._pendingPush[_pKey] && !_pendingIsNewer()) {
+      if (/^(mpd|del)\|/.test(_pKey)) delete window._pendingPush[_pKey];
+      else delete window._pendingPush[_pKey].failAt;
+    }
     // v5.12: Crud v3.21 stamps `savedAt` on every claim write and returns
     // it. Keep the local copy in step, or this device's NEXT save of the
     // same claim would be refused as stale against its own write.
@@ -2239,8 +2428,7 @@ async function push(action, body, wire) {
       errName: String(e && e.name || ''), errMsg: String(e && e.message || e),
       attempt: 1, recovered: false
     });
-    setSyncState('error', { code: _ec });
-    return false;
+    return _pushSoftFail(action, body, _pKey, _ec);   // v5.32
   }
   } finally {
     if (_qRel) _qRel();   // v5.31: always hand the queue to the next write

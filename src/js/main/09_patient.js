@@ -352,15 +352,18 @@ async function _mergeAndReadmit() {
     // patient row sharing the old/new PHN, (c) retags every prior claim row.
     // push() returns false on a server rejection ({ok:false}) so the doctor is
     // told rather than silently losing the correction.
-    var ok = _demoChanged
-      ? await push('mergePatientDemographics', {
-          id:      p.id,                                  // for the in-flight guard
+    var _mBody = _demoChanged
+      ? { id:      p.id,                                  // for the in-flight guard
           patient: p,
           oldPhn:  _oldPhn,
-          user:    (st.doc && st.doc.alias) || ''
-        })
-      : await push('savePatient', p);
-    if (!ok) {
+          user:    (st.doc && st.doc.alias) || '' }
+      : p;
+    var ok = await push(_demoChanged ? 'mergePatientDemographics' : 'savePatient', _mBody);
+    // v5.32: a timeout is not a failure — the write is queued and the app
+    // keeps re-sending it (safe: both actions are repeat-safe). Carry on
+    // exactly as if it landed; only a real server rejection stops here.
+    var _mQueued = !ok && wasQueued(_mBody);
+    if (!ok && !_mQueued) {
       // Keep p._mergeOldPhn stashed so a retry still knows which claim rows to
       // retag (see the snapshot block above).
       showToast(window._lastPushError
@@ -370,8 +373,9 @@ async function _mergeAndReadmit() {
       return;
     }
   }
-  // Landed. Clear the retag key.
-  if (p._mergeOldPhn) { delete p._mergeOldPhn; sv('patients', st.patients); }
+  // Landed. Clear the retag key. (v5.32: not while only queued — the
+  // queued merge body still needs it.)
+  if (p._mergeOldPhn && !_mQueued) { delete p._mergeOldPhn; sv('patients', st.patients); }
 
   var mergeVerb = window._dupIsReadmit ? 'Readmit (merged)' : 'Moved to active service (merged)';
   logChange(p, mergeVerb, addToList ? (p.ward + (p.bed ? ' Rm ' + p.bed : '')) : 'Consult only');
@@ -428,12 +432,10 @@ async function _mergeAndReadmit() {
     }
     sv('claims', st.claims);
     if (_mgClaimsValid && _mgBatch.length && SHEETS_URL) {
-      var okClaims = await push('savePatientWithClaims', {
-        id:      p.id,
-        patient: p,
-        claims:  _mgBatch
-      });
-      if (!okClaims) {
+      var _mgBody = { id: p.id, patient: p, claims: _mgBatch };
+      var okClaims = await push('savePatientWithClaims', _mgBody);
+      // v5.32: queued (timeout) = done; the claims stay and are re-sent.
+      if (!okClaims && !wasQueued(_mgBody)) {
         // Patient row is saved; the claims are kept locally and the sync
         // retry loop will re-push them individually — but tell the doctor
         // so they can verify rather than trust silence.
@@ -465,7 +467,7 @@ async function _mergeAndReadmit() {
   }
 
   // v4.69: plain-language toast — say what happened, not which internal path ran.
-  showToast(p.last + (addToList ? ' added to list' : ' added') +
+  showSaved(p.last + (addToList ? ' added to list' : ' added') +
             (_demoChanged
               ? ' — info updated' + (_retagged ? ' (' + _retagged + ' prior claim' +
                   (_retagged > 1 ? 's' : '') + ' corrected)' : '')
@@ -731,7 +733,7 @@ function locSaveCustomWard(prefix) {
       if (otherOpt) sel.insertBefore(newOpt, otherOpt);
       else sel.appendChild(newOpt);
     });
-    showToast(name + ' added to ward list');
+    showSaved(name + ' added to ward list');
     if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL)
       push('logNewRoom', { ward:key, room:'(new ward)', doctor:st.doc||'' });
   }
@@ -1782,12 +1784,14 @@ async function apSubmit(addToList, _skipDupCheck) {
   }
 
   if (SHEETS_URL) {
-    var ok = await push('savePatientWithClaims', {
-      id:      p.id,                        // in-flight guard key
-      patient: p,
-      claims:  _apBatch
-    });
-    if (!ok) {
+    var _apBody = { id: p.id, patient: p, claims: _apBatch };   // id = in-flight guard key
+    var ok = await push('savePatientWithClaims', _apBody);
+    // v5.32 (KBrown/Whaley 25/09): a TIMEOUT is not a failure. The server
+    // usually has it (it did here — 16 s, all 3 claims written). Rolling
+    // back + "Not saved" made the doctor submit again. Now: keep the
+    // patient and claims, queue the re-send (same ids → no duplicates),
+    // clear the form and move on. Only a real server rejection rolls back.
+    if (!ok && !wasQueued(_apBody)) {
       var _apIds2 = {}; _apBatch.forEach(function(c){ _apIds2[c.id] = true; });
       st.claims   = st.claims.filter(function(c){ return !_apIds2[c.id]; });
       st.patients = st.patients.filter(function(x) { return x.id !== p.id; });
@@ -1844,7 +1848,7 @@ async function apSubmit(addToList, _skipDupCheck) {
   // lived here was the dropped-consult bug and has been removed.
 
   var listLabel = addToList ? (p.list === 'on' ? 'On' : 'Off') + ' Service' : 'claim only';
-  showToast(last + ' added — ' + listLabel);
+  showSaved(last + ' added — ' + listLabel);
   _hideSubmitOverlay();
   clearAddForm();
   if (addToList) {

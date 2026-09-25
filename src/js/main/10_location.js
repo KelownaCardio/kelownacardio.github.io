@@ -135,7 +135,7 @@ function confirmLocChange() {
   if (SHEETS_URL) push('savePatient', p);
   logChange(p, 'Location changed', from + ' → ' + _locWard);
   closeLocScreen();
-  showToast(p.last + ' moved to ' + wardLabel(_locWard));
+  showSaved(p.last + ' moved to ' + wardLabel(_locWard));
 }
 
 function closeLocScreen() {
@@ -306,7 +306,7 @@ function _cvConfirmAllGapNote(btn) {
   });
   sv('gapNotes', st.gapNotes);
   hideModal('cv-picker-modal');
-  showToast(gaps.length + ' day' + (gaps.length > 1 ? 's' : '') + ' noted for billing');
+  showSaved(gaps.length + ' day' + (gaps.length > 1 ? 's' : '') + ' noted for billing');
   _cvProceedDischarge(pid);
 }
 
@@ -538,7 +538,7 @@ function _dischFinalize(pid) {
   removePatient(pid);
   hideModal('disch-modal');
   closeClaimScreen();
-  showToast(p.last + ' discharged');
+  showSaved(p.last + ' discharged');
 }
 
 // Kept for compatibility with button handlers (checklist "Doesn't qualify")
@@ -566,7 +566,7 @@ function disch78717() {
   removePatient(_claimPid);
   hideModal('disch-modal');
   closeClaimScreen();
-  showToast('33008 + 78717 billed — ' + p.last + ' discharged');
+  showSaved('33008 + 78717 billed — ' + p.last + ' discharged');
 }
 
 function dischSimple() {
@@ -577,7 +577,7 @@ function dischSimple() {
   removePatient(_claimPid);
   hideModal('disch-modal');
   closeClaimScreen();
-  showToast('33008 billed — ' + p.last + ' discharged');
+  showSaved('33008 billed — ' + p.last + ' discharged');
 }
 
 function transferToDir() {
@@ -588,7 +588,7 @@ function transferToDir() {
   logChange(p, 'Transferred MRP → Directive', '');
   hideModal('disch-modal');
   closeClaimScreen();
-  showToast(p.last + ' now on directive care');
+  showSaved(p.last + ' now on directive care');
 }
 
 
@@ -1093,7 +1093,9 @@ function ppDemogSave(btn) {
   }
   _ppCommitPatient(p);
   var left = _ppMissingDemogFields(p);
-  showToast(left.length ? 'Saved — still missing ' + left.join(', ') : 'Billing details complete');
+  // v5.32: only what is still missing is worth a toast.
+  if (left.length) showToast('Still missing ' + left.join(', '));
+  else showSaved('Billing details complete');
   _ppStepInterp(p.id);
 }
 

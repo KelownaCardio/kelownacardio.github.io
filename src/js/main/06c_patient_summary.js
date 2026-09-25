@@ -236,7 +236,7 @@ async function savePatientNotes(pid) {
   logChange(p, 'Summary updated', alias);
 
   hideModal('pt-notes-modal');
-  showToast('Notes saved');
+  showSaved('Notes saved');
 
   if (SHEETS_URL) {
     window._lastPushStale = null;
@@ -1090,8 +1090,9 @@ function _cvApplyTypeRange(pid, fromDate, toDate, type, alias) {
   }
   sv('patients', st.patients);
   sv('claims', st.claims);
-  showToast(added ? (added + ' ' + (type === 'ccu' ? 'CCU' : type) + ' day' + (added > 1 ? 's' : '') + ' added — ' + p.last)
-                  : 'Those days already billed — nothing added');
+  // v5.32: only the "nothing added" case is worth a toast.
+  if (added) showSaved(added + ' ' + (type === 'ccu' ? 'CCU' : type) + ' day' + (added > 1 ? 's' : '') + ' added — ' + p.last);
+  else showToast('Those days already billed — nothing added');
   _cvRefreshSummary(pid);
   render();
 }
@@ -1284,7 +1285,7 @@ function _cvConfirmGapNote(btn) {
   if (idx >= 0) st.gapNotes[idx] = rec; else st.gapNotes.push(rec);
   sv('gapNotes', st.gapNotes);
   if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL) push('saveGapNote', rec);
-  showToast('Gap explained — noted for billing');
+  showSaved('Gap explained — noted for billing');
   if (window._dischResolvePid === pid) { hideModal('cv-picker-modal'); _cvRefreshSummary(pid); return; }   // back to calendar (banner + active pill preserved)
   hideModal('cv-picker-modal');
   if (typeof openPatientSummary === 'function') openPatientSummary(pid);
@@ -1402,7 +1403,7 @@ function _cvFillClaim(pid, dateStr, type, note, icdOverride, alias) {
 
   sv('patients', st.patients);
   sv('claims',   st.claims);
-  showToast(type === 'combined' ? 'Combined daily added — ' + p.last : 'Claim added — ' + p.last);
+  showSaved(type === 'combined' ? 'Combined daily added — ' + p.last : 'Claim added — ' + p.last);
   hideModal('cv-picker-modal');
   // Refresh in place — preserves the active legend pill (so a type stays armed
   // for the next day-tap / range) AND updates the discharge gap banner.
@@ -2023,7 +2024,7 @@ function saveClaimEdit(btn) {
 
   // Reopen summary to show updated claim
   openPatientSummary(pid);
-  showToast('Claim updated');
+  showSaved('Claim updated');
 }
 
 function deleteClaimBtn(btn) {
@@ -2041,7 +2042,7 @@ function deleteClaimBtn(btn) {
   if (c) ccfppRecomputeAround_(c.alias, c.date);
 
   openPatientSummary(pid);
-  showToast('Claim deleted');
+  showSaved('Claim deleted');
 }
 
 function hideClaimEditModal() { hideModal('claim-edit-modal'); }

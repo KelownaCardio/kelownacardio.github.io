@@ -120,7 +120,7 @@ function submitDaily() {
   var alias = getPerformingAlias();
   addClaim(pc, '33008', '33008', days, fmtD(parseISODate(ds)), 'I', dailyStampTime(ds, days), null, null, alias);
   sv('claims', st.claims);
-  showToast('33008 ×' + days + ' — ' + p.last);
+  showSaved('33008 ×' + days + ' — ' + p.last);
   closeClaimScreen();
 }
 
@@ -182,7 +182,7 @@ function submitCombined() {
     (baseNote ? baseNote + ' | ' : '') + 'Second visit — ' + (note2 || 'patient unstable'),
     null, alias, { allowSecondDaily: true });
   sv('claims', st.claims);
-  showToast('Combined daily ×' + v + ' — ' + p.last);
+  showSaved('Combined daily ×' + v + ' — ' + p.last);
   closeClaimScreen();
 }
 
@@ -218,7 +218,7 @@ function submitDirective() {
   var alias = getPerformingAlias();
   addClaim(pc, '33006', '33006', 1, fmtD(parseISODate(ds)), 'I', null, note, null, alias);
   sv('claims', st.claims);
-  showToast('33006 directive — ' + p.last);
+  showSaved('33006 directive — ' + p.last);
   closeClaimScreen();
 }
 
@@ -255,7 +255,9 @@ function submitCCU(isDuplicate) {
   // v3.60: write CCU_DAILY placeholder; export consolidates.
   addClaim(pc, 'CCU_DAILY', 'CCU_DAILY', 1, TODAY, 'I', null, null, null, alias);
   sv('claims', st.claims);
-  showToast('CCU daily recorded' + (isDuplicate ? ' (duplicate)' : '') + ' — ' + p.last);
+  // v5.32: silent on success; a duplicate is still flagged.
+  if (isDuplicate) showToast('CCU daily recorded (duplicate) — ' + p.last);
+  else showSaved('CCU daily recorded — ' + p.last);
   closeClaimScreen();
 }
 

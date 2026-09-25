@@ -46,32 +46,6 @@ function ebcDisp(t24) {
   return v.disp ? v.disp + v.ap : t24;
 }
 
-// ── 01172 Sedation (anesthesia intensity/complexity, Level 2) ──────
-// v5.29 (2026-09-21, Kathryn spec): start AND end time are now mandatory
-// for 01172 on the Other-claim form (same pattern as 00081) so the app can
-// calculate how many 15-min service units to bill — MSP pays this code
-// "per 15 min or part thereof". Confirmed with Kathryn: this is a straight
-// CEILING, no minimum-duration threshold and no majority-portion rule like
-// 00081's — 1 min = 1 unit, 15 min = 1 unit, 16 min = 2 units, etc.
-var SEDATION_CODE = '01172';
-var SEDATION_EXPLANATION = 'Billed per completed 15 minutes or any part thereof';
-
-// Generic HH:MM duration in minutes (handles midnight wrap). Mirrors
-// ebcDurMins exactly but kept as its own function — ebcDurMins is left
-// untouched so the existing 00081 path can't be affected by this change.
-function ocDurMins(start24, end24) {
-  if (!start24 || !end24) return 0;
-  var s = t2m(start24), e = t2m(end24);
-  if (e < s) e += 24 * 60;
-  return e - s;
-}
-
-// Ceiling to the next 15-min unit; 0 min (no valid window) bills nothing.
-function sedationUnitsFromDur(durMins) {
-  if (!durMins || durMins <= 0) return 0;
-  return Math.ceil(durMins / 15);
-}
-
 function _openClaimScreen(pid) {
   // v5.08: single choke point for every "+Claim" entry (card, summary
   // screen, discharged list) — residents never bill (Kathryn 2026-08-24).
@@ -210,17 +184,6 @@ function selectFeeCode(code, desc) {
     }
     // 00081: surface the billing rule right under the fee-code picker.
     if (code === EBC_CODE && disp) disp.textContent = EBC_EXPLANATION;
-  } else if (code === SEDATION_CODE) {
-    // v5.29: start/end mandatory to compute 15-min service units — notes
-    // stay optional, this code has no MSP-mandated description requirement.
-    if (endWrap)  endWrap.style.display = 'block';
-    if (startLbl) startLbl.innerHTML = 'Start time <span style="color:var(--red-t)">*</span>';
-    if (notesEl) {
-      notesEl.placeholder = 'Optional';
-      notesEl.style.cssText = '';
-      notesEl.removeAttribute('data-required');
-    }
-    if (disp) disp.textContent = SEDATION_EXPLANATION;
   } else {
     if (endWrap)  endWrap.style.display = 'none';
     if (startLbl) startLbl.innerHTML = 'Start time <span style="font-size:10px;color:var(--text3)">(if required)</span>';
@@ -441,24 +404,6 @@ function updateOtherPreview() {
     extra += '<div style="font-size:11px;color:var(--text3);margin-top:3px">' + esc(EBC_EXPLANATION) + '</div>';
   }
 
-  // v5.29: 01172 Sedation — live 15-min-unit calculation from start/end times.
-  if (fee === SEDATION_CODE) {
-    var sS   = ocTime24('start');
-    var sE   = ocTime24('end');
-    var sDur = ocDurMins(sS, sE);
-    var sU   = sedationUnitsFromDur(sDur);
-    var sRate = FEE_RATES[SEDATION_CODE] || 0;
-    if (sDur > 0) {
-      extra = '<div class="cp-row" style="font-size:12px;margin-top:4px">' + sDur +
-        ' min &rarr; ' + sU + ' &times; 15-min unit' + (sU === 1 ? '' : 's') +
-        ' = <b>$' + (sU * sRate).toFixed(2) + '</b></div>';
-    } else {
-      extra = '<div style="font-size:11px;color:var(--text3);margin-top:4px">Enter start and end time &mdash; ' +
-        'billed per 15 min or part thereof.</div>';
-    }
-    extra += '<div style="font-size:11px;color:var(--text3);margin-top:3px">' + esc(SEDATION_EXPLANATION) + '</div>';
-  }
-
   prev.innerHTML = '<div class="cp-title">Claim to add</div>' +
     '<div class="cp-row" style="display:flex;align-items:center;gap:6px">' +
     '<span class="cp-code">' + esc(fee) + '</span>' +
@@ -506,23 +451,8 @@ function submitOtherClaimFor(p, alias, opts) {
     }
   }
 
-  // v5.29: 01172 Sedation — start and end time are mandatory (notes stay
-  // optional) so the app can calculate 15-min service units.
-  if (fee === SEDATION_CODE) {
-    var sm = [];
-    if (!start)   sm.push('start time');
-    if (!endTime) sm.push('end time');
-    if (sm.length) {
-      if (!start)   { var _ss = document.getElementById('oc-start'); if (_ss) _ss.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
-      if (!endTime) { var _se2 = document.getElementById('oc-end');  if (_se2) _se2.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
-      showToast('Required for ' + fee + ': ' + sm.join(', '));
-      return false;
-    }
-  }
-
   var dateFmt = fmtD(parseISODate(dateISO));
-  // Units are always 1 for an Other claim — except 00081 (per-30-min) and
-  // 01172 (per-15-min, v5.29).
+  // Units are always 1 for an Other claim — except 00081 (per-30-min).
   var pClone  = Object.assign({}, p, { icd: icd, refby: refby, refbyName: refName });
 
   // v4.96: 00081 Emergency Bedside Care — units from the bedside window;
@@ -532,22 +462,6 @@ function submitOtherClaimFor(p, alias, opts) {
       dateISO: dateISO, dateFmt: dateFmt, start: start, end: endTime,
       loc: loc, notes: notes
     });
-  }
-
-  // v5.29: 01172 Sedation — units computed from the mandatory start/end
-  // window (ceiling to the next 15-min period); no consult-split sheet
-  // (that's an 00081-specific MSP rule that doesn't apply here).
-  if (fee === SEDATION_CODE) {
-    var sedDur = ocDurMins(start, endTime);
-    if (sedDur <= 0) { showToast('01172: end time must be after start time'); return false; }
-    var sedUnits = sedationUnitsFromDur(sedDur);
-    var sedResult = addClaim(pClone, fee, fee, sedUnits, dateFmt, loc, start, notes, endTime, alias);
-    if (!sedResult) return false;  // dedup blocked — stay on form, error toast visible
-    sv('claims', st.claims);
-    // No unit-specific toast here — the generic caller (submitOtherClaim)
-    // already toasts "<fee> claim added for <name>"; the unit count is
-    // visible in the preview before submit and as ×N on the claims list.
-    return true;
   }
 
   // v4.79: Echo bundles — one tap creates each component claim with its
@@ -569,7 +483,7 @@ function submitOtherClaimFor(p, alias, opts) {
     });
     if (!_made) return false;   // every component blocked as duplicate — toast already shown
     sv('claims', st.claims);
-    showToast(ECHO_BUNDLES[fee].label + ' — ' + _made + ' claim' + (_made > 1 ? 's' : '') + ' added');
+    showSaved(ECHO_BUNDLES[fee].label + ' — ' + _made + ' claim' + (_made > 1 ? 's' : '') + ' added');
     return true;
   }
 
@@ -688,7 +602,7 @@ function _ebcNo() {
                    x.f.loc, x.f.start, x.f.notes, x.f.end, x.alias);
   if (!r) return;  // dedup blocked — stay on the form
   sv('claims', st.claims);
-  showToast('00081 × ' + x.fullUnits + ' unit' + (x.fullUnits > 1 ? 's' : '') +
+  showSaved('00081 × ' + x.fullUnits + ' unit' + (x.fullUnits > 1 ? 's' : '') +
     ' added for ' + x.p.last);
   closeClaimScreen();
 }
@@ -717,7 +631,7 @@ function submitOtherClaim() {
 
   // 00081 finishes via its own sheet (submitOtherClaimFor returned false
   // while it is open), so this toast/close only runs for ordinary codes.
-  showToast((fee || 'Claim') + ' claim added for ' + p.last);
+  showSaved((fee || 'Claim') + ' claim added for ' + p.last);
   closeClaimScreen();
 }
 

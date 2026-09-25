@@ -490,7 +490,7 @@ function rvAddFor(idx) {
     // consult's own location, alias and referrer/dx riding on the row.
     addClaim(p, '78720', '78720', 1, card.serviceDate, consult.loc || 'I', null, null, null,
              consult.alias || st.doc.alias, { icd:consult.icd, refby:consult.refby, refbyName:consult.refbyName });
-    showToast('MOST (78720) added for ' + card.serviceDate);
+    showSaved('MOST (78720) added for ' + card.serviceDate);
   } else if (card.issueType === 'MISSING_OOH_MODIFIER') {
     if (!consult.startTime || !consult.endTime) { rvOpenClaimEdit(consult.id, card.phn); return; }
     // getModifier wants an ISO date (isWeekendOrStat does new Date(iso+'T12:00')).
@@ -519,7 +519,7 @@ function rvAddFor(idx) {
     // showing a premium that is not there.
     var _made = rvClaims(card.phn, card.serviceDate).some(function(c){ return RV_MOD_FEES[String(c.fee)]; });
     if (_made) {
-      showToast('Call-out premium re-derived from the consult times');
+      showSaved('Call-out premium re-derived from the consult times');
     } else {
       RV.choice[card.key] = '';
       var _ccfpp = /(^|\|)\s*CCFPP:/i.test(String(consult.notes || ''));
@@ -702,7 +702,7 @@ async function rvAct_(kind) {
     return;
   }
   if (res.refused && res.refused.length) showToast('Partly closed — ' + res.refused.join('; '), 'error');
-  else showToast(kind === 'escalate' ? 'Reported to KB'
+  else showSaved(kind === 'escalate' ? 'Reported to KB'
                : (kind === 'later' ? 'Noted — it will be back in your email tomorrow'
                                    : 'Submitted — that one is off your list'));
   if (kind !== 'later') {
