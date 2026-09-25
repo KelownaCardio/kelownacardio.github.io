@@ -3015,8 +3015,54 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   queued. Safety valve: a write holding the queue >60 s releases it.
 //   14_init.js: the mandatory-update reload also waits for the queue to
 //   drain. No backend change. No cache-format change, BUILD_ID not bumped.
-var APP_VERSION = 'v5.31';
-var APP_BUILT   = '2026-09-24';
+// v5.32 (2026-09-25) — QUIET SAVES: NO FAILURE BANNER UNLESS A SAVE IS
+//   REALLY STUCK, NO "PLEASE RESAVE" PROMPTS, NO SUCCESS TOASTS. KBrown
+//   25/09 07:33 PT (Whaley): Add Patient's savePatientWithClaims took 16 s
+//   server-side at the 7am rush, the phone's 20 s clock ran out, the app
+//   rolled the patient + claims back, toasted "Not saved" and raised the
+//   red "unable to connect / Retry" banner — but the server HAD written
+//   all 3 claims. The doctor re-submitted; the server's duplicate guard
+//   blocked all 3 (no harm this time). A timeout means "no answer yet",
+//   not "failed". Kathryn's rule: no toast when a save succeeds or is
+//   queued; no failure banner unless it is actually failing.
+//   push():
+//   • A transient failure (timeout / transport / 5xx / lock) of a keyed
+//     write now leaves it QUEUED (it already stayed in _pendingPush for the
+//     background retry) and turns the dot AMBER — no red banner. The first
+//     failure time is kept on the entry (failAt) across retries.
+//   • RED banner only when it is actually failing: a queued write still
+//     unsent after 3 min, OR no successful sync for 3 min (checked every
+//     15 s by _evalNetHealth). It clears itself when things recover.
+//     Server faults (rejected / stale client / app password) stay red at
+//     once, as before — those ARE failures.
+//   • savePatientWithClaims joins the retry-safe list (NETLOG_IDEMPOTENT,
+//     03b_netlog.js). Proven safe in the 25/09 log: two writes of the same
+//     batch left exactly 3 claim rows — claims upsert by id and the server
+//     blocks same-day duplicates. On a transient failure the patient and
+//     every claim in the batch are registered as ordinary pending
+//     savePatient / saveClaim entries, so the sync keeps them on screen and
+//     the background retry re-sends them (same ids → upsert, no duplicates).
+//   • mergePatientDemographics and deleteClaim / deletePatient are now
+//     queued the same way (keys 'mpd|id' / 'del|id'); a queued delete
+//     stops the sync from re-showing the row until the delete lands.
+//   • savePatientWithClaims / mergePatientDemographics get 30 s instead of
+//     20 s (16 s server time is normal at 7am). Write-queue valve 60→75 s.
+//   • log* calls (logChange etc.) never raise the banner — they are audit
+//     trail, not the doctor's data.
+//   • wasQueued(body) tells a caller "not confirmed yet, but queued and
+//     retrying" — callers treat that as done: no rollback, no toast.
+//   • Banner "Retry" now re-sends queued writes immediately, then syncs
+//     (it used to only re-read the sheet).
+//   commitClaimGate (consult edits): a transient failure now re-sends the
+//   consult once more before giving up (the server answers an identical
+//   re-send of a write that landed with ok/unchanged), instead of going
+//   straight to "Not saved — please redo".
+//   Success/"added"/"updated" toasts removed app-wide via showSaved()
+//   (14_init.js) — a no-op that only logs to the console. Validation and
+//   real-failure toasts are unchanged.
+//   No backend change. No cache-format change, BUILD_ID not bumped.
+var APP_VERSION = 'v5.32';
+var APP_BUILT   = '2026-09-25';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
@@ -3293,6 +3339,13 @@ function sanitizeReferrer(obj) {
 // fall back to the last recorded netlog event, so every existing call
 // site keeps working and still gets a better message than before.
 function setSyncState(s, detail) {
+  // v5.32: 'synced' while a failed write is still queued stays AMBER —
+  // green must mean "nothing of yours is waiting".
+  if (s === 'synced' && _oldestUnsentAge() >= 0) s = 'syncing';
+  // v5.32: remember whether a red banner came from the soft 3-min rule
+  // (_evalNetHealth may clear it) or from a hard fault (it may not).
+  window._netRedSoft = (s === 'error') ? !!(detail && detail.soft) : false;
+  window._netState = s;
   var dot = document.getElementById('sync-dot');
   if (dot) dot.className = 'sync-dot ' + s;
 
@@ -3322,7 +3375,14 @@ function setSyncState(s, detail) {
     if (txt) txt.textContent = netlogExplain(_code);
     if (btn) {
       btn.textContent = (_code === 'offline') ? 'Try anyway' : 'Retry';
-      btn.onclick = function() { setSyncState('syncing'); syncFromSheets(); };
+      // v5.32: re-send queued writes NOW, then re-read the sheet. Before,
+      // this only re-read — nothing was re-sent, so the doctor re-did the
+      // save by hand and it landed twice.
+      btn.onclick = function() {
+        setSyncState('syncing');
+        try { _retryPendingPushes(true); } catch (eR) {}
+        syncFromSheets();
+      };
     }
     // One tap, sends itself, nothing for them to describe or remember.
     // Also re-labelled on every error so a previous "Reported ✓" does not
@@ -3515,6 +3575,7 @@ function _applySyncDelta(d) {
   ((d.deleted && d.deleted.claims)   || []).forEach(function(id) { delC[String(id)] = 1; });
 
   (d.patients || []).forEach(function(rp) {
+    if (_pendingDel(rp.id)) return;   // v5.32: our delete is still on its way
     _normRemotePatient(rp);
     sanitizeReferrer(rp);
     var idx = -1;
@@ -3532,6 +3593,7 @@ function _applySyncDelta(d) {
   }
 
   (d.claims || []).forEach(function(rc) {
+    if (_pendingDel(rc.id)) return;   // v5.32: our delete is still on its way
     _normRemoteClaim(rc);
     sanitizeReferrer(rc);
     var idx = -1;
@@ -3566,12 +3628,101 @@ function _applySyncDelta(d) {
   });
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// v5.32 — QUIET SAVES (see version note). Amber = "queued, retrying";
+// red only when actually failing (unsent >3 min, or no sync for 3 min).
+// ═══════════════════════════════════════════════════════════════════
+var NET_STUCK_MS_ = 180000;
+if (!window._appStartAt) window._appStartAt = Date.now();
+if (!window._pushQ) { try { window._pushQ = new WeakMap(); } catch (eWm) { window._pushQ = null; } }
+// Caller-side: "push() returned false, but the write is queued and the app
+// will keep re-sending it" — treat as done (no rollback, no toast).
+function wasQueued(body) {
+  try { return !!(body && typeof body === 'object' && window._pushQ && window._pushQ.get(body)); }
+  catch (e) { return false; }
+}
+// A delete this device has sent but not had confirmed — the sync must not
+// put the row back on screen meanwhile.
+function _pendingDel(id) {
+  var pp = window._pendingPush;
+  return !!(pp && id != null && pp['del|' + String(id)]);
+}
+// Age (ms) of the oldest write that FAILED and is still waiting to be
+// re-sent; -1 when none. Writes merely awaiting sync confirmation do not
+// count — only ones that actually failed (failAt stamped by _pushSoftFail).
+function _oldestUnsentAge() {
+  var pp = window._pendingPush || {}, now = Date.now(), max = -1;
+  Object.keys(pp).forEach(function(k) {
+    var e = pp[k];
+    if (e && e.failAt) { var a = now - e.failAt; if (a > max) max = a; }
+  });
+  return max;
+}
+function _evalNetHealth() {
+  if (window._staleLocked) return;
+  var cur = window._netState;
+  if (cur === 'auth') return;
+  if (cur === 'error' && !window._netRedSoft) return;   // hard fault: only a real success clears it
+  var unsent = _oldestUnsentAge();
+  var base = Math.max(window._lastSyncOkAt || 0, window._appStartAt || 0);
+  var syncDown = !!window._syncFailing && (Date.now() - base) > NET_STUCK_MS_;
+  if (unsent > NET_STUCK_MS_ || syncDown) {
+    if (cur !== 'error') setSyncState('error', { code: window._netSoftCode || '', soft: true });
+  } else if (unsent >= 0 || window._syncFailing) {
+    if (cur !== 'syncing') setSyncState('syncing');
+  } else if (cur === 'error') {
+    setSyncState('synced');   // recovered on its own — take the red banner down
+  }
+}
+setInterval(function() { try { _evalNetHealth(); } catch (e) {} }, 15000);
+function _syncSoftFail(code) {
+  window._syncFailing = true;
+  window._netSoftCode = code;
+  if (!(window._netState === 'error' && !window._netRedSoft)) setSyncState('syncing');
+  _evalNetHealth();
+}
+// A write got no usable answer (timeout / transport / 5xx / lock). If it is
+// queued for re-send, go amber and say nothing; if nothing will ever re-send
+// it, that is a real failure → red, as before.
+function _pushSoftFail(action, body, key, code) {
+  var pp = window._pendingPush || (window._pendingPush = {});
+  var now = Date.now(), queued = false;
+  window._netSoftCode = code;
+  if (/^log/.test(String(action || ''))) {   // audit trail, never the banner
+    if (_oldestUnsentAge() < 0 && !window._syncFailing && window._netState === 'syncing') setSyncState('synced');
+    return false;
+  }
+  if (action === 'savePatientWithClaims' && body && body.patient && body.patient.id) {
+    // Re-send as ordinary keyed saves: same ids → upsert, never a duplicate.
+    // The sync keeps pending rows on screen and _retryPendingPushes re-sends.
+    var reg = function(k, act, b) {
+      var pe = pp[k];
+      if (pe && pe.queued) return;   // a newer edit is already parked there
+      pp[k] = { action: act, body: b, ts: now, failAt: (pe && pe.failAt) || now };
+    };
+    reg(String(body.patient.id), 'savePatient', body.patient);
+    (body.claims || []).forEach(function(c) { if (c && c.id) reg(String(c.id), 'saveClaim', c); });
+    queued = true;
+  } else if (key && pp[key]) {
+    if (!pp[key].failAt) pp[key].failAt = now;
+    queued = true;
+  }
+  if (queued) {
+    try { if (body && typeof body === 'object' && window._pushQ) window._pushQ.set(body, true); } catch (e) {}
+    if (!(window._netState === 'error' && !window._netRedSoft)) setSyncState('syncing');
+    _evalNetHealth();
+  } else {
+    setSyncState('error', { code: code });   // nothing will re-send it — a real failure
+  }
+  return false;
+}
+
 // v5.19: a failed write used to wait for the next FULL sync to be re-sent
 // (the full merge re-pushes pending rows). Deltas don't walk the whole list,
 // so re-send stragglers here — anything pending >30s and not in flight.
 // Every action that reaches _pendingPush is upsert-keyed, so a re-send of a
 // write that actually landed is a no-op server-side.
-function _retryPendingPushes() {
+function _retryPendingPushes(force) {
   if (!SHEETS_URL) return;
   var pp = window._pendingPush || {};
   var now = Date.now();
@@ -3579,9 +3730,10 @@ function _retryPendingPushes() {
     var e = pp[k];
     if (!e || !e.action || !e.body) return;
     if (window._pushInFlight && window._pushInFlight[k]) return;
-    if (now - (e.ts || 0) < 30000) return;
+    if (!force && now - (e.ts || 0) < 30000) return;   // v5.32: banner Retry forces
     // A `queued` entry (parked behind an in-flight save) whose in-flight
     // save has long finished has no other sender for patients — send it.
+    var _fa = e.failAt || 0;   // v5.32: the first-failure clock must survive the re-registration below
     if (e.queued) delete pp[k];
     // Only rows that still exist locally: a save whose row was since
     // deleted/un-billed on this device must not be resurrected (review
@@ -3589,6 +3741,7 @@ function _retryPendingPushes() {
     if (e.action === 'saveClaim'   && !(st.claims   || []).some(function(c) { return String(c.id) === String(k); })) { delete pp[k]; return; }
     if (e.action === 'savePatient' && !(st.patients || []).some(function(p) { return String(p.id) === String(k); })) { delete pp[k]; return; }
     push(e.action, e.body, e.wire || undefined);
+    if (_fa && pp[k] && !pp[k].failAt) pp[k].failAt = _fa;   // push() registers synchronously before its first await
   });
 }
 
@@ -3719,7 +3872,7 @@ async function syncFromSheets(opts) {
           _syncInFlight = false;
           return await syncFromSheets(opts);       // same request, other door, right now
         }
-        setSyncState('error', { code: _lastCode });
+        _syncSoftFail(_lastCode);   // v5.32: amber; red only if still down after 3 min
         return;
       }
       await _netlogSleep(netlogRetryDelay(_lastCode));   // v5.13: longer pause after a 404
@@ -3775,7 +3928,7 @@ async function syncFromSheets(opts) {
       if (d.ver) window._syncVer = Number(d.ver) || window._syncVer;
       if (d.lastWriteAt) window._lastSeenWriteAt = String(d.lastWriteAt);
       window._lastSyncResponse.checkpoint = 'no-change';
-      window._lastSyncOkAt = Date.now();
+      window._lastSyncOkAt = Date.now(); window._syncFailing = false;
       setSyncState('synced');
       try { if (!isResident()) netlogFlush(); } catch (eNl0) {}
       _retryPendingPushes();
@@ -3791,7 +3944,7 @@ async function syncFromSheets(opts) {
       window._lastSyncResponse.checkpoint = 'delta-applied';
       window._lastSyncResponse.deltaPatients = (d.patients || []).length;
       window._lastSyncResponse.deltaClaims   = (d.claims || []).length;
-      window._lastSyncOkAt = Date.now();
+      window._lastSyncOkAt = Date.now(); window._syncFailing = false;
       setSyncState('synced');
       try { if (!isResident()) netlogFlush(); } catch (eNl1) {}
       render();
@@ -3859,7 +4012,7 @@ async function syncFromSheets(opts) {
       // v5.19: per-row merge + pending confirmation now live in
       // _mergeRemotePatient / _confirmPendingPatient (shared with the delta
       // path) — same v4.72 rules, unchanged.
-      var merged = d.patients.map(function(rp) {
+      var merged = d.patients.filter(function(rp) { return !_pendingDel(rp.id); }).map(function(rp) {   // v5.32
         var lp = st.patients.find(function(p) { return p.id === rp.id; });
         return _mergeRemotePatient(rp, lp);
       });
@@ -3909,7 +4062,7 @@ async function syncFromSheets(opts) {
       var remoteClaimIds = {};
       d.claims.forEach(function(c) { remoteClaimIds[c.id] = true; });
 
-      var mergedClaims = d.claims.slice();
+      var mergedClaims = d.claims.filter(function(c) { return !_pendingDel(c.id); });   // v5.32: was .slice()
 
       // Clear pending entries that now appear in Sheets (push succeeded) —
       // v5.12: unless the entry was queued AFTER this sync began, in which
@@ -4095,7 +4248,7 @@ async function syncFromSheets(opts) {
     window._lastSyncResponse.completedAt = new Date().toISOString();
     window._lastSyncResponse.stPatientsFinal = st.patients.length;
     window._lastSyncResponse.stClaimsFinal = st.claims.length;
-    window._lastSyncOkAt = Date.now();   // v4.73: resume-guard staleness marker
+    window._lastSyncOkAt = Date.now(); window._syncFailing = false;   // v4.73: resume-guard staleness marker
     if (d.lastWriteAt) window._lastSeenWriteAt = String(d.lastWriteAt);   // v4.75: ping-sync re-baseline
     // v5.19: a full pull is the delta baseline. No `ver` in the reply means
     // Router < v3.21 — _syncVer stays 0 and every sync remains a full pull.
@@ -4135,7 +4288,7 @@ async function syncFromSheets(opts) {
       errName: String(e && e.name || ''), errMsg: String(e && e.message || e),
       attempt: 1, recovered: false
     });
-    setSyncState('error', { code: _c });
+    _syncSoftFail(_c);   // v5.32: amber; red only if still failing after 3 min
   } finally {
     _syncInFlight = false;
   }
@@ -4217,6 +4370,21 @@ function endClaimGate() { var g = window._claimGate; window._claimGate = null; r
 async function commitClaimGate(g, consult) {
   if (!g || !consult) return true;
   var ok = await push('saveClaim', consult);          // gate is closed — a real send
+  // v5.32: a timeout is "no answer yet", not "refused". Re-send the SAME
+  // consult once more (after any background re-send of it finishes). If
+  // the first one landed, Crud v3.21 sees an identical payload and answers
+  // ok/unchanged — so this can never double-bill. Only if that fails too
+  // do we fall through to the old "Not saved — please redo".
+  if (!ok && wasQueued(consult)) {
+    var _gw0 = Date.now(), _cid = String(consult.id);
+    while (window._pushInFlight && window._pushInFlight[_cid] && (Date.now() - _gw0) < 30000) {
+      await _netlogSleep(500);
+    }
+    await _netlogSleep(3000);
+    ok = await push('saveClaim', consult);
+    var _gpe = window._pendingPush && window._pendingPush[_cid];
+    if (ok && _gpe && _gpe.queued) ok = false;   // only parked, not confirmed
+  }
   if (ok) {
     // Keep the LAST write per row, in order. A row that is DELETED inside
     // the gate must not also be saved — the delete would land first and
@@ -4262,7 +4430,7 @@ var WRITE_Q_ACTIONS_ = {
   saveClaim: 1, savePatient: 1, savePatients: 1, savePatientWithClaims: 1,
   deleteClaim: 1, deletePatient: 1, saveGapNote: 1, mergePatientDemographics: 1
 };
-var WRITE_Q_STALL_MS_ = 60000;   // > worst single push (20 + ~5 + 20 s)
+var WRITE_Q_STALL_MS_ = 75000;   // > worst single push (30 + ~5 + 30 s) — v5.32: was 60 s
 if (!window._writeQ) window._writeQ = { tail: Promise.resolve(), depth: 0 };
 function _writeQAcquire() {
   var q = window._writeQ;
@@ -4281,7 +4449,7 @@ function _writeQAcquire() {
       release();
     };
     valve = setTimeout(function(){
-      if (!released) { console.warn('[writeQ] a write held the queue >60s — releasing'); rel(); }
+      if (!released) { console.warn('[writeQ] a write held the queue >75s — releasing'); rel(); }
     }, WRITE_Q_STALL_MS_);
     window._lastPushAt = Date.now();
     var waited = Date.now() - _t0;
@@ -4289,6 +4457,10 @@ function _writeQAcquire() {
     return rel;
   });
 }
+
+// v5.32: per-action write timeout. The Add-Patient batch and the demographics
+// merge legitimately take ~16 s server-side at the 7am rush (Perf Log 25/09).
+var PUSH_TIMEOUT_MS_ = { savePatientWithClaims: 30000, mergePatientDemographics: 30000 };
 
 async function push(action, body, wire) {
   // v5.19: `wire` = fields that ride on the request ONLY (never stored on
@@ -4306,6 +4478,7 @@ async function push(action, body, wire) {
     window._claimGate.ops.push({ action: action, body: body });
     return true;
   }
+  try { if (body && typeof body === 'object' && window._pushQ) window._pushQ.delete(body); } catch (eQd) {}   // v5.32
   if (!SHEETS_URL) return false;
   if (window._staleLocked) return false;   // v5.25: see syncFromSheets
   // Guard: never push a patient or claim with no id — prevents blank row creation
@@ -4343,6 +4516,11 @@ async function push(action, body, wire) {
   if (action === 'saveGapNote' && body) {
     _pKey = 'g|' + String(body.phn || '').replace(/\D/g, '') + '|' + String(body.date || '');
   }
+  // v5.32: queued re-send for these too (both are safe to repeat — see
+  // version note). Keys are prefixed so they never collide with the
+  // patient/claim ids the sync merge looks up.
+  if (action === 'mergePatientDemographics' && body && body.id) _pKey = 'mpd|' + body.id;
+  if ((action === 'deleteClaim' || action === 'deletePatient') && body && body.id) _pKey = 'del|' + body.id;
   if (_pKey) {
     if (window._pushInFlight[_pKey]) {
       // v5.04: the in-flight window grew (retry + 20s abort ceiling), so
@@ -4350,7 +4528,9 @@ async function push(action, body, wire) {
       // back in ~1s. Queue the NEWER body before returning, otherwise a
       // doctor who corrects a fee mid-retry gets a success toast for a
       // value that was never sent anywhere.
-      window._pendingPush[_pKey] = { action: action, body: body, ts: Date.now(), queued: true, wire: wire || null };  // v5.12: tagged — see syncFromSheets; v5.19: keeps wire
+      var _qPrev = window._pendingPush[_pKey];
+      window._pendingPush[_pKey] = { action: action, body: body, ts: Date.now(), queued: true, wire: wire || null,
+                                     failAt: (_qPrev && _qPrev.failAt) || 0 };  // v5.12: tagged — see syncFromSheets; v5.19: keeps wire; v5.32: keeps failAt
       return true;  // true = don't trigger error handling
     }
     window._pushInFlight[_pKey] = true;
@@ -4358,7 +4538,9 @@ async function push(action, body, wire) {
   // Mark as pending until next successful sync confirms it
   var _pStart = Date.now();
   if (_pKey) {
-    window._pendingPush[_pKey] = { action: action, body: body, ts: _pStart, wire: wire || null };   // v5.19: wire kept for retries
+    var _pPrev = window._pendingPush[_pKey];
+    window._pendingPush[_pKey] = { action: action, body: body, ts: _pStart, wire: wire || null,   // v5.19: wire kept for retries
+                                   failAt: (_pPrev && _pPrev.failAt) || 0 };                      // v5.32: first-failure time survives re-sends
   }
   // v5.04 review fix: with the retry chain, this push can be in flight for
   // up to ~25s — long enough for the doctor to save the SAME record again.
@@ -4404,7 +4586,7 @@ async function push(action, body, wire) {
       // 20s matches the sync ceiling. Worst case 20 + 1.35 + 20 ~= 41s,
       // still under the old single 45s wait.
       var _pCtrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-      var _pTid  = setTimeout(function() { if (_pCtrl) _pCtrl.abort(); }, 20000);
+      var _pTid  = setTimeout(function() { if (_pCtrl) _pCtrl.abort(); }, PUSH_TIMEOUT_MS_[action] || 20000);   // v5.32: per-action
       try {
         // v5.12: opt this build into Crud v3.21 claim arbitration. The flag
         // rides on the wire only — never on the st.claims object.
@@ -4450,8 +4632,7 @@ async function push(action, body, wire) {
           if (_qRel) { _qRel(); _qRel = null; }   // v5.31: free the queue first or the re-push waits on itself
           return await push(action, body, wire);   // v5.20: same write, other door, right now
         }
-        setSyncState('error', { code: _pCode });
-        return false;
+        return _pushSoftFail(action, body, _pKey, _pCode);   // v5.32: queued → amber, not red
       }
       await _netlogSleep(netlogRetryDelay(_pCode));      // v5.13: longer pause after a 404
     }
@@ -4475,8 +4656,7 @@ async function push(action, body, wire) {
         errName: String(_parseErr.name || ''), errMsg: String(_parseErr.message || _parseErr),
         httpStatus: resp.status, attempt: 1, recovered: false
       });
-      setSyncState('error', { code: 'bad_json' });
-      return false;
+      return _pushSoftFail(action, body, _pKey, 'bad_json');   // v5.32
     }
     // v4.76: a response carrying `error` is a FAILURE even without ok:false.
     // Router ≤v3.05 returned bare {error} for thrown backend exceptions (lock
@@ -4556,10 +4736,19 @@ async function push(action, body, wire) {
       // Connection is fine — we got a clean 200 + JSON. This is a data
       // rejection, not a connectivity failure, so do NOT raise the wifi
       // banner; the caller surfaces the specific error to the user.
+      // v5.32: a TRANSIENT rejection (lock timeout) is still queued for
+      // re-send — mark it so the caller treats it as done, not failed.
+      if (_transient) return _pushSoftFail(action, body, _pKey, 'lock');
       setSyncState('synced');
       return false;
     }
     window._lastPushError = null;
+    // v5.32: sent and answered — no longer "unsent". Prefixed keys have no
+    // sync confirmation, so they are done now.
+    if (_pKey && window._pendingPush[_pKey] && !_pendingIsNewer()) {
+      if (/^(mpd|del)\|/.test(_pKey)) delete window._pendingPush[_pKey];
+      else delete window._pendingPush[_pKey].failAt;
+    }
     // v5.12: Crud v3.21 stamps `savedAt` on every claim write and returns
     // it. Keep the local copy in step, or this device's NEXT save of the
     // same claim would be refused as stale against its own write.
@@ -4592,8 +4781,7 @@ async function push(action, body, wire) {
       errName: String(e && e.name || ''), errMsg: String(e && e.message || e),
       attempt: 1, recovered: false
     });
-    setSyncState('error', { code: _ec });
-    return false;
+    return _pushSoftFail(action, body, _pKey, _ec);   // v5.32
   }
   } finally {
     if (_qRel) _qRel();   // v5.31: always hand the queue to the next write
@@ -5007,9 +5195,16 @@ function netlogWorthRetry(code) {
 // 2 can call findRowIndex before attempt 1's append has committed, miss it,
 // and append a SECOND row with the same id/alias. Upsert-by-key is only
 // idempotent when the read-modify-write is serialized. It is not, here.
+// v5.32 (2026-09-25): + savePatientWithClaims and mergePatientDemographics.
+// Both are safe to repeat: the batch upserts patient + claims by id and the
+// server blocks same-day duplicates (25/09 log: two writes of Whaley's batch
+// → exactly 3 claim rows); the merge finds the kept row by id and the
+// absorbed rows are already gone on a second pass. Without this, a 7am
+// timeout on Add Patient got ONE attempt and then "Not saved".
 var NETLOG_IDEMPOTENT = {
   savePatient: 1, saveClaim: 1, saveGapNote: 1,
-  deletePatient: 1, deleteClaim: 1
+  deletePatient: 1, deleteClaim: 1,
+  savePatientWithClaims: 1, mergePatientDemographics: 1
 };
 
 // ── Throttled variant, for high-frequency probes ───────────────────
@@ -6259,7 +6454,7 @@ function confirmDupClaim() {
         return;
       }
     }
-    showToast('Second ' + a.fee + ' billed at ' + time + ' with your note');
+    showSaved('Second ' + a.fee + ' billed at ' + time + ' with your note');
   }
 }
 // 05_render.js — Render rounds list (geo + alpha + off service)
@@ -6387,17 +6582,15 @@ function toggleHandoverFlag(pid) {
   render();
 }
 
-// v5.27: Flag/unflag a claim for KB billing follow-up. Called from the
-// flag icon on each Today's-Claims row (_cfFlagBtn, 02_constants.js).
-// Backend: Claims gains 'followUp'/'followUpNote' (Config v2.50); DataCheck
-// v2.54 copies any flagged claim onto the "Claims to Follow" tab on its
-// next run — this is a watchlist, not an error, so nothing more happens
-// here. Turning a flag OFF stays a silent, instant toggle — no modal, no
-// toast.
-// v5.29: turning a flag ON opens cf-note-modal and now REQUIRES a note
-// (Kathryn, 2026-09-21) — the note is what tells her what to actually
-// follow up on for that MSP claim, so an empty flag isn't useful. "Cancel"
-// backs out without flagging; there is no "flag with no note" option.
+// v5.27: Flag/unflag a claim for follow-up. Called from the flag icon on
+// each Today's-Claims row (_cfFlagBtn, 02_constants.js). Backend: Claims
+// gains 'followUp'/'followUpNote' (Config v2.50); DataCheck v2.54 copies any
+// flagged claim onto the "Claims to Follow" tab on its next run — this is a
+// watchlist, not an error, so nothing more happens here.
+// v5.28: turning a flag ON now opens a small optional-note modal
+// (cf-note-modal) instead of toggling immediately, so a note can be
+// attached at flag time without opening the Claims sheet. Turning a flag
+// OFF stays a silent, instant toggle — no modal, no toast — same as before.
 function toggleClaimFollowUp(claimId) {
   var c = (st.claims || []).find(function(x){ return String(x.id) === String(claimId); });
   if (!c) return;
@@ -6409,43 +6602,32 @@ function toggleClaimFollowUp(claimId) {
     if (typeof openDailyClaimsList === 'function') openDailyClaimsList(_dailyClaimsFilter);
     return;
   }
-  var idEl  = document.getElementById('cf-note-claim-id');
-  var taEl  = document.getElementById('cf-note-input');
-  var errEl = document.getElementById('cf-note-err');
+  var idEl = document.getElementById('cf-note-claim-id');
+  var taEl = document.getElementById('cf-note-input');
   if (idEl) idEl.value = claimId;
   if (taEl) taEl.value = '';
-  if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
   showModal('cf-note-modal');
   setTimeout(function() { if (taEl) try { taEl.focus(); } catch (e) {} }, 200);
 }
 
-// v5.29: back out of the flag-note modal without flagging anything.
-function cfCancelFollowUpNote() {
-  hideModal('cf-note-modal');
-}
-
-// v5.29: MANDATORY — no note, no flag (mirrors the dup-claim-sheet's
-// required-note pattern in 04_billing.js). Shows an inline error and keeps
-// the modal open instead of closing it, so nothing is silently lost.
-function cfSaveFollowUpNote() {
-  var taEl  = document.getElementById('cf-note-input');
-  var errEl = document.getElementById('cf-note-err');
-  var note  = String((taEl && taEl.value) || '').trim();
-  if (!note) {
-    if (errEl) { errEl.textContent = 'Add a note so KB knows what to follow up on.'; errEl.style.display = 'block'; }
-    return;
-  }
+// v5.28: shared finish step for both cf-note-modal buttons.
+function _cfFinishFollowUpFlag(note) {
   var claimId = (document.getElementById('cf-note-claim-id') || {}).value;
   hideModal('cf-note-modal');
   var c = (st.claims || []).find(function(x){ return String(x.id) === String(claimId); });
   if (!c) return;
   c.followUp     = true;
-  c.followUpNote = note;
+  c.followUpNote = String(note || '').trim();
   sv('claims', st.claims);
   if (SHEETS_URL) push('saveClaim', c);
-  logChange(c, 'Flagged claim for KB billing follow-up',
-    (c.fee || '') + ' on ' + (c.date || '') + ' \u2014 ' + note);
+  logChange(c, 'Flagged claim for follow-up',
+    (c.fee || '') + ' on ' + (c.date || '') + (c.followUpNote ? ' \u2014 ' + c.followUpNote : ''));
   if (typeof openDailyClaimsList === 'function') openDailyClaimsList(_dailyClaimsFilter);
+}
+function cfSkipFollowUpNote() { _cfFinishFollowUpFlag(''); }
+function cfSaveFollowUpNote() {
+  var taEl = document.getElementById('cf-note-input');
+  _cfFinishFollowUpFlag(taEl ? taEl.value : '');
 }
 
 // v4.62: bordered footer row with the three card-level actions.
@@ -7108,7 +7290,7 @@ function batchRound(ward) {
   });
   sv('patients', st.patients);
   sv('claims', st.claims);
-  showToast('Rounded ' + pts.length + ' on ' + ward + ' — tap any to adjust');
+  showSaved('Rounded ' + pts.length + ' on ' + ward + ' — tap any to adjust');
   render();
 }
 
@@ -7258,7 +7440,7 @@ function quickDailyBtn(btn) {
   // If already billed — toggle off (undo)
   if (alreadyBilledToday(pid, ['33008'])) {
     if (unbillToday(pid, ['33008'])) {
-      showToast('Daily removed — ' + getP(pid).last);
+      showSaved('Daily removed — ' + getP(pid).last);
       render();
     }
     return;
@@ -7285,7 +7467,7 @@ function quickDailyBtn(btn) {
         addClaim(p2, '33008', '33008', 1, TODAY, 'I', null, p2.combinedDailyReason || '');
         p2.lastBilled = 'Combined daily';
         sv('patients', st.patients); sv('claims', st.claims);
-        showToast('✓ Combined daily — ' + p2.last);
+        showSaved('✓ Combined daily — ' + p2.last);
         requestAnimationFrame(render);
       });
       return;
@@ -7294,7 +7476,7 @@ function quickDailyBtn(btn) {
     addClaim(p, '33008', '33008', 1, TODAY, 'I', null, p.combinedDailyReason || '');
     p.lastBilled = 'Combined daily';
     sv('patients', st.patients); sv('claims', st.claims);
-    showToast('✓ Combined daily — ' + p.last);
+    showSaved('✓ Combined daily — ' + p.last);
     requestAnimationFrame(render);
     return;
   }
@@ -7304,7 +7486,7 @@ function quickDailyBtn(btn) {
   p.lastBilled   = label;
   sv('patients', st.patients);
   sv('claims', st.claims);
-  showToast('✓ ' + label + ' — ' + p.last);
+  showSaved('✓ ' + label + ' — ' + p.last);
   requestAnimationFrame(render);
 }
 
@@ -7315,7 +7497,7 @@ function quickDirectiveBtn(btn) {
   // If already billed today — toggle off (undo), same as daily/CCU
   if (alreadyBilledToday(pid, ['33006'])) {
     if (unbillToday(pid, ['33006'])) {
-      showToast('Directive removed — ' + getP(pid).last);
+      showSaved('Directive removed — ' + getP(pid).last);
       render();
     }
     return;
@@ -7338,7 +7520,7 @@ function quickDirectiveBtn(btn) {
   p.lastBilled   = 'Directive';
   sv('patients', st.patients);
   sv('claims', st.claims);
-  showToast('✓ Directive — ' + p.last);
+  showSaved('✓ Directive — ' + p.last);
   requestAnimationFrame(render);
 }
 
@@ -7349,7 +7531,7 @@ function quickCCUBtn(btn) {
   // If already billed — toggle off (undo)
   if (alreadyBilledToday(pid, ['CCU_DAILY','1411','1421','1431'])) {
     if (unbillToday(pid, ['CCU_DAILY','1411','1421','1431'])) {
-      showToast('CCU daily removed — ' + getP(pid).last);
+      showSaved('CCU daily removed — ' + getP(pid).last);
       render();
     }
     return;
@@ -7373,7 +7555,7 @@ function quickCCUBtn(btn) {
   p.lastBilled   = 'CCU day';
   sv('patients', st.patients);
   sv('claims', st.claims);
-  showToast('✓ CCU day — ' + p.last);
+  showSaved('✓ CCU day — ' + p.last);
   requestAnimationFrame(render);
 }
 
@@ -7441,32 +7623,6 @@ function ebcAddMins(t24, n) {
 function ebcDisp(t24) {
   var v = _ocTo12(t24);
   return v.disp ? v.disp + v.ap : t24;
-}
-
-// ── 01172 Sedation (anesthesia intensity/complexity, Level 2) ──────
-// v5.29 (2026-09-21, Kathryn spec): start AND end time are now mandatory
-// for 01172 on the Other-claim form (same pattern as 00081) so the app can
-// calculate how many 15-min service units to bill — MSP pays this code
-// "per 15 min or part thereof". Confirmed with Kathryn: this is a straight
-// CEILING, no minimum-duration threshold and no majority-portion rule like
-// 00081's — 1 min = 1 unit, 15 min = 1 unit, 16 min = 2 units, etc.
-var SEDATION_CODE = '01172';
-var SEDATION_EXPLANATION = 'Billed per completed 15 minutes or any part thereof';
-
-// Generic HH:MM duration in minutes (handles midnight wrap). Mirrors
-// ebcDurMins exactly but kept as its own function — ebcDurMins is left
-// untouched so the existing 00081 path can't be affected by this change.
-function ocDurMins(start24, end24) {
-  if (!start24 || !end24) return 0;
-  var s = t2m(start24), e = t2m(end24);
-  if (e < s) e += 24 * 60;
-  return e - s;
-}
-
-// Ceiling to the next 15-min unit; 0 min (no valid window) bills nothing.
-function sedationUnitsFromDur(durMins) {
-  if (!durMins || durMins <= 0) return 0;
-  return Math.ceil(durMins / 15);
 }
 
 function _openClaimScreen(pid) {
@@ -7607,17 +7763,6 @@ function selectFeeCode(code, desc) {
     }
     // 00081: surface the billing rule right under the fee-code picker.
     if (code === EBC_CODE && disp) disp.textContent = EBC_EXPLANATION;
-  } else if (code === SEDATION_CODE) {
-    // v5.29: start/end mandatory to compute 15-min service units — notes
-    // stay optional, this code has no MSP-mandated description requirement.
-    if (endWrap)  endWrap.style.display = 'block';
-    if (startLbl) startLbl.innerHTML = 'Start time <span style="color:var(--red-t)">*</span>';
-    if (notesEl) {
-      notesEl.placeholder = 'Optional';
-      notesEl.style.cssText = '';
-      notesEl.removeAttribute('data-required');
-    }
-    if (disp) disp.textContent = SEDATION_EXPLANATION;
   } else {
     if (endWrap)  endWrap.style.display = 'none';
     if (startLbl) startLbl.innerHTML = 'Start time <span style="font-size:10px;color:var(--text3)">(if required)</span>';
@@ -7838,24 +7983,6 @@ function updateOtherPreview() {
     extra += '<div style="font-size:11px;color:var(--text3);margin-top:3px">' + esc(EBC_EXPLANATION) + '</div>';
   }
 
-  // v5.29: 01172 Sedation — live 15-min-unit calculation from start/end times.
-  if (fee === SEDATION_CODE) {
-    var sS   = ocTime24('start');
-    var sE   = ocTime24('end');
-    var sDur = ocDurMins(sS, sE);
-    var sU   = sedationUnitsFromDur(sDur);
-    var sRate = FEE_RATES[SEDATION_CODE] || 0;
-    if (sDur > 0) {
-      extra = '<div class="cp-row" style="font-size:12px;margin-top:4px">' + sDur +
-        ' min &rarr; ' + sU + ' &times; 15-min unit' + (sU === 1 ? '' : 's') +
-        ' = <b>$' + (sU * sRate).toFixed(2) + '</b></div>';
-    } else {
-      extra = '<div style="font-size:11px;color:var(--text3);margin-top:4px">Enter start and end time &mdash; ' +
-        'billed per 15 min or part thereof.</div>';
-    }
-    extra += '<div style="font-size:11px;color:var(--text3);margin-top:3px">' + esc(SEDATION_EXPLANATION) + '</div>';
-  }
-
   prev.innerHTML = '<div class="cp-title">Claim to add</div>' +
     '<div class="cp-row" style="display:flex;align-items:center;gap:6px">' +
     '<span class="cp-code">' + esc(fee) + '</span>' +
@@ -7903,23 +8030,8 @@ function submitOtherClaimFor(p, alias, opts) {
     }
   }
 
-  // v5.29: 01172 Sedation — start and end time are mandatory (notes stay
-  // optional) so the app can calculate 15-min service units.
-  if (fee === SEDATION_CODE) {
-    var sm = [];
-    if (!start)   sm.push('start time');
-    if (!endTime) sm.push('end time');
-    if (sm.length) {
-      if (!start)   { var _ss = document.getElementById('oc-start'); if (_ss) _ss.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
-      if (!endTime) { var _se2 = document.getElementById('oc-end');  if (_se2) _se2.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
-      showToast('Required for ' + fee + ': ' + sm.join(', '));
-      return false;
-    }
-  }
-
   var dateFmt = fmtD(parseISODate(dateISO));
-  // Units are always 1 for an Other claim — except 00081 (per-30-min) and
-  // 01172 (per-15-min, v5.29).
+  // Units are always 1 for an Other claim — except 00081 (per-30-min).
   var pClone  = Object.assign({}, p, { icd: icd, refby: refby, refbyName: refName });
 
   // v4.96: 00081 Emergency Bedside Care — units from the bedside window;
@@ -7929,22 +8041,6 @@ function submitOtherClaimFor(p, alias, opts) {
       dateISO: dateISO, dateFmt: dateFmt, start: start, end: endTime,
       loc: loc, notes: notes
     });
-  }
-
-  // v5.29: 01172 Sedation — units computed from the mandatory start/end
-  // window (ceiling to the next 15-min period); no consult-split sheet
-  // (that's an 00081-specific MSP rule that doesn't apply here).
-  if (fee === SEDATION_CODE) {
-    var sedDur = ocDurMins(start, endTime);
-    if (sedDur <= 0) { showToast('01172: end time must be after start time'); return false; }
-    var sedUnits = sedationUnitsFromDur(sedDur);
-    var sedResult = addClaim(pClone, fee, fee, sedUnits, dateFmt, loc, start, notes, endTime, alias);
-    if (!sedResult) return false;  // dedup blocked — stay on form, error toast visible
-    sv('claims', st.claims);
-    // No unit-specific toast here — the generic caller (submitOtherClaim)
-    // already toasts "<fee> claim added for <name>"; the unit count is
-    // visible in the preview before submit and as ×N on the claims list.
-    return true;
   }
 
   // v4.79: Echo bundles — one tap creates each component claim with its
@@ -7966,7 +8062,7 @@ function submitOtherClaimFor(p, alias, opts) {
     });
     if (!_made) return false;   // every component blocked as duplicate — toast already shown
     sv('claims', st.claims);
-    showToast(ECHO_BUNDLES[fee].label + ' — ' + _made + ' claim' + (_made > 1 ? 's' : '') + ' added');
+    showSaved(ECHO_BUNDLES[fee].label + ' — ' + _made + ' claim' + (_made > 1 ? 's' : '') + ' added');
     return true;
   }
 
@@ -8085,7 +8181,7 @@ function _ebcNo() {
                    x.f.loc, x.f.start, x.f.notes, x.f.end, x.alias);
   if (!r) return;  // dedup blocked — stay on the form
   sv('claims', st.claims);
-  showToast('00081 × ' + x.fullUnits + ' unit' + (x.fullUnits > 1 ? 's' : '') +
+  showSaved('00081 × ' + x.fullUnits + ' unit' + (x.fullUnits > 1 ? 's' : '') +
     ' added for ' + x.p.last);
   closeClaimScreen();
 }
@@ -8114,7 +8210,7 @@ function submitOtherClaim() {
 
   // 00081 finishes via its own sheet (submitOtherClaimFor returned false
   // while it is open), so this toast/close only runs for ordinary codes.
-  showToast((fee || 'Claim') + ' claim added for ' + p.last);
+  showSaved((fee || 'Claim') + ' claim added for ' + p.last);
   closeClaimScreen();
 }
 
@@ -8755,7 +8851,7 @@ function _doRestoreCommit(pid, list, mode, isoDate) {
       ? 'New admission ' + p.admitDate +
         (prevDisch ? ' — previous stay closed ' + prevDisch : '')
       : 'Returned to ' + (list === 'on' ? 'On Service' : 'Off Service'));
-  showToast(mode === 'new'
+  showSaved(mode === 'new'
     ? p.last + ' readmitted — new stay from ' + p.admitDate
     : p.last + ' restored to ' + (list === 'on' ? 'on-service' : 'off-service') + ' list');
   renderDischarged(document.getElementById('discharged-search') ? document.getElementById('discharged-search').value : '');
@@ -9000,7 +9096,7 @@ async function savePatientNotes(pid) {
   logChange(p, 'Summary updated', alias);
 
   hideModal('pt-notes-modal');
-  showToast('Notes saved');
+  showSaved('Notes saved');
 
   if (SHEETS_URL) {
     window._lastPushStale = null;
@@ -9854,8 +9950,9 @@ function _cvApplyTypeRange(pid, fromDate, toDate, type, alias) {
   }
   sv('patients', st.patients);
   sv('claims', st.claims);
-  showToast(added ? (added + ' ' + (type === 'ccu' ? 'CCU' : type) + ' day' + (added > 1 ? 's' : '') + ' added — ' + p.last)
-                  : 'Those days already billed — nothing added');
+  // v5.32: only the "nothing added" case is worth a toast.
+  if (added) showSaved(added + ' ' + (type === 'ccu' ? 'CCU' : type) + ' day' + (added > 1 ? 's' : '') + ' added — ' + p.last);
+  else showToast('Those days already billed — nothing added');
   _cvRefreshSummary(pid);
   render();
 }
@@ -10048,7 +10145,7 @@ function _cvConfirmGapNote(btn) {
   if (idx >= 0) st.gapNotes[idx] = rec; else st.gapNotes.push(rec);
   sv('gapNotes', st.gapNotes);
   if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL) push('saveGapNote', rec);
-  showToast('Gap explained — noted for billing');
+  showSaved('Gap explained — noted for billing');
   if (window._dischResolvePid === pid) { hideModal('cv-picker-modal'); _cvRefreshSummary(pid); return; }   // back to calendar (banner + active pill preserved)
   hideModal('cv-picker-modal');
   if (typeof openPatientSummary === 'function') openPatientSummary(pid);
@@ -10166,7 +10263,7 @@ function _cvFillClaim(pid, dateStr, type, note, icdOverride, alias) {
 
   sv('patients', st.patients);
   sv('claims',   st.claims);
-  showToast(type === 'combined' ? 'Combined daily added — ' + p.last : 'Claim added — ' + p.last);
+  showSaved(type === 'combined' ? 'Combined daily added — ' + p.last : 'Claim added — ' + p.last);
   hideModal('cv-picker-modal');
   // Refresh in place — preserves the active legend pill (so a type stays armed
   // for the next day-tap / range) AND updates the discharge gap banner.
@@ -10787,7 +10884,7 @@ function saveClaimEdit(btn) {
 
   // Reopen summary to show updated claim
   openPatientSummary(pid);
-  showToast('Claim updated');
+  showSaved('Claim updated');
 }
 
 function deleteClaimBtn(btn) {
@@ -10805,7 +10902,7 @@ function deleteClaimBtn(btn) {
   if (c) ccfppRecomputeAround_(c.alias, c.date);
 
   openPatientSummary(pid);
-  showToast('Claim deleted');
+  showSaved('Claim deleted');
 }
 
 function hideClaimEditModal() { hideModal('claim-edit-modal'); }
@@ -11149,7 +11246,7 @@ function savePatientEdit(pid) {
   logChange(p, 'Demographics edited', _detailParts.join(' \u2014 '));
   hideModal('pt-edit-modal');
   render();
-  showToast(p.last + ' updated' + (_claimsTouched > 0 ? ' (\u2713 ' + _claimsTouched + ' claim row(s) updated)' : ''));
+  showSaved(p.last + ' updated' + (_claimsTouched > 0 ? ' (\u2713 ' + _claimsTouched + ' claim row(s) updated)' : ''));
 }
 
 // ═══════════════════════════════════════════════════════
@@ -11246,7 +11343,7 @@ function saveLocationEdit(pid) {
   var toastBits = [];
   if (oldWard !== newWard || oldBed !== newBed) toastBits.push((WARDS[newWard]||{}).label || newWard);
   if (newBed) toastBits.push(newBed);
-  showToast(p.last + ' moved' + (toastBits.length ? ' → ' + toastBits.join(' ') : ''));
+  showSaved(p.last + ' moved' + (toastBits.length ? ' → ' + toastBits.join(' ') : ''));
 }
 
 // 07_consult.js — Unified consult form (33010/33012)
@@ -12172,8 +12269,9 @@ function submitConsultClaims(p, alias, locOverride) {
     p.admitVia = 'RACE';
     sv('patients', st.patients);
     sv('claims', st.claims);
-    showToast(_mostOn ? 'RACE admit — MOST (78720) added, no consult fee'
-                      : 'RACE admit — no claims added (consult billed in RACE clinic)');
+    // v5.32: success is silent; "nothing billed" is still said out loud.
+    if (_mostOn) showSaved('RACE admit — MOST (78720) added, no consult fee');
+    else showToast('RACE admit — no claims added (consult billed in RACE clinic)');
     return true;
   }
   // CCFPP — one-directional detection (single most-recent overlapping
@@ -12311,7 +12409,7 @@ function submitConsult() {
   if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
   if (!submitConsultClaims(p, getPerformingAlias())) return;
   sv('patients', st.patients);
-  showToast('Consult claims added for ' + p.last);
+  showSaved('Consult claims added for ' + p.last);
   closeClaimScreen();
 }
 
@@ -12809,7 +12907,7 @@ function tlSaveTimes() {
 
   _tlCommitTimes(sel, ns, ne, null);
   trims.forEach(function(t){ if (!t.self) applyConsultTimes_(t.c, t.ns, t.ne); });
-  showToast('Times updated — call-out blocks re-built');
+  showSaved('Times updated — call-out blocks re-built');
   _tlSel = null;
   _tlCod = null;
   _tlRender();
@@ -12833,7 +12931,7 @@ function _tlApplyCod() {
     : null;
   _tlCommitTimes(sel, _tlCod.ns, _tlCod.ne, ccNote);
   _tlCod.trims.forEach(function(t){ applyConsultTimes_(t.c, t.ns, t.ne); });
-  showToast(canLink ? 'Times updated — call-out blocks re-built, CCFPP noted'
+  showSaved(canLink ? 'Times updated — call-out blocks re-built, CCFPP noted'
                     : 'Times updated — call-out blocks re-built');
   _tlSel = null;
   _tlCod = null;
@@ -12850,7 +12948,7 @@ function _tlCodSelectPill(which) {
     ? _ccfppMerge(_ccfppStrip(sel.notes), 'CCFPP: ' + _tlCod.pred.name + ' (' + _tlCod.pred.phn + ')')
     : (_ccfppStrip(sel.notes) || null);
   _tlCommitTimes(sel, _tlCod.ns, _tlCod.ne, ccNote);
-  showToast(which === 'ccfpp' ? 'Times updated — linked as continuing care (CCFPP)'
+  showSaved(which === 'ccfpp' ? 'Times updated — linked as continuing care (CCFPP)'
                                : 'Times updated — billed as a new call-back');
   _tlSel = null;
   _tlCod = null;
@@ -12993,7 +13091,7 @@ function submitDaily() {
   var alias = getPerformingAlias();
   addClaim(pc, '33008', '33008', days, fmtD(parseISODate(ds)), 'I', dailyStampTime(ds, days), null, null, alias);
   sv('claims', st.claims);
-  showToast('33008 ×' + days + ' — ' + p.last);
+  showSaved('33008 ×' + days + ' — ' + p.last);
   closeClaimScreen();
 }
 
@@ -13055,7 +13153,7 @@ function submitCombined() {
     (baseNote ? baseNote + ' | ' : '') + 'Second visit — ' + (note2 || 'patient unstable'),
     null, alias, { allowSecondDaily: true });
   sv('claims', st.claims);
-  showToast('Combined daily ×' + v + ' — ' + p.last);
+  showSaved('Combined daily ×' + v + ' — ' + p.last);
   closeClaimScreen();
 }
 
@@ -13091,7 +13189,7 @@ function submitDirective() {
   var alias = getPerformingAlias();
   addClaim(pc, '33006', '33006', 1, fmtD(parseISODate(ds)), 'I', null, note, null, alias);
   sv('claims', st.claims);
-  showToast('33006 directive — ' + p.last);
+  showSaved('33006 directive — ' + p.last);
   closeClaimScreen();
 }
 
@@ -13128,7 +13226,9 @@ function submitCCU(isDuplicate) {
   // v3.60: write CCU_DAILY placeholder; export consolidates.
   addClaim(pc, 'CCU_DAILY', 'CCU_DAILY', 1, TODAY, 'I', null, null, null, alias);
   sv('claims', st.claims);
-  showToast('CCU daily recorded' + (isDuplicate ? ' (duplicate)' : '') + ' — ' + p.last);
+  // v5.32: silent on success; a duplicate is still flagged.
+  if (isDuplicate) showToast('CCU daily recorded (duplicate) — ' + p.last);
+  else showSaved('CCU daily recorded — ' + p.last);
   closeClaimScreen();
 }
 
@@ -13486,15 +13586,18 @@ async function _mergeAndReadmit() {
     // patient row sharing the old/new PHN, (c) retags every prior claim row.
     // push() returns false on a server rejection ({ok:false}) so the doctor is
     // told rather than silently losing the correction.
-    var ok = _demoChanged
-      ? await push('mergePatientDemographics', {
-          id:      p.id,                                  // for the in-flight guard
+    var _mBody = _demoChanged
+      ? { id:      p.id,                                  // for the in-flight guard
           patient: p,
           oldPhn:  _oldPhn,
-          user:    (st.doc && st.doc.alias) || ''
-        })
-      : await push('savePatient', p);
-    if (!ok) {
+          user:    (st.doc && st.doc.alias) || '' }
+      : p;
+    var ok = await push(_demoChanged ? 'mergePatientDemographics' : 'savePatient', _mBody);
+    // v5.32: a timeout is not a failure — the write is queued and the app
+    // keeps re-sending it (safe: both actions are repeat-safe). Carry on
+    // exactly as if it landed; only a real server rejection stops here.
+    var _mQueued = !ok && wasQueued(_mBody);
+    if (!ok && !_mQueued) {
       // Keep p._mergeOldPhn stashed so a retry still knows which claim rows to
       // retag (see the snapshot block above).
       showToast(window._lastPushError
@@ -13504,8 +13607,9 @@ async function _mergeAndReadmit() {
       return;
     }
   }
-  // Landed. Clear the retag key.
-  if (p._mergeOldPhn) { delete p._mergeOldPhn; sv('patients', st.patients); }
+  // Landed. Clear the retag key. (v5.32: not while only queued — the
+  // queued merge body still needs it.)
+  if (p._mergeOldPhn && !_mQueued) { delete p._mergeOldPhn; sv('patients', st.patients); }
 
   var mergeVerb = window._dupIsReadmit ? 'Readmit (merged)' : 'Moved to active service (merged)';
   logChange(p, mergeVerb, addToList ? (p.ward + (p.bed ? ' Rm ' + p.bed : '')) : 'Consult only');
@@ -13562,12 +13666,10 @@ async function _mergeAndReadmit() {
     }
     sv('claims', st.claims);
     if (_mgClaimsValid && _mgBatch.length && SHEETS_URL) {
-      var okClaims = await push('savePatientWithClaims', {
-        id:      p.id,
-        patient: p,
-        claims:  _mgBatch
-      });
-      if (!okClaims) {
+      var _mgBody = { id: p.id, patient: p, claims: _mgBatch };
+      var okClaims = await push('savePatientWithClaims', _mgBody);
+      // v5.32: queued (timeout) = done; the claims stay and are re-sent.
+      if (!okClaims && !wasQueued(_mgBody)) {
         // Patient row is saved; the claims are kept locally and the sync
         // retry loop will re-push them individually — but tell the doctor
         // so they can verify rather than trust silence.
@@ -13599,7 +13701,7 @@ async function _mergeAndReadmit() {
   }
 
   // v4.69: plain-language toast — say what happened, not which internal path ran.
-  showToast(p.last + (addToList ? ' added to list' : ' added') +
+  showSaved(p.last + (addToList ? ' added to list' : ' added') +
             (_demoChanged
               ? ' — info updated' + (_retagged ? ' (' + _retagged + ' prior claim' +
                   (_retagged > 1 ? 's' : '') + ' corrected)' : '')
@@ -13865,7 +13967,7 @@ function locSaveCustomWard(prefix) {
       if (otherOpt) sel.insertBefore(newOpt, otherOpt);
       else sel.appendChild(newOpt);
     });
-    showToast(name + ' added to ward list');
+    showSaved(name + ' added to ward list');
     if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL)
       push('logNewRoom', { ward:key, room:'(new ward)', doctor:st.doc||'' });
   }
@@ -14916,12 +15018,14 @@ async function apSubmit(addToList, _skipDupCheck) {
   }
 
   if (SHEETS_URL) {
-    var ok = await push('savePatientWithClaims', {
-      id:      p.id,                        // in-flight guard key
-      patient: p,
-      claims:  _apBatch
-    });
-    if (!ok) {
+    var _apBody = { id: p.id, patient: p, claims: _apBatch };   // id = in-flight guard key
+    var ok = await push('savePatientWithClaims', _apBody);
+    // v5.32 (KBrown/Whaley 25/09): a TIMEOUT is not a failure. The server
+    // usually has it (it did here — 16 s, all 3 claims written). Rolling
+    // back + "Not saved" made the doctor submit again. Now: keep the
+    // patient and claims, queue the re-send (same ids → no duplicates),
+    // clear the form and move on. Only a real server rejection rolls back.
+    if (!ok && !wasQueued(_apBody)) {
       var _apIds2 = {}; _apBatch.forEach(function(c){ _apIds2[c.id] = true; });
       st.claims   = st.claims.filter(function(c){ return !_apIds2[c.id]; });
       st.patients = st.patients.filter(function(x) { return x.id !== p.id; });
@@ -14978,7 +15082,7 @@ async function apSubmit(addToList, _skipDupCheck) {
   // lived here was the dropped-consult bug and has been removed.
 
   var listLabel = addToList ? (p.list === 'on' ? 'On' : 'Off') + ' Service' : 'claim only';
-  showToast(last + ' added — ' + listLabel);
+  showSaved(last + ' added — ' + listLabel);
   _hideSubmitOverlay();
   clearAddForm();
   if (addToList) {
@@ -16819,7 +16923,7 @@ function confirmLocChange() {
   if (SHEETS_URL) push('savePatient', p);
   logChange(p, 'Location changed', from + ' → ' + _locWard);
   closeLocScreen();
-  showToast(p.last + ' moved to ' + wardLabel(_locWard));
+  showSaved(p.last + ' moved to ' + wardLabel(_locWard));
 }
 
 function closeLocScreen() {
@@ -16990,7 +17094,7 @@ function _cvConfirmAllGapNote(btn) {
   });
   sv('gapNotes', st.gapNotes);
   hideModal('cv-picker-modal');
-  showToast(gaps.length + ' day' + (gaps.length > 1 ? 's' : '') + ' noted for billing');
+  showSaved(gaps.length + ' day' + (gaps.length > 1 ? 's' : '') + ' noted for billing');
   _cvProceedDischarge(pid);
 }
 
@@ -17222,7 +17326,7 @@ function _dischFinalize(pid) {
   removePatient(pid);
   hideModal('disch-modal');
   closeClaimScreen();
-  showToast(p.last + ' discharged');
+  showSaved(p.last + ' discharged');
 }
 
 // Kept for compatibility with button handlers (checklist "Doesn't qualify")
@@ -17250,7 +17354,7 @@ function disch78717() {
   removePatient(_claimPid);
   hideModal('disch-modal');
   closeClaimScreen();
-  showToast('33008 + 78717 billed — ' + p.last + ' discharged');
+  showSaved('33008 + 78717 billed — ' + p.last + ' discharged');
 }
 
 function dischSimple() {
@@ -17261,7 +17365,7 @@ function dischSimple() {
   removePatient(_claimPid);
   hideModal('disch-modal');
   closeClaimScreen();
-  showToast('33008 billed — ' + p.last + ' discharged');
+  showSaved('33008 billed — ' + p.last + ' discharged');
 }
 
 function transferToDir() {
@@ -17272,7 +17376,7 @@ function transferToDir() {
   logChange(p, 'Transferred MRP → Directive', '');
   hideModal('disch-modal');
   closeClaimScreen();
-  showToast(p.last + ' now on directive care');
+  showSaved(p.last + ' now on directive care');
 }
 
 
@@ -17777,7 +17881,9 @@ function ppDemogSave(btn) {
   }
   _ppCommitPatient(p);
   var left = _ppMissingDemogFields(p);
-  showToast(left.length ? 'Saved — still missing ' + left.join(', ') : 'Billing details complete');
+  // v5.32: only what is still missing is worth a toast.
+  if (left.length) showToast('Still missing ' + left.join(', '));
+  else showSaved('Billing details complete');
   _ppStepInterp(p.id);
 }
 
@@ -18976,9 +19082,9 @@ function submitNewPhysician(dropdownId, hiddenId, nameId) {
   // in later once Kathryn looks it up.
   selectRef(num, display, dropdownId, hiddenId, nameId);
   hideModal('add-phys-modal'); // v4.68: close the bottom sheet on save
-  showToast(num
-    ? ('Dr. ' + last + ' added to physician directory')
-    : ('Dr. ' + last + ' saved — MSP # will be emailed to Kathryn to look up'));
+  // v5.32: silent when complete; the no-MSP case still says what happens next.
+  if (num) showSaved('Dr. ' + last + ' added to physician directory');
+  else showToast('Dr. ' + last + ' saved — MSP # will be emailed to Kathryn to look up');
 }
 
 // ── selectRefRow / selectRef ───────────────────────────
@@ -19070,7 +19176,7 @@ function addRef() {
   if (SHEETS_URL) push('saveRef', r);
   ['r-last','r-first','r-num','r-spec'].forEach(function(id) { document.getElementById(id).value = ''; });
   renderRefs('');
-  showToast('Referrer saved');
+  showSaved('Referrer saved');
 }
 
 // Close dropdowns on outside click
@@ -20327,7 +20433,7 @@ function paSubmit() {
       if (j && j.ok) {
         paStatus('✓ Submitted: ' + ((j.result && j.result.message) || 'done') +
                  ' — letter queued, claim in billing.', 'ok');
-        showToast('Phone advice submitted ✓', 'ok');
+        showSaved('Phone advice submitted ✓');
       } else {
         var msg = (j && (j.error || (j.result && j.result.error))) || 'Submission failed';
         // 'Unauthorized' → likely APP_PW mismatch on the PhoneAdvice project.
@@ -21159,6 +21265,16 @@ function chkIco10() {
 
 // Toast notification
 var _toastTimer;
+// v5.32 (2026-09-25, Kathryn): NO toast when a save succeeds or is queued —
+// the doctor sees the result on screen (pill turns billed, card moves).
+// Every former "added / updated / saved / discharged" toast now calls this
+// instead. It only logs, so the wording is still there for debugging and
+// any one of them can be switched back to showToast by name. Validation
+// messages and real failures still use showToast.
+function showSaved(msg) {
+  try { console.log('[saved] ' + msg); } catch (e) {}
+}
+
 function showToast(msg, kind) {
   // v4.29: If addClaim just blocked a duplicate (within last 2s), don't
   // let a success toast overwrite the error toast. The caller doesn't
@@ -22052,7 +22168,7 @@ function rvAddFor(idx) {
     // consult's own location, alias and referrer/dx riding on the row.
     addClaim(p, '78720', '78720', 1, card.serviceDate, consult.loc || 'I', null, null, null,
              consult.alias || st.doc.alias, { icd:consult.icd, refby:consult.refby, refbyName:consult.refbyName });
-    showToast('MOST (78720) added for ' + card.serviceDate);
+    showSaved('MOST (78720) added for ' + card.serviceDate);
   } else if (card.issueType === 'MISSING_OOH_MODIFIER') {
     if (!consult.startTime || !consult.endTime) { rvOpenClaimEdit(consult.id, card.phn); return; }
     // getModifier wants an ISO date (isWeekendOrStat does new Date(iso+'T12:00')).
@@ -22081,7 +22197,7 @@ function rvAddFor(idx) {
     // showing a premium that is not there.
     var _made = rvClaims(card.phn, card.serviceDate).some(function(c){ return RV_MOD_FEES[String(c.fee)]; });
     if (_made) {
-      showToast('Call-out premium re-derived from the consult times');
+      showSaved('Call-out premium re-derived from the consult times');
     } else {
       RV.choice[card.key] = '';
       var _ccfpp = /(^|\|)\s*CCFPP:/i.test(String(consult.notes || ''));
@@ -22264,7 +22380,7 @@ async function rvAct_(kind) {
     return;
   }
   if (res.refused && res.refused.length) showToast('Partly closed — ' + res.refused.join('; '), 'error');
-  else showToast(kind === 'escalate' ? 'Reported to KB'
+  else showSaved(kind === 'escalate' ? 'Reported to KB'
                : (kind === 'later' ? 'Noted — it will be back in your email tomorrow'
                                    : 'Submitted — that one is off your list'));
   if (kind !== 'later') {
@@ -22630,5 +22746,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "5c17ec677a88";</script></body>
+<script>var BUILD_HASH = "aa0bbcb50c9a";</script></body>
 </html>
