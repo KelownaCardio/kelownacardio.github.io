@@ -300,7 +300,17 @@ async function _mergeAndReadmit() {
   } else if (!!((document.getElementById('f-private') || {}).checked)) {
     p.privatePay = true;
     p.rateMode   = gv('f-private-rate') || p.rateMode || 'BCMA';
-    p.oop = false; p.homeProvince = ''; p.homeHCN = ''; p.homeAddress = '';
+    // v5.33: homeAddress is KEPT — a private-pay invoice is mailed there and
+    // the discharge gate requires it. It used to be blanked here and in the
+    // Edit Patient modal, silently undoing an address captured earlier.
+    // v5.33: Quebec stays recorded as homeProvince 'QC' on the private-pay
+    // row (picked via the OOP list, or already on file) so the OOP tab and
+    // invoice still say Quebec; everything else in the OOP block is cleared.
+    p.oop = false; p.homeHCN = '';
+    p.homeProvince = _apPrivateIsQc(p) ? 'QC' : '';
+    p.homeAddress  = gv('f-home-address') || p.homeAddress || '';
+    // v5.33: patient email captured at intake (mandatory on this form).
+    p.homeEmail  = gv('f-home-email') || p.homeEmail || '';
   }
 
   stampChangedGroups(p, _hotSnap);   // v4.73: readmit = discharge/location/handover taps
@@ -473,6 +483,7 @@ async function _mergeAndReadmit() {
                   (_retagged > 1 ? 's' : '') + ' corrected)' : '')
               : ''));
   _hideSubmitOverlay();
+  ppDocUploadPending('f', p);   // v5.33: insurance photos → patient's invoice folder
   clearAddForm();
   if (addToList) { nav(0, document.querySelectorAll('.nb')[0]); }
   else { nav(2, document.querySelectorAll('.nb')[2]); }
@@ -1252,6 +1263,20 @@ function apProvinceChange() {
   var v = (document.getElementById('f-home-province') || {}).value || '';
   var qc = document.getElementById('f-qc-warn');
   if (qc) qc.style.display = (v === 'QC') ? 'block' : 'none';
+  // v5.33 (Kathryn 2026-09-24): Quebec is outside the reciprocal agreement,
+  // so it is billed exactly like private pay at MSP rates. Picking Quebec
+  // moves the patient straight onto the Private Pay block (MSP selected),
+  // where the patient email + insurance photos are collected.
+  if (v === 'QC') {
+    var oop = document.getElementById('f-oop');
+    if (oop) { oop.checked = false; apToggleOOP(); }
+    var priv = document.getElementById('f-private');
+    if (priv) { priv.checked = true; apTogglePrivate(); priv.setAttribute('data-qc', '1'); }
+    apPrivateRate('MSP');
+    showToast('Quebec — switched to Private Pay (MSP rates). Ask for the patient\'s email.');
+    var em = document.getElementById('f-home-email');
+    if (em) { try { em.focus(); } catch (e) {} }
+  }
 }
 // ── Private Pay toggle + rate selector ────────────────────────────
 function apTogglePrivate() {
@@ -1263,10 +1288,23 @@ function apTogglePrivate() {
     var oop = document.getElementById('f-oop');
     if (oop && oop.checked) { oop.checked = false; if (typeof apToggleOOP === 'function') apToggleOOP(); }
     apPrivateRate((document.getElementById('f-private-rate') || {}).value || 'BCMA');
+    ppDocRender('f', null);
   } else {
     var rm = document.getElementById('f-private-rate'); if (rm) rm.value = 'BCMA';
     apPrivateRate('BCMA');
+    // v5.33: collapse → clear, so a hidden block never submits stale data.
+    var em = document.getElementById('f-home-email'); if (em) { em.value = ''; em.style.cssText = 'font-size:16px'; }
+    var pc = document.getElementById('f-private'); if (pc) pc.removeAttribute('data-qc');
+    _ppDocPending.f = [];
+    ppDocRender('f', null);
   }
+}
+// v5.33: is this private-pay entry a Quebec resident? True when Quebec was
+// picked in the OOP list this time, or the patient on file is already QC.
+function _apPrivateIsQc(p) {
+  var pc = document.getElementById('f-private');
+  if (pc && pc.getAttribute('data-qc') === '1') return true;
+  return !!(p && /^(qc|pq|quebec)/i.test(String(p.homeProvince || '').trim()));
 }
 function apPrivateRate(mode) {
   mode = (mode === 'MSP') ? 'MSP' : 'BCMA';
@@ -1496,7 +1534,18 @@ async function apSubmit(addToList, _skipDupCheck) {
     }
   }
 
+  // v5.33 (Kathryn 2026-09-24): private pay (incl. Quebec) — the patient
+  // email is MANDATORY at intake. Leaving it to discharge wasn't working.
+  // Insurance photos stay optional. Same validity rule as the discharge gate
+  // (_ppValidEmail) so the two can never disagree.
+  var _priv = !!((document.getElementById('f-private') || {}).checked);
+  if (_priv && !_ppValidEmail(gv('f-home-email'))) addMissing.push('patient email');
+
   if (addMissing.length) {
+    if (addMissing.indexOf('patient email') !== -1) {
+      var emEl = document.getElementById('f-home-email');
+      if (emEl) { emEl.style.cssText = 'font-size:16px;border:1.5px solid var(--amber-t);background:var(--amber-bg)'; }
+    }
     if (addMissing.indexOf('last name') !== -1) {
       var lastBlankEl = document.getElementById('f-last');
       if (lastBlankEl) { lastBlankEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; lastBlankEl.focus(); }
@@ -1551,6 +1600,7 @@ async function apSubmit(addToList, _skipDupCheck) {
     if (addMissing.indexOf('home province')      !== -1) msgs.push('home province');
     if (addMissing.indexOf('home health number') !== -1) msgs.push('home health number');
     if (addMissing.indexOf('home address')        !== -1) msgs.push('home address');
+    if (addMissing.indexOf('patient email')       !== -1) msgs.push('patient email (private pay — ask the patient)');
     showToast('Required: ' + msgs.join(', '));
     return;
   }
@@ -1682,6 +1732,8 @@ async function apSubmit(addToList, _skipDupCheck) {
   if ((document.getElementById('f-private') || {}).checked) {
     p.privatePay = true;
     p.rateMode   = gv('f-private-rate') || 'BCMA';
+    p.homeEmail  = gv('f-home-email');   // v5.33: mandatory at intake
+    if (_apPrivateIsQc(null)) p.homeProvince = 'QC';   // v5.33: Quebec via the OOP list
   }
 
   // v4.95: ALWAYS send explicit discharge state on a new add. The admitted
@@ -1850,6 +1902,7 @@ async function apSubmit(addToList, _skipDupCheck) {
   var listLabel = addToList ? (p.list === 'on' ? 'On' : 'Off') + ' Service' : 'claim only';
   showSaved(last + ' added — ' + listLabel);
   _hideSubmitOverlay();
+  ppDocUploadPending('f', p);   // v5.33: insurance photos → patient's invoice folder
   clearAddForm();
   if (addToList) {
     nav(0, document.querySelectorAll('.nb')[0]);
@@ -3551,4 +3604,189 @@ function buildOCRCorrections(savedPatient) {
     }
   });
   return corrections;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// v5.33 (Kathryn 2026-09-24): PRIVATE-PAY INTAKE — INSURANCE PHOTOS
+// ═══════════════════════════════════════════════════════════════════
+// Private pay (and Quebec, which now routes to Private Pay at MSP rates)
+// collects the patient email (mandatory) and optional photos of insurance
+// documents/cards AT INTAKE, from the doctor who creates the card. Leaving
+// it all to discharge wasn't working.
+//
+// Photos go to the backend (Invoice.gs savePpDoc) and land in
+//   Drive › Patient Invoices › <LAST, First — PHN [id]>
+// — the same folder the patient's finalized invoice is filed into after
+// discharge, so the clerk finds everything for one patient in one place.
+//
+// ⚠️ Deliberately NO credit-card capture. Card photos (esp. the back/CVV)
+// must not be stored under PCI DSS; the card is kept on file in Wix.
+//
+// Memory: every photo goes through photoFileToDataUrl (v5.14 rule — never
+// FileReader on a camera file) and is then shrunk to PPDOC_MAX, which keeps
+// a card legible at ~150–400 KB — the same size class ocrSticker already
+// sends through the relay every day.
+var PPDOC_MAX = 1400;   // long side; a card stays legible, ~150–400 KB
+var _ppDocPending = { f: [], pe: [] };   // data URLs not yet uploaded, per form
+var _ppDocRetry   = {};                  // pid → data URLs whose upload failed
+
+function _ppDocShrink(dataUrl, cb) {
+  var img = new Image();
+  img.onload = function() {
+    var w = img.naturalWidth, h = img.naturalHeight;
+    var s = Math.min(1, PPDOC_MAX / Math.max(w || 1, h || 1));
+    var c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(w * s)); c.height = Math.max(1, Math.round(h * s));
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    var out = c.toDataURL('image/jpeg', 0.8);
+    c.width = c.height = 0;
+    img.removeAttribute('src');
+    cb(out);
+  };
+  img.onerror = function() { cb(dataUrl); };
+  img.src = dataUrl;
+}
+
+// Render the photo block into <prefix>-ppdoc-host. p = the saved patient
+// (Edit Patient) or null (Add Patient — nothing saved yet).
+function ppDocRender(prefix, p) {
+  var host = document.getElementById(prefix + '-ppdoc-host');
+  if (!host) return;
+  var pend  = _ppDocPending[prefix] || [];
+  var saved = p ? (parseInt(p.ppDocs, 10) || 0) : 0;
+  var h = '<label style="margin:0 0 6px">Insurance documents / cards <span style="font-weight:400;color:var(--text3)">(optional)</span></label>' +
+    '<input type="file" id="' + prefix + '-ppdoc-file" accept="image/*" multiple style="display:none" ' +
+      'onchange="ppDocFileChosen(\'' + prefix + '\', this)">' +
+    '<button type="button" class="btn btn-s" style="margin:0;width:100%" ' +
+      'onclick="ppDocPick(\'' + prefix + '\')">📷 Photo insurance documents or cards</button>' +
+    '<div style="margin-top:5px;font-size:10px;color:var(--text3);line-height:1.5">' +
+      'Front and back of each insurance card, or the policy page. ' +
+      'Saved to the patient’s invoice folder for the billing clerk. ' +
+      '<b>Do not photograph credit cards.</b></div>';
+  if (saved) {
+    h += '<div style="margin-top:6px;font-size:12px;font-weight:700;color:var(--green-t)">✓ ' +
+         saved + ' photo' + (saved === 1 ? '' : 's') + ' already saved to the invoice folder</div>';
+  }
+  if (pend.length) {
+    h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">';
+    pend.forEach(function(u, i) {
+      h += '<div style="position:relative;width:64px;height:64px;border:.5px solid var(--border2);border-radius:6px;overflow:hidden;background:#fff">' +
+             '<img src="' + u + '" style="width:100%;height:100%;object-fit:cover" alt="">' +
+             '<button type="button" onclick="ppDocRemove(\'' + prefix + '\',' + i + ')" ' +
+               'style="position:absolute;top:1px;right:1px;width:20px;height:20px;border:none;border-radius:10px;' +
+               'background:rgba(0,0,0,.6);color:#fff;font-size:12px;line-height:20px;padding:0;cursor:pointer">✕</button>' +
+           '</div>';
+    });
+    h += '</div><div style="margin-top:4px;font-size:11px;color:var(--amber-t);font-weight:600">' +
+         pend.length + ' photo' + (pend.length === 1 ? '' : 's') + ' will upload when you tap ' +
+         (prefix === 'f' ? 'Submit' : 'Save') + '</div>';
+  }
+  host.innerHTML = h;
+}
+
+function ppDocPick(prefix) {
+  var inp = document.getElementById(prefix + '-ppdoc-file');
+  if (inp) { inp.value = ''; inp.click(); }
+}
+
+function ppDocFileChosen(prefix, input) {
+  var files = Array.prototype.slice.call((input && input.files) || []);
+  if (!files.length) return;
+  var p = (prefix === 'pe' && window._ppDocEditPid) ? getP(window._ppDocEditPid) : null;
+  // One at a time: two 3000px decodes side by side is exactly the Android
+  // OOM the v5.14 budget exists to prevent.
+  (function next(i) {
+    if (i >= files.length) return;
+    photoFileToDataUrl(files[i], function(url) {
+      _ppDocShrink(url, function(small) {
+        (_ppDocPending[prefix] = _ppDocPending[prefix] || []).push(small);
+        ppDocRender(prefix, (p && p.id) ? p : null);
+        next(i + 1);
+      });
+    }, function() {
+      showToast('Could not read that photo — try again', 'error');
+      next(i + 1);
+    });
+  })(0);
+  if (input) input.value = '';
+}
+
+function ppDocRemove(prefix, i) {
+  var arr = _ppDocPending[prefix] || [];
+  arr.splice(i, 1);
+  var p = (prefix === 'pe' && window._ppDocEditPid) ? getP(window._ppDocEditPid) : null;
+  ppDocRender(prefix, (p && p.id) ? p : null);
+}
+
+// One upload. Resolves with the server result or throws. One retry: on the
+// relay it fails over to /exec (like push()); otherwise after a 3 s pause.
+function _ppDocSend(p, dataUrl) {
+  var b64 = String(dataUrl || '').split(',')[1] || '';
+  var body = JSON.stringify({
+    action:    'savePpDoc',
+    key:       SHARED_KEY,
+    patientId: p.id,
+    last:      p.last  || '',
+    first:     p.first || '',
+    phn:       p.phn   || '',
+    image:     b64,
+    mediaType: 'image/jpeg',
+    by:        (st.doc && st.doc.alias) || ''
+  });
+  function attempt() {
+    return fetchWithTimeout(SHEETS_URL, {
+      method: 'POST', redirect: 'follow',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: body
+    }, 45000, 'Insurance photo upload')
+      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function(j) { if (!j || !j.ok) throw new Error((j && j.error) || 'upload failed'); return j; });
+  }
+  return attempt()['catch'](function(e) {
+    if (typeof _doorFailover === 'function' && _doorFailover('ppdoc')) return attempt();
+    return new Promise(function(res) { setTimeout(res, 3000); }).then(attempt);
+  });
+}
+
+// Upload everything pending for this form, AFTER the patient is saved.
+// Detaches the list first, so clearAddForm() right after is safe. Photos
+// that fail are parked in _ppDocRetry[pid] and reappear as pending the next
+// time anyone opens Edit Patient on this device — no retake needed.
+async function ppDocUploadPending(prefix, p) {
+  var list = (_ppDocPending[prefix] || []).slice();
+  _ppDocPending[prefix] = [];
+  if (!p || !p.id) return;
+  // Photos parked from an earlier failed upload on this device ride along;
+  // they are re-parked below if they fail again.
+  if (_ppDocRetry[p.id] && _ppDocRetry[p.id].length) { list = list.concat(_ppDocRetry[p.id]); }
+  delete _ppDocRetry[p.id];
+  if (!list.length) return;
+  if (!SHEETS_URL) {
+    _ppDocRetry[p.id] = (_ppDocRetry[p.id] || []).concat(list);
+    showToast('Insurance photos NOT saved (offline) — open Edit Patient to retry', 'error');
+    return;
+  }
+  var ok = 0, failed = [];
+  for (var i = 0; i < list.length; i++) {
+    try { await _ppDocSend(p, list[i]); ok++; }
+    catch (e) { console.warn('[ppdoc] upload failed', e); failed.push(list[i]); }
+  }
+  if (ok) {
+    var live = getP(p.id);
+    if (!live || !live.id) live = p;           // getP returns {} when absent
+    live.ppDocs = (parseInt(live.ppDocs, 10) || 0) + ok;
+    sv('patients', st.patients);
+    push('savePatient', live);
+    if (typeof logChange === 'function') {
+      try { logChange(live, 'Insurance photos saved', ok + ' photo' + (ok === 1 ? '' : 's') + ' to invoice folder'); } catch (e) {}
+    }
+  }
+  if (failed.length) {
+    _ppDocRetry[p.id] = (_ppDocRetry[p.id] || []).concat(failed);
+    showToast(failed.length + ' insurance photo' + (failed.length === 1 ? '' : 's') +
+              ' did NOT upload — open Edit Patient and tap Save to retry', 'error');
+  } else {
+    showSaved('✓ ' + ok + ' insurance photo' + (ok === 1 ? '' : 's') + ' saved for ' + (p.last || 'patient'));   // silent (v5.32 quiet-saves rule)
+  }
 }

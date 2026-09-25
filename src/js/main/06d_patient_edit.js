@@ -80,8 +80,18 @@ function openPatientEdit(pid, focusDob) {
     +     '<button type="button" class="ap-list-pill' + (_peRate==='MSP'?' on':'') + '" id="pe-private-rate-msp" onclick="pePrivateRate(\'MSP\')">MSP rates</button>'
     +   '</div>'
     +   '<input id="pe-private-rate" type="hidden" value="' + _peRate + '">'
+    // v5.33: patient email + insurance photos (same fields as Add Patient)
+    +   '<label style="margin-top:10px">Patient email <span style="color:var(--red-t,#c42828)">*</span></label>'
+    +   '<input id="pe-home-email" type="email" inputmode="email" autocorrect="off" autocapitalize="off" autocomplete="off" spellcheck="false" '
+    +     'placeholder="Ask the patient" style="font-size:16px" value="' + esc(String(p.homeEmail||'').trim()) + '">'
+    +   '<div id="pe-ppdoc-host" style="margin-top:10px"></div>'
     + '</div>'
     + '</div>';
+  // v5.32: photos pending for THIS patient only. Any upload that failed
+  // earlier on this device is re-sent by Save (ppDocUploadPending picks it
+  // up from _ppDocRetry), so Cancel never loses it.
+  window._ppDocEditPid = pid;
+  _ppDocPending.pe = [];
 
   // ── Location & list (shared component) ───────────────
   html += buildLocationCard('pe', p);
@@ -120,6 +130,7 @@ function openPatientEdit(pid, focusDob) {
   // buildLocationCard, so nothing else needs restoring here.
   setTimeout(function() {
     renderRoomPills(p.ward, 'pe-bed', 'pe-room-pills');
+    ppDocRender('pe', p);   // v5.33
     // v5.10: sent here by the discharge gate -- flag and focus the DOB.
     if (focusDob) {
       var _peDob = document.getElementById('pe-dob');
@@ -150,7 +161,7 @@ function clearSearchField(searchId, hiddenId, hiddenNameId, ddId) {
 // Care type is NOT auto-changed.
 function _peProvOptions(sel) {
   sel = String(sel||'').toUpperCase();
-  var provs = [['','Select province…'],['AB','Alberta'],['SK','Saskatchewan'],['MB','Manitoba'],['ON','Ontario'],['NB','New Brunswick'],['NS','Nova Scotia'],['PE','Prince Edward Island'],['NL','Newfoundland and Labrador'],['YT','Yukon'],['NT','Northwest Territories'],['NU','Nunavut'],['QC','Quebec — cannot submit to MSP, invoice directly']];
+  var provs = [['','Select province…'],['AB','Alberta'],['SK','Saskatchewan'],['MB','Manitoba'],['ON','Ontario'],['NB','New Brunswick'],['NS','Nova Scotia'],['PE','Prince Edward Island'],['NL','Newfoundland and Labrador'],['YT','Yukon'],['NT','Northwest Territories'],['NU','Nunavut'],['QC','Quebec — use Private Pay (MSP rates)']];
   return provs.map(function(o){ return '<option value="'+o[0]+'"'+(o[0]===sel?' selected':'')+'>'+o[1]+'</option>'; }).join('');
 }
 function peToggleOOP() {
@@ -161,11 +172,21 @@ function peToggleOOP() {
 function peProvinceChange() {
   var v=(document.getElementById('pe-home-province')||{}).value||'';
   var qc=document.getElementById('pe-qc-warn'); if(qc) qc.style.display=(v==='QC')?'block':'none';
+  // v5.33: Quebec → Private Pay at MSP rates (same as Add Patient).
+  if (v === 'QC') {
+    var op=document.getElementById('pe-oop'); if(op){ op.checked=false; peToggleOOP(); }
+    var pr=document.getElementById('pe-private'); if(pr){ pr.checked=true; peTogglePrivate(); pr.setAttribute('data-qc','1'); }
+    pePrivateRate('MSP');
+    showToast('Quebec \u2014 switched to Private Pay (MSP rates). Ask for the patient\'s email.');
+  }
 }
 function peTogglePrivate() {
   var on = !!((document.getElementById('pe-private')||{}).checked);
   var box = document.getElementById('pe-private-fields'); if (box) box.style.display = on ? 'block' : 'none';
   if (on) { var op=document.getElementById('pe-oop'); if(op&&op.checked){ op.checked=false; if(typeof peToggleOOP==='function') peToggleOOP(); } pePrivateRate((document.getElementById('pe-private-rate')||{}).value||'BCMA'); }
+  if (!on) { var _pc=document.getElementById('pe-private'); if(_pc) _pc.removeAttribute('data-qc'); }
+  var _pp = window._ppDocEditPid ? getP(window._ppDocEditPid) : null;
+  ppDocRender('pe', (_pp && _pp.id) ? _pp : null);   // v5.33
 }
 function pePrivateRate(mode) {
   mode=(mode==='MSP')?'MSP':'BCMA';
@@ -236,6 +257,23 @@ function savePatientEdit(pid) {
     return;
   }
 
+  // ── v5.33: private-pay patient email ─────────────────────────────
+  // Mandatory when private pay is being switched ON here (the same intake
+  // rule as Add Patient). For a patient ALREADY private pay with no email
+  // on file (legacy / phone-consult rows) a blank is allowed, so ward and
+  // list edits are never held hostage — the discharge gate still requires
+  // it. A typed-but-invalid address is always refused.
+  var _pePrivNow = !!((document.getElementById('pe-private')||{}).checked);
+  var _pePrivWas = (p.privatePay === true || String(p.privatePay).toLowerCase() === 'true');
+  var _peEmailEl = document.getElementById('pe-home-email');
+  var _peEmail   = String((_peEmailEl || {}).value || '').trim();
+  if (_pePrivNow && ((_peEmail && !_ppValidEmail(_peEmail)) || (!_peEmail && !_pePrivWas))) {
+    if (_peEmailEl) { _peEmailEl.style.cssText = 'font-size:16px;border:1.5px solid var(--amber-t);background:var(--amber-bg)'; _peEmailEl.focus(); }
+    showToast(_peEmail ? 'Patient email "' + _peEmail + '" is not a valid address.'
+                       : 'Required: patient email (private pay \u2014 ask the patient)', 'error');
+    return;
+  }
+
   p.last      = fmtName((document.getElementById('pe-last')  || {}).value || p.last);
   p.first     = fmtName((document.getElementById('pe-first') || {}).value || p.first);
   p.phn       = (document.getElementById('pe-phn')   || {}).value || p.phn;
@@ -260,7 +298,17 @@ function savePatientEdit(pid) {
   } else if (!!((document.getElementById('pe-private')||{}).checked)) {
     p.privatePay = true;
     p.rateMode = (document.getElementById('pe-private-rate')||{}).value || 'BCMA';
-    p.oop = false; p.homeProvince=''; p.homeHCN=''; p.homeAddress='';
+    // v5.33 BUG FIX: homeAddress is KEPT. It used to be blanked here, so any
+    // Edit-Patient save on a private-pay patient silently erased the mailing
+    // address the invoice goes to (and re-tripped the discharge gate).
+    // Quebec (picked in the OOP list, or already on file) stays recorded as
+    // homeProvince 'QC' so the OOP tab and invoice still say Quebec.
+    var _peQc = ((document.getElementById('pe-private')||{}).getAttribute && document.getElementById('pe-private').getAttribute('data-qc') === '1')
+             || /^(qc|pq|quebec)/i.test(String(p.homeProvince||'').trim());
+    p.oop = false; p.homeHCN='';
+    p.homeProvince = _peQc ? 'QC' : '';
+    p.homeAddress  = (document.getElementById('pe-home-address')||{}).value || p.homeAddress || '';
+    if (_peEmail) p.homeEmail = _peEmail;
   } else {
     p.oop = false; p.homeProvince=''; p.homeHCN=''; p.homeAddress='';
     p.privatePay = false; p.rateMode = '';
@@ -338,6 +386,8 @@ function savePatientEdit(pid) {
   hideModal('pt-edit-modal');
   render();
   showSaved(p.last + ' updated' + (_claimsTouched > 0 ? ' (\u2713 ' + _claimsTouched + ' claim row(s) updated)' : ''));
+  ppDocUploadPending('pe', p);   // v5.33: insurance photos → invoice folder (toasts only on failure)
+  window._ppDocEditPid = null;
 }
 
 // ═══════════════════════════════════════════════════════
