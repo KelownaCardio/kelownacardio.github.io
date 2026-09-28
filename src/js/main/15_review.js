@@ -1,5 +1,14 @@
 // ═══════════════════════════════════════════════════════════════════
-// 15_review.js — PHYSICIAN REVIEW MODE            v5.16 (2026-09-09)
+// 15_review.js — PHYSICIAN REVIEW MODE            v5.33 (2026-09-27)
+// ───────────────────────────────────────────────────────────────────
+// v5.33 (2026-09-27, Kathryn): Resubmit showed no sign of life while it
+//   waited for the 'no MOST' note to reach the sheet (several seconds on a
+//   slow link) — she tapped it repeatedly thinking it was stuck. rvAct now
+//   puts the page in a visible working state the moment a button is
+//   tapped: every action button is disabled and the tapped one reads
+//   'Submitting…' / 'Saving…' / 'Sending…' until the call returns, then
+//   the card re-renders. The RV.busy guard already swallowed the extra
+//   taps; this only makes the wait visible. No backend change.
 // ───────────────────────────────────────────────────────────────────
 // index.html?review=<token> — a doctor's list of billing blockers from the
 // ClaimReview tab (filled nightly by PhysicianReview.gs), presented as one
@@ -643,6 +652,7 @@ function rvMarkEditing(modalId) {
 // call, and it still is.
 async function rvAct(kind) {
   if (RV.busy) return;
+  rvWorking(kind);                       // v5.33: visible at once, before any await
   try {
     await rvAct_(kind);
   } catch (e) {
@@ -650,8 +660,33 @@ async function rvAct(kind) {
     showToast('Something went wrong there — please try again', 'error');
   } finally {
     RV.busy = false;
-    var b = document.getElementById('rv-resubmit'); if (b) b.disabled = false;
+    rvWorking(null);
     if (RV.bundle) rvRender();
+  }
+}
+
+// v5.33 — working state for the three action buttons. kind = 'fix' |
+// 'later' | 'escalate' switches it on (all three disabled, the tapped one
+// relabelled); null switches it off and restores the labels. rvRender
+// rebuilds the card afterwards anyway; the restore is for the paths that
+// return before a re-render (no bundle, or an early return).
+var RV_WORKING_LABEL = { fix:'Submitting…', later:'Saving…', escalate:'Sending…' };
+function rvWorking(kind) {
+  var box = document.querySelector('.rv-actions'); if (!box) return;
+  var btns = box.querySelectorAll('button');
+  for (var i = 0; i < btns.length; i++) {
+    var b = btns[i];
+    if (kind) {
+      if (b.dataset.rvLabel === undefined) b.dataset.rvLabel = b.textContent;
+      b.dataset.rvWasDisabled = b.disabled ? '1' : '';
+      b.disabled = true;
+      var mine = (b.getAttribute('onclick') || '').indexOf("'" + kind + "'") >= 0;
+      if (mine) { b.textContent = RV_WORKING_LABEL[kind] || 'Working…'; b.setAttribute('aria-busy', 'true'); }
+    } else {
+      if (b.dataset.rvLabel !== undefined) b.textContent = b.dataset.rvLabel;
+      b.disabled = b.dataset.rvWasDisabled === '1';
+      b.removeAttribute('aria-busy');
+    }
   }
 }
 

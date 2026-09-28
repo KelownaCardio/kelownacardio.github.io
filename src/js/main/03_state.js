@@ -708,22 +708,14 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   (14_init.js) — a no-op that only logs to the console. Validation and
 //   real-failure toasts are unchanged.
 //   No backend change. No cache-format change, BUILD_ID not bumped.
-// v5.33 (2026-09-25): PRIVATE-PAY INTAKE (Kathryn). Private pay — and
-//   Quebec, which now switches to Private Pay at MSP rates when picked in
-//   the OOP province list (province stays recorded as QC) — collects the
-//   patient EMAIL (mandatory) and optional "Photo insurance documents or
-//   cards" on Add Patient and Edit Patient, so the creating doctor gathers
-//   it instead of discharge. Photos upload via new backend action savePpDoc
-//   (Invoice.gs v1.12 + Router.gs v3.26) to Drive › Patient Invoices ›
-//   <patient folder>, the same folder the finalized invoice is filed in.
-//   New Patients column ppDocs (count) — Config.gs v2.51. No credit-card
-//   capture (PCI). BUG FIX: saving Edit Patient (or re-adding) on a
-//   private-pay patient blanked homeAddress. Follows the v5.32 quiet-saves
-//   rule: photo upload success is showSaved() (silent); only a failure
-//   toasts. 09_patient.js, 06d_patient_edit.js, index.template.html
-//   changed. No cache-format change, BUILD_ID not bumped.
+// v5.33 (2026-09-27) — REVIEW PAGE: 'Submitting…' while Resubmit waits.
+//   Kathryn tapped Resubmit several times on the first live attestation
+//   because nothing changed on screen for several seconds (the page waits
+//   for the 'no MOST' note to land on the sheet before closing the row).
+//   15_review.js rvWorking(): buttons disable and relabel at tap time.
+//   No backend change. No cache-format change, BUILD_ID not bumped.
 var APP_VERSION = 'v5.33';
-var APP_BUILT   = '2026-09-25';
+var APP_BUILT   = '2026-09-27';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
