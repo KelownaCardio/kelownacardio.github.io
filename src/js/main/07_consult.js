@@ -1,4 +1,7 @@
 // 07_consult.js — Unified consult form (33010/33012)
+// v5.34 (2026-09-27): modifier banner shows per-tier increment runs (e.g.
+//   "1205 ×1 from 22:45 + 1206 ×2 from 23:15") via calloutIncGroups_ — see
+//   04_billing.js v5.34. Billing itself is unchanged here (rebuild path).
 //
 // ONE consult form, shared by the +Claim screen and the Add Patient
 // screen. Built on the Add Patient template: flat layout, no claims-
@@ -550,14 +553,18 @@ function updateConsultUI() {
       '<span style="font-size:10px;opacity:' + (linked ? '1' : '.75') + ';margin-left:6px">' + baseTagTxt + '</span>' +
       '</div>';
     if (incUnits > 0) {
-      var incMod = modInc || modBase;
+      // v5.34: increments take their own tier per half-hour — show the
+      // split the same way rebuildConsultModifiers_ will bill it.
+      var _groups = calloutIncGroups_(t2m(start), linked ? 0 : 30, incUnits, incRaw, end, dateISO, modBase);
       var incLabelTxt = linked ? 'CCFPP — 30-min lapse waived' : 'Consult time &gt; 45 min';
       var _capNote = (incUnits < incRaw)
         ? '<span style="font-size:9px;opacity:.7;margin-left:6px">(+' + (incRaw - incUnits) + ' after 08:00 not billable)</span>'
         : '';
-      banner += '<div class="mod-box ' + incMod.cls + '" style="margin-top:1px;border-radius:0 0 var(--rsm) var(--rsm);opacity:.85">' +
+      var _incTxt = _groups.map(function(g){ return g.fee + ' ×' + g.units + (_groups.length > 1 ? ' <span style="font-weight:400;opacity:.8">from ' + g.start + '</span>' : ''); }).join('<span style="opacity:.6"> + </span>');
+      var _incCls = (_groups.length && _groups[_groups.length - 1].fee === '1206') ? 'mod-night' : (modInc || modBase).cls;
+      banner += '<div class="mod-box ' + _incCls + '" style="margin-top:1px;border-radius:0 0 var(--rsm) var(--rsm);opacity:.85">' +
         '<span>' + incLabelTxt + '</span>' +
-        '<span style="font-size:10px;font-weight:700;margin-left:6px">' + incMod.inc + ' ×' + incUnits + '</span>' + _capNote +
+        '<span style="font-size:10px;font-weight:700;margin-left:6px">' + _incTxt + '</span>' + _capNote +
         '</div>';
     } else if (incRaw > 0 && !linked) {
       // Consult IS > 45 min but the increment period starts after the 07:45

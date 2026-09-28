@@ -714,7 +714,14 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   for the 'no MOST' note to land on the sheet before closing the row).
 //   15_review.js rvWorking(): buttons disable and relabel at tap time.
 //   No backend change. No cache-format change, BUILD_ID not bumped.
-var APP_VERSION = 'v5.33';
+// v5.34 (2026-09-27) — CALL-OUT INCREMENTS TAKE THEIR OWN TIER. Sprayson
+//   Sun 20/09 22:30–00:30 billed 1207 ×3 for half-hours that start at/after
+//   23:00 (night, 1206) — $80.13 under-billed; DataCheck CALLOUT_BAND caught
+//   it. Each increment period is now tiered from its own start; a consult
+//   crossing 23:00 gets two increment rows (04_billing.js). Banner in
+//   07_consult.js shows the split. No backend change. No cache-format
+//   change, BUILD_ID not bumped.
+var APP_VERSION = 'v5.34';
 var APP_BUILT   = '2026-09-27';
 
 // ─── v5.20: door failover ───────────────────────────────────────────

@@ -1,6 +1,27 @@
 // 04_billing.js — Modifier logic, BC stat holidays,
 //                 CCU consolidation, directive weekly limit
 // ═══════════════════════════════════════════════════════
+// v5.34 (2026-09-27, Kathryn): INCREMENT PERIODS TAKE THEIR OWN TIER.
+//   Sprayson 20/09 (Sun): consult 22:30–00:30 billed 1202 + 1207 ×3. The
+//   three increment half-hours all start at/after 23:00 = NIGHT band, so
+//   they are 1206 ($99.40) not 1207 ($72.69) — $80.13 under-billed, and
+//   DataCheck's CALLOUT_BAND (which re-derives each block from its OWN
+//   start) rightly flagged it. Cause: v4.58 made every increment inherit
+//   the BASE tier (to stop a 07:39 weekday increment being re-clocked into
+//   daytime and dropped). That fix is kept — the 08:00 weekday cap already
+//   handles the daytime case — but each increment period now takes the
+//   tier of ITS OWN start time (getModifier at that minute; falls back to
+//   the base tier only if that returns nothing, which the cap makes
+//   unreachable). Consecutive periods of one tier form one row, so a
+//   consult that crosses 23:00 now produces TWO increment rows, e.g.
+//   weekday 22:15–00:00 → 1200 + 1205 ×1 (22:45) + 1206 ×2 (23:15);
+//   weekend 22:30–00:30 → 1202 + 1206 ×3 (23:00). Night → weekend after
+//   08:00 on a weekend works the same way (1206 then 1207). Priority order
+//   is unchanged (night > weekend/stat > evening). rebuildConsultModifiers_
+//   now reconciles up to N increment rows (matched in start-time order)
+//   instead of exactly one; the base row is unchanged. Applies to the
+//   CCFPP-linked ladder too (period 1 starts at the consult's own start).
+//   07_consult.js: the pre-save banner shows the split. No backend change.
 
 // ── BC Statutory Holidays ──────────────────────────────
 function easterDate(y) {
@@ -580,6 +601,37 @@ function ccfppContinuingUnitsCapped(startTimeStr, dateStr, rawUnits) {
   return _calloutPeriodsCapped(startTimeStr, dateStr, rawUnits, 0);
 }
 
+// v5.34 — split a consult's billable increment periods into runs of one
+// tier. Period n (1-based) starts at startM + firstPeriodOffsetMin +
+// 30*(n-1); its tier is getModifier at that minute (night > weekend/stat >
+// evening), falling back to the base tier if that returns nothing (the
+// 08:00 weekday cap has already removed such periods, so this is a guard).
+// Returns [{fee, start, end, units}] in time order; the last run ends at
+// the consult's real end unless the cap dropped periods, in which case it
+// ends at the last billable period's boundary (as before).
+function calloutIncGroups_(startM, firstPeriodOffsetMin, incUnits, incRaw, endStr, dateISO, modBase) {
+  var groups = [];
+  if (!incUnits || incUnits < 1 || !modBase) return groups;
+  for (var n = 1; n <= incUnits; n++) {
+    var pStart = (startM + firstPeriodOffsetMin + 30 * (n - 1)) % 1440;
+    var mod = getModifier(minsToTime(pStart), dateISO) || modBase;
+    var last = groups[groups.length - 1];
+    if (last && last.fee === mod.inc) { last.units++; last.endM = pStart + 30; }
+    else groups.push({ fee: mod.inc, startM: pStart, endM: pStart + 30, units: 1 });
+  }
+  groups.forEach(function(g, i){
+    g.start = minsToTime(g.startM % 1440);
+    g.end   = (i === groups.length - 1 && incUnits >= incRaw) ? endStr : minsToTime(g.endM % 1440);
+  });
+  return groups;
+}
+// Sort key for a consult's increment rows: minutes from the consult's date,
+// with a post-midnight start (cross-midnight consult) placed after 23:59.
+function _incSortKey_(row) {
+  var m = row.startTime ? t2m(row.startTime) : 0;
+  return m < 12 * 60 ? m + 1440 : m;     // anything before noon = next morning
+}
+
 // ── Directive Weekly Limit (Sun–Sat) ───────────────────
 // Returns number of 33006 claims already billed in the Sun–Sat week that
 // contains isoDate (YYYY-MM-DD). If isoDate is omitted, uses today.
@@ -910,9 +962,11 @@ function rebuildConsultModifiers_(consult) {
     st.claims = st.claims.filter(function(x){ return String(x.id) !== String(c.id); });
     if (typeof SHEETS_URL !== 'undefined' && SHEETS_URL) push('deleteClaim', { id: c.id });
   }
-  baseRows.slice(1).forEach(delRow);          // never more than one of each
-  incRows.slice(1).forEach(delRow);
-  var baseRow = baseRows[0] || null, incRow = incRows[0] || null;
+  baseRows.slice(1).forEach(delRow);          // never more than one base row
+  // v5.34: several increment rows are legitimate (one per tier run). Keep
+  // them all, in start-time order; _reconcileIncRows_ trims the surplus.
+  incRows.sort(function(a, b){ return _incSortKey_(a) - _incSortKey_(b); });
+  var baseRow = baseRows[0] || null;
 
   // Patient object for addClaim — fall back to a synth from the claim row so
   // a pulled/archived patient still rebuilds correctly.
@@ -928,29 +982,14 @@ function rebuildConsultModifiers_(consult) {
     // No base row, ever — the predecessor named in this consult's own CCFPP
     // note already billed the 1200-series charge for this call-out.
     if (baseRow) delRow(baseRow);
-    if (incUnits > 0) {
-      var lIncStart = start;
-      var lIncEnd   = (incUnits < incRaw) ? minsToTime((_sM + 30 * incUnits) % 1440) : end;
-      if (incRow) {
-        if (incRow.fee !== modBase.inc || incRow.startTime !== lIncStart ||
-            incRow.endTime !== lIncEnd || String(incRow.units) !== String(incUnits)) {
-          incRow.fee = modBase.inc; incRow.feeCode = modBase.inc;
-          incRow.startTime = lIncStart; incRow.endTime = lIncEnd; incRow.units = incUnits;
-          changed.push(incRow);
-        }
-      } else {
-        // v4.93: seed the CCFPP tag directly (use the consult's OWN current
-        // notes, not the stripped userNote) — ccfppRecomputeForAliasDates_
-        // deliberately SKIPS re-stamping a card-linked consult's notes (so it
-        // never overrides the doctor's explicit choice), so this row must
-        // carry the tag from the moment it's created rather than waiting for
-        // that sweep to add it.
-        addClaim(pat, modBase.inc, modBase.inc, incUnits, dateFmt, consult.loc || 'I',
-                 lIncStart, consult.notes || userNote || null, lIncEnd, alias, ov);
-      }
-    } else if (incRow) {
-      delRow(incRow);
-    }
+    // v5.34: one row per tier run; period 1 starts at the consult's own
+    // start (no separate base period on a CCFPP-linked consult). v4.93: the
+    // rows are seeded with the consult's OWN current notes (not the stripped
+    // userNote) — ccfppRecomputeForAliasDates_ deliberately SKIPS re-stamping
+    // a card-linked consult's notes, so a new row must carry the CCFPP tag
+    // from the moment it is created.
+    _reconcileIncRows_(calloutIncGroups_(_sM, 0, incUnits, incRaw, end, dateISO, modBase),
+                       consult.notes || userNote || null);
   } else if (modBase) {
     var baseEnd = minsToTime((_sM + 30) % 1440);
     if (baseRow) {
@@ -964,30 +1003,38 @@ function rebuildConsultModifiers_(consult) {
       addClaim(pat, modBase.base, modBase.base, 1, dateFmt, consult.loc || 'I',
                start, userNote || null, baseEnd, alias, ov);
     }
-    if (incUnits > 0) {
-      var incStart = minsToTime((_sM + 30) % 1440);
-      var incEnd   = (incUnits < incRaw)
-        ? minsToTime((_sM + 30 + 30 * incUnits) % 1440)
-        : end;
-      if (incRow) {
-        if (incRow.fee !== modBase.inc || incRow.startTime !== incStart ||
-            incRow.endTime !== incEnd || String(incRow.units) !== String(incUnits)) {
-          incRow.fee = modBase.inc; incRow.feeCode = modBase.inc;
-          incRow.startTime = incStart; incRow.endTime = incEnd; incRow.units = incUnits;
-          changed.push(incRow);
-        }
-      } else {
-        addClaim(pat, modBase.inc, modBase.inc, incUnits, dateFmt, consult.loc || 'I',
-                 incStart, userNote || null, incEnd, alias, ov);
-      }
-    } else if (incRow) {
-      delRow(incRow);
-    }
+    // v5.34: one row per tier run; period 1 starts at start+30 (after the
+    // base half-hour).
+    _reconcileIncRows_(calloutIncGroups_(_sM, 30, incUnits, incRaw, end, dateISO, modBase),
+                       userNote || null);
   } else {
     if (baseRow) delRow(baseRow);
-    if (incRow)  delRow(incRow);
+    incRows.forEach(delRow);
   }
   return changed;
+
+  // v5.34 — make the increment rows on the sheet match `groups` (from
+  // calloutIncGroups_): existing rows are matched in start-time order and
+  // updated in place (dodging addClaim's dedup guard), missing ones added,
+  // surplus ones deleted. Updated rows go on `changed` for the caller to
+  // persist; adds and deletes push themselves, as before.
+  function _reconcileIncRows_(groups, noteForNew) {
+    for (var gi = 0; gi < groups.length; gi++) {
+      var g = groups[gi], row = incRows[gi];
+      if (row) {
+        if (row.fee !== g.fee || row.startTime !== g.start ||
+            row.endTime !== g.end || String(row.units) !== String(g.units)) {
+          row.fee = g.fee; row.feeCode = g.fee;
+          row.startTime = g.start; row.endTime = g.end; row.units = g.units;
+          changed.push(row);
+        }
+      } else {
+        addClaim(pat, g.fee, g.fee, g.units, dateFmt, consult.loc || 'I',
+                 g.start, noteForNew, g.end, alias, ov);
+      }
+    }
+    incRows.slice(groups.length).forEach(delRow);
+  }
 }
 
 // Apply new start/end to a consult claim and cascade everything dynamic:
