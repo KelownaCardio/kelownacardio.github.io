@@ -3062,22 +3062,14 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   (14_init.js) — a no-op that only logs to the console. Validation and
 //   real-failure toasts are unchanged.
 //   No backend change. No cache-format change, BUILD_ID not bumped.
-// v5.33 (2026-09-25): PRIVATE-PAY INTAKE (Kathryn). Private pay — and
-//   Quebec, which now switches to Private Pay at MSP rates when picked in
-//   the OOP province list (province stays recorded as QC) — collects the
-//   patient EMAIL (mandatory) and optional "Photo insurance documents or
-//   cards" on Add Patient and Edit Patient, so the creating doctor gathers
-//   it instead of discharge. Photos upload via new backend action savePpDoc
-//   (Invoice.gs v1.12 + Router.gs v3.26) to Drive › Patient Invoices ›
-//   <patient folder>, the same folder the finalized invoice is filed in.
-//   New Patients column ppDocs (count) — Config.gs v2.51. No credit-card
-//   capture (PCI). BUG FIX: saving Edit Patient (or re-adding) on a
-//   private-pay patient blanked homeAddress. Follows the v5.32 quiet-saves
-//   rule: photo upload success is showSaved() (silent); only a failure
-//   toasts. 09_patient.js, 06d_patient_edit.js, index.template.html
-//   changed. No cache-format change, BUILD_ID not bumped.
+// v5.33 (2026-09-27) — REVIEW PAGE: 'Submitting…' while Resubmit waits.
+//   Kathryn tapped Resubmit several times on the first live attestation
+//   because nothing changed on screen for several seconds (the page waits
+//   for the 'no MOST' note to land on the sheet before closing the row).
+//   15_review.js rvWorking(): buttons disable and relabel at tap time.
+//   No backend change. No cache-format change, BUILD_ID not bumped.
 var APP_VERSION = 'v5.33';
-var APP_BUILT   = '2026-09-25';
+var APP_BUILT   = '2026-09-27';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
@@ -21980,7 +21972,16 @@ function ctxEditBtn(btn) { openPatientEdit(btn.getAttribute("data-pid")); }
 function openSummaryEl(el) { openPatientNotes(el.getAttribute("data-pid") || el.closest("[data-pid]").getAttribute("data-pid")); }
 
 // ═══════════════════════════════════════════════════════════════════
-// 15_review.js — PHYSICIAN REVIEW MODE            v5.16 (2026-09-09)
+// 15_review.js — PHYSICIAN REVIEW MODE            v5.33 (2026-09-27)
+// ───────────────────────────────────────────────────────────────────
+// v5.33 (2026-09-27, Kathryn): Resubmit showed no sign of life while it
+//   waited for the 'no MOST' note to reach the sheet (several seconds on a
+//   slow link) — she tapped it repeatedly thinking it was stuck. rvAct now
+//   puts the page in a visible working state the moment a button is
+//   tapped: every action button is disabled and the tapped one reads
+//   'Submitting…' / 'Saving…' / 'Sending…' until the call returns, then
+//   the card re-renders. The RV.busy guard already swallowed the extra
+//   taps; this only makes the wait visible. No backend change.
 // ───────────────────────────────────────────────────────────────────
 // index.html?review=<token> — a doctor's list of billing blockers from the
 // ClaimReview tab (filled nightly by PhysicianReview.gs), presented as one
@@ -22624,6 +22625,7 @@ function rvMarkEditing(modalId) {
 // call, and it still is.
 async function rvAct(kind) {
   if (RV.busy) return;
+  rvWorking(kind);                       // v5.33: visible at once, before any await
   try {
     await rvAct_(kind);
   } catch (e) {
@@ -22631,8 +22633,33 @@ async function rvAct(kind) {
     showToast('Something went wrong there — please try again', 'error');
   } finally {
     RV.busy = false;
-    var b = document.getElementById('rv-resubmit'); if (b) b.disabled = false;
+    rvWorking(null);
     if (RV.bundle) rvRender();
+  }
+}
+
+// v5.33 — working state for the three action buttons. kind = 'fix' |
+// 'later' | 'escalate' switches it on (all three disabled, the tapped one
+// relabelled); null switches it off and restores the labels. rvRender
+// rebuilds the card afterwards anyway; the restore is for the paths that
+// return before a re-render (no bundle, or an early return).
+var RV_WORKING_LABEL = { fix:'Submitting…', later:'Saving…', escalate:'Sending…' };
+function rvWorking(kind) {
+  var box = document.querySelector('.rv-actions'); if (!box) return;
+  var btns = box.querySelectorAll('button');
+  for (var i = 0; i < btns.length; i++) {
+    var b = btns[i];
+    if (kind) {
+      if (b.dataset.rvLabel === undefined) b.dataset.rvLabel = b.textContent;
+      b.dataset.rvWasDisabled = b.disabled ? '1' : '';
+      b.disabled = true;
+      var mine = (b.getAttribute('onclick') || '').indexOf("'" + kind + "'") >= 0;
+      if (mine) { b.textContent = RV_WORKING_LABEL[kind] || 'Working…'; b.setAttribute('aria-busy', 'true'); }
+    } else {
+      if (b.dataset.rvLabel !== undefined) b.textContent = b.dataset.rvLabel;
+      b.disabled = b.dataset.rvWasDisabled === '1';
+      b.removeAttribute('aria-busy');
+    }
   }
 }
 
@@ -23049,5 +23076,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "5db631994207";</script></body>
+<script>var BUILD_HASH = "a9233ffab823";</script></body>
 </html>
