@@ -3075,8 +3075,14 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   crossing 23:00 gets two increment rows (04_billing.js). Banner in
 //   07_consult.js shows the split. No backend change. No cache-format
 //   change, BUILD_ID not bumped.
-var APP_VERSION = 'v5.34';
-var APP_BUILT   = '2026-09-27';
+// v5.35 (2026-10-07) — CLIENT ERRORS NAME THE RECORD AND THE REAL DOOR.
+//   push() rows carry `ref` (patient/claim ids + fee code + service date —
+//   never a PHN or name) and the door captured when the request was SENT,
+//   not when the failure was recorded (03b_netlog.js v5.35 header). Needs
+//   ClientErrors.gs v1.5 (adds the `ref` column). No behaviour change for
+//   doctors; telemetry only.
+var APP_VERSION = 'v5.35';
+var APP_BUILT   = '2026-10-07';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
@@ -3813,6 +3819,7 @@ async function syncFromSheets(opts) {
         credentials: 'omit'
       } : { redirect: 'follow', cache: 'no-store', credentials: 'omit' };
       var _resp = null, _err = null;
+      var _sDoor = (typeof currentDoor === 'function') ? currentDoor() : '';   // v5.35: door at SEND time
       try {
         // Cache-bust URL with timestamp to defeat any iOS BFCache fetch interception
         var url = SHEETS_URL + '?action=' + _syncAction + '&key=' + SHARED_KEY +
@@ -3847,7 +3854,7 @@ async function syncFromSheets(opts) {
             action: _syncAction, checkpoint: 'fetch-returned', code: _lastCode,
             errName: _lastErr ? String(_lastErr.name || '') : '',
             errMsg:  _lastErr ? String(_lastErr.message || _lastErr) : '',
-            attempt: _try, recovered: true, durationMs: Date.now() - _t0
+            attempt: _try, recovered: true, durationMs: Date.now() - _t0, door: _sDoor
           });
         }
         r = _resp;
@@ -3863,7 +3870,7 @@ async function syncFromSheets(opts) {
         errMsg:  _err ? String(_err.message || _err)
                       : ('HTTP ' + _resp.status + ' ' + (_resp.statusText || '') + (_resp._bodyNote ? ' ' + _resp._bodyNote : '')),
         httpStatus: _resp ? _resp.status : '',
-        attempt: _try, recovered: false, durationMs: Date.now() - _t0
+        attempt: _try, recovered: false, durationMs: Date.now() - _t0, door: _sDoor
       });
 
       // Give up early when a second attempt provably cannot help (4xx,
@@ -4588,6 +4595,8 @@ async function push(action, body, wire) {
     // LANDED, so only upsert-by-key actions may be replayed. Append-only
     // actions fall through to _pendingPush exactly as before.
     var _pUrl = SHEETS_URL + '?action=' + action + '&key=' + SHARED_KEY;
+    var _pDoor = (typeof currentDoor === 'function') ? currentDoor() : '';   // v5.35: door at SEND time
+    var _pRef  = (typeof _netlogRef === 'function') ? _netlogRef(action, body) : '';   // v5.35
     var _pMax = NETLOG_IDEMPOTENT[action] ? 2 : 1;
     var resp = null, _pCode = '';
     for (var _pt = 1; _pt <= _pMax; _pt++) {
@@ -4617,7 +4626,8 @@ async function push(action, body, wire) {
         if (_pt > 1) {
           netlogRecord('push', {
             action: action, checkpoint: 'post-returned', code: _pCode,
-            attempt: _pt, recovered: true, durationMs: Date.now() - _pt0
+            attempt: _pt, recovered: true, durationMs: Date.now() - _pt0,
+            door: _pDoor, ref: _pRef
           });
         }
         resp = _pr;
@@ -4633,7 +4643,8 @@ async function push(action, body, wire) {
         errMsg:  _pe ? String(_pe.message || _pe)
                      : ('HTTP ' + _pr.status + ' ' + (_pr.statusText || '') + (_pNote ? ' ' + _pNote : '')),
         httpStatus: _pr ? _pr.status : '',
-        attempt: _pt, recovered: false, durationMs: Date.now() - _pt0
+        attempt: _pt, recovered: false, durationMs: Date.now() - _pt0,
+        door: _pDoor, ref: _pRef
       });
 
       if (_pt >= _pMax || !netlogWorthRetry(_pCode)) {
@@ -4668,7 +4679,8 @@ async function push(action, body, wire) {
       netlogRecord('push', {
         action: action, checkpoint: 'post-parse', code: 'bad_json',
         errName: String(_parseErr.name || ''), errMsg: String(_parseErr.message || _parseErr),
-        httpStatus: resp.status, attempt: 1, recovered: false
+        httpStatus: resp.status, attempt: 1, recovered: false,
+        door: _pDoor, ref: _pRef
       });
       return _pushSoftFail(action, body, _pKey, 'bad_json');   // v5.32
     }
@@ -4856,6 +4868,26 @@ async function push(action, body, wire) {
 // hitting the same wall doesn't all re-hit it in the same second. Push
 // replays remain gated on NETLOG_IDEMPOTENT exactly as before.
 // ═══════════════════════════════════════════════════════════════════
+//
+// v5.35 (2026-10-07): WHICH RECORD, AND WHICH DOOR — MEASURED, NOT GUESSED.
+// KHoskin 06/10 14:42 PT review: four "unrescued" write rows, and the only
+// way to say which patient they were was to line up timestamps against
+// Claims / ChangeLog / Perf Log by hand. Two fixes:
+//   1. `ref` — every push row now names the record(s) it was carrying:
+//        p:<patientId>;c:<claimId>/<feeCode>/<serviceDate>/b<baseSavedAtMs>,…
+//      Internal ids + fee code + service date only. NO PHN, NO name.
+//      b<ms> = the claim's savedAt as this device last knew it (blank for a
+//      new claim). The server stamps savedAt on every claim write, so a
+//      sheet savedAt LATER than b proves this edit (or a newer one) landed;
+//      EQUAL means it never arrived. No device-clock comparison involved.
+//      Needs a `ref` column on the Client Errors tab — ClientErrors.gs v1.5
+//      adds it automatically on its first write.
+//   2. `door` — the @relay / @exec suffix was read from SHEETS_URL when
+//      the failure was RECORDED. A failover triggered by another request
+//      in the same instant (14:42:25: logChange failed on the relay and
+//      flipped the door) made a save that was SENT on the relay log as
+//      @exec. Callers now pass the door captured just before fetch().
+// ═══════════════════════════════════════════════════════════════════
 
 var NETLOG_KEY      = 'kgh5:netlog';
 var NETLOG_MAX      = 40;      // ring buffer — oldest dropped past this
@@ -4934,6 +4966,36 @@ function netlogExplain(code) {
   return "Can't reach the server — tap Retry";
 }
 
+// v5.35: which record(s) a write was carrying — ids, fee code and service
+// date only (never a PHN or a name). '' for reads and for anything else.
+//   p:<patientId>;c:<claimId>/<feeCode>/<date>/b<savedAtMs>,…
+function _netlogRef(action, body) {
+  try {
+    if (!body || typeof body !== 'object') return '';
+    var cl = function (c) {
+      if (!c || !c.id) return '';
+      var b = c.savedAt ? Date.parse(String(c.savedAt)) : NaN;
+      return String(c.id) + '/' + String(c.feeCode || c.fee || '') + '/' + String(c.date || '') +
+             '/b' + (isNaN(b) ? '' : String(b));
+    };
+    var a = String(action || ''), parts = [];
+    if (a === 'savePatientWithClaims') {
+      var pid = (body.patient && body.patient.id) || body.id;
+      if (pid) parts.push('p:' + pid);
+      var cs = (body.claims || []).map(cl).filter(Boolean);
+      if (cs.length) parts.push('c:' + cs.join(','));
+    } else if (a === 'saveClaim' || a === 'deleteClaim') {
+      if (body.id) parts.push('c:' + cl(body));
+    } else if (a === 'savePatient' || a === 'deletePatient' || a === 'mergePatientDemographics') {
+      if (body.id) parts.push('p:' + body.id);
+    }
+    var out = parts.join(';');
+    // Too long to keep whole: cut, and say so — the server then treats the
+    // record as "can't prove it landed" rather than checking half of it.
+    return out.length > 690 ? out.slice(0, 690) + ';TRUNC' : out;
+  } catch (e) { return ''; }
+}
+
 // ── The recorder ───────────────────────────────────────────────────
 // kind:   'sync' | 'push' | 'init'
 // detail: { action, checkpoint, code, errName, errMsg, httpStatus,
@@ -4954,7 +5016,8 @@ function netlogRecord(kind, detail) {
     action:     String(d.action     || ''),
     // v5.20: tag which door the request used so the Client Errors tab can
     // separate relay failures from /exec failures (no new column needed).
-    checkpoint: String(d.checkpoint || '') + '@' + (typeof currentDoor === 'function' ? currentDoor() : 'exec'),
+    // v5.35: d.door = the door captured when the request was SENT (see header).
+    checkpoint: String(d.checkpoint || '') + '@' + (d.door ? String(d.door) : (typeof currentDoor === 'function' ? currentDoor() : 'exec')),
     code:       String(d.code       || ''),
     errName:    String(d.errName    || ''),
     errMsg:     String(d.errMsg     || '').slice(0, 300),
@@ -4963,7 +5026,8 @@ function netlogRecord(kind, detail) {
     recovered:  String(!!d.recovered),
     durationMs: (d.durationMs != null) ? String(Math.round(d.durationMs)) : '',
     appVersion: (typeof APP_VERSION !== 'undefined') ? APP_VERSION : '',
-    doctor:     _netlogDoctor()
+    doctor:     _netlogDoctor(),
+    ref:        String(d.ref || '').slice(0, 700)   // v5.35 (_netlogRef caps at 696)
   };
   var c = _netlogConn();
   for (var k in c) { if (Object.prototype.hasOwnProperty.call(c, k)) rec[k] = c[k]; }
@@ -23137,5 +23201,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "e6e280c34081";</script></body>
+<script>var BUILD_HASH = "f4c6dc2a4dd3";</script></body>
 </html>
