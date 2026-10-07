@@ -53,6 +53,26 @@
 // hitting the same wall doesn't all re-hit it in the same second. Push
 // replays remain gated on NETLOG_IDEMPOTENT exactly as before.
 // ═══════════════════════════════════════════════════════════════════
+//
+// v5.35 (2026-10-07): WHICH RECORD, AND WHICH DOOR — MEASURED, NOT GUESSED.
+// KHoskin 06/10 14:42 PT review: four "unrescued" write rows, and the only
+// way to say which patient they were was to line up timestamps against
+// Claims / ChangeLog / Perf Log by hand. Two fixes:
+//   1. `ref` — every push row now names the record(s) it was carrying:
+//        p:<patientId>;c:<claimId>/<feeCode>/<serviceDate>/b<baseSavedAtMs>,…
+//      Internal ids + fee code + service date only. NO PHN, NO name.
+//      b<ms> = the claim's savedAt as this device last knew it (blank for a
+//      new claim). The server stamps savedAt on every claim write, so a
+//      sheet savedAt LATER than b proves this edit (or a newer one) landed;
+//      EQUAL means it never arrived. No device-clock comparison involved.
+//      Needs a `ref` column on the Client Errors tab — ClientErrors.gs v1.5
+//      adds it automatically on its first write.
+//   2. `door` — the @relay / @exec suffix was read from SHEETS_URL when
+//      the failure was RECORDED. A failover triggered by another request
+//      in the same instant (14:42:25: logChange failed on the relay and
+//      flipped the door) made a save that was SENT on the relay log as
+//      @exec. Callers now pass the door captured just before fetch().
+// ═══════════════════════════════════════════════════════════════════
 
 var NETLOG_KEY      = 'kgh5:netlog';
 var NETLOG_MAX      = 40;      // ring buffer — oldest dropped past this
@@ -131,6 +151,36 @@ function netlogExplain(code) {
   return "Can't reach the server — tap Retry";
 }
 
+// v5.35: which record(s) a write was carrying — ids, fee code and service
+// date only (never a PHN or a name). '' for reads and for anything else.
+//   p:<patientId>;c:<claimId>/<feeCode>/<date>/b<savedAtMs>,…
+function _netlogRef(action, body) {
+  try {
+    if (!body || typeof body !== 'object') return '';
+    var cl = function (c) {
+      if (!c || !c.id) return '';
+      var b = c.savedAt ? Date.parse(String(c.savedAt)) : NaN;
+      return String(c.id) + '/' + String(c.feeCode || c.fee || '') + '/' + String(c.date || '') +
+             '/b' + (isNaN(b) ? '' : String(b));
+    };
+    var a = String(action || ''), parts = [];
+    if (a === 'savePatientWithClaims') {
+      var pid = (body.patient && body.patient.id) || body.id;
+      if (pid) parts.push('p:' + pid);
+      var cs = (body.claims || []).map(cl).filter(Boolean);
+      if (cs.length) parts.push('c:' + cs.join(','));
+    } else if (a === 'saveClaim' || a === 'deleteClaim') {
+      if (body.id) parts.push('c:' + cl(body));
+    } else if (a === 'savePatient' || a === 'deletePatient' || a === 'mergePatientDemographics') {
+      if (body.id) parts.push('p:' + body.id);
+    }
+    var out = parts.join(';');
+    // Too long to keep whole: cut, and say so — the server then treats the
+    // record as "can't prove it landed" rather than checking half of it.
+    return out.length > 690 ? out.slice(0, 690) + ';TRUNC' : out;
+  } catch (e) { return ''; }
+}
+
 // ── The recorder ───────────────────────────────────────────────────
 // kind:   'sync' | 'push' | 'init'
 // detail: { action, checkpoint, code, errName, errMsg, httpStatus,
@@ -151,7 +201,8 @@ function netlogRecord(kind, detail) {
     action:     String(d.action     || ''),
     // v5.20: tag which door the request used so the Client Errors tab can
     // separate relay failures from /exec failures (no new column needed).
-    checkpoint: String(d.checkpoint || '') + '@' + (typeof currentDoor === 'function' ? currentDoor() : 'exec'),
+    // v5.35: d.door = the door captured when the request was SENT (see header).
+    checkpoint: String(d.checkpoint || '') + '@' + (d.door ? String(d.door) : (typeof currentDoor === 'function' ? currentDoor() : 'exec')),
     code:       String(d.code       || ''),
     errName:    String(d.errName    || ''),
     errMsg:     String(d.errMsg     || '').slice(0, 300),
@@ -160,7 +211,8 @@ function netlogRecord(kind, detail) {
     recovered:  String(!!d.recovered),
     durationMs: (d.durationMs != null) ? String(Math.round(d.durationMs)) : '',
     appVersion: (typeof APP_VERSION !== 'undefined') ? APP_VERSION : '',
-    doctor:     _netlogDoctor()
+    doctor:     _netlogDoctor(),
+    ref:        String(d.ref || '').slice(0, 700)   // v5.35 (_netlogRef caps at 696)
   };
   var c = _netlogConn();
   for (var k in c) { if (Object.prototype.hasOwnProperty.call(c, k)) rec[k] = c[k]; }

@@ -721,8 +721,14 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   crossing 23:00 gets two increment rows (04_billing.js). Banner in
 //   07_consult.js shows the split. No backend change. No cache-format
 //   change, BUILD_ID not bumped.
-var APP_VERSION = 'v5.34';
-var APP_BUILT   = '2026-09-27';
+// v5.35 (2026-10-07) — CLIENT ERRORS NAME THE RECORD AND THE REAL DOOR.
+//   push() rows carry `ref` (patient/claim ids + fee code + service date —
+//   never a PHN or name) and the door captured when the request was SENT,
+//   not when the failure was recorded (03b_netlog.js v5.35 header). Needs
+//   ClientErrors.gs v1.5 (adds the `ref` column). No behaviour change for
+//   doctors; telemetry only.
+var APP_VERSION = 'v5.35';
+var APP_BUILT   = '2026-10-07';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
@@ -1459,6 +1465,7 @@ async function syncFromSheets(opts) {
         credentials: 'omit'
       } : { redirect: 'follow', cache: 'no-store', credentials: 'omit' };
       var _resp = null, _err = null;
+      var _sDoor = (typeof currentDoor === 'function') ? currentDoor() : '';   // v5.35: door at SEND time
       try {
         // Cache-bust URL with timestamp to defeat any iOS BFCache fetch interception
         var url = SHEETS_URL + '?action=' + _syncAction + '&key=' + SHARED_KEY +
@@ -1493,7 +1500,7 @@ async function syncFromSheets(opts) {
             action: _syncAction, checkpoint: 'fetch-returned', code: _lastCode,
             errName: _lastErr ? String(_lastErr.name || '') : '',
             errMsg:  _lastErr ? String(_lastErr.message || _lastErr) : '',
-            attempt: _try, recovered: true, durationMs: Date.now() - _t0
+            attempt: _try, recovered: true, durationMs: Date.now() - _t0, door: _sDoor
           });
         }
         r = _resp;
@@ -1509,7 +1516,7 @@ async function syncFromSheets(opts) {
         errMsg:  _err ? String(_err.message || _err)
                       : ('HTTP ' + _resp.status + ' ' + (_resp.statusText || '') + (_resp._bodyNote ? ' ' + _resp._bodyNote : '')),
         httpStatus: _resp ? _resp.status : '',
-        attempt: _try, recovered: false, durationMs: Date.now() - _t0
+        attempt: _try, recovered: false, durationMs: Date.now() - _t0, door: _sDoor
       });
 
       // Give up early when a second attempt provably cannot help (4xx,
@@ -2234,6 +2241,8 @@ async function push(action, body, wire) {
     // LANDED, so only upsert-by-key actions may be replayed. Append-only
     // actions fall through to _pendingPush exactly as before.
     var _pUrl = SHEETS_URL + '?action=' + action + '&key=' + SHARED_KEY;
+    var _pDoor = (typeof currentDoor === 'function') ? currentDoor() : '';   // v5.35: door at SEND time
+    var _pRef  = (typeof _netlogRef === 'function') ? _netlogRef(action, body) : '';   // v5.35
     var _pMax = NETLOG_IDEMPOTENT[action] ? 2 : 1;
     var resp = null, _pCode = '';
     for (var _pt = 1; _pt <= _pMax; _pt++) {
@@ -2263,7 +2272,8 @@ async function push(action, body, wire) {
         if (_pt > 1) {
           netlogRecord('push', {
             action: action, checkpoint: 'post-returned', code: _pCode,
-            attempt: _pt, recovered: true, durationMs: Date.now() - _pt0
+            attempt: _pt, recovered: true, durationMs: Date.now() - _pt0,
+            door: _pDoor, ref: _pRef
           });
         }
         resp = _pr;
@@ -2279,7 +2289,8 @@ async function push(action, body, wire) {
         errMsg:  _pe ? String(_pe.message || _pe)
                      : ('HTTP ' + _pr.status + ' ' + (_pr.statusText || '') + (_pNote ? ' ' + _pNote : '')),
         httpStatus: _pr ? _pr.status : '',
-        attempt: _pt, recovered: false, durationMs: Date.now() - _pt0
+        attempt: _pt, recovered: false, durationMs: Date.now() - _pt0,
+        door: _pDoor, ref: _pRef
       });
 
       if (_pt >= _pMax || !netlogWorthRetry(_pCode)) {
@@ -2314,7 +2325,8 @@ async function push(action, body, wire) {
       netlogRecord('push', {
         action: action, checkpoint: 'post-parse', code: 'bad_json',
         errName: String(_parseErr.name || ''), errMsg: String(_parseErr.message || _parseErr),
-        httpStatus: resp.status, attempt: 1, recovered: false
+        httpStatus: resp.status, attempt: 1, recovered: false,
+        door: _pDoor, ref: _pRef
       });
       return _pushSoftFail(action, body, _pKey, 'bad_json');   // v5.32
     }
