@@ -727,8 +727,17 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   not when the failure was recorded (03b_netlog.js v5.35 header). Needs
 //   ClientErrors.gs v1.5 (adds the `ref` column). No behaviour change for
 //   doctors; telemetry only.
-var APP_VERSION = 'v5.35';
-var APP_BUILT   = '2026-10-07';
+// v5.36 (2026-10-12) — PATIENT SAVES CARRY A PUSH NUMBER (telemetry only).
+//   Every savePatient / mergePatientDemographics / savePatientWithClaims
+//   push gets n = 1, 2, 3 … for this app load, sent as
+//   {_ps:{s:NETLOG_SESSION, n}} on the wire only (never on st.patients) and
+//   logged in the error ref as p:<id>/s<n>. Crud v3.27 remembers the highest
+//   n it wrote per patient, so ClientErrors.gs v1.7 can prove a patient edit
+//   landed even when the phone lost the reply — no false "unsaved" alerts.
+//   Needs Crud v3.27 + ClientErrors v1.7 live FIRST. No behaviour change for
+//   doctors. No cache-format change, BUILD_ID not bumped.
+var APP_VERSION = 'v5.36';
+var APP_BUILT   = '2026-10-12';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
@@ -2127,6 +2136,8 @@ function _writeQAcquire() {
 
 // v5.32: per-action write timeout. The Add-Patient batch and the demographics
 // merge legitimately take ~16 s server-side at the 7am rush (Perf Log 25/09).
+// v5.36: patient writes that carry a push number (Crud v3.27 proof).
+var PSEQ_ACTIONS_ = { savePatient: 1, mergePatientDemographics: 1, savePatientWithClaims: 1 };
 var PUSH_TIMEOUT_MS_ = { savePatientWithClaims: 30000, mergePatientDemographics: 30000 };
 
 async function push(action, body, wire) {
@@ -2242,7 +2253,10 @@ async function push(action, body, wire) {
     // actions fall through to _pendingPush exactly as before.
     var _pUrl = SHEETS_URL + '?action=' + action + '&key=' + SHARED_KEY;
     var _pDoor = (typeof currentDoor === 'function') ? currentDoor() : '';   // v5.35: door at SEND time
-    var _pRef  = (typeof _netlogRef === 'function') ? _netlogRef(action, body) : '';   // v5.35
+    // v5.36: per-load push number for patient writes (see version note)
+    var _pSeq  = PSEQ_ACTIONS_[action] ? (window._pSeqN = (window._pSeqN || 0) + 1) : 0;
+    var _pX    = _pSeq ? { _ps: { s: NETLOG_SESSION, n: _pSeq } } : null;
+    var _pRef  = (typeof _netlogRef === 'function') ? _netlogRef(action, body, _pSeq) : '';   // v5.35 / v5.36
     var _pMax = NETLOG_IDEMPOTENT[action] ? 2 : 1;
     var resp = null, _pCode = '';
     for (var _pt = 1; _pt <= _pMax; _pt++) {
@@ -2261,7 +2275,7 @@ async function push(action, body, wire) {
         // rides on the wire only — never on the st.claims object.
         var _pBody = (action === 'saveClaim')
           ? JSON.stringify(Object.assign({}, body, { arbitrate: true }, wire || {}))
-          : (wire ? JSON.stringify(Object.assign({}, body, wire)) : JSON.stringify(body));
+          : ((wire || _pX) ? JSON.stringify(Object.assign({}, body, wire || {}, _pX || {})) : JSON.stringify(body));   // v5.36: _pX
         _pr = await fetch(_pUrl, _pCtrl
           ? { method: 'POST', body: _pBody, signal: _pCtrl.signal }
           : { method: 'POST', body: _pBody });

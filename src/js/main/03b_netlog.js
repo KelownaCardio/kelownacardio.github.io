@@ -54,6 +54,10 @@
 // replays remain gated on NETLOG_IDEMPOTENT exactly as before.
 // ═══════════════════════════════════════════════════════════════════
 //
+// v5.36 (2026-10-12): patient parts of `ref` carry this load's push number,
+//   p:<patientId>/s<n> (see 03_state.js v5.36). ClientErrors.gs v1.7 strips
+//   it when grouping and uses it to prove the edit landed (Crud v3.27).
+// ═══════════════════════════════════════════════════════════════════
 // v5.35 (2026-10-07): WHICH RECORD, AND WHICH DOOR — MEASURED, NOT GUESSED.
 // KHoskin 06/10 14:42 PT review: four "unrescued" write rows, and the only
 // way to say which patient they were was to line up timestamps against
@@ -154,7 +158,8 @@ function netlogExplain(code) {
 // v5.35: which record(s) a write was carrying — ids, fee code and service
 // date only (never a PHN or a name). '' for reads and for anything else.
 //   p:<patientId>;c:<claimId>/<feeCode>/<date>/b<savedAtMs>,…
-function _netlogRef(action, body) {
+function _netlogRef(action, body, seq) {
+  var sq = (seq > 0) ? '/s' + String(seq) : '';   // v5.36
   try {
     if (!body || typeof body !== 'object') return '';
     var cl = function (c) {
@@ -166,13 +171,13 @@ function _netlogRef(action, body) {
     var a = String(action || ''), parts = [];
     if (a === 'savePatientWithClaims') {
       var pid = (body.patient && body.patient.id) || body.id;
-      if (pid) parts.push('p:' + pid);
+      if (pid) parts.push('p:' + pid + sq);
       var cs = (body.claims || []).map(cl).filter(Boolean);
       if (cs.length) parts.push('c:' + cs.join(','));
     } else if (a === 'saveClaim' || a === 'deleteClaim') {
       if (body.id) parts.push('c:' + cl(body));
     } else if (a === 'savePatient' || a === 'deletePatient' || a === 'mergePatientDemographics') {
-      if (body.id) parts.push('p:' + body.id);
+      if (body.id) parts.push('p:' + body.id + (a === 'deletePatient' ? '' : sq));
     }
     var out = parts.join(';');
     // Too long to keep whole: cut, and say so — the server then treats the
