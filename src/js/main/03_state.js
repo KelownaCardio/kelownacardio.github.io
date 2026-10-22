@@ -752,7 +752,9 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   Discharged and Archive search rows). Needs Router v3.26 + ConsultPdf.gs
 //   v1.0 live FIRST. Residents excluded. No cache-format change, BUILD_ID not
 //   bumped.
-var APP_VERSION = 'v5.38';
+// v5.39 (2026-10-22) — consult button icon 📄 → 📞 (13d_consult_pdf.js).
+//   Icon only. No cache-format change, BUILD_ID not bumped.
+var APP_VERSION = 'v5.39';
 var APP_BUILT   = '2026-10-22';
 
 // ─── v5.20: door failover ───────────────────────────────────────────

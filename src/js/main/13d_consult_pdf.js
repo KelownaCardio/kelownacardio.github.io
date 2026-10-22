@@ -1,5 +1,7 @@
 // ── 13d_consult_pdf.js ──
 // ═══════════════════════════════════════════════════════
+// v5.39 (2026-10-22): row button is now "📞 Consult" (was "📄 Consult") so
+//   it reads as the phone-consult transcript (Kathryn). Icon only.
 // v5.38 (2026-10-22): VIEW PHONE-CONSULT PDFs (new file).
 //   A physician asked to read the phone-consult PDF (web form / QuickChart)
 //   from inside the app. Every KCA doctor may read every consult PDF
@@ -88,11 +90,11 @@ function cpdfLikely(p, claims) {
 // Button for a discharged / archive row. Empty for residents or non-consults.
 function cpdfRowBtn(p, claims) {
   if ((typeof isResident === 'function' && isResident()) || !cpdfLikely(p, claims)) return '';
-  return '<button class="bb" style="font-size:10px;padding:5px 9px" title="View phone consult PDF" ' +
+  return '<button class="bb" style="font-size:10px;padding:5px 9px" title="View phone consult transcript" ' +
     'data-phn="' + esc(String(p.phn || '')) + '" data-last="' + esc(String(p.last || '')) + '" ' +
     'data-dob="' + esc(String(p.dob || '')) + '" ' +
     'data-name="' + esc(String(p.last || '') + ', ' + String(p.first || '')) + '" ' +
-    'onclick="event.stopPropagation();cpdfOpenFromBtn(this)">📄 Consult</button>';
+    'onclick="event.stopPropagation();cpdfOpenFromBtn(this)">📞 Consult</button>';
 }
 
 function cpdfOpenFromBtn(el) {
