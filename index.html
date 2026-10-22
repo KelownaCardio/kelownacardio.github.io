@@ -3108,7 +3108,14 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   QuickChart" lists (CardiologyMRP or CardiologyConsult). Never creates a
 //   patient. Frontend only — no backend change. No cache-format change,
 //   BUILD_ID not bumped.
-var APP_VERSION = 'v5.37';
+// v5.38 (2026-10-22) — VIEW PHONE-CONSULT PDFs. New node 13d_consult_pdf.js
+//   (full-screen in-app PDF viewer, PDF.js from cdnjs on first use) + hooks in
+//   09_patient.js (Add Patient banner "Phone consult on file — View Phone
+//   Consult" after a valid PHN) and 06b_discharged.js ("📄 Consult" button on
+//   Discharged and Archive search rows). Needs Router v3.26 + ConsultPdf.gs
+//   v1.0 live FIRST. Residents excluded. No cache-format change, BUILD_ID not
+//   bumped.
+var APP_VERSION = 'v5.38';
 var APP_BUILT   = '2026-10-22';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
@@ -8455,6 +8462,9 @@ function backToRoundsFromClaim() {
 
 // ── 06b_discharged.js ──
 // ═══════════════════════════════════════════════════════
+// v5.38 (2026-10-22): "📄 Consult" button (cpdfRowBtn, 13d_consult_pdf.js)
+//   on Discharged rows and Archive search rows for phone-consult patients —
+//   opens the consult PDF in the in-app viewer.
 // Recently Discharged pane + rounds search filter
 // Pane shows discharged patients (last 21 days, or all when searching)
 // Each row offers: tap to add a missed claim, restore (to On/Off Service)
@@ -8581,6 +8591,7 @@ async function archiveSearch() {
         + '<div><div style="font-weight:700;font-size:13px">' + esc(p.last) + ', ' + esc(p.first) + '</div>'
         + '<div style="font-size:11px;color:var(--text2)">PHN …' + esc(String(p.phn || '').slice(-4)) + dd + ' &middot; ' + claimN + ' claim' + (claimN === 1 ? '' : 's') + '</div></div>'
         + '<div style="display:flex;gap:6px">'
+        + (typeof cpdfRowBtn === 'function' ? cpdfRowBtn(p, _archiveCache.claims) : '')   // v5.38
         + (isResident() ? '' :
             '<button class="btn btn-p" style="margin:0;font-size:12px;padding:6px 12px" onclick="pullArchivedPatient(\'' + esc(p.id) + '\')">Pull claims</button>'
           + '<button class="btn btn-s" style="margin:0;font-size:12px;padding:6px 12px" onclick="pullArchivedAndClaim(\'' + esc(p.id) + '\')">+ Claim</button>')
@@ -8837,6 +8848,7 @@ function dischargedRow(p) {
       (isResident() ? '' :
         '<button class="bb bb-rnd" style="font-size:10px;padding:5px 9px" ' +
         'onclick="event.stopPropagation();restorePatient(\'' + esc(pid) + '\')">↩ Restore</button>') +
+      (typeof cpdfRowBtn === 'function' ? cpdfRowBtn(p) : '') +   // v5.38
       chartBtn(pid) +
     '</div>' +
   '</div>';
@@ -13454,6 +13466,11 @@ function submitCCU(isDuplicate) {
 // 09_patient.js — Add patient (Step 1), sticker/Meditech
 //                 chart photo OCR, ward/room selectors
 // ═══════════════════════════════════════════════════════
+// v5.38 (2026-10-22): validatePhnLive calls cpdfCheckForPhn(digits) on a
+//        valid 10-digit PHN (13d_consult_pdf.js) — shows "Phone consult on
+//        file — View Phone Consult" when the backend finds a consult PDF.
+//        dismissExistingPatientBanner also clears that banner. Information
+//        only; the v5.03 silent merge is unchanged.
 // v4.95 (2026-08-12): VANKOESVELD FIX — the NEW-patient branch of apSubmit
 //        never set `discharged`, so when the server PHN-merged the payload
 //        into an existing DISCHARGED row (phone-consult webform stubs are
@@ -13753,17 +13770,7 @@ async function _mergeAndReadmit() {
   } else if (!!((document.getElementById('f-private') || {}).checked)) {
     p.privatePay = true;
     p.rateMode   = gv('f-private-rate') || p.rateMode || 'BCMA';
-    // v5.33: homeAddress is KEPT — a private-pay invoice is mailed there and
-    // the discharge gate requires it. It used to be blanked here and in the
-    // Edit Patient modal, silently undoing an address captured earlier.
-    // v5.33: Quebec stays recorded as homeProvince 'QC' on the private-pay
-    // row (picked via the OOP list, or already on file) so the OOP tab and
-    // invoice still say Quebec; everything else in the OOP block is cleared.
-    p.oop = false; p.homeHCN = '';
-    p.homeProvince = _apPrivateIsQc(p) ? 'QC' : '';
-    p.homeAddress  = gv('f-home-address') || p.homeAddress || '';
-    // v5.33: patient email captured at intake (mandatory on this form).
-    p.homeEmail  = gv('f-home-email') || p.homeEmail || '';
+    p.oop = false; p.homeProvince = ''; p.homeHCN = ''; p.homeAddress = '';
   }
 
   stampChangedGroups(p, _hotSnap);   // v4.73: readmit = discharge/location/handover taps
@@ -13936,7 +13943,6 @@ async function _mergeAndReadmit() {
                   (_retagged > 1 ? 's' : '') + ' corrected)' : '')
               : ''));
   _hideSubmitOverlay();
-  ppDocUploadPending('f', p);   // v5.33: insurance photos → patient's invoice folder
   clearAddForm();
   if (addToList) { nav(0, document.querySelectorAll('.nb')[0]); }
   else { nav(2, document.querySelectorAll('.nb')[2]); }
@@ -14716,20 +14722,6 @@ function apProvinceChange() {
   var v = (document.getElementById('f-home-province') || {}).value || '';
   var qc = document.getElementById('f-qc-warn');
   if (qc) qc.style.display = (v === 'QC') ? 'block' : 'none';
-  // v5.33 (Kathryn 2026-09-24): Quebec is outside the reciprocal agreement,
-  // so it is billed exactly like private pay at MSP rates. Picking Quebec
-  // moves the patient straight onto the Private Pay block (MSP selected),
-  // where the patient email + insurance photos are collected.
-  if (v === 'QC') {
-    var oop = document.getElementById('f-oop');
-    if (oop) { oop.checked = false; apToggleOOP(); }
-    var priv = document.getElementById('f-private');
-    if (priv) { priv.checked = true; apTogglePrivate(); priv.setAttribute('data-qc', '1'); }
-    apPrivateRate('MSP');
-    showToast('Quebec — switched to Private Pay (MSP rates). Ask for the patient\'s email.');
-    var em = document.getElementById('f-home-email');
-    if (em) { try { em.focus(); } catch (e) {} }
-  }
 }
 // ── Private Pay toggle + rate selector ────────────────────────────
 function apTogglePrivate() {
@@ -14741,23 +14733,10 @@ function apTogglePrivate() {
     var oop = document.getElementById('f-oop');
     if (oop && oop.checked) { oop.checked = false; if (typeof apToggleOOP === 'function') apToggleOOP(); }
     apPrivateRate((document.getElementById('f-private-rate') || {}).value || 'BCMA');
-    ppDocRender('f', null);
   } else {
     var rm = document.getElementById('f-private-rate'); if (rm) rm.value = 'BCMA';
     apPrivateRate('BCMA');
-    // v5.33: collapse → clear, so a hidden block never submits stale data.
-    var em = document.getElementById('f-home-email'); if (em) { em.value = ''; em.style.cssText = 'font-size:16px'; }
-    var pc = document.getElementById('f-private'); if (pc) pc.removeAttribute('data-qc');
-    _ppDocPending.f = [];
-    ppDocRender('f', null);
   }
-}
-// v5.33: is this private-pay entry a Quebec resident? True when Quebec was
-// picked in the OOP list this time, or the patient on file is already QC.
-function _apPrivateIsQc(p) {
-  var pc = document.getElementById('f-private');
-  if (pc && pc.getAttribute('data-qc') === '1') return true;
-  return !!(p && /^(qc|pq|quebec)/i.test(String(p.homeProvince || '').trim()));
 }
 function apPrivateRate(mode) {
   mode = (mode === 'MSP') ? 'MSP' : 'BCMA';
@@ -14987,18 +14966,7 @@ async function apSubmit(addToList, _skipDupCheck) {
     }
   }
 
-  // v5.33 (Kathryn 2026-09-24): private pay (incl. Quebec) — the patient
-  // email is MANDATORY at intake. Leaving it to discharge wasn't working.
-  // Insurance photos stay optional. Same validity rule as the discharge gate
-  // (_ppValidEmail) so the two can never disagree.
-  var _priv = !!((document.getElementById('f-private') || {}).checked);
-  if (_priv && !_ppValidEmail(gv('f-home-email'))) addMissing.push('patient email');
-
   if (addMissing.length) {
-    if (addMissing.indexOf('patient email') !== -1) {
-      var emEl = document.getElementById('f-home-email');
-      if (emEl) { emEl.style.cssText = 'font-size:16px;border:1.5px solid var(--amber-t);background:var(--amber-bg)'; }
-    }
     if (addMissing.indexOf('last name') !== -1) {
       var lastBlankEl = document.getElementById('f-last');
       if (lastBlankEl) { lastBlankEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; lastBlankEl.focus(); }
@@ -15053,7 +15021,6 @@ async function apSubmit(addToList, _skipDupCheck) {
     if (addMissing.indexOf('home province')      !== -1) msgs.push('home province');
     if (addMissing.indexOf('home health number') !== -1) msgs.push('home health number');
     if (addMissing.indexOf('home address')        !== -1) msgs.push('home address');
-    if (addMissing.indexOf('patient email')       !== -1) msgs.push('patient email (private pay — ask the patient)');
     showToast('Required: ' + msgs.join(', '));
     return;
   }
@@ -15185,8 +15152,6 @@ async function apSubmit(addToList, _skipDupCheck) {
   if ((document.getElementById('f-private') || {}).checked) {
     p.privatePay = true;
     p.rateMode   = gv('f-private-rate') || 'BCMA';
-    p.homeEmail  = gv('f-home-email');   // v5.33: mandatory at intake
-    if (_apPrivateIsQc(null)) p.homeProvince = 'QC';   // v5.33: Quebec via the OOP list
   }
 
   // v4.95: ALWAYS send explicit discharge state on a new add. The admitted
@@ -15355,7 +15320,6 @@ async function apSubmit(addToList, _skipDupCheck) {
   var listLabel = addToList ? (p.list === 'on' ? 'On' : 'Off') + ' Service' : 'claim only';
   showSaved(last + ' added — ' + listLabel);
   _hideSubmitOverlay();
-  ppDocUploadPending('f', p);   // v5.33: insurance photos → patient's invoice folder
   clearAddForm();
   if (addToList) {
     nav(0, document.querySelectorAll('.nb')[0]);
@@ -15497,6 +15461,8 @@ function validatePhnLive() {
     }
     _liveClear(el);
     _phnErr(null);
+    // v5.38: consult-PDF banner (13d_consult_pdf.js) — async, information only
+    if (typeof cpdfCheckForPhn === 'function') cpdfCheckForPhn(digits);
     // Existing patient check — local first, then server
     var localMatch = (st.patients || []).filter(function(x) {
       return x && String(x.phn || '').replace(/\D/g, '').slice(0, 10) === digits;
@@ -16954,6 +16920,7 @@ function showExistingPatientBanner(match) {
 function dismissExistingPatientBanner() {
   var el = document.getElementById('existing-pt-banner');
   if (el && el.parentNode) el.parentNode.removeChild(el);
+  if (typeof cpdfClearBanner === 'function') cpdfClearBanner();   // v5.38
 }
 
 function goToExistingPatient(pid) {
@@ -17057,191 +17024,6 @@ function buildOCRCorrections(savedPatient) {
     }
   });
   return corrections;
-}
-
-
-// ═══════════════════════════════════════════════════════════════════
-// v5.33 (Kathryn 2026-09-24): PRIVATE-PAY INTAKE — INSURANCE PHOTOS
-// ═══════════════════════════════════════════════════════════════════
-// Private pay (and Quebec, which now routes to Private Pay at MSP rates)
-// collects the patient email (mandatory) and optional photos of insurance
-// documents/cards AT INTAKE, from the doctor who creates the card. Leaving
-// it all to discharge wasn't working.
-//
-// Photos go to the backend (Invoice.gs savePpDoc) and land in
-//   Drive › Patient Invoices › <LAST, First — PHN [id]>
-// — the same folder the patient's finalized invoice is filed into after
-// discharge, so the clerk finds everything for one patient in one place.
-//
-// ⚠️ Deliberately NO credit-card capture. Card photos (esp. the back/CVV)
-// must not be stored under PCI DSS; the card is kept on file in Wix.
-//
-// Memory: every photo goes through photoFileToDataUrl (v5.14 rule — never
-// FileReader on a camera file) and is then shrunk to PPDOC_MAX, which keeps
-// a card legible at ~150–400 KB — the same size class ocrSticker already
-// sends through the relay every day.
-var PPDOC_MAX = 1400;   // long side; a card stays legible, ~150–400 KB
-var _ppDocPending = { f: [], pe: [] };   // data URLs not yet uploaded, per form
-var _ppDocRetry   = {};                  // pid → data URLs whose upload failed
-
-function _ppDocShrink(dataUrl, cb) {
-  var img = new Image();
-  img.onload = function() {
-    var w = img.naturalWidth, h = img.naturalHeight;
-    var s = Math.min(1, PPDOC_MAX / Math.max(w || 1, h || 1));
-    var c = document.createElement('canvas');
-    c.width = Math.max(1, Math.round(w * s)); c.height = Math.max(1, Math.round(h * s));
-    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-    var out = c.toDataURL('image/jpeg', 0.8);
-    c.width = c.height = 0;
-    img.removeAttribute('src');
-    cb(out);
-  };
-  img.onerror = function() { cb(dataUrl); };
-  img.src = dataUrl;
-}
-
-// Render the photo block into <prefix>-ppdoc-host. p = the saved patient
-// (Edit Patient) or null (Add Patient — nothing saved yet).
-function ppDocRender(prefix, p) {
-  var host = document.getElementById(prefix + '-ppdoc-host');
-  if (!host) return;
-  var pend  = _ppDocPending[prefix] || [];
-  var saved = p ? (parseInt(p.ppDocs, 10) || 0) : 0;
-  var h = '<label style="margin:0 0 6px">Insurance documents / cards <span style="font-weight:400;color:var(--text3)">(optional)</span></label>' +
-    '<input type="file" id="' + prefix + '-ppdoc-file" accept="image/*" multiple style="display:none" ' +
-      'onchange="ppDocFileChosen(\'' + prefix + '\', this)">' +
-    '<button type="button" class="btn btn-s" style="margin:0;width:100%" ' +
-      'onclick="ppDocPick(\'' + prefix + '\')">📷 Photo insurance documents or cards</button>' +
-    '<div style="margin-top:5px;font-size:10px;color:var(--text3);line-height:1.5">' +
-      'Front and back of each insurance card, or the policy page. ' +
-      'Saved to the patient’s invoice folder for the billing clerk. ' +
-      '<b>Do not photograph credit cards.</b></div>';
-  if (saved) {
-    h += '<div style="margin-top:6px;font-size:12px;font-weight:700;color:var(--green-t)">✓ ' +
-         saved + ' photo' + (saved === 1 ? '' : 's') + ' already saved to the invoice folder</div>';
-  }
-  if (pend.length) {
-    h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">';
-    pend.forEach(function(u, i) {
-      h += '<div style="position:relative;width:64px;height:64px;border:.5px solid var(--border2);border-radius:6px;overflow:hidden;background:#fff">' +
-             '<img src="' + u + '" style="width:100%;height:100%;object-fit:cover" alt="">' +
-             '<button type="button" onclick="ppDocRemove(\'' + prefix + '\',' + i + ')" ' +
-               'style="position:absolute;top:1px;right:1px;width:20px;height:20px;border:none;border-radius:10px;' +
-               'background:rgba(0,0,0,.6);color:#fff;font-size:12px;line-height:20px;padding:0;cursor:pointer">✕</button>' +
-           '</div>';
-    });
-    h += '</div><div style="margin-top:4px;font-size:11px;color:var(--amber-t);font-weight:600">' +
-         pend.length + ' photo' + (pend.length === 1 ? '' : 's') + ' will upload when you tap ' +
-         (prefix === 'f' ? 'Submit' : 'Save') + '</div>';
-  }
-  host.innerHTML = h;
-}
-
-function ppDocPick(prefix) {
-  var inp = document.getElementById(prefix + '-ppdoc-file');
-  if (inp) { inp.value = ''; inp.click(); }
-}
-
-function ppDocFileChosen(prefix, input) {
-  var files = Array.prototype.slice.call((input && input.files) || []);
-  if (!files.length) return;
-  var p = (prefix === 'pe' && window._ppDocEditPid) ? getP(window._ppDocEditPid) : null;
-  // One at a time: two 3000px decodes side by side is exactly the Android
-  // OOM the v5.14 budget exists to prevent.
-  (function next(i) {
-    if (i >= files.length) return;
-    photoFileToDataUrl(files[i], function(url) {
-      _ppDocShrink(url, function(small) {
-        (_ppDocPending[prefix] = _ppDocPending[prefix] || []).push(small);
-        ppDocRender(prefix, (p && p.id) ? p : null);
-        next(i + 1);
-      });
-    }, function() {
-      showToast('Could not read that photo — try again', 'error');
-      next(i + 1);
-    });
-  })(0);
-  if (input) input.value = '';
-}
-
-function ppDocRemove(prefix, i) {
-  var arr = _ppDocPending[prefix] || [];
-  arr.splice(i, 1);
-  var p = (prefix === 'pe' && window._ppDocEditPid) ? getP(window._ppDocEditPid) : null;
-  ppDocRender(prefix, (p && p.id) ? p : null);
-}
-
-// One upload. Resolves with the server result or throws. One retry: on the
-// relay it fails over to /exec (like push()); otherwise after a 3 s pause.
-function _ppDocSend(p, dataUrl) {
-  var b64 = String(dataUrl || '').split(',')[1] || '';
-  var body = JSON.stringify({
-    action:    'savePpDoc',
-    key:       SHARED_KEY,
-    patientId: p.id,
-    last:      p.last  || '',
-    first:     p.first || '',
-    phn:       p.phn   || '',
-    image:     b64,
-    mediaType: 'image/jpeg',
-    by:        (st.doc && st.doc.alias) || ''
-  });
-  function attempt() {
-    return fetchWithTimeout(SHEETS_URL, {
-      method: 'POST', redirect: 'follow',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: body
-    }, 45000, 'Insurance photo upload')
-      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-      .then(function(j) { if (!j || !j.ok) throw new Error((j && j.error) || 'upload failed'); return j; });
-  }
-  return attempt()['catch'](function(e) {
-    if (typeof _doorFailover === 'function' && _doorFailover('ppdoc')) return attempt();
-    return new Promise(function(res) { setTimeout(res, 3000); }).then(attempt);
-  });
-}
-
-// Upload everything pending for this form, AFTER the patient is saved.
-// Detaches the list first, so clearAddForm() right after is safe. Photos
-// that fail are parked in _ppDocRetry[pid] and reappear as pending the next
-// time anyone opens Edit Patient on this device — no retake needed.
-async function ppDocUploadPending(prefix, p) {
-  var list = (_ppDocPending[prefix] || []).slice();
-  _ppDocPending[prefix] = [];
-  if (!p || !p.id) return;
-  // Photos parked from an earlier failed upload on this device ride along;
-  // they are re-parked below if they fail again.
-  if (_ppDocRetry[p.id] && _ppDocRetry[p.id].length) { list = list.concat(_ppDocRetry[p.id]); }
-  delete _ppDocRetry[p.id];
-  if (!list.length) return;
-  if (!SHEETS_URL) {
-    _ppDocRetry[p.id] = (_ppDocRetry[p.id] || []).concat(list);
-    showToast('Insurance photos NOT saved (offline) — open Edit Patient to retry', 'error');
-    return;
-  }
-  var ok = 0, failed = [];
-  for (var i = 0; i < list.length; i++) {
-    try { await _ppDocSend(p, list[i]); ok++; }
-    catch (e) { console.warn('[ppdoc] upload failed', e); failed.push(list[i]); }
-  }
-  if (ok) {
-    var live = getP(p.id);
-    if (!live || !live.id) live = p;           // getP returns {} when absent
-    live.ppDocs = (parseInt(live.ppDocs, 10) || 0) + ok;
-    sv('patients', st.patients);
-    push('savePatient', live);
-    if (typeof logChange === 'function') {
-      try { logChange(live, 'Insurance photos saved', ok + ' photo' + (ok === 1 ? '' : 's') + ' to invoice folder'); } catch (e) {}
-    }
-  }
-  if (failed.length) {
-    _ppDocRetry[p.id] = (_ppDocRetry[p.id] || []).concat(failed);
-    showToast(failed.length + ' insurance photo' + (failed.length === 1 ? '' : 's') +
-              ' did NOT upload — open Edit Patient and tap Save to retry', 'error');
-  } else {
-    showSaved('✓ ' + ok + ' insurance photo' + (ok === 1 ? '' : 's') + ' saved for ' + (p.last || 'patient'));   // silent (v5.32 quiet-saves rule)
-  }
 }
 // 10_location.js — Location change screen + discharge modal
 // ═══════════════════════════════════════════════════════
@@ -21607,6 +21389,344 @@ function rlApply() {
     rlHandleFile(f);
   });
 })();
+// ── 13d_consult_pdf.js ──
+// ═══════════════════════════════════════════════════════
+// v5.38 (2026-10-22): VIEW PHONE-CONSULT PDFs (new file).
+//   A physician asked to read the phone-consult PDF (web form / QuickChart)
+//   from inside the app. Every KCA doctor may read every consult PDF
+//   (Kathryn 2026-10-22). The PDFs live in the admin@ Drive folder, which
+//   doctors cannot open (single shared Google login), so the backend fetches
+//   the file and the app shows it in its own full-screen viewer.
+//   Backend: Router v3.26 + ConsultPdf.gs v1.0 (listConsultPdfs /
+//   getConsultPdf). Residents never see these buttons (the backend refuses
+//   them anyway).
+//
+//   WHERE THE LINK APPEARS
+//   1. Add Patient — once a valid 10-digit PHN is entered (typed or OCR), the
+//      app asks the backend for consult PDFs on that PHN (or surname + DOB).
+//      If any exist, a small "Phone consult on file — View" banner appears
+//      under the scan bar. Information only: it does not change the v5.03
+//      silent-merge flow and asks nothing.
+//   2. Discharged search rows and 3. Archive search rows — a "📄 Consult"
+//      button on any patient who looks like a phone consult: added by the
+//      web form / QuickChart (addedVia PhoneConsult*), or with a phone-advice
+//      claim (10001 / 10002 / 78711 etc.) in the claims the app has loaded.
+//      ⚠ A patient whose phone-advice claims have already been purged from
+//      the Claims tab AND who was not created by a consult will not show the
+//      button — the Add Patient banner (server lookup) still finds them.
+//
+//   VIEWER: PDF.js 3.11.174 from cdnjs, loaded only the first time a PDF is
+//   opened, renders every page to canvas — the only approach that shows ALL
+//   pages on iPhone (an iframe/embed shows page 1 only on iOS). If PDF.js
+//   cannot load, the viewer falls back to an "Open PDF" button (blob URL).
+//   "Open in new tab" is offered on every PDF for zoom / print on a computer.
+//   Nothing is cached on the device; the PDF lives in memory until closed.
+// ═══════════════════════════════════════════════════════
+
+var CPDF_PDFJS_URL  = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+var CPDF_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+var _cpdfState = { list: null, who: '', blobUrl: '', reqSeq: 0 };
+var _cpdfBannerFor = '';      // PHN the Add-Patient banner lookup is for
+var _cpdfBannerPdfs = null;   // its result, reused when the banner is tapped
+var _cpdfJsPromise = null;
+
+// ─── Backend calls ────────────────────────────────────────────────
+function _cpdfGet(params) {
+  var q = '?key=' + encodeURIComponent(SHARED_KEY) + '&_t=' + Date.now();
+  Object.keys(params).forEach(function(k) {
+    if (params[k] != null && params[k] !== '') q += '&' + k + '=' + encodeURIComponent(params[k]);
+  });
+  return fetch(SHEETS_URL + q).then(function(r) { return r.json(); }).then(function(j) {
+    if (j && j.error === 'unauthorized') {
+      if (typeof handleUnauthorized === 'function') handleUnauthorized();
+      throw new Error('Not signed in');
+    }
+    if (!j || j.ok === false) throw new Error((j && j.error) || 'No response');
+    return j;
+  });
+}
+
+function _cpdfDob(dob) {
+  var s = String(dob || '').trim();
+  if (!s) return '';
+  try { if (typeof dobNormDMY === 'function') return dobNormDMY(s) || s; } catch (e) {}
+  return s;
+}
+
+function cpdfList(phn, last, dob) {
+  return _cpdfGet({
+    action: 'listConsultPdfs',
+    phn:  String(phn || '').replace(/\s/g, ''),
+    last: String(last || '').trim(),
+    dob:  _cpdfDob(dob)
+  }).then(function(j) { return j.pdfs || []; });
+}
+
+// ─── Heuristic for list rows ──────────────────────────────────────
+function cpdfLikely(p, claims) {
+  if (!p) return false;
+  if (/^phoneconsult/i.test(String(p.addedVia || ''))) return true;
+  if (typeof isPhoneAdviceClaim !== 'function' || !p.phn) return false;
+  var pool = claims || (st && st.claims) || [];
+  for (var i = 0; i < pool.length; i++) {
+    var c = pool[i];
+    if (c && samePhn(c.phn, p.phn) && isPhoneAdviceClaim(c)) return true;
+  }
+  return false;
+}
+
+// Button for a discharged / archive row. Empty for residents or non-consults.
+function cpdfRowBtn(p, claims) {
+  if ((typeof isResident === 'function' && isResident()) || !cpdfLikely(p, claims)) return '';
+  return '<button class="bb" style="font-size:10px;padding:5px 9px" title="View phone consult PDF" ' +
+    'data-phn="' + esc(String(p.phn || '')) + '" data-last="' + esc(String(p.last || '')) + '" ' +
+    'data-dob="' + esc(String(p.dob || '')) + '" ' +
+    'data-name="' + esc(String(p.last || '') + ', ' + String(p.first || '')) + '" ' +
+    'onclick="event.stopPropagation();cpdfOpenFromBtn(this)">📄 Consult</button>';
+}
+
+function cpdfOpenFromBtn(el) {
+  cpdfOpen({
+    phn:  el.getAttribute('data-phn'),
+    last: el.getAttribute('data-last'),
+    dob:  el.getAttribute('data-dob'),
+    name: el.getAttribute('data-name')
+  });
+}
+
+// ─── Add Patient banner ───────────────────────────────────────────
+// Called by validatePhnLive (09_patient.js) on a valid 10-digit PHN.
+function cpdfCheckForPhn(digits) {
+  if (typeof isResident === 'function' && isResident()) return;
+  if (!SHEETS_URL || !SHARED_KEY) return;
+  if (digits === _cpdfBannerFor) return;   // already looked up (or in flight) for this PHN
+  cpdfClearBanner();
+  _cpdfBannerFor = digits;
+  var last = (document.getElementById('f-last') || {}).value || '';
+  var dob  = (document.getElementById('f-dob')  || {}).value || '';
+  cpdfList(digits, last, dob).then(function(pdfs) {
+    var cur = String((document.getElementById('f-phn') || {}).value || '').replace(/\D/g, '');
+    if (cur !== digits || _cpdfBannerFor !== digits || !pdfs.length) return;
+    _cpdfBannerPdfs = pdfs;
+    var bar = document.getElementById('ocr-bar');
+    if (!bar || !bar.parentNode) return;
+    var newest = pdfs[0];
+    var div = document.createElement('div');
+    div.id = 'cpdf-banner';
+    div.style.cssText = 'margin-top:6px;padding:9px 10px;border-radius:8px;display:flex;align-items:center;' +
+      'justify-content:space-between;gap:8px;background:var(--teal-bg);border:1px solid var(--teal);color:var(--teal-t)';
+    div.innerHTML =
+      '<div style="font-size:12px;line-height:1.35"><b>Phone consult on file</b><br>' +
+        esc(_cpdfDate(newest.date)) + (pdfs.length > 1 ? ' &middot; ' + pdfs.length + ' PDFs' : '') + '</div>' +
+      '<button type="button" class="btn btn-s" style="margin:0;padding:6px 12px;font-size:12px;white-space:nowrap" ' +
+        'onclick="cpdfOpenBanner()">View Phone Consult</button>';
+    // After the "already on the list" banner if present, else under the scan bar
+    var anchor = document.getElementById('existing-pt-banner') || bar;
+    anchor.parentNode.insertBefore(div, anchor.nextSibling);
+  }).catch(function() { /* silent — information only */ });
+}
+
+function cpdfOpenBanner() {
+  var last = (document.getElementById('f-last') || {}).value || '';
+  var first = (document.getElementById('f-first') || {}).value || '';
+  cpdfOpen({ phn: _cpdfBannerFor, name: last + (first ? ', ' + first : '') }, _cpdfBannerPdfs);
+}
+
+function cpdfClearBanner() {
+  var el = document.getElementById('cpdf-banner');
+  if (el && el.parentNode) el.parentNode.removeChild(el);
+  _cpdfBannerFor = '';
+  _cpdfBannerPdfs = null;
+}
+
+// ─── Viewer ───────────────────────────────────────────────────────
+function _cpdfDate(iso) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+  return m ? (m[3] + '/' + m[2] + '/' + m[1]) : String(iso || '');
+}
+
+function _cpdfShell() {
+  var ov = document.getElementById('cpdf-viewer');
+  if (ov) return ov;
+  ov = document.createElement('div');
+  ov.id = 'cpdf-viewer';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:9800;display:none;flex-direction:column;background:#525659';
+  ov.innerHTML =
+    '<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;padding-top:calc(10px + env(safe-area-inset-top));' +
+      'background:var(--surface);border-bottom:1px solid var(--border2)">' +
+      '<button type="button" id="cpdf-back" class="btn btn-s" style="margin:0;padding:6px 10px;font-size:12px;display:none" onclick="cpdfShowList()">&#8249; List</button>' +
+      '<div id="cpdf-title" style="flex:1;min-width:0;font-weight:700;font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>' +
+      '<button type="button" id="cpdf-newtab" class="btn btn-s" style="margin:0;padding:6px 10px;font-size:12px;display:none" onclick="cpdfNewTab()">Open in new tab</button>' +
+      '<button type="button" class="btn btn-p" style="margin:0;padding:6px 12px;font-size:12px" onclick="cpdfClose()">Close</button>' +
+    '</div>' +
+    '<div id="cpdf-body" style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:10px 8px calc(16px + env(safe-area-inset-bottom))"></div>';
+  document.body.appendChild(ov);
+  return ov;
+}
+
+function _cpdfMsg(html) {
+  var b = document.getElementById('cpdf-body');
+  if (b) b.innerHTML = '<div style="max-width:480px;margin:40px auto;padding:16px;border-radius:10px;background:var(--surface);' +
+    'color:var(--text);font-size:13px;text-align:center;line-height:1.45">' + html + '</div>';
+}
+
+function _cpdfSetHeader(title, showBack, showNewTab) {
+  var t = document.getElementById('cpdf-title'); if (t) t.textContent = title;
+  var b = document.getElementById('cpdf-back');  if (b) b.style.display = showBack ? '' : 'none';
+  var n = document.getElementById('cpdf-newtab'); if (n) n.style.display = showNewTab ? '' : 'none';
+}
+
+// o = { phn, last, dob, name }; pdfs = optional list already fetched
+function cpdfOpen(o, pdfs) {
+  o = o || {};
+  var ov = _cpdfShell();
+  ov.style.display = 'flex';
+  _cpdfRevoke();
+  _cpdfState.who = String(o.name || '').replace(/^,\s*|,\s*$/g, '') || 'Phone consult';
+  _cpdfState.list = null;
+  var seq = ++_cpdfState.reqSeq;
+  _cpdfSetHeader(_cpdfState.who, false, false);
+  var got = pdfs ? Promise.resolve(pdfs) : (_cpdfMsg('Finding phone consult&hellip;'), cpdfList(o.phn, o.last, o.dob));
+  got.then(function(list) {
+    if (seq !== _cpdfState.reqSeq) return;
+    _cpdfState.list = list;
+    if (!list.length) { _cpdfMsg('No phone-consult PDF found for <b>' + esc(_cpdfState.who) + '</b>.'); return; }
+    if (list.length === 1) { cpdfShowPdf(0); return; }
+    cpdfShowList();
+  }).catch(function(e) {
+    if (seq !== _cpdfState.reqSeq) return;
+    _cpdfMsg('Could not look up the consult PDF &mdash; ' + esc(e && e.message || 'network error') + '.<br>Check connection and try again.');
+  });
+}
+
+function cpdfShowList() {
+  var list = _cpdfState.list || [];
+  _cpdfRevoke();
+  _cpdfState.reqSeq++;
+  _cpdfSetHeader(_cpdfState.who, false, false);
+  var b = document.getElementById('cpdf-body');
+  if (!b) return;
+  b.innerHTML = '<div style="max-width:520px;margin:8px auto">' +
+    '<div style="color:#fff;font-size:12px;margin:0 4px 8px">' + list.length + ' phone-consult PDFs &mdash; newest first</div>' +
+    list.map(function(p, i) {
+      return '<button type="button" onclick="cpdfShowPdf(' + i + ')" style="display:block;width:100%;text-align:left;margin:0 0 8px;' +
+        'padding:12px;border-radius:10px;border:none;background:var(--surface);color:var(--text);font-family:inherit;cursor:pointer">' +
+        '<div style="font-weight:700;font-size:13px">' + esc(_cpdfDate(p.date)) + ' &middot; ' + esc(p.type || 'Phone consult') + '</div>' +
+        '<div style="font-size:11px;color:var(--text2);margin-top:2px">' + esc(p.last) + ', ' + esc(p.first) +
+          (p.match === 'name+dob' ? ' &middot; <span style="color:var(--amber-t)">matched on name + DOB (PHN differs)</span>' : '') +
+        '</div></button>';
+    }).join('') + '</div>';
+}
+
+function cpdfShowPdf(i) {
+  var p = (_cpdfState.list || [])[i];
+  if (!p) return;
+  var multi = (_cpdfState.list || []).length > 1;
+  var seq = ++_cpdfState.reqSeq;
+  _cpdfRevoke();
+  _cpdfSetHeader(_cpdfDate(p.date) + ' · ' + _cpdfState.who, multi, false);
+  _cpdfMsg('Loading PDF&hellip;');
+  _cpdfGet({ action: 'getConsultPdf', id: p.id }).then(function(j) {
+    if (seq !== _cpdfState.reqSeq) return;
+    var bin = atob(j.b64), bytes = new Uint8Array(bin.length);
+    for (var k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+    _cpdfState.blobUrl = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+    _cpdfSetHeader(_cpdfDate(p.date) + ' · ' + _cpdfState.who, multi, true);
+    return _cpdfRender(bytes, seq);
+  }).catch(function(e) {
+    if (seq !== _cpdfState.reqSeq) return;
+    if (_cpdfState.blobUrl) {
+      // PDF arrived but PDF.js could not draw it — offer the browser's own viewer.
+      _cpdfMsg('Could not display the PDF in the app.<br><br>' +
+        '<button type="button" class="btn btn-p" style="margin:0" onclick="cpdfNewTab()">Open PDF</button>');
+    } else {
+      _cpdfMsg('Could not load the PDF &mdash; ' + esc(e && e.message || 'network error') + '.<br>Check connection and try again.');
+    }
+  });
+}
+
+function _cpdfLoadJs() {
+  if (_cpdfJsPromise) return _cpdfJsPromise;
+  var loaded = window.pdfjsLib ? Promise.resolve() : new Promise(function(resolve, reject) {
+    var s = document.createElement('script');
+    s.src = CPDF_PDFJS_URL;
+    s.onload = resolve;
+    s.onerror = function() { reject(new Error('PDF viewer could not be downloaded')); };
+    document.head.appendChild(s);
+  });
+  _cpdfJsPromise = loaded.then(function() {
+    var lib = window.pdfjsLib;
+    if (!lib || !lib.GlobalWorkerOptions) throw new Error('PDF viewer did not load');
+    if (lib.GlobalWorkerOptions.workerSrc) return lib;
+    // Same-origin blob wrapper for the worker (a cross-origin Worker URL is
+    // refused by the browser); falls back to the direct URL.
+    return fetch(CPDF_WORKER_URL).then(function(r) {
+      if (!r.ok) throw new Error('worker ' + r.status);
+      return r.text();
+    }).then(function(txt) {
+      lib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([txt], { type: 'text/javascript' }));
+    }).catch(function() {
+      lib.GlobalWorkerOptions.workerSrc = CPDF_WORKER_URL;
+    }).then(function() { return lib; });
+  }).catch(function(e) { _cpdfJsPromise = null; throw e; });
+  return _cpdfJsPromise;
+}
+
+function _cpdfRender(bytes, seq) {
+  return _cpdfLoadJs().then(function(lib) {
+    return lib.getDocument({ data: bytes }).promise;
+  }).then(function(doc) {
+    if (seq !== _cpdfState.reqSeq) return;
+    var body = document.getElementById('cpdf-body');
+    body.innerHTML = '';
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'max-width:900px;margin:0 auto';
+    body.appendChild(wrap);
+    var width = Math.min(body.clientWidth - 16, 900);
+    var dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    var chain = Promise.resolve();
+    for (var n = 1; n <= doc.numPages; n++) {
+      (function(n) {
+        chain = chain.then(function() {
+          if (seq !== _cpdfState.reqSeq) return;
+          return doc.getPage(n).then(function(page) {
+            var base = page.getViewport({ scale: 1 });
+            var vp = page.getViewport({ scale: (width / base.width) * dpr });
+            var c = document.createElement('canvas');
+            c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+            c.style.cssText = 'display:block;width:100%;height:auto;margin:0 0 10px;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.4)';
+            wrap.appendChild(c);
+            return page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+          });
+        });
+      })(n);
+    }
+    return chain;
+  });
+}
+
+function cpdfNewTab() {
+  if (!_cpdfState.blobUrl) return;
+  var w = window.open(_cpdfState.blobUrl, '_blank');
+  if (!w) showToast('Pop-up blocked — allow pop-ups for this site', 'error');
+}
+
+function _cpdfRevoke() {
+  if (_cpdfState.blobUrl) {
+    var u = _cpdfState.blobUrl;
+    _cpdfState.blobUrl = '';
+    // Delay so a just-opened tab has time to load it.
+    setTimeout(function() { try { URL.revokeObjectURL(u); } catch (e) {} }, 60000);
+  }
+}
+
+function cpdfClose() {
+  _cpdfState.reqSeq++;
+  _cpdfRevoke();
+  var b = document.getElementById('cpdf-body'); if (b) b.innerHTML = '';
+  var ov = document.getElementById('cpdf-viewer'); if (ov) ov.style.display = 'none';
+}
 // ═══════════════════════════════════════════════════════════════════
 // v5.12 (2026-09-02): PHYSICIAN REVIEW MODE — plumbing that lets
 // 15_review.js run on top of the normal boot.
@@ -23941,5 +24061,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "e02906b99183";</script></body>
+<script>var BUILD_HASH = "05e062bf25f5";</script></body>
 </html>
