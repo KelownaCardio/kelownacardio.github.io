@@ -1,5 +1,8 @@
 // ── 06b_discharged.js ──
 // ═══════════════════════════════════════════════════════
+// v5.38 (2026-10-22): "📄 Consult" button (cpdfRowBtn, 13d_consult_pdf.js)
+//   on Discharged rows and Archive search rows for phone-consult patients —
+//   opens the consult PDF in the in-app viewer.
 // Recently Discharged pane + rounds search filter
 // Pane shows discharged patients (last 21 days, or all when searching)
 // Each row offers: tap to add a missed claim, restore (to On/Off Service)
@@ -126,6 +129,7 @@ async function archiveSearch() {
         + '<div><div style="font-weight:700;font-size:13px">' + esc(p.last) + ', ' + esc(p.first) + '</div>'
         + '<div style="font-size:11px;color:var(--text2)">PHN …' + esc(String(p.phn || '').slice(-4)) + dd + ' &middot; ' + claimN + ' claim' + (claimN === 1 ? '' : 's') + '</div></div>'
         + '<div style="display:flex;gap:6px">'
+        + (typeof cpdfRowBtn === 'function' ? cpdfRowBtn(p, _archiveCache.claims) : '')   // v5.38
         + (isResident() ? '' :
             '<button class="btn btn-p" style="margin:0;font-size:12px;padding:6px 12px" onclick="pullArchivedPatient(\'' + esc(p.id) + '\')">Pull claims</button>'
           + '<button class="btn btn-s" style="margin:0;font-size:12px;padding:6px 12px" onclick="pullArchivedAndClaim(\'' + esc(p.id) + '\')">+ Claim</button>')
@@ -382,6 +386,7 @@ function dischargedRow(p) {
       (isResident() ? '' :
         '<button class="bb bb-rnd" style="font-size:10px;padding:5px 9px" ' +
         'onclick="event.stopPropagation();restorePatient(\'' + esc(pid) + '\')">↩ Restore</button>') +
+      (typeof cpdfRowBtn === 'function' ? cpdfRowBtn(p) : '') +   // v5.38
       chartBtn(pid) +
     '</div>' +
   '</div>';

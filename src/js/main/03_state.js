@@ -745,7 +745,14 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   QuickChart" lists (CardiologyMRP or CardiologyConsult). Never creates a
 //   patient. Frontend only — no backend change. No cache-format change,
 //   BUILD_ID not bumped.
-var APP_VERSION = 'v5.37';
+// v5.38 (2026-10-22) — VIEW PHONE-CONSULT PDFs. New node 13d_consult_pdf.js
+//   (full-screen in-app PDF viewer, PDF.js from cdnjs on first use) + hooks in
+//   09_patient.js (Add Patient banner "Phone consult on file — View Phone
+//   Consult" after a valid PHN) and 06b_discharged.js ("📄 Consult" button on
+//   Discharged and Archive search rows). Needs Router v3.26 + ConsultPdf.gs
+//   v1.0 live FIRST. Residents excluded. No cache-format change, BUILD_ID not
+//   bumped.
+var APP_VERSION = 'v5.38';
 var APP_BUILT   = '2026-10-22';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
