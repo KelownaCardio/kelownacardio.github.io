@@ -736,8 +736,17 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   landed even when the phone lost the reply — no false "unsaved" alerts.
 //   Needs Crud v3.27 + ClientErrors v1.7 live FIRST. No behaviour change for
 //   doctors. No cache-format change, BUILD_ID not bumped.
-var APP_VERSION = 'v5.36';
-var APP_BUILT   = '2026-10-12';
+// v5.37 (2026-10-22) — MEDITECH ROUNDS LIST PDF. New node 13c_rounds_pdf.js +
+//   index.template.html (button on the Rounds pane replaces the import.html
+//   link; new rl-modal; .rl-drop styles). Drop the Meditech "SB Rounds List"
+//   PDF: the app reads the PDF text itself (no AI), updates rooms of patients
+//   already in the app, flags app patients missing from the list
+//   (Discharge / Off-service / Keep), and offers CCU / 2S / 2W "Copy for
+//   QuickChart" lists (CardiologyMRP or CardiologyConsult). Never creates a
+//   patient. Frontend only — no backend change. No cache-format change,
+//   BUILD_ID not bumped.
+var APP_VERSION = 'v5.37';
+var APP_BUILT   = '2026-10-22';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
