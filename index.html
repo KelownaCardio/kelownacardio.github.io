@@ -119,6 +119,8 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 .mit-btn { display:flex; align-items:center; gap:7px; width:100%; padding:9px 12px; border:1.5px dashed var(--border2); border-radius:var(--r); background:var(--surface2); cursor:pointer; font-family:inherit; color:var(--text2); font-size:12px; font-weight:600; margin-bottom:10px; }
 .mit-btn svg { width:15px; height:15px; stroke:var(--blue); fill:none; stroke-width:2; flex-shrink:0; }
 .mit-btn:hover { background:var(--blue-bg); border-color:#a8c4e8; color:var(--blue-t); }
+.rl-drop { border:2px dashed var(--border2); border-radius:var(--r); padding:16px 12px; text-align:center; background:var(--surface2); margin-bottom:8px; }
+.rl-drop.rl-hot { border-color:var(--blue); background:var(--blue-bg); }
 
 /* WARD */
 .ward-block { margin-bottom:13px; }
@@ -879,10 +881,11 @@ input[type=file] { display:none; }
     <div id="alpha-view" style="display:none"></div>
   </div>
   <div id="off-view" style="display:none"><div id="off-list"></div></div>
-  <!-- Meditech list import — opens standalone import.html (Apps Script path, works on hospital WiFi) -->
-  <a href="import.html" target="_blank" rel="noopener" class="mit-btn" style="margin-top:16px;text-decoration:none">
-    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Import from Meditech list
-  </a>
+  <!-- v5.37: Meditech SB Rounds List PDF → rooms, discharge flags, QuickChart lists (13c_rounds_pdf.js).
+       Replaces the import.html link (AI read of a photo/PDF). import.html itself is untouched in the repo. -->
+  <button class="mit-btn" onclick="openRoundsPdf()" style="margin-top:16px">
+    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Meditech rounds list (PDF) &rarr; rooms &amp; QuickChart
+  </button>
   <button class="mit-btn" onclick="openQuickChartExport()" style="border-style:solid;border-color:var(--blue);background:var(--blue-bg)">
     <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Export list for QuickChart
   </button>
@@ -956,7 +959,7 @@ input[type=file] { display:none; }
         <option value="YT">Yukon</option>
         <option value="NT">Northwest Territories</option>
         <option value="NU">Nunavut</option>
-        <option value="QC">Quebec — use Private Pay (MSP rates)</option>
+        <option value="QC">Quebec — cannot submit to MSP, invoice directly</option>
       </select>
       <div id="f-qc-warn" style="display:none;margin-top:8px;padding:8px 10px;background:var(--amber-bg);border:1px solid var(--amber-t);border-radius:6px;font-size:12px;font-weight:600;color:var(--amber-t);line-height:1.4">Quebec resident — cannot be submitted to MSP. Invoice the patient directly (private billing — separate build).</div>
       <label style="margin-top:8px">Home province health number</label>
@@ -978,10 +981,6 @@ input[type=file] { display:none; }
       </div>
       <input id="f-private-rate" type="hidden" value="BCMA">
       <div style="margin-top:6px;font-size:10px;color:var(--text3);line-height:1.5">Claims are entered as usual. After discharge this patient is held from the iClinic export and a patient invoice (default <strong>BCMA</strong> rates) is generated with a pay-online link.</div>
-      <!-- v5.33: private-pay intake — patient email (mandatory) + insurance photos (optional) -->
-      <label style="margin-top:10px">Patient email <span style="color:var(--red-t,#c42828)">*</span></label>
-      <input id="f-home-email" type="email" inputmode="email" autocorrect="off" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="Ask the patient" style="font-size:16px">
-      <div id="f-ppdoc-host" style="margin-top:10px"></div>
     </div>
   </div>
 
@@ -1180,6 +1179,16 @@ input[type=file] { display:none; }
       <button class="btn btn-p" onclick="confirmMediteachImport()">Import selected</button>
     </div>
     <button class="btn btn-s" onclick="hideModal('mit-modal')" style="margin-bottom:0">Cancel</button>
+  </div>
+</div>
+
+<!-- v5.37: Meditech SB Rounds List PDF (13c_rounds_pdf.js) -->
+<div class="overlay" id="rl-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Meditech rounds list</div>
+    <div id="rl-body"></div>
+    <button class="btn btn-s" onclick="hideModal('rl-modal')" style="margin-top:10px;margin-bottom:0">Close</button>
   </div>
 </div>
 
@@ -23932,5 +23941,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "8b37a29287b6";</script></body>
+<script>var BUILD_HASH = "e02906b99183";</script></body>
 </html>
