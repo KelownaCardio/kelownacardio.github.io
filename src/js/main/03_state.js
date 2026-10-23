@@ -754,7 +754,13 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   bumped.
 // v5.39 (2026-10-22) — consult button icon 📄 → 📞 (13d_consult_pdf.js).
 //   Icon only. No cache-format change, BUILD_ID not bumped.
-var APP_VERSION = 'v5.39';
+// v5.40 (2026-10-22) — ONE QuickChart list. 13c_rounds_pdf.js now builds a
+//   single "KGH Cardiology" paste list (ward written into the bed field:
+//   "2S 217", "CICU 1") with one Copy button instead of three. Proven by
+//   Kathryn's QuickChart paste test 2026-10-22 17:12 (QuickChart groups it
+//   CICU, 2S, 2W). Built on the staged v5.39 (consult-pdf-icon). Frontend only.
+//   No cache-format change, BUILD_ID not bumped.
+var APP_VERSION = 'v5.40';
 var APP_BUILT   = '2026-10-22';
 
 // ─── v5.20: door failover ───────────────────────────────────────────

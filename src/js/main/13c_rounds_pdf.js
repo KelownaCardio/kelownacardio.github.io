@@ -1,6 +1,11 @@
 // 13c_rounds_pdf.js — Meditech "SB Rounds List" PDF → room updates,
 //                     discharge flags and QuickChart paste lists
 // ═══════════════════════════════════════════════════════════════════
+// v5.40 (2026-10-22) — ONE QuickChart list instead of three (Kathryn's
+//   paste tests 2026-10-22 17:09/17:12): a single "KGH Cardiology" list,
+//   CICU → 2W → 2S by bed, with the ward written into the bed field
+//   ("2S 217", "CICU 1") because QuickChart's list view shows only the bed.
+//   Location stays CICU / 2S / 2W. One Copy button replaces three.
 // v5.37 (2026-10-22) — NEW. Kathryn's rounds workflow (2026-10-22):
 //   1. Meditech: print the "SB Rounds List" report, save as PDF.
 //   2. Billing app: drag the PDF onto the "Meditech rounds list" box
@@ -17,7 +22,7 @@
 //        • MRP Cardiology patients on the PDF but not in the app are LISTED
 //          (information only — never added).
 //      The PDF never creates a patient.
-//   4. QuickChart: three Copy buttons (CCU / 2S / 2W). Built straight from
+//   4. QuickChart: Copy for QuickChart (v5.38: one list, see top). Built straight from
 //      the PDF — MRP "CardiologyMRP" OR Other "CardiologyConsult", on those
 //      three units only — so patients not yet in the app are included for
 //      dictation. Format proven by Kathryn's paste test 2026-10-22 13:27
@@ -39,7 +44,7 @@
 // CCU: bed number 1–8 (KGHS2501-A → "1"), the app's own CCU convention.
 // ═══════════════════════════════════════════════════════════════════
 
-var RL_QC_WARDS = ['CCU', '2S', '2W'];   // QuickChart lists, in this order
+var RL_QC_WARDS = ['CCU', '2W', '2S'];   // wards on the QuickChart list, in this order
 var _rl = null;                          // last parsed list + review state
 
 // ── PDF → text items ─────────────────────────────────────────────────
@@ -270,16 +275,18 @@ function _rlDobIso(dmy) {
   return m ? (m[3] + '-' + m[2] + '-' + m[1]) : '';
 }
 
-// QuickChart paste text for one ward (format proven 2026-10-22).
-function rlQuickChartText(ward, recs) {
+// QuickChart paste text — one list, ward in the bed field (format proven
+// by Kathryn's paste test 2026-10-22 17:12).
+function rlQuickChartText(recs) {
   var lines = recs.map(function (r) {
+    var w = wardLabel(r._ward);
     return r.last + ', ' + r.first +
       ' | DOB ' + (_rlDobIso(r.dob) || 'unknown') +
       ' | PHN ' + (r.phn || 'unknown') +
-      ' | Location ' + ward +
-      ' | Bed ' + (r._bed || '');
+      ' | Location ' + w +
+      ' | Bed ' + w + (r._bed ? ' ' + r._bed : '');
   });
-  return ward + ' patient list\n' + lines.join('\n');
+  return 'KGH Cardiology patient list\n' + lines.join('\n');
 }
 
 function _rlBedSort(a, b) {
@@ -325,10 +332,10 @@ function rlBuildReview(recs, patients, reportMs, nowMs) {
     r._cardio = rlIsCardiology(r);
   });
 
-  // QuickChart lists.
-  var qc = {};
+  // QuickChart list: CICU, then 2W, then 2S, each by bed.
+  var qc = [];
   RL_QC_WARDS.forEach(function (w) {
-    qc[w] = recs.filter(function (r) { return r._cardio && r._ward === w; }).sort(_rlBedSort);
+    qc = qc.concat(recs.filter(function (r) { return r._cardio && r._ward === w; }).sort(_rlBedSort));
   });
 
   var active = patients.filter(function (p) { return p && p.id && !p.discharged; });
@@ -439,7 +446,7 @@ async function rlHandleFile(file) {
     _rl.fileName = file.name || '';
     _rl.reportMs = repMs;
     _rl.owner    = rlReportOwner(pages);
-    _rl.copied   = {};
+    _rl.copied   = false;
     status.style.display = 'none';
     _rlRender();
   } catch (e) {
@@ -487,15 +494,15 @@ function _rlRender() {
   // 1. QuickChart copy buttons.
   html += '<div class="sec-lbl" style="margin-top:6px">Copy for QuickChart</div>' +
           '<div style="font-size:10px;color:var(--text2);margin-bottom:6px;line-height:1.4">' +
-            'CardiologyMRP or CardiologyConsult only. In QuickChart: open the ward’s list → Scan list → “Paste it here instead”.' +
+            'CardiologyMRP or CardiologyConsult on CICU, 2W and 2S. In QuickChart: open the KGH Cardiology list → Scan list → “Paste it here instead”.' +
           '</div>' +
           '<div class="fl" style="gap:6px;margin-bottom:12px">';
-  RL_QC_WARDS.forEach(function (w) {
-    var n = R.qc[w].length, done = R.copied[w];
-    html += '<button class="ap-list-pill' + (done ? ' on' : '') + '" style="flex:1"' +
-            (n ? '' : ' disabled') + ' onclick="rlCopy(\'' + w + '\')">' +
-            (done ? '✓ ' : '') + wardLabel(w) + ' (' + n + ')</button>';
-  });
+  var qcCounts = RL_QC_WARDS.map(function (w) {
+    return wardLabel(w) + ' ' + R.qc.filter(function (r) { return r._ward === w; }).length;
+  }).join(' · ');
+  html += '<button class="ap-list-pill' + (R.copied ? ' on' : '') + '" style="flex:1"' +
+          (R.qc.length ? '' : ' disabled') + ' onclick="rlCopy()">' +
+          (R.copied ? '✓ Copied ' : 'Copy ') + R.qc.length + ' patients (' + qcCounts + ')</button>';
   html += '</div>';
 
   // 2. Room changes.
@@ -601,14 +608,14 @@ function _rlCopyFallback(text) {
   } catch (e) { return false; }
 }
 
-function rlCopy(ward) {
-  if (!_rl || !_rl.qc[ward] || !_rl.qc[ward].length) return;
-  var text = rlQuickChartText(ward, _rl.qc[ward]);
+function rlCopy() {
+  if (!_rl || !_rl.qc || !_rl.qc.length) return;
+  var text = rlQuickChartText(_rl.qc);
   _rlCopyText(text).then(function (ok) {
     if (ok) {
-      _rl.copied[ward] = true;
+      _rl.copied = true;
       _rlRender();
-      showToast(wardLabel(ward) + ' list copied — paste it into QuickChart');
+      showToast('List copied — paste it into QuickChart');
     } else {
       showToast('Copy blocked by this browser', 'error');
     }
