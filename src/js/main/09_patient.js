@@ -1,6 +1,16 @@
 // 09_patient.js — Add patient (Step 1), sticker/Meditech
 //                 chart photo OCR, ward/room selectors
 // ═══════════════════════════════════════════════════════
+// v5.41 (2026-10-25): CONSULT BANNER FLASH FIX. The "Phone consult on file"
+//        banner appeared and vanished a moment later: v5.38 made
+//        dismissExistingPatientBanner() also clear it, and
+//        showExistingPatientBanner() calls dismissExistingPatientBanner()
+//        first thing — so when the existing-patient check came back
+//        (server listPatients, or a re-validate after OCR) it wiped the
+//        consult banner, and the lookup guard stopped it reappearing.
+//        Now the consult banner is cleared only when the PHN changes to a
+//        different number (validatePhnLive) or the form is cleared
+//        (clearAddForm). dismissExistingPatientBanner no longer touches it.
 // v5.38 (2026-10-22): validatePhnLive calls cpdfCheckForPhn(digits) on a
 //        valid 10-digit PHN (13d_consult_pdf.js) — shows "Phone consult on
 //        file — View Phone Consult" when the backend finds a consult PDF.
@@ -1960,6 +1970,10 @@ function validatePhnLive() {
   var el = document.getElementById('f-phn');
   if (!el) return;
   var digits = String(el.value || '').replace(/\D/g,'');
+  // v5.41: consult-PDF banner belongs to one PHN — drop it only when the
+  // number actually changes (13d_consult_pdf.js).
+  if (typeof _cpdfBannerFor !== 'undefined' && _cpdfBannerFor && digits !== _cpdfBannerFor &&
+      typeof cpdfClearBanner === 'function') cpdfClearBanner();
   if (digits.length > 0 && digits.length !== 10) {
     el.style.cssText = _LIVE_RED;
     _phnErr('PHN is ' + digits.length + ' digit' + (digits.length === 1 ? '' : 's') + ' \u2014 must be 10');
@@ -2156,6 +2170,7 @@ function _apDobKeepAgeMismatch() {
 }
 
 function clearAddForm() {
+  if (typeof cpdfClearBanner === 'function') cpdfClearBanner();   // v5.41
   // v4.33: Cancel any in-flight OCR background loop and unlock fields.
   _ocrGeneration++;
   _unlockDemoFields();
@@ -3455,7 +3470,8 @@ function showExistingPatientBanner(match) {
 function dismissExistingPatientBanner() {
   var el = document.getElementById('existing-pt-banner');
   if (el && el.parentNode) el.parentNode.removeChild(el);
-  if (typeof cpdfClearBanner === 'function') cpdfClearBanner();   // v5.38
+  // v5.41: does NOT clear the consult-PDF banner (see header) — that caused
+  // the banner to flash and disappear.
 }
 
 function goToExistingPatient(pid) {

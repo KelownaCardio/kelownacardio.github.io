@@ -760,7 +760,10 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   Kathryn's QuickChart paste test 2026-10-22 17:12 (QuickChart groups it
 //   CICU, 2S, 2W). Built on the staged v5.39 (consult-pdf-icon). Frontend only.
 //   No cache-format change, BUILD_ID not bumped.
-var APP_VERSION = 'v5.40';
+// v5.41 (2026-10-25) — consult-PDF banner no longer flashes and disappears on
+//   Add Patient (09_patient.js: only cleared when the PHN changes or the form
+//   is cleared). No cache-format change, BUILD_ID not bumped.
+var APP_VERSION = 'v5.41';
 var APP_BUILT   = '2026-10-22';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
