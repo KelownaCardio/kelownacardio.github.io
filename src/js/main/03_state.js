@@ -763,7 +763,18 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // v5.41 (2026-10-25) — consult-PDF banner no longer flashes and disappears on
 //   Add Patient (09_patient.js: only cleared when the PHN changes or the form
 //   is cleared). No cache-format change, BUILD_ID not bumped.
-var APP_VERSION = 'v5.41';
+// v5.42 (2026-10-25) — RESTORE RELEASE. Three uploads had been built from
+//   stale copies and silently removed earlier, deployed features:
+//   (1) 09_patient.js — private-pay intake (25/09) removed by v5.38 (22/10):
+//       Edit Patient pencil dead for every patient + no insurance photos.
+//   (2) 05_render.js / 06_claim_screen.js / index.template.html — v5.29
+//       (21/09) green follow-up flag with MANDATORY note, and 01172 Sedation
+//       start/end + 15-min units, removed by the 25/09 uploads.
+//   (3) 07_consult.js — v4.88 RACE admitVia persist (01/08) removed 09/08;
+//       re-added for the +Claim path.
+//   Each restored by re-applying the original change on top of the current
+//   repo file. No cache-format change, BUILD_ID not bumped.
+var APP_VERSION = 'v5.42';
 var APP_BUILT   = '2026-10-22';
 
 // ─── v5.20: door failover ───────────────────────────────────────────

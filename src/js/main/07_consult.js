@@ -1,4 +1,10 @@
 // 07_consult.js — Unified consult form (33010/33012)
+// v5.42 (2026-10-25): RACE admit from the +Claim screen now saves the
+//   admitVia='RACE' stamp to Sheets (push savePatient). The v4.88 fix for
+//   this (01/08, Gerlinsky) was silently dropped by the 09/08 upload; since
+//   then a RACE admit entered on an EXISTING patient kept the stamp only on
+//   the phone, so DataCheck could flag MISSING_CONSULT. Add Patient was not
+//   affected (savePatientWithClaims runs after the stamp).
 // v5.34 (2026-09-27): modifier banner shows per-tier increment runs (e.g.
 //   "1205 ×1 from 22:45 + 1206 ×2 from 23:15") via calloutIncGroups_ — see
 //   04_billing.js v5.34. Billing itself is unchanged here (rebuild path).
@@ -1068,6 +1074,8 @@ function submitConsult() {
   if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
   if (!submitConsultClaims(p, getPerformingAlias())) return;
   sv('patients', st.patients);
+  // v5.42: sv() never writes patients to Sheets — persist the RACE stamp.
+  if (p.admitVia === 'RACE' && SHEETS_URL) push('savePatient', p);
   showSaved('Consult claims added for ' + p.last);
   closeClaimScreen();
 }
