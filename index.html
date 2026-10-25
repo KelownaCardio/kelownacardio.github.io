@@ -3126,7 +3126,18 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // v5.41 (2026-10-25) — consult-PDF banner no longer flashes and disappears on
 //   Add Patient (09_patient.js: only cleared when the PHN changes or the form
 //   is cleared). No cache-format change, BUILD_ID not bumped.
-var APP_VERSION = 'v5.41';
+// v5.42 (2026-10-25) — RESTORE RELEASE. Three uploads had been built from
+//   stale copies and silently removed earlier, deployed features:
+//   (1) 09_patient.js — private-pay intake (25/09) removed by v5.38 (22/10):
+//       Edit Patient pencil dead for every patient + no insurance photos.
+//   (2) 05_render.js / 06_claim_screen.js / index.template.html — v5.29
+//       (21/09) green follow-up flag with MANDATORY note, and 01172 Sedation
+//       start/end + 15-min units, removed by the 25/09 uploads.
+//   (3) 07_consult.js — v4.88 RACE admitVia persist (01/08) removed 09/08;
+//       re-added for the +Claim path.
+//   Each restored by re-applying the original change on top of the current
+//   repo file. No cache-format change, BUILD_ID not bumped.
+var APP_VERSION = 'v5.42';
 var APP_BUILT   = '2026-10-22';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
@@ -6639,6 +6650,12 @@ function confirmDupClaim() {
 }
 // 05_render.js — Render rounds list (geo + alpha + off service)
 //
+// v5.42 (2026-10-25): RESTORED v5.29 (21/09) follow-up flag rule — a note is
+//   MANDATORY when flagging a claim for KB billing follow-up. The 25/09
+//   quiet-saves upload (v5.32) was built from a pre-v5.29 copy and had
+//   silently put back the v5.28 optional-note version. Re-applied on top of
+//   the current file (quiet-saves changes kept).
+//
 // v4.19 change: alphaRow (on-service alphabetical view) now places
 // the room/bed number on a dedicated second row — identical structure
 // to offRow — rather than appended inline to the patient name.
@@ -6762,15 +6779,17 @@ function toggleHandoverFlag(pid) {
   render();
 }
 
-// v5.27: Flag/unflag a claim for follow-up. Called from the flag icon on
-// each Today's-Claims row (_cfFlagBtn, 02_constants.js). Backend: Claims
-// gains 'followUp'/'followUpNote' (Config v2.50); DataCheck v2.54 copies any
-// flagged claim onto the "Claims to Follow" tab on its next run — this is a
-// watchlist, not an error, so nothing more happens here.
-// v5.28: turning a flag ON now opens a small optional-note modal
-// (cf-note-modal) instead of toggling immediately, so a note can be
-// attached at flag time without opening the Claims sheet. Turning a flag
-// OFF stays a silent, instant toggle — no modal, no toast — same as before.
+// v5.27: Flag/unflag a claim for KB billing follow-up. Called from the
+// flag icon on each Today's-Claims row (_cfFlagBtn, 02_constants.js).
+// Backend: Claims gains 'followUp'/'followUpNote' (Config v2.50); DataCheck
+// v2.54 copies any flagged claim onto the "Claims to Follow" tab on its
+// next run — this is a watchlist, not an error, so nothing more happens
+// here. Turning a flag OFF stays a silent, instant toggle — no modal, no
+// toast.
+// v5.29: turning a flag ON opens cf-note-modal and now REQUIRES a note
+// (Kathryn, 2026-09-21) — the note is what tells her what to actually
+// follow up on for that MSP claim, so an empty flag isn't useful. "Cancel"
+// backs out without flagging; there is no "flag with no note" option.
 function toggleClaimFollowUp(claimId) {
   var c = (st.claims || []).find(function(x){ return String(x.id) === String(claimId); });
   if (!c) return;
@@ -6782,32 +6801,43 @@ function toggleClaimFollowUp(claimId) {
     if (typeof openDailyClaimsList === 'function') openDailyClaimsList(_dailyClaimsFilter);
     return;
   }
-  var idEl = document.getElementById('cf-note-claim-id');
-  var taEl = document.getElementById('cf-note-input');
+  var idEl  = document.getElementById('cf-note-claim-id');
+  var taEl  = document.getElementById('cf-note-input');
+  var errEl = document.getElementById('cf-note-err');
   if (idEl) idEl.value = claimId;
   if (taEl) taEl.value = '';
+  if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
   showModal('cf-note-modal');
   setTimeout(function() { if (taEl) try { taEl.focus(); } catch (e) {} }, 200);
 }
 
-// v5.28: shared finish step for both cf-note-modal buttons.
-function _cfFinishFollowUpFlag(note) {
+// v5.29: back out of the flag-note modal without flagging anything.
+function cfCancelFollowUpNote() {
+  hideModal('cf-note-modal');
+}
+
+// v5.29: MANDATORY — no note, no flag (mirrors the dup-claim-sheet's
+// required-note pattern in 04_billing.js). Shows an inline error and keeps
+// the modal open instead of closing it, so nothing is silently lost.
+function cfSaveFollowUpNote() {
+  var taEl  = document.getElementById('cf-note-input');
+  var errEl = document.getElementById('cf-note-err');
+  var note  = String((taEl && taEl.value) || '').trim();
+  if (!note) {
+    if (errEl) { errEl.textContent = 'Add a note so KB knows what to follow up on.'; errEl.style.display = 'block'; }
+    return;
+  }
   var claimId = (document.getElementById('cf-note-claim-id') || {}).value;
   hideModal('cf-note-modal');
   var c = (st.claims || []).find(function(x){ return String(x.id) === String(claimId); });
   if (!c) return;
   c.followUp     = true;
-  c.followUpNote = String(note || '').trim();
+  c.followUpNote = note;
   sv('claims', st.claims);
   if (SHEETS_URL) push('saveClaim', c);
-  logChange(c, 'Flagged claim for follow-up',
-    (c.fee || '') + ' on ' + (c.date || '') + (c.followUpNote ? ' \u2014 ' + c.followUpNote : ''));
+  logChange(c, 'Flagged claim for KB billing follow-up',
+    (c.fee || '') + ' on ' + (c.date || '') + ' \u2014 ' + note);
   if (typeof openDailyClaimsList === 'function') openDailyClaimsList(_dailyClaimsFilter);
-}
-function cfSkipFollowUpNote() { _cfFinishFollowUpFlag(''); }
-function cfSaveFollowUpNote() {
-  var taEl = document.getElementById('cf-note-input');
-  _cfFinishFollowUpFlag(taEl ? taEl.value : '');
 }
 
 // v4.62: bordered footer row with the three card-level actions.
@@ -7759,6 +7789,10 @@ function wpAddClaim(btn) {
 
 // 06_claim_screen.js — Tap-patient claim screen controller
 // ═══════════════════════════════════════════════════════
+// v5.42 (2026-10-25): RESTORED v5.29 (21/09) 01172 Sedation — start AND end
+//   time mandatory on the Other-claim form, units = 15-min ceiling. The 25/09
+//   quiet-saves upload (v5.32) was built from a pre-v5.29 copy and silently
+//   removed it. Re-applied on top of the current file (quiet-saves kept).
 // v4.96 (2026-08-13): 00081 Emergency Bedside Care (Kathryn spec).
 //   - $119.97 per 30-min unit or MAJORITY portion (≥16 min) thereof; units
 //     auto-calculated from the mandatory start/end times.
@@ -7803,6 +7837,32 @@ function ebcAddMins(t24, n) {
 function ebcDisp(t24) {
   var v = _ocTo12(t24);
   return v.disp ? v.disp + v.ap : t24;
+}
+
+// ── 01172 Sedation (anesthesia intensity/complexity, Level 2) ──────
+// v5.29 (2026-09-21, Kathryn spec): start AND end time are now mandatory
+// for 01172 on the Other-claim form (same pattern as 00081) so the app can
+// calculate how many 15-min service units to bill — MSP pays this code
+// "per 15 min or part thereof". Confirmed with Kathryn: this is a straight
+// CEILING, no minimum-duration threshold and no majority-portion rule like
+// 00081's — 1 min = 1 unit, 15 min = 1 unit, 16 min = 2 units, etc.
+var SEDATION_CODE = '01172';
+var SEDATION_EXPLANATION = 'Billed per completed 15 minutes or any part thereof';
+
+// Generic HH:MM duration in minutes (handles midnight wrap). Mirrors
+// ebcDurMins exactly but kept as its own function — ebcDurMins is left
+// untouched so the existing 00081 path can't be affected by this change.
+function ocDurMins(start24, end24) {
+  if (!start24 || !end24) return 0;
+  var s = t2m(start24), e = t2m(end24);
+  if (e < s) e += 24 * 60;
+  return e - s;
+}
+
+// Ceiling to the next 15-min unit; 0 min (no valid window) bills nothing.
+function sedationUnitsFromDur(durMins) {
+  if (!durMins || durMins <= 0) return 0;
+  return Math.ceil(durMins / 15);
 }
 
 function _openClaimScreen(pid) {
@@ -7943,6 +8003,17 @@ function selectFeeCode(code, desc) {
     }
     // 00081: surface the billing rule right under the fee-code picker.
     if (code === EBC_CODE && disp) disp.textContent = EBC_EXPLANATION;
+  } else if (code === SEDATION_CODE) {
+    // v5.29: start/end mandatory to compute 15-min service units — notes
+    // stay optional, this code has no MSP-mandated description requirement.
+    if (endWrap)  endWrap.style.display = 'block';
+    if (startLbl) startLbl.innerHTML = 'Start time <span style="color:var(--red-t)">*</span>';
+    if (notesEl) {
+      notesEl.placeholder = 'Optional';
+      notesEl.style.cssText = '';
+      notesEl.removeAttribute('data-required');
+    }
+    if (disp) disp.textContent = SEDATION_EXPLANATION;
   } else {
     if (endWrap)  endWrap.style.display = 'none';
     if (startLbl) startLbl.innerHTML = 'Start time <span style="font-size:10px;color:var(--text3)">(if required)</span>';
@@ -8163,6 +8234,24 @@ function updateOtherPreview() {
     extra += '<div style="font-size:11px;color:var(--text3);margin-top:3px">' + esc(EBC_EXPLANATION) + '</div>';
   }
 
+  // v5.29: 01172 Sedation — live 15-min-unit calculation from start/end times.
+  if (fee === SEDATION_CODE) {
+    var sS   = ocTime24('start');
+    var sE   = ocTime24('end');
+    var sDur = ocDurMins(sS, sE);
+    var sU   = sedationUnitsFromDur(sDur);
+    var sRate = FEE_RATES[SEDATION_CODE] || 0;
+    if (sDur > 0) {
+      extra = '<div class="cp-row" style="font-size:12px;margin-top:4px">' + sDur +
+        ' min &rarr; ' + sU + ' &times; 15-min unit' + (sU === 1 ? '' : 's') +
+        ' = <b>$' + (sU * sRate).toFixed(2) + '</b></div>';
+    } else {
+      extra = '<div style="font-size:11px;color:var(--text3);margin-top:4px">Enter start and end time &mdash; ' +
+        'billed per 15 min or part thereof.</div>';
+    }
+    extra += '<div style="font-size:11px;color:var(--text3);margin-top:3px">' + esc(SEDATION_EXPLANATION) + '</div>';
+  }
+
   prev.innerHTML = '<div class="cp-title">Claim to add</div>' +
     '<div class="cp-row" style="display:flex;align-items:center;gap:6px">' +
     '<span class="cp-code">' + esc(fee) + '</span>' +
@@ -8210,8 +8299,23 @@ function submitOtherClaimFor(p, alias, opts) {
     }
   }
 
+  // v5.29: 01172 Sedation — start and end time are mandatory (notes stay
+  // optional) so the app can calculate 15-min service units.
+  if (fee === SEDATION_CODE) {
+    var sm = [];
+    if (!start)   sm.push('start time');
+    if (!endTime) sm.push('end time');
+    if (sm.length) {
+      if (!start)   { var _ss = document.getElementById('oc-start'); if (_ss) _ss.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
+      if (!endTime) { var _se2 = document.getElementById('oc-end');  if (_se2) _se2.style.cssText = 'border:1.5px solid var(--red-t);background:var(--red-bg)'; }
+      showToast('Required for ' + fee + ': ' + sm.join(', '));
+      return false;
+    }
+  }
+
   var dateFmt = fmtD(parseISODate(dateISO));
-  // Units are always 1 for an Other claim — except 00081 (per-30-min).
+  // Units are always 1 for an Other claim — except 00081 (per-30-min) and
+  // 01172 (per-15-min, v5.29).
   var pClone  = Object.assign({}, p, { icd: icd, refby: refby, refbyName: refName });
 
   // v4.96: 00081 Emergency Bedside Care — units from the bedside window;
@@ -8221,6 +8325,22 @@ function submitOtherClaimFor(p, alias, opts) {
       dateISO: dateISO, dateFmt: dateFmt, start: start, end: endTime,
       loc: loc, notes: notes
     });
+  }
+
+  // v5.29: 01172 Sedation — units computed from the mandatory start/end
+  // window (ceiling to the next 15-min period); no consult-split sheet
+  // (that's an 00081-specific MSP rule that doesn't apply here).
+  if (fee === SEDATION_CODE) {
+    var sedDur = ocDurMins(start, endTime);
+    if (sedDur <= 0) { showToast('01172: end time must be after start time'); return false; }
+    var sedUnits = sedationUnitsFromDur(sedDur);
+    var sedResult = addClaim(pClone, fee, fee, sedUnits, dateFmt, loc, start, notes, endTime, alias);
+    if (!sedResult) return false;  // dedup blocked — stay on form, error toast visible
+    sv('claims', st.claims);
+    // No unit-specific toast here — the generic caller (submitOtherClaim)
+    // already toasts "<fee> claim added for <name>"; the unit count is
+    // visible in the preview before submit and as ×N on the claims list.
+    return true;
   }
 
   // v4.79: Echo bundles — one tap creates each component claim with its
@@ -11582,6 +11702,12 @@ function saveLocationEdit(pid) {
 }
 
 // 07_consult.js — Unified consult form (33010/33012)
+// v5.42 (2026-10-25): RACE admit from the +Claim screen now saves the
+//   admitVia='RACE' stamp to Sheets (push savePatient). The v4.88 fix for
+//   this (01/08, Gerlinsky) was silently dropped by the 09/08 upload; since
+//   then a RACE admit entered on an EXISTING patient kept the stamp only on
+//   the phone, so DataCheck could flag MISSING_CONSULT. Add Patient was not
+//   affected (savePatientWithClaims runs after the stamp).
 // v5.34 (2026-09-27): modifier banner shows per-tier increment runs (e.g.
 //   "1205 ×1 from 22:45 + 1206 ×2 from 23:15") via calloutIncGroups_ — see
 //   04_billing.js v5.34. Billing itself is unchanged here (rebuild path).
@@ -12651,6 +12777,8 @@ function submitConsult() {
   if (!validateRequiredForClaim(p)) { highlightMissingFields(); return; }
   if (!submitConsultClaims(p, getPerformingAlias())) return;
   sv('patients', st.patients);
+  // v5.42: sv() never writes patients to Sheets — persist the RACE stamp.
+  if (p.admitVia === 'RACE' && SHEETS_URL) push('savePatient', p);
   showSaved('Consult claims added for ' + p.last);
   closeClaimScreen();
 }
@@ -13477,6 +13605,13 @@ function submitCCU(isDuplicate) {
 // 09_patient.js — Add patient (Step 1), sticker/Meditech
 //                 chart photo OCR, ward/room selectors
 // ═══════════════════════════════════════════════════════
+// v5.42 (2026-10-25): RESTORES THE PRIVATE-PAY INTAKE CODE (25/09, v5.33)
+//        that the v5.38 upload of this file silently removed — it was built
+//        from a stale copy. Symptom: the Edit Patient pencil did nothing
+//        (06d_patient_edit.js uses _ppDocPending, defined only in the removed
+//        block → ReferenceError on every patient), and the private-pay
+//        insurance-photo intake was gone from Add Patient. This file = the
+//        25/09 version + the v5.38/v5.41 consult-banner hooks. No other change.
 // v5.41 (2026-10-25): CONSULT BANNER FLASH FIX. The "Phone consult on file"
 //        banner appeared and vanished a moment later: v5.38 made
 //        dismissExistingPatientBanner() also clear it, and
@@ -13791,7 +13926,17 @@ async function _mergeAndReadmit() {
   } else if (!!((document.getElementById('f-private') || {}).checked)) {
     p.privatePay = true;
     p.rateMode   = gv('f-private-rate') || p.rateMode || 'BCMA';
-    p.oop = false; p.homeProvince = ''; p.homeHCN = ''; p.homeAddress = '';
+    // v5.33: homeAddress is KEPT — a private-pay invoice is mailed there and
+    // the discharge gate requires it. It used to be blanked here and in the
+    // Edit Patient modal, silently undoing an address captured earlier.
+    // v5.33: Quebec stays recorded as homeProvince 'QC' on the private-pay
+    // row (picked via the OOP list, or already on file) so the OOP tab and
+    // invoice still say Quebec; everything else in the OOP block is cleared.
+    p.oop = false; p.homeHCN = '';
+    p.homeProvince = _apPrivateIsQc(p) ? 'QC' : '';
+    p.homeAddress  = gv('f-home-address') || p.homeAddress || '';
+    // v5.33: patient email captured at intake (mandatory on this form).
+    p.homeEmail  = gv('f-home-email') || p.homeEmail || '';
   }
 
   stampChangedGroups(p, _hotSnap);   // v4.73: readmit = discharge/location/handover taps
@@ -13964,6 +14109,7 @@ async function _mergeAndReadmit() {
                   (_retagged > 1 ? 's' : '') + ' corrected)' : '')
               : ''));
   _hideSubmitOverlay();
+  ppDocUploadPending('f', p);   // v5.33: insurance photos → patient's invoice folder
   clearAddForm();
   if (addToList) { nav(0, document.querySelectorAll('.nb')[0]); }
   else { nav(2, document.querySelectorAll('.nb')[2]); }
@@ -14743,6 +14889,20 @@ function apProvinceChange() {
   var v = (document.getElementById('f-home-province') || {}).value || '';
   var qc = document.getElementById('f-qc-warn');
   if (qc) qc.style.display = (v === 'QC') ? 'block' : 'none';
+  // v5.33 (Kathryn 2026-09-24): Quebec is outside the reciprocal agreement,
+  // so it is billed exactly like private pay at MSP rates. Picking Quebec
+  // moves the patient straight onto the Private Pay block (MSP selected),
+  // where the patient email + insurance photos are collected.
+  if (v === 'QC') {
+    var oop = document.getElementById('f-oop');
+    if (oop) { oop.checked = false; apToggleOOP(); }
+    var priv = document.getElementById('f-private');
+    if (priv) { priv.checked = true; apTogglePrivate(); priv.setAttribute('data-qc', '1'); }
+    apPrivateRate('MSP');
+    showToast('Quebec — switched to Private Pay (MSP rates). Ask for the patient\'s email.');
+    var em = document.getElementById('f-home-email');
+    if (em) { try { em.focus(); } catch (e) {} }
+  }
 }
 // ── Private Pay toggle + rate selector ────────────────────────────
 function apTogglePrivate() {
@@ -14754,10 +14914,23 @@ function apTogglePrivate() {
     var oop = document.getElementById('f-oop');
     if (oop && oop.checked) { oop.checked = false; if (typeof apToggleOOP === 'function') apToggleOOP(); }
     apPrivateRate((document.getElementById('f-private-rate') || {}).value || 'BCMA');
+    ppDocRender('f', null);
   } else {
     var rm = document.getElementById('f-private-rate'); if (rm) rm.value = 'BCMA';
     apPrivateRate('BCMA');
+    // v5.33: collapse → clear, so a hidden block never submits stale data.
+    var em = document.getElementById('f-home-email'); if (em) { em.value = ''; em.style.cssText = 'font-size:16px'; }
+    var pc = document.getElementById('f-private'); if (pc) pc.removeAttribute('data-qc');
+    _ppDocPending.f = [];
+    ppDocRender('f', null);
   }
+}
+// v5.33: is this private-pay entry a Quebec resident? True when Quebec was
+// picked in the OOP list this time, or the patient on file is already QC.
+function _apPrivateIsQc(p) {
+  var pc = document.getElementById('f-private');
+  if (pc && pc.getAttribute('data-qc') === '1') return true;
+  return !!(p && /^(qc|pq|quebec)/i.test(String(p.homeProvince || '').trim()));
 }
 function apPrivateRate(mode) {
   mode = (mode === 'MSP') ? 'MSP' : 'BCMA';
@@ -14987,7 +15160,18 @@ async function apSubmit(addToList, _skipDupCheck) {
     }
   }
 
+  // v5.33 (Kathryn 2026-09-24): private pay (incl. Quebec) — the patient
+  // email is MANDATORY at intake. Leaving it to discharge wasn't working.
+  // Insurance photos stay optional. Same validity rule as the discharge gate
+  // (_ppValidEmail) so the two can never disagree.
+  var _priv = !!((document.getElementById('f-private') || {}).checked);
+  if (_priv && !_ppValidEmail(gv('f-home-email'))) addMissing.push('patient email');
+
   if (addMissing.length) {
+    if (addMissing.indexOf('patient email') !== -1) {
+      var emEl = document.getElementById('f-home-email');
+      if (emEl) { emEl.style.cssText = 'font-size:16px;border:1.5px solid var(--amber-t);background:var(--amber-bg)'; }
+    }
     if (addMissing.indexOf('last name') !== -1) {
       var lastBlankEl = document.getElementById('f-last');
       if (lastBlankEl) { lastBlankEl.style.cssText = 'border:1.5px solid var(--amber-t);background:var(--amber-bg)'; lastBlankEl.focus(); }
@@ -15042,6 +15226,7 @@ async function apSubmit(addToList, _skipDupCheck) {
     if (addMissing.indexOf('home province')      !== -1) msgs.push('home province');
     if (addMissing.indexOf('home health number') !== -1) msgs.push('home health number');
     if (addMissing.indexOf('home address')        !== -1) msgs.push('home address');
+    if (addMissing.indexOf('patient email')       !== -1) msgs.push('patient email (private pay — ask the patient)');
     showToast('Required: ' + msgs.join(', '));
     return;
   }
@@ -15173,6 +15358,8 @@ async function apSubmit(addToList, _skipDupCheck) {
   if ((document.getElementById('f-private') || {}).checked) {
     p.privatePay = true;
     p.rateMode   = gv('f-private-rate') || 'BCMA';
+    p.homeEmail  = gv('f-home-email');   // v5.33: mandatory at intake
+    if (_apPrivateIsQc(null)) p.homeProvince = 'QC';   // v5.33: Quebec via the OOP list
   }
 
   // v4.95: ALWAYS send explicit discharge state on a new add. The admitted
@@ -15341,6 +15528,7 @@ async function apSubmit(addToList, _skipDupCheck) {
   var listLabel = addToList ? (p.list === 'on' ? 'On' : 'Off') + ' Service' : 'claim only';
   showSaved(last + ' added — ' + listLabel);
   _hideSubmitOverlay();
+  ppDocUploadPending('f', p);   // v5.33: insurance photos → patient's invoice folder
   clearAddForm();
   if (addToList) {
     nav(0, document.querySelectorAll('.nb')[0]);
@@ -17051,6 +17239,191 @@ function buildOCRCorrections(savedPatient) {
     }
   });
   return corrections;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// v5.33 (Kathryn 2026-09-24): PRIVATE-PAY INTAKE — INSURANCE PHOTOS
+// ═══════════════════════════════════════════════════════════════════
+// Private pay (and Quebec, which now routes to Private Pay at MSP rates)
+// collects the patient email (mandatory) and optional photos of insurance
+// documents/cards AT INTAKE, from the doctor who creates the card. Leaving
+// it all to discharge wasn't working.
+//
+// Photos go to the backend (Invoice.gs savePpDoc) and land in
+//   Drive › Patient Invoices › <LAST, First — PHN [id]>
+// — the same folder the patient's finalized invoice is filed into after
+// discharge, so the clerk finds everything for one patient in one place.
+//
+// ⚠️ Deliberately NO credit-card capture. Card photos (esp. the back/CVV)
+// must not be stored under PCI DSS; the card is kept on file in Wix.
+//
+// Memory: every photo goes through photoFileToDataUrl (v5.14 rule — never
+// FileReader on a camera file) and is then shrunk to PPDOC_MAX, which keeps
+// a card legible at ~150–400 KB — the same size class ocrSticker already
+// sends through the relay every day.
+var PPDOC_MAX = 1400;   // long side; a card stays legible, ~150–400 KB
+var _ppDocPending = { f: [], pe: [] };   // data URLs not yet uploaded, per form
+var _ppDocRetry   = {};                  // pid → data URLs whose upload failed
+
+function _ppDocShrink(dataUrl, cb) {
+  var img = new Image();
+  img.onload = function() {
+    var w = img.naturalWidth, h = img.naturalHeight;
+    var s = Math.min(1, PPDOC_MAX / Math.max(w || 1, h || 1));
+    var c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(w * s)); c.height = Math.max(1, Math.round(h * s));
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    var out = c.toDataURL('image/jpeg', 0.8);
+    c.width = c.height = 0;
+    img.removeAttribute('src');
+    cb(out);
+  };
+  img.onerror = function() { cb(dataUrl); };
+  img.src = dataUrl;
+}
+
+// Render the photo block into <prefix>-ppdoc-host. p = the saved patient
+// (Edit Patient) or null (Add Patient — nothing saved yet).
+function ppDocRender(prefix, p) {
+  var host = document.getElementById(prefix + '-ppdoc-host');
+  if (!host) return;
+  var pend  = _ppDocPending[prefix] || [];
+  var saved = p ? (parseInt(p.ppDocs, 10) || 0) : 0;
+  var h = '<label style="margin:0 0 6px">Insurance documents / cards <span style="font-weight:400;color:var(--text3)">(optional)</span></label>' +
+    '<input type="file" id="' + prefix + '-ppdoc-file" accept="image/*" multiple style="display:none" ' +
+      'onchange="ppDocFileChosen(\'' + prefix + '\', this)">' +
+    '<button type="button" class="btn btn-s" style="margin:0;width:100%" ' +
+      'onclick="ppDocPick(\'' + prefix + '\')">📷 Photo insurance documents or cards</button>' +
+    '<div style="margin-top:5px;font-size:10px;color:var(--text3);line-height:1.5">' +
+      'Front and back of each insurance card, or the policy page. ' +
+      'Saved to the patient’s invoice folder for the billing clerk. ' +
+      '<b>Do not photograph credit cards.</b></div>';
+  if (saved) {
+    h += '<div style="margin-top:6px;font-size:12px;font-weight:700;color:var(--green-t)">✓ ' +
+         saved + ' photo' + (saved === 1 ? '' : 's') + ' already saved to the invoice folder</div>';
+  }
+  if (pend.length) {
+    h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">';
+    pend.forEach(function(u, i) {
+      h += '<div style="position:relative;width:64px;height:64px;border:.5px solid var(--border2);border-radius:6px;overflow:hidden;background:#fff">' +
+             '<img src="' + u + '" style="width:100%;height:100%;object-fit:cover" alt="">' +
+             '<button type="button" onclick="ppDocRemove(\'' + prefix + '\',' + i + ')" ' +
+               'style="position:absolute;top:1px;right:1px;width:20px;height:20px;border:none;border-radius:10px;' +
+               'background:rgba(0,0,0,.6);color:#fff;font-size:12px;line-height:20px;padding:0;cursor:pointer">✕</button>' +
+           '</div>';
+    });
+    h += '</div><div style="margin-top:4px;font-size:11px;color:var(--amber-t);font-weight:600">' +
+         pend.length + ' photo' + (pend.length === 1 ? '' : 's') + ' will upload when you tap ' +
+         (prefix === 'f' ? 'Submit' : 'Save') + '</div>';
+  }
+  host.innerHTML = h;
+}
+
+function ppDocPick(prefix) {
+  var inp = document.getElementById(prefix + '-ppdoc-file');
+  if (inp) { inp.value = ''; inp.click(); }
+}
+
+function ppDocFileChosen(prefix, input) {
+  var files = Array.prototype.slice.call((input && input.files) || []);
+  if (!files.length) return;
+  var p = (prefix === 'pe' && window._ppDocEditPid) ? getP(window._ppDocEditPid) : null;
+  // One at a time: two 3000px decodes side by side is exactly the Android
+  // OOM the v5.14 budget exists to prevent.
+  (function next(i) {
+    if (i >= files.length) return;
+    photoFileToDataUrl(files[i], function(url) {
+      _ppDocShrink(url, function(small) {
+        (_ppDocPending[prefix] = _ppDocPending[prefix] || []).push(small);
+        ppDocRender(prefix, (p && p.id) ? p : null);
+        next(i + 1);
+      });
+    }, function() {
+      showToast('Could not read that photo — try again', 'error');
+      next(i + 1);
+    });
+  })(0);
+  if (input) input.value = '';
+}
+
+function ppDocRemove(prefix, i) {
+  var arr = _ppDocPending[prefix] || [];
+  arr.splice(i, 1);
+  var p = (prefix === 'pe' && window._ppDocEditPid) ? getP(window._ppDocEditPid) : null;
+  ppDocRender(prefix, (p && p.id) ? p : null);
+}
+
+// One upload. Resolves with the server result or throws. One retry: on the
+// relay it fails over to /exec (like push()); otherwise after a 3 s pause.
+function _ppDocSend(p, dataUrl) {
+  var b64 = String(dataUrl || '').split(',')[1] || '';
+  var body = JSON.stringify({
+    action:    'savePpDoc',
+    key:       SHARED_KEY,
+    patientId: p.id,
+    last:      p.last  || '',
+    first:     p.first || '',
+    phn:       p.phn   || '',
+    image:     b64,
+    mediaType: 'image/jpeg',
+    by:        (st.doc && st.doc.alias) || ''
+  });
+  function attempt() {
+    return fetchWithTimeout(SHEETS_URL, {
+      method: 'POST', redirect: 'follow',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: body
+    }, 45000, 'Insurance photo upload')
+      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function(j) { if (!j || !j.ok) throw new Error((j && j.error) || 'upload failed'); return j; });
+  }
+  return attempt()['catch'](function(e) {
+    if (typeof _doorFailover === 'function' && _doorFailover('ppdoc')) return attempt();
+    return new Promise(function(res) { setTimeout(res, 3000); }).then(attempt);
+  });
+}
+
+// Upload everything pending for this form, AFTER the patient is saved.
+// Detaches the list first, so clearAddForm() right after is safe. Photos
+// that fail are parked in _ppDocRetry[pid] and reappear as pending the next
+// time anyone opens Edit Patient on this device — no retake needed.
+async function ppDocUploadPending(prefix, p) {
+  var list = (_ppDocPending[prefix] || []).slice();
+  _ppDocPending[prefix] = [];
+  if (!p || !p.id) return;
+  // Photos parked from an earlier failed upload on this device ride along;
+  // they are re-parked below if they fail again.
+  if (_ppDocRetry[p.id] && _ppDocRetry[p.id].length) { list = list.concat(_ppDocRetry[p.id]); }
+  delete _ppDocRetry[p.id];
+  if (!list.length) return;
+  if (!SHEETS_URL) {
+    _ppDocRetry[p.id] = (_ppDocRetry[p.id] || []).concat(list);
+    showToast('Insurance photos NOT saved (offline) — open Edit Patient to retry', 'error');
+    return;
+  }
+  var ok = 0, failed = [];
+  for (var i = 0; i < list.length; i++) {
+    try { await _ppDocSend(p, list[i]); ok++; }
+    catch (e) { console.warn('[ppdoc] upload failed', e); failed.push(list[i]); }
+  }
+  if (ok) {
+    var live = getP(p.id);
+    if (!live || !live.id) live = p;           // getP returns {} when absent
+    live.ppDocs = (parseInt(live.ppDocs, 10) || 0) + ok;
+    sv('patients', st.patients);
+    push('savePatient', live);
+    if (typeof logChange === 'function') {
+      try { logChange(live, 'Insurance photos saved', ok + ' photo' + (ok === 1 ? '' : 's') + ' to invoice folder'); } catch (e) {}
+    }
+  }
+  if (failed.length) {
+    _ppDocRetry[p.id] = (_ppDocRetry[p.id] || []).concat(failed);
+    showToast(failed.length + ' insurance photo' + (failed.length === 1 ? '' : 's') +
+              ' did NOT upload — open Edit Patient and tap Save to retry', 'error');
+  } else {
+    showSaved('✓ ' + ok + ' insurance photo' + (ok === 1 ? '' : 's') + ' saved for ' + (p.last || 'patient'));   // silent (v5.32 quiet-saves rule)
+  }
 }
 // 10_location.js — Location change screen + discharge modal
 // ═══════════════════════════════════════════════════════
@@ -24097,5 +24470,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "84660d327f93";</script></body>
+<script>var BUILD_HASH = "480b19e989f3";</script></body>
 </html>
