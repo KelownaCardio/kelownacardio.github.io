@@ -3143,8 +3143,15 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //       re-added for the +Claim path.
 //   Each restored by re-applying the original change on top of the current
 //   repo file. No cache-format change, BUILD_ID not bumped.
-var APP_VERSION = 'v5.42';
-var APP_BUILT   = '2026-10-22';
+// v5.43 (2026-10-26) — Leaderboard: 6th trophy 🎪 RINGMASTER: IT IS MY
+//   CIRCUS — most patients seen in one day by one doctor, any service
+//   (CCU 1411/1421/1431/1441/CCU_DAILY, 33008 any MRP, 33006 directive,
+//   33010/33012 consults, 33005). Distinct PHN per doctor-day, best day per
+//   doctor per Mon–Sun week (Shepherd rule). 11_export.js only + this
+//   header; pairs with BigQuery.gs v3.29 (q6 'ringmaster'). Built on repo
+//   v5.42. No cache-format change, BUILD_ID not bumped.
+var APP_VERSION = 'v5.43';
+var APP_BUILT   = '2026-10-26';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
@@ -18990,6 +18997,11 @@ function _lbInitials(alias) {
 // ── Compute leaderboard from local claims ────────────
 // Fee codes that always count for shepherd (CCU family)
 var LB_CCU_FEES = { 'CCU_DAILY':1, '1411':1, '1421':1, '1431':1, '1441':1 };
+// v5.43: THE RINGMASTER — every patient seen in the day, any service:
+// CCU family + 33008 daily/combined (any MRP) + 33006 directive +
+// 33010/33012 consults + 33005 emergency visit. Distinct PHN per doctor-day.
+var LB_RING_FEES = { 'CCU_DAILY':1, '1411':1, '1421':1, '1431':1, '1441':1,
+  '33008':1, '33006':1, '33010':1, '33012':1, '33005':1 };
 
 // Return the Monday that starts this DD/MM/YYYY's Mon-Sun week ("YYYY-MM-DD")
 function _lbWeekKey(dateStr) {
@@ -19031,6 +19043,7 @@ function _computeLeaderboard() {
     var consults  = 0;
     var revenue   = 0;
     var shepherdPHNs = {};
+    var ringPHNs = {};
 
     g.claims.forEach(function(c) {
       var fee = c.fee;
@@ -19046,6 +19059,10 @@ function _computeLeaderboard() {
       if (resolved === '33010' || resolved === '33012' || resolved === '1411') consults++;
       revenue += rate * (c.units || 1);
 
+      // Ringmaster (v5.43): any service — raw or resolved code counts
+      if (c.phn && (LB_RING_FEES[fee] || LB_RING_FEES[resolved])) {
+        ringPHNs[c.phn] = true;
+      }
       // Shepherd: CCU family always counts
       if (LB_CCU_FEES[fee] && c.phn) {
         shepherdPHNs[c.phn] = true;
@@ -19061,11 +19078,13 @@ function _computeLeaderboard() {
 
     var shepherdCount = 0;
     for (var _p in shepherdPHNs) shepherdCount++;
+    var ringCount = 0;
+    for (var _r in ringPHNs) ringCount++;
 
     entries.push({
       alias: g.alias, date: g.date,
       ccuAdmits: ccuAdmits, consults: consults,
-      revenue: revenue, shepherd: shepherdCount
+      revenue: revenue, shepherd: shepherdCount, ringmaster: ringCount
     });
   }
 
@@ -19089,6 +19108,20 @@ function _computeLeaderboard() {
     var arr = [];
     for (var k in weekBest) arr.push(weekBest[k]);
     arr.sort(function(a, b) { return b.shepherd - a.shepherd; });
+    return arr.slice(0, 3);
+  })();
+  var byRingmaster = (function() {
+    // v5.43: same one-per-doctor-per-Mon-Sun-week rule as the Shepherd
+    var weekBest = {};
+    entries.filter(function(e) { return e.ringmaster > 0; }).forEach(function(e) {
+      var key = e.alias + '|' + _lbWeekKey(e.date);
+      if (!weekBest[key] || e.ringmaster > weekBest[key].ringmaster) {
+        weekBest[key] = e;
+      }
+    });
+    var arr = [];
+    for (var k in weekBest) arr.push(weekBest[k]);
+    arr.sort(function(a, b) { return b.ringmaster - a.ringmaster; });
     return arr.slice(0, 3);
   })();
 
@@ -19121,6 +19154,7 @@ function _computeLeaderboard() {
     consults:  byConsults.map(function(e) { return [e.alias, e.date, e.consults]; }),
     revenue:   byRevenue.map(function(e) { return [e.alias, e.date, Math.round(e.revenue * 100) / 100]; }),
     shepherd:  byShepherd.map(function(e) { return [e.alias, e.date, e.shepherd]; }),
+    ringmaster: byRingmaster.map(function(e) { return [e.alias, e.date, e.ringmaster]; }),
     cleaner:   cleanerEntries
   };
 }
@@ -19143,6 +19177,7 @@ function _mergeLeaderboards(local, bq) {
     consults:  _mergeCat(local ? local.consults  : [], bq ? bq.consults  : [], 3),
     revenue:   _mergeCat(local ? local.revenue   : [], bq ? bq.revenue   : [], 3),
     shepherd:  _mergeShepherd(local ? local.shepherd : [], bq ? bq.shepherd : []),
+    ringmaster: _mergeShepherd(local ? local.ringmaster : [], bq ? bq.ringmaster : []),
     cleaner:   _mergeCat(local ? local.cleaner : [], bq ? bq.cleaner : [], 3)
   };
 }
@@ -19163,7 +19198,8 @@ function _mergeCat(a, b, limit) {
   return out.slice(0, limit || 3);
 }
 
-// Shepherd merge: one entry per doctor per Mon-Sun week
+// Shepherd merge: one entry per doctor per Mon-Sun week (also used by the
+// Ringmaster, v5.43 — same weekly rule)
 function _mergeShepherd(a, b) {
   var map = {};
   (a || []).concat(b || []).forEach(function(r) {
@@ -19374,7 +19410,7 @@ function _lbOverlayTap(e) {
   if (e.target.id === 'lb-overlay') hideLeaderboard();
 }
 
-// ── Render the four categories ───────────────────────
+// ── Render the categories ───────────────────────
 var LB_MEDALS = ['\uD83E\uDD47', '\uD83E\uDD48', '\uD83E\uDD49'];
 
 function _renderLeaderboard(data) {
@@ -19391,6 +19427,7 @@ function _renderLeaderboard(data) {
   html += _renderCategory('\uD83D\uDC1D BUSY BEE', 'Most consults in 24hrs', data.consults || [], false);
   html += _renderCategory('\uD83D\uDCB0 THE TAX MAN COMETH', 'Highest $ billed in 24hrs', data.revenue || [], true);
   html += _renderCategory('\uD83D\uDC11 THE SHEPHERD', 'Most patients on service in 24hrs', data.shepherd || [], false);
+  html += _renderCategory('\uD83C\uDFAA RINGMASTER: IT IS MY CIRCUS', 'Who corralled the most monkeys in 24hrs \u2014 CCU, MRP, directives & consults', data.ringmaster || [], false);
   html += _renderCategory('\uD83E\uDDF9 THE CLEANER', 'Most discharges in 24hrs', data.cleaner || [], false);
 
   body.innerHTML = html;
@@ -24476,5 +24513,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "f7f8d6f53ac6";</script></body>
+<script>var BUILD_HASH = "7c4b1b405d68";</script></body>
 </html>
