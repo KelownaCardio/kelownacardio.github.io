@@ -774,8 +774,15 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //       re-added for the +Claim path.
 //   Each restored by re-applying the original change on top of the current
 //   repo file. No cache-format change, BUILD_ID not bumped.
-var APP_VERSION = 'v5.42';
-var APP_BUILT   = '2026-10-22';
+// v5.43 (2026-10-26) — Leaderboard: 6th trophy 🎪 RINGMASTER: IT IS MY
+//   CIRCUS — most patients seen in one day by one doctor, any service
+//   (CCU 1411/1421/1431/1441/CCU_DAILY, 33008 any MRP, 33006 directive,
+//   33010/33012 consults, 33005). Distinct PHN per doctor-day, best day per
+//   doctor per Mon–Sun week (Shepherd rule). 11_export.js only + this
+//   header; pairs with BigQuery.gs v3.29 (q6 'ringmaster'). Built on repo
+//   v5.42. No cache-format change, BUILD_ID not bumped.
+var APP_VERSION = 'v5.43';
+var APP_BUILT   = '2026-10-26';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
