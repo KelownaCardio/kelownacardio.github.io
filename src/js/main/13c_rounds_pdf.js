@@ -1,6 +1,27 @@
 // 13c_rounds_pdf.js — Meditech "SB Rounds List" PDF → room updates,
 //                     discharge flags and QuickChart paste lists
 // ═══════════════════════════════════════════════════════════════════
+// v5.44 (2026-10-27) — Drop the PDF straight on the "Meditech rounds list"
+//   button under the patient list (Kathryn 2026-10-27: no need to open the
+//   box first). The button lights up while a file is dragged over it. The
+//   drop-anywhere fallback now also accepts a file whose drag type is blank
+//   (some Mac drag sources don't label PDFs); the .pdf name check on drop
+//   still applies.
+//   SCOPE CUT (Kathryn 2026-10-27 07:32): "you shouldn't change anything
+//   except the patient location and flag people that are no longer on the
+//   rounds list at all". So Apply now writes ward + bed ONLY:
+//     • no "Move to off-service list" (27/10 07:14 it moved two
+//       Cardiology-MRP ED patients off service and they lost the red);
+//     • patients missing from the PDF are LISTED for the doctor to check —
+//       no Discharge / Off-service buttons, nothing written for them;
+//     • list / role / care / mrp / discharge are never touched.
+//   QuickChart list also includes any patient already active in the app on
+//   CICU/2S/2W, even if Meditech's MRP is an individual doctor's name.
+//   Missing patients (Kathryn 07:37): default KEEP; a "Discharge" button per
+//   patient runs the SAME flow as the card's D/C button (openDischModal:
+//   DOB check, MRP-gap gate, private-pay step, confirm discharge date,
+//   complex-discharge 78717 check). The rounds box closes while it runs and
+//   reopens on the same list (kept 30 min) with discharged patients gone.
 // v5.40 (2026-10-22) — ONE QuickChart list instead of three (Kathryn's
 //   paste tests 2026-10-22 17:09/17:12): a single "KGH Cardiology" list,
 //   CICU → 2W → 2S by bed, with the ward written into the bed field
@@ -332,13 +353,21 @@ function rlBuildReview(recs, patients, reportMs, nowMs) {
     r._cardio = rlIsCardiology(r);
   });
 
+  var active = patients.filter(function (p) { return p && p.id && !p.discharged; });
+
+  // v5.44: a patient already active in the app goes on the QuickChart list
+  // too, whatever Meditech's MRP/Other says — a clerk may have registered
+  // them under one doctor's name instead of CardiologyMRP (Kathryn
+  // 2026-10-27). The app's own settings are never changed by the PDF.
+  recs.forEach(function (r) {
+    if (!r._cardio && active.some(function (p) { return _rlSamePatient(p, r); })) r._cardio = true;
+  });
+
   // QuickChart list: CICU, then 2W, then 2S, each by bed.
   var qc = [];
   RL_QC_WARDS.forEach(function (w) {
     qc = qc.concat(recs.filter(function (r) { return r._cardio && r._ward === w; }).sort(_rlBedSort));
   });
-
-  var active = patients.filter(function (p) { return p && p.id && !p.discharged; });
 
   // Room changes for patients already in the app.
   var moves = [], matchedIds = {};
@@ -359,7 +388,12 @@ function rlBuildReview(recs, patients, reportMs, nowMs) {
     if (_rlSameSpot(p, r)) return;
     // Kathryn 2026-10-22: an on-service patient now on a unit other than
     // CICU / 2S / 2W -> prompt "Move to off-service list" (pre-ticked).
-    var offPrompt = p.list === 'on' && RL_QC_WARDS.indexOf(r._ward) === -1;
+    // v5.44: NEVER for a Cardiology-MRP patient — off the home wards they are
+    // "stranded" (05_render.js isStranded) and must stay on service so they
+    // show red on both lists. 27/10 07:14 the pre-ticked box moved Neufeld
+    // and Pajak (MRP Cardiology, in ED) off service and they lost the red.
+    // v5.44: location only — never offered (see header).
+    var offPrompt = false;
     moves.push({ pid: p.id, last: p.last, first: p.first,
                  fromWard: p.ward || '', fromBed: p.bed || '',
                  toWard: r._ward, toBed: r._bed || '', _on: true,
@@ -388,9 +422,7 @@ function rlBuildReview(recs, patients, reportMs, nowMs) {
   var rep   = reportMs ? new Date(reportMs) : null;
   var fresh = !!rep && rep.toDateString() === today.toDateString();
   var plausible = missing.length <= 10 && missing.length <= Math.max(3, Math.ceil(active.length * 0.3));
-  missing.forEach(function (m) {
-    m.action = (fresh && plausible && !m.cardOnly) ? 'disch' : 'keep';
-  });
+  // v5.44: listed only — the import never discharges or moves anyone.
 
   notInApp.sort(function (a, b) {
     var ia = RL_QC_WARDS.indexOf(a.ward), ib = RL_QC_WARDS.indexOf(b.ward);
@@ -405,7 +437,9 @@ function rlBuildReview(recs, patients, reportMs, nowMs) {
 // ── UI ───────────────────────────────────────────────────────────────
 function openRoundsPdf() {
   if (typeof isResident === 'function' && isResident()) { showToast('Not available for this login'); return; }
-  _rl = null;
+  // v5.44: reopening within 30 min shows the same list (e.g. after a
+  // Discharge from the "Not on the Meditech list" section).
+  if (!_rl || !_rl.readAt || (Date.now() - _rl.readAt) > 30 * 60 * 1000) _rl = null;
   _rlRender();
   showModal('rl-modal');
 }
@@ -423,6 +457,31 @@ function rlDrop(e) {
   rlDragLeave();
   var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
   if (f) rlHandleFile(f);
+}
+
+// v5.44: footer button as a drop target.
+function rlFootDragOver(e) {
+  e.preventDefault();
+  try { e.dataTransfer.dropEffect = 'copy'; } catch (eD) {}
+  var b = document.getElementById('rl-foot-btn'); if (b) b.classList.add('rl-hot');
+  var l = document.getElementById('rl-foot-lbl'); if (l) l.textContent = 'Drop the SB Rounds List PDF here';
+}
+function rlFootDragLeave(e) {
+  var b = document.getElementById('rl-foot-btn');
+  if (e && b && e.relatedTarget && b.contains(e.relatedTarget)) return;   // moving onto the icon/label
+  if (b) b.classList.remove('rl-hot');
+  var l = document.getElementById('rl-foot-lbl');
+  if (l) l.innerHTML = 'Meditech rounds list (PDF) &rarr; rooms &amp; QuickChart &mdash; tap or drop PDF here';
+}
+function rlFootDrop(e) {
+  e.preventDefault();
+  e.stopPropagation();   // the document-level fallback must not read it twice
+  rlFootDragLeave(null);
+  var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (!f) return;
+  var modal = document.getElementById('rl-modal');
+  if (!modal || !modal.classList.contains('on')) openRoundsPdf();
+  rlHandleFile(f);
 }
 
 async function rlHandleFile(file) {
@@ -447,6 +506,7 @@ async function rlHandleFile(file) {
     _rl.reportMs = repMs;
     _rl.owner    = rlReportOwner(pages);
     _rl.copied   = false;
+    _rl.readAt   = Date.now();
     status.style.display = 'none';
     _rlRender();
   } catch (e) {
@@ -485,10 +545,10 @@ function _rlRender() {
             (R.owner ? ' · ' + esc(R.owner) : '') +
           '</div>';
   if (!R.fresh) {
-    html += '<div class="ocr-bar ocr-warn" style="display:block;margin-bottom:8px">This list was not printed today — nothing is pre-selected. Print a fresh one if you can.</div>';
+    html += '<div class="ocr-bar ocr-warn" style="display:block;margin-bottom:8px">This list was not printed today — check the rooms below before applying. Print a fresh one if you can.</div>';
   } else if (!R.plausible) {
     html += '<div class="ocr-bar ocr-warn" style="display:block;margin-bottom:8px">' + R.missing.length +
-            ' app patients are missing from this list — more than usual. Check it is the full cardiology list; nothing is pre-selected.</div>';
+            ' app patients are missing from this list — more than usual. Check it is the full cardiology list.</div>';
   }
 
   // 1. QuickChart copy buttons.
@@ -517,38 +577,37 @@ function _rlRender() {
                   '<div class="imp-name">' + esc(m.last) + ', ' + esc(m.first) + '</div>' +
                   '<div class="imp-meta">' + esc(wardLabel(m.fromWard) || '—') + (m.fromBed ? ' ' + esc(m.fromBed) : '') +
                     ' → <b>' + esc(wardLabel(m.toWard)) + (m.toBed ? ' ' + esc(m.toBed) : '') + '</b></div>' +
-                  (m.offPrompt && m._on
-                    ? '<div class="fl" style="gap:6px;margin-top:6px">' +
-                        '<button class="ap-list-pill' + (m._off ? ' on' : '') + '" onclick="rlToggleOff(' + i + ')">' +
-                          (m._off ? '✓ ' : '') + 'Move to off-service list</button>' +
-                      '</div>'
-                    : '') +
                 '</div>' +
               '</div>';
     });
   }
 
-  // 3. Not on the Meditech list.
-  if (R.missing.length) {
-    html += '<div class="sec-lbl" style="color:var(--red-t);margin-top:8px">Not on the Meditech list — likely discharged (' + R.missing.length + ')</div>';
-    R.missing.forEach(function (m, i) {
-      var opts = [['disch', 'Discharge'], ['off', 'Off-service'], ['keep', 'Keep']];
-      if (m.list !== 'on') opts = [['disch', 'Discharge'], ['keep', 'Keep']];
-      var why = m.privatePay ? 'Private pay / out of province — discharge from the patient card'
-              : (m.cardOnly ? 'Stay ' + m.stay + ' days — discharge from the patient card (complex discharge check)' : '');
-      html += '<div class="imp-row">' +
+  // v5.44: Apply (rooms only) sits right under the room list.
+  var nMoves = R.moves.filter(function (m) { return m._on; }).length;
+  if (R.moves.length) {
+    html += '<button class="btn btn-p" style="width:100%;margin-top:10px" onclick="rlApply()"' +
+            (nMoves ? '' : ' disabled') + '>Update ' + nMoves + ' room' + (nMoves === 1 ? '' : 's') + '</button>';
+  } else {
+    html += '<div class="imp-meta" style="margin-top:8px">App rooms already match Meditech — nothing to change.</div>';
+  }
+
+  // 3. Not on the Meditech list — default Keep; Discharge runs the card's D/C flow.
+  var miss = R.missing.filter(function (m) {
+    var p = st.patients.find(function (pp) { return pp.id === m.pid; });
+    return p && !p.discharged;
+  });
+  if (miss.length) {
+    html += '<div class="sec-lbl" style="color:var(--red-t);margin-top:12px">\u26A0 Not on the Meditech list (' + miss.length + ')</div>' +
+            '<div style="font-size:10px;color:var(--text2);margin-bottom:6px;line-height:1.4">Kept unless you choose Discharge. Discharge opens the usual discharge steps (date, billing gaps, complex discharge).</div>';
+    miss.forEach(function (m) {
+      html += '<div class="imp-row" style="padding:8px 10px">' +
                 '<div class="imp-info">' +
                   '<div class="imp-name">' + esc(m.last) + ', ' + esc(m.first) + '</div>' +
                   '<div class="imp-meta">' + esc(wardLabel(m.ward)) + (m.bed ? ' ' + esc(m.bed) : '') +
                     ' · ' + (m.list === 'on' ? 'on service' : 'off service') + '</div>' +
-                  (why ? '<div class="imp-meta" style="color:var(--amber-t)">' + esc(why) + '</div>' : '') +
                   '<div class="fl" style="gap:6px;margin-top:6px">' +
-                    opts.map(function (o) {
-                      var dis = (o[0] === 'disch' && m.cardOnly);
-                      return '<button class="ap-list-pill' + (m.action === o[0] ? ' on' : '') + '"' +
-                             (dis ? ' disabled style="opacity:.35"' : '') +
-                             ' onclick="rlSetAction(' + i + ',\'' + o[0] + '\')">' + o[1] + '</button>';
-                    }).join('') +
+                    '<button class="ap-list-pill on">Keep</button>' +
+                    '<button class="ap-list-pill" onclick="rlDischarge(\'' + esc(m.pid) + '\')">Discharge</button>' +
                   '</div>' +
                 '</div>' +
               '</div>';
@@ -571,15 +630,17 @@ function _rlRender() {
     });
   }
 
-  var nMoves = R.moves.filter(function (m) { return m._on; }).length;
-  var nAct   = R.missing.filter(function (m) { return m.action !== 'keep'; }).length;
-  if (R.moves.length || R.missing.length) {
-    html += '<button class="btn btn-p" style="width:100%;margin-top:10px" onclick="rlApply()"' +
-            (nMoves + nAct ? '' : ' disabled') + '>Apply ' + (nMoves + nAct) + ' change' + (nMoves + nAct === 1 ? '' : 's') + '</button>';
-  } else {
-    html += '<div class="imp-meta" style="margin-top:8px">App rooms already match Meditech — nothing to change.</div>';
-  }
   box.innerHTML = html;
+}
+
+// v5.44: Discharge from the "Not on the Meditech list" section = exactly the
+// patient card's D/C button. The rounds box closes so the discharge steps
+// (and the patient summary, if there are billing gaps) are on top; reopen
+// the box to carry on with the same list.
+function rlDischarge(pid) {
+  if (typeof openDischModal !== 'function') return;
+  hideModal('rl-modal');
+  openDischModal(pid);
 }
 
 function rlToggleMove(i) { var m = _rl && _rl.moves[i]; if (!m) return; m._on = !m._on; _rlRender(); }
@@ -635,8 +696,7 @@ function rlApply() {
     var from = (p.ward || '') + (p.bed ? ' ' + p.bed : '');
     p.ward = m.toWard;
     p.bed  = m.toBed;
-    var goOff = m.offPrompt && m._off && p.list === 'on';
-    if (goOff) { p.list = 'off'; p.role = 'consultant'; p.care = 'directive'; }
+    var goOff = false;   // v5.44: location only
     stampChangedGroups(p, snap);
     if (SHEETS_URL) push('savePatient', p);
     logChange(p, 'Location changed (Meditech list)' + (goOff ? ' + moved off service' : ''),
@@ -645,30 +705,7 @@ function rlApply() {
     if (goOff) nOff++;
   });
 
-  _rl.missing.forEach(function (m) {
-    if (m.action === 'keep') return;
-    var p = st.patients.find(function (pp) { return pp.id === m.pid; });
-    if (!p || p.discharged) return;
-    var snap = snapHot(p);
-    if (m.action === 'disch' && !m.cardOnly) {
-      if (!p.dischargeDate) p.dischargeDate = TODAY;
-      p.dischargedAt = Date.now();
-      p.discharged   = true;
-      if (!p.dischargedBy && st.doc && st.doc.alias) p.dischargedBy = st.doc.alias;
-      stampChangedGroups(p, snap);
-      if (SHEETS_URL) push('savePatient', p);
-      logChange(p, 'Discharged via Meditech list', 'Not on SB Rounds List ' + _rlFmtTime(_rl.reportMs));
-      nDisch++;
-    } else if (m.action === 'off') {
-      p.list = 'off';
-      p.role = 'consultant';
-      p.care = 'directive';
-      stampChangedGroups(p, snap);
-      if (SHEETS_URL) push('savePatient', p);
-      logChange(p, 'Moved off service via Meditech list', 'Not on SB Rounds List ' + _rlFmtTime(_rl.reportMs));
-      nOff++;
-    }
-  });
+  // v5.44: patients missing from the PDF are listed only — nothing written.
 
   sv('patients', st.patients);
   render();
@@ -678,7 +715,7 @@ function rlApply() {
   if (nOff)   bits.push(nOff + ' moved off service');
   // Keep the modal open on the copy buttons; drop the applied sections.
   _rl.moves = [];
-  _rl.missing = _rl.missing.filter(function (m) { return m.action === 'keep'; });
+  // (missing list kept on screen as a reminder)
   _rlRender();
   showToast(bits.length ? bits.join(', ') : 'Nothing changed');
 }
@@ -691,7 +728,8 @@ function rlApply() {
     var dt = e.dataTransfer; if (!dt) return false;
     var items = dt.items || [];
     for (var i = 0; i < items.length; i++) {
-      if (items[i].kind === 'file' && /pdf/i.test(items[i].type || '')) return true;
+      // v5.44: blank type allowed (some Mac drag sources leave it empty).
+      if (items[i].kind === 'file' && (!items[i].type || /pdf/i.test(items[i].type))) return true;
     }
     return false;
   }

@@ -305,11 +305,45 @@ async function init() {
     // processor, nightly archive). Nothing runs while the tab is hidden:
     // coming back to the foreground triggers syncWithGuardIfStale (below).
     // Same editing-screen guards as before (_autoRefreshSync).
+    // v5.44: the poll is no longer a fixed 60 s. A 5 s ticker decides how
+    // often to ask (each "nothing changed" answer is a ~100-byte cache read
+    // on the server — no sheet read, no lock):
+    //   • BURST 10 s for 3 min after a delta brought patient changes — so
+    //     when one doctor applies the Meditech rounds list at handover, the
+    //     other phones pick up each room/discharge as it lands instead of
+    //     on the next 60 s tick;
+    //   • HANDOVER 15 s, 06:55–07:10 Mon–Fri local, so the FIRST change is seen
+    //     within ~15 s;
+    //   • otherwise 60 s, as before.
+    var _pollLastAt = Date.now();
     setInterval(function() {
       if (document.visibilityState !== 'visible') return;
-      _autoRefreshSync('poll');
-    }, 60 * 1000);
+      var now = Date.now();
+      if (now - _pollLastAt < _pollEveryMs(now)) return;
+      _pollLastAt = now;
+      _autoRefreshSync('poll').then(function() {
+        var r = window._lastSyncResponse;
+        if (r && r.checkpoint === 'delta-applied' && (r.deltaPatients || 0) > 0) {
+          window._syncBurstUntil = Date.now() + POLL_BURST_FOR_MS;
+        }
+      });
+    }, 5 * 1000);
   }
+}
+
+// v5.44: poll cadence (see the ticker in the init block above).
+var POLL_BASE_MS      = 60 * 1000;
+var POLL_HANDOVER_MS  = 15 * 1000;
+var POLL_BURST_MS     = 10 * 1000;
+var POLL_BURST_FOR_MS = 3 * 60 * 1000;
+var POLL_HANDOVER_FROM = 6 * 60 + 55;   // 06:55 local, minutes after midnight (Kathryn 2026-10-27)
+var POLL_HANDOVER_TO   = 7 * 60 + 10;   // 07:10 local
+var POLL_HANDOVER_DAYS = { 1:1, 2:1, 3:1, 4:1, 5:1 };   // Mon–Fri only
+function _pollEveryMs(now) {
+  if ((window._syncBurstUntil || 0) > now) return POLL_BURST_MS;
+  var d = new Date(now), m = d.getHours() * 60 + d.getMinutes();
+  if (POLL_HANDOVER_DAYS[d.getDay()] && m >= POLL_HANDOVER_FROM && m < POLL_HANDOVER_TO) return POLL_HANDOVER_MS;
+  return POLL_BASE_MS;
 }
 
 async function resetLocalData() {

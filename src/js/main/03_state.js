@@ -781,8 +781,28 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   doctor per Mon–Sun week (Shepherd rule). 11_export.js only + this
 //   header; pairs with BigQuery.gs v3.29 (q6 'ringmaster'). Built on repo
 //   v5.42. No cache-format change, BUILD_ID not bumped.
-var APP_VERSION = 'v5.43';
-var APP_BUILT   = '2026-10-26';
+// v5.44 (2026-10-27) — Meditech rounds list at handover:
+//   (1) 13c_rounds_pdf.js + index.template.html — drop the PDF straight on
+//       the "Meditech rounds list" button under the patient list.
+//   (2) 14_init.js — other phones see the changes sooner: the 60 s poll is
+//       now 15 s from 06:55 to 07:10 Mon–Fri and 10 s for 3 min after any sync that
+//       brought patient changes (60 s otherwise). "No change" answers are a
+//       server cache read. Frontend only. No cache-format change, BUILD_ID
+//       not bumped.
+//   (3) index.template.html — "Export list for QuickChart" button removed
+//       from under the patient list (Copy for QuickChart in the rounds-list
+//       box replaces it).
+//   (4) 13c_rounds_pdf.js — Apply writes ward + bed ONLY (Kathryn 27/10:
+//       "nothing except the patient location"). No off-service move, no
+//       discharge from the import; patients missing from the PDF are listed
+//       to check. 27/10 the old pre-ticked off-service box moved two
+//       Cardiology-MRP ED patients off service (lost the red).
+//       Missing patients default to Keep; a Discharge button runs the card's
+//       D/C flow (openDischModal: DOB, gap gate, date, 78717 check).
+//       QuickChart list also takes app patients whose Meditech MRP is an
+//       individual doctor's name (clerk registration error).
+var APP_VERSION = 'v5.44';
+var APP_BUILT   = '2026-10-27';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
