@@ -121,6 +121,9 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 .mit-btn:hover { background:var(--blue-bg); border-color:#a8c4e8; color:var(--blue-t); }
 .rl-drop { border:2px dashed var(--border2); border-radius:var(--r); padding:16px 12px; text-align:center; background:var(--surface2); margin-bottom:8px; }
 .rl-drop.rl-hot { border-color:var(--blue); background:var(--blue-bg); }
+/* v5.45: bigger drop target for the Meditech rounds-list button */
+#rl-foot-btn { flex-direction:column; justify-content:center; text-align:center; gap:8px; min-height:110px; padding:20px 16px; font-size:13px; }
+#rl-foot-btn svg { width:26px; height:26px; }
 .mit-btn.rl-hot { border-color:var(--blue); border-style:solid; background:var(--blue-bg); color:var(--blue-t); }
 
 /* WARD */
@@ -24606,5 +24609,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "bed3c05787c8";</script></body>
+<script>var BUILD_HASH = "f886879ceb0e";</script></body>
 </html>
