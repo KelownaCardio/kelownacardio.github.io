@@ -121,6 +121,7 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 .mit-btn:hover { background:var(--blue-bg); border-color:#a8c4e8; color:var(--blue-t); }
 .rl-drop { border:2px dashed var(--border2); border-radius:var(--r); padding:16px 12px; text-align:center; background:var(--surface2); margin-bottom:8px; }
 .rl-drop.rl-hot { border-color:var(--blue); background:var(--blue-bg); }
+.mit-btn.rl-hot { border-color:var(--blue); border-style:solid; background:var(--blue-bg); color:var(--blue-t); }
 
 /* WARD */
 .ward-block { margin-bottom:13px; }
@@ -885,12 +886,12 @@ input[type=file] { display:none; }
   <div id="off-view" style="display:none"><div id="off-list"></div></div>
   <!-- v5.37: Meditech SB Rounds List PDF → rooms, discharge flags, QuickChart lists (13c_rounds_pdf.js).
        Replaces the import.html link (AI read of a photo/PDF). import.html itself is untouched in the repo. -->
-  <button class="mit-btn" onclick="openRoundsPdf()" style="margin-top:16px">
-    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Meditech rounds list (PDF) &rarr; rooms &amp; QuickChart
+  <!-- v5.44: the button itself is a drop target — drop the PDF straight on it. -->
+  <button class="mit-btn" id="rl-foot-btn" onclick="openRoundsPdf()" style="margin-top:16px"
+          ondragenter="rlFootDragOver(event)" ondragover="rlFootDragOver(event)" ondragleave="rlFootDragLeave(event)" ondrop="rlFootDrop(event)">
+    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><span id="rl-foot-lbl">Meditech rounds list (PDF) &rarr; rooms &amp; QuickChart &mdash; tap or drop PDF here</span>
   </button>
-  <button class="mit-btn" onclick="openQuickChartExport()" style="border-style:solid;border-color:var(--blue);background:var(--blue-bg)">
-    <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Export list for QuickChart
-  </button>
+  <!-- v5.44: "Export list for QuickChart" button removed (Kathryn 2026-10-27) — the rounds-list box has its own Copy for QuickChart. openQuickChartExport() left in 11_export.js, unused. -->
 </div>
 
 <!-- ═══ ADD PATIENT PANE ═══ -->
@@ -24605,5 +24606,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "5509ef43878e";</script></body>
+<script>var BUILD_HASH = "bed3c05787c8";</script></body>
 </html>
