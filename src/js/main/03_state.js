@@ -801,7 +801,10 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //       D/C flow (openDischModal: DOB, gap gate, date, 78717 check).
 //       QuickChart list also takes app patients whose Meditech MRP is an
 //       individual doctor's name (clerk registration error).
-var APP_VERSION = 'v5.44';
+// v5.45 (2026-10-27) — Bigger drop target: the "Meditech rounds list" button
+//   under the patient list is taller (110 px), icon above the label
+//   (index.template.html CSS only). No cache-format change, BUILD_ID not bumped.
+var APP_VERSION = 'v5.45';
 var APP_BUILT   = '2026-10-27';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
