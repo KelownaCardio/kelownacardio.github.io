@@ -8,6 +8,9 @@
 //     MOD-11 check digit (the app's isValidPHN), red message under the field;
 //     Add / Done refuse a bad PHN. PHN is now editable on the card (fix a List
 //     typo); a List PHN that fails the check shows amber "PHN check failed".
+//   v5.50 (2026-10-29): picking a different referring MD now shows on the card
+//     ("Referring MD: Dr. Hodge, Steven" under the presenter) — e.g. an NP
+//     presenting for a physician. The List presenter is kept as presented.
 //   Wed Combined Heart Rounds · IHA Sarcoid Rounds · Amyloid EDRD Rounds.
 //   Replaces the Wix form at kelownacardio.com/rounds (Kathryn 2026-10-28).
 //   Backend: Router v3.28 + Rounds.gs v1.0 (roundsGet / roundsPhn /
@@ -446,7 +449,16 @@ function rdCardHtml(p, rank) {
   var ag = (age || p.sex) ? (age + (p.sex || '')) : '';
   var line2 = (ag ? esc(ag) : '<span class="rd-warn">Age/gender ?</span>') + ' · PHN ' + (p.phn ? esc(rdFmtPhn(p.phn)) + (rdPhnProblem(p.phn) ? ' <span class="rd-warn">PHN check failed</span>' : '') : '<span class="rd-warn">?</span>');
   var pres = p.presenter || p.refbyName || '';
-  var line3 = 'Presented: ' + (pres ? esc(pres) : '<span class="rd-warn">?</span>') + (pres && !p.refby ? ' <span class="rd-tag">no MSP #</span>' : '');
+  // v5.50: show the referring MD when it differs from the presenter (e.g. an NP
+  // presenting for the physician) — the claim bills the referring MD, not the presenter.
+  var _sur = function (x) {
+    var t = String(x || '').replace(/\b(dr|np)\.?\s+/ig, '').trim();
+    t = t.indexOf(',') >= 0 ? t.split(',')[0] : t.split(/\s+/).pop();
+    return t.toLowerCase().replace(/[^a-z]/g, '');
+  };
+  var _refSame = !!(p.refbyName && p.presenter && _sur(p.refbyName) === _sur(p.presenter));
+  var line3 = 'Presented: ' + (pres ? esc(pres) : '<span class="rd-warn">?</span>') + (pres && !p.refby ? ' <span class="rd-tag">no MSP #</span>' : '') +
+              (p.refby && p.refbyName && p.presenter && !_refSame ? '<br>Referring MD: ' + esc(p.refbyName) : '');
   var line4 = 'Dx: ' + (p.icd ? esc(p.icdLabel || p.icd) + (p.icdAuto ? ' <span class="rd-tag">suggested</span>' : '') : '<span class="rd-warn">tap to pick</span>');
   var pill = over ? 'Discussed — over cap' : tapped ? '✓ ' + rdTimeAdd(_rd.start, rank * RD_SLOT_MIN) + '–' + rdTimeAdd(_rd.start, (rank + 1) * RD_SLOT_MIN) : 'Discussed';
   var k = esc(p.key);

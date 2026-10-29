@@ -821,8 +821,10 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // v5.49 (2026-10-28) — Rounds card PHN check: auto-spacing, BC MOD-11 check digit
 //   (isValidPHN), red message, Add/Done blocked on a bad PHN, PHN editable on the
 //   card. 13e_rounds_conf.js only. BUILD_ID not bumped.
-var APP_VERSION = 'v5.49';
-var APP_BUILT   = '2026-10-28';
+// v5.50 (2026-10-29) — Rounds card shows the chosen referring MD under the
+//   presenter when they differ (NP presenting for a physician). 13e only.
+var APP_VERSION = 'v5.50';
+var APP_BUILT   = '2026-10-29';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
