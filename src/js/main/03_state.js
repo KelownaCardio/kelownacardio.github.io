@@ -814,7 +814,9 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   Patient referrer when the pick came from the Rounds card (12_referrers.js).
 //   Files: 13e_rounds_conf.js (new), 14_init.js, 12_referrers.js,
 //   index.template.html, 03_state.js. No cache-format change, BUILD_ID not bumped.
-var APP_VERSION = 'v5.46';
+// v5.47 (2026-10-28) — Rounds card: fine-print footer under "Submit for
+//   review" removed (13e_rounds_conf.js only). BUILD_ID not bumped.
+var APP_VERSION = 'v5.47';
 var APP_BUILT   = '2026-10-28';
 
 // ─── v5.20: door failover ───────────────────────────────────────────

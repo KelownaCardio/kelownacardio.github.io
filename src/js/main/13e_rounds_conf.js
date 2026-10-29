@@ -1,6 +1,7 @@
 // ── 13e_rounds_conf.js ──
 // ═══════════════════════════════════════════════════════
 // 13e_rounds_conf.js — v5.46 ROUNDS tab: conference billing (G10004)
+//   v5.47 (2026-10-28): fine-print footer under Submit removed (Kathryn).
 //   Wed Combined Heart Rounds · IHA Sarcoid Rounds · Amyloid EDRD Rounds.
 //   Replaces the Wix form at kelownacardio.com/rounds (Kathryn 2026-10-28).
 //   Backend: Router v3.28 + Rounds.gs v1.0 (roundsGet / roundsPhn /
@@ -24,10 +25,26 @@
 
 var RD_TYPES = [
   { id: 'wed',     label: 'Wed Combined Heart', title: 'Wed Combined Heart Rounds', dx: '',     dxLabel: '' },
-  { id: 'sarcoid', label: 'IHA Sarcoid',        title: 'IHA Sarcoid Rounds',        dx: '135',  dxLabel: 'Sarcoidosis (135)' },
-  { id: 'amyloid', label: 'Amyloid EDRD',       title: 'Amyloid EDRD Rounds',       dx: '2773', dxLabel: 'Amyloidosis (2773)' }
+  { id: 'sarcoid', label: 'IHA Sarcoid',        title: 'IHA Sarcoid Rounds',        dx: '135',  dxLabel: 'Sarcoid (135)' },
+  { id: 'amyloid', label: 'Amyloid EDRD',       title: 'Amyloid EDRD Rounds',       dx: '2773', dxLabel: 'Amyloid (2773)' }
 ];
 var RD_CAP = 5, RD_SLOT_MIN = 15;
+// Dx quick-pick pills — the phone advice web form's pills (same codes and
+// labels as kelownacardio.com/md #icd-quick and PA_ICD_PILLS), plus Aortic
+// Valve Dz / Mitral Valve Dz / Endocarditis / Sarcoid / Amyloid (Kathryn
+// 2026-10-28). Rounds.gs suggests from the same list. One Dx per patient.
+var RD_DX_PILLS = [
+  { code: '4140', label: 'CAD' },            { code: '4280', label: 'Heart Failure' },
+  { code: '4241', label: 'Aortic Valve Dz' }, { code: '4240', label: 'Mitral Valve Dz' },
+  { code: '421',  label: 'Endocarditis' },   { code: '4254', label: 'Cardiomyopathy' },
+  { code: '4273', label: 'AFib' },           { code: '427',  label: 'Arrhythmia' },
+  { code: '4261', label: 'Heart Block' },    { code: '4100', label: 'NSTEMI/STEMI' },
+  { code: '411',  label: 'U/A' },            { code: '7865', label: 'Chest Pain' },
+  { code: '7802', label: 'Syncope' },        { code: '420',  label: 'Pericarditis' },
+  { code: '4019', label: 'HTN' },            { code: '135',  label: 'Sarcoid' },
+  { code: '2773', label: 'Amyloid' }
+];
+function rdPillLabel(code) { for (var i = 0; i < RD_DX_PILLS.length; i++) if (RD_DX_PILLS[i].code === code) return RD_DX_PILLS[i].label + ' (' + code + ')'; return ''; }
 var RD_ROSTER_SEED = [
   { alias: 'SBaker', name: 'Sandy Baker' }, { alias: 'AKhosla', name: 'Amit Khosla' }, { alias: 'ASodhi', name: 'Amit Sodhi' },
   { alias: 'KBrown', name: 'Kathryn Brown' }, { alias: 'EMMassie', name: 'Emma Massie' }, { alias: 'KTodd', name: 'Keith Todd' },
@@ -381,8 +398,6 @@ function rdRender() {
   h += '<div id="rd-status" class="rd-status"></div>';
   h += '<button class="btn btn-p rd-submit" onclick="rdSubmit()"' + (_rd.submitting ? ' disabled' : '') + '>' +
        (_rd.submitting ? 'Submitting…' : miss.length ? 'Submit anyway' : (_rd.submitted ? 'Re-submit for review' : 'Submit for review')) + '</button>';
-  h += '<div class="rd-fine">Nothing is billed yet. Kathryn checks it against the List on Thursday and releases the claims. ' +
-       'Max ' + RD_CAP + ' patients (15 min each); every ticked doctor bills each discussed patient.</div>';
   h += '</div>';
   host.innerHTML = h;
   rdRenderStatus();
@@ -449,11 +464,27 @@ function rdRefFields(pre, p) {
     '<input type="hidden" id="' + pre + '-ref-name" value="' + esc((p && p.refbyName) || '') + '">';
 }
 function rdIcdFields(pre, p) {
-  return '<input id="' + pre + '-icd-search" class="rd-wide" placeholder="Dx — search ICD-9 (one major cardiac diagnosis)" autocomplete="off" autocorrect="off" ' +
+  var cur = (p && p.icd) || '';
+  return '<div class="rd-lbl" style="margin-top:4px">Dx — one major cardiac diagnosis</div>' +
+    '<div class="rd-chips" id="' + pre + '-pills">' + RD_DX_PILLS.map(function (d) {
+      return '<button type="button" class="rd-chip' + (d.code === cur ? ' on' : '') + '" data-code="' + d.code + '" ' +
+             'onclick="rdPickPill(\'' + pre + '\',\'' + d.code + '\')">' + esc(d.label) + '</button>';
+    }).join('') + '</div>' +
+    '<input id="' + pre + '-icd-search" class="rd-wide" placeholder="Other Dx — search ICD-9" autocomplete="off" autocorrect="off" ' +
     'value="' + esc((p && (p.icdLabel || p.icd)) || '') + '" data-dd="' + pre + '-icd-dd" data-hidden="' + pre + '-icd-code" ' +
     'oninput="icdSearchEl(this)" onfocus="icdSearchEl(this)">' +
     '<div id="' + pre + '-icd-dd" class="ref-dd"></div>' +
     '<input type="hidden" id="' + pre + '-icd-code" value="' + esc((p && p.icd) || '') + '">';
+}
+function rdPickPill(pre, code) {
+  var h = document.getElementById(pre + '-icd-code'), inp = document.getElementById(pre + '-icd-search');
+  var same = h && h.value === code;
+  if (h) h.value = same ? '' : code;
+  if (inp) inp.value = same ? '' : rdPillLabel(code);
+  var box = document.getElementById(pre + '-pills');
+  if (box) Array.prototype.forEach.call(box.querySelectorAll('.rd-chip'), function (b) {
+    b.classList.toggle('on', !same && b.getAttribute('data-code') === code);
+  });
 }
 function rdVal(id) { var e = document.getElementById(id); return e ? String(e.value || '').trim() : ''; }
 function rdReadRefIcd(pre, p) {
