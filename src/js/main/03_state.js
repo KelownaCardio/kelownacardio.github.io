@@ -816,7 +816,12 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   index.template.html, 03_state.js. No cache-format change, BUILD_ID not bumped.
 // v5.47 (2026-10-28) — Rounds card: fine-print footer under "Submit for
 //   review" removed (13e_rounds_conf.js only). BUILD_ID not bumped.
-var APP_VERSION = 'v5.47';
+// v5.48 (2026-10-28) — Rounds card DOB fields auto-insert "/" as digits are
+//   typed (iPhone number pad has no slash). 13e_rounds_conf.js only. BUILD_ID not bumped.
+// v5.49 (2026-10-28) — Rounds card PHN check: auto-spacing, BC MOD-11 check digit
+//   (isValidPHN), red message, Add/Done blocked on a bad PHN, PHN editable on the
+//   card. 13e_rounds_conf.js only. BUILD_ID not bumped.
+var APP_VERSION = 'v5.49';
 var APP_BUILT   = '2026-10-28';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
