@@ -79,9 +79,51 @@ body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:
 .nav { display:flex; background:var(--surface2); border-bottom:1px solid var(--border2); position:sticky; top:54px; z-index:49; padding:4px 6px; gap:4px; }
 .nb { flex:1; padding:7px 3px; font-size:11px; text-align:center; color:var(--text2); cursor:pointer; border:none; border-radius:var(--rsm); font-family:inherit; background:none; transition:background .15s,color .15s; }
 .nb.on { color:var(--kca-navy); font-weight:700; background:var(--surface); box-shadow:0 1px 3px rgba(0,0,0,.1); }
+/* v5.46: tabs on row 1, Add patient pill full width on row 2 */
+.nav { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); }
+.nb-add { grid-column:1 / -1; grid-row:2; background:var(--green-bg); color:var(--green-t); font-weight:700; font-size:12px; border:.5px solid rgba(26,122,74,.35); border-radius:var(--rpill); padding:7px 3px; }
+.nb-add.on { background:var(--green); color:#fff; box-shadow:none; }
+.nb-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--red); margin-left:5px; vertical-align:1px; }
+/* v5.46: Rounds conference card (13e_rounds_conf.js) — big enough to read on the projector */
+.rd-banner { background:var(--blue); color:#fff; border-radius:var(--r); padding:12px 14px; margin-bottom:10px; }
+.rd-banner-t { font-size:18px; font-weight:800; letter-spacing:-.2px; }
+.rd-banner-s { font-size:13px; opacity:.9; margin-top:2px; }
+.rd-chips { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }
+.rd-chip, .rd-doc { border:.5px solid var(--border2); background:var(--surface); color:var(--text2); border-radius:var(--rpill); padding:8px 13px; font-size:13px; font-family:inherit; cursor:pointer; }
+.rd-chip.on { background:var(--blue-bg); color:var(--blue-t); border-color:var(--blue); font-weight:700; }
+.rd-doc.on { background:var(--teal-bg); color:var(--teal-t); border-color:var(--teal); font-weight:700; }
+.rd-row2 { display:flex; gap:12px; flex-wrap:wrap; margin:2px 0 6px; font-size:12px; color:var(--text2); }
+.rd-row2 input { display:block; margin-top:3px; font-size:15px; padding:6px 8px; }
+.rd-lbl { font-size:11px; font-weight:700; color:var(--text2); text-transform:uppercase; letter-spacing:.5px; margin:12px 0 6px; }
+.rd-note { font-size:12px; color:var(--text2); margin:-2px 0 8px; }
+.rd-empty { font-size:14px; color:var(--text2); padding:14px; text-align:center; background:var(--surface); border-radius:var(--r); border:.5px dashed var(--border2); margin-bottom:8px; }
+.rd-card { display:flex; align-items:center; gap:12px; background:var(--surface); border:.5px solid var(--border); border-radius:var(--r); padding:12px 14px; margin-bottom:8px; }
+.rd-card.on { border-color:var(--green); background:#f6fbf8; }
+.rd-card.over { border-color:var(--amber); }
+.rd-info { flex:1; min-width:0; cursor:pointer; }
+.rd-name { font-size:18px; font-weight:800; color:var(--text); letter-spacing:-.2px; }
+.rd-meta { font-size:14px; color:var(--text2); margin-top:2px; }
+.rd-tag { font-size:10px; font-weight:700; background:var(--surface2); color:var(--text2); border-radius:4px; padding:1px 5px; vertical-align:1px; }
+.rd-warn { color:var(--amber-t); font-weight:700; }
+.rd-pill { flex-shrink:0; min-width:150px; padding:13px 14px; border-radius:var(--rpill); border:1px solid var(--border2); background:var(--surface); color:var(--text); font-size:15px; font-weight:700; font-family:inherit; cursor:pointer; }
+.rd-pill.on { background:var(--green); border-color:var(--green); color:#fff; }
+.rd-pill.over { background:var(--amber-bg); border-color:var(--amber); color:var(--amber-t); }
+.rd-edit { background:var(--surface); border:.5px solid var(--border2); border-radius:var(--r); padding:12px 13px; margin:-4px 0 10px; }
+.rd-addt { font-size:15px; font-weight:800; margin-bottom:8px; }
+.rd-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:7px; margin-bottom:7px; }
+.rd-grid input, .rd-grid select, .rd-wide { font-size:15px; padding:9px 10px; box-sizing:border-box; width:100%; }
+.rd-wide { margin-bottom:7px; }
+.rd-err { font-size:13px; color:var(--red); min-height:16px; margin:2px 0 6px; }
+.rd-btns { display:flex; gap:8px; } .rd-btns .btn { margin:0; }
+.rd-add { width:100%; padding:13px; border:1px dashed var(--teal); background:var(--teal-bg); color:var(--teal-t); border-radius:var(--r); font-size:15px; font-weight:700; font-family:inherit; cursor:pointer; margin:4px 0 12px; }
+.rd-foot { border-top:.5px solid var(--border2); padding-top:10px; }
+.rd-status { font-size:12px; color:var(--text2); min-height:16px; margin-bottom:6px; }
+.rd-missing { font-size:13px; background:var(--amber-bg); border-radius:var(--rsm); padding:8px 10px; margin-bottom:8px; font-weight:400; }
+.rd-submit { font-size:15px; padding:13px; }
+.rd-fine { font-size:11px; color:var(--text3); line-height:1.45; }
 
 /* LIST SELECTOR + ROUNDS SEARCH (below nav, only on Rounds tab) */
-.list-sel { display:flex; flex-direction:column; background:var(--surface); border-bottom:1px solid var(--border2); position:sticky; top:88px; z-index:48; padding:6px 8px; gap:5px; }
+.list-sel { display:flex; flex-direction:column; background:var(--surface); border-bottom:1px solid var(--border2); position:sticky; top:var(--stick-top,122px); z-index:48; padding:6px 8px; gap:5px; }
 .list-sel.hidden { display:none; }
 .list-sel-btns { display:flex; gap:4px; }
 .ls-btn { flex:1; padding:7px 8px; font-size:12px; font-weight:600; text-align:center; cursor:pointer; border:none; border-radius:var(--rsm); color:var(--text2); background:none; font-family:inherit; transition:background .15s,color .15s; }
@@ -829,7 +871,7 @@ input[type=file] { display:none; }
 
 <div id="wifi-banner" style="display:none;align-items:center;justify-content:center;gap:8px;
   background:#c42828;color:#fff;font-size:12px;font-weight:600;padding:8px 14px;
-  position:sticky;top:88px;z-index:47;">
+  position:sticky;top:var(--stick-top,122px);z-index:47;">
   <svg style="width:14px;height:14px;stroke:#fff;fill:none;stroke-width:2;flex-shrink:0" viewBox="0 0 24 24">
     <line x1="1" y1="1" x2="23" y2="23"/>
     <path d="M16.72 11.06A10.94 10.94 0 0119 12.55M5 12.55a10.94 10.94 0 015.17-2.39M10.71 5.05A16 16 0 0122.56 9M1.42 9a15.91 15.91 0 014.7-2.88M8.53 16.11a6 6 0 016.95 0M12 20h.01"/>
@@ -852,10 +894,14 @@ input[type=file] { display:none; }
   </button>
 </div>
 
+<!-- v5.46: tabs renamed (Patient Lists | Recently D/C | Rounds). "Add patient" is a
+     full-width light-green pill on its own row (CSS grid places it on row 2), but stays
+     the 2nd .nb in the DOM so every querySelectorAll('.nb')[n] caller still maps to nav(n). -->
 <div class="nav">
-  <button class="nb on" onclick="nav(0,this)">Rounds</button>
-  <button class="nb" onclick="nav(1,this)">Add patient</button>
-  <button class="nb" onclick="nav(2,this)">Recently discharged</button>
+  <button class="nb on" onclick="nav(0,this)">Patient Lists</button>
+  <button class="nb nb-add" onclick="nav(1,this)">+ Add patient</button>
+  <button class="nb" onclick="nav(2,this)">Recently D/C</button>
+  <button class="nb" onclick="nav(3,this)">Rounds<span id="nb-rounds-dot" class="nb-dot" style="display:none"></span></button>
 </div>
 
 <div class="list-sel" id="list-sel-bar">
@@ -895,6 +941,11 @@ input[type=file] { display:none; }
     <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><span id="rl-foot-lbl">Meditech rounds list (PDF) &rarr; rooms &amp; QuickChart &mdash; tap or drop PDF here</span>
   </button>
   <!-- v5.44: "Export list for QuickChart" button removed (Kathryn 2026-10-27) — the rounds-list box has its own Copy for QuickChart. openQuickChartExport() left in 11_export.js, unused. -->
+</div>
+
+<!-- ═══ v5.46: ROUNDS (conference billing) PANE — 13e_rounds_conf.js ═══ -->
+<div class="pane" id="p-rounds">
+  <div id="rd-host"></div>
 </div>
 
 <!-- ═══ ADD PATIENT PANE ═══ -->
