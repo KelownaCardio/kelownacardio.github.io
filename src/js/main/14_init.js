@@ -404,7 +404,7 @@ async function resetLocalData() {
 }
 
 // ── Navigation ─────────────────────────────────────────
-var ALL_PANES = ['p0','p1','p-discharged','p-claim','p-loc'];
+var ALL_PANES = ['p0','p1','p-discharged','p-claim','p-loc','p-rounds'];   // v5.46: + p-rounds
 
 function showPane(id) {
   ALL_PANES.forEach(function(pid) { document.getElementById(pid).classList.remove('on'); });
@@ -457,6 +457,7 @@ function applyResidentChrome() {
   // Add Patient nav button — matched by its handler, since the nav buttons
   // carry no distinguishing id or class in the shell.
   _hide('[onclick^="nav(1"]');
+  _hide('[onclick^="nav(3"]');   // v5.46: Rounds (conference billing) tab — MD-only
   // Phone Advice launcher in the footer — no id/class, matched by its handler.
   _hide('[onclick*="openPhoneAdvice"]');
   // "Search all discharged (incl. >7-day archive)" — needs getAllForDataCheck.
@@ -471,14 +472,20 @@ function nav(n, el) {
     showToast('Ask the attending to add new patients');
     return;
   }
+  // v5.46: Rounds (conference billing) is MD-only too — the backend refuses residents.
+  if (n === 3 && isResident()) return;
+  // Leaving the Rounds tab: push any unsaved taps now (no-op when clean).
+  if (n !== 3 && typeof rdFlushNow === 'function') { try { rdFlushNow(); } catch (eR) {} }
   document.querySelectorAll('.nb').forEach(function(b, i) { b.classList.toggle('on', i === n); });
-  var paneMap = { 0:'p0', 1:'p1', 2:'p-discharged' };
+  var paneMap = { 0:'p0', 1:'p1', 2:'p-discharged', 3:'p-rounds' };
   showPane(paneMap[n] || 'p0');
   var listSel = document.getElementById('list-sel-bar');
   if (listSel) listSel.classList.toggle('hidden', n !== 0);
   if (n === 0) render();
   if (n === 1) initAddPatientConsult();
   if (n === 2) initDischarged();
+  if (n === 3 && typeof initRoundsConf === 'function') initRoundsConf();
+  if (typeof rdFixSticky === 'function') rdFixSticky();
 }
 
 function setList(v) {

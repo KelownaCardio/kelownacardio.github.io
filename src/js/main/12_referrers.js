@@ -325,7 +325,9 @@ function selectRef(num, displayName, dropdownId, hiddenId, nameId) {
   if (nameEl) nameEl.value = displayName;
 
   // Populate f-refby-num if present (Add Patient form)
-  var numEl = document.getElementById('f-refby-num');
+  // v5.46: not when the pick came from the Rounds card (rde-/rda- fields) —
+  // it must never overwrite an Add Patient form that is open in another tab.
+  var numEl = /^rd[ea]-/.test(String(dropdownId || '')) ? null : document.getElementById('f-refby-num');
   if (numEl) numEl.value = num;
 
   // Fill visible search input with selected name

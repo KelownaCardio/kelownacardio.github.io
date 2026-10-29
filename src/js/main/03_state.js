@@ -804,8 +804,18 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // v5.45 (2026-10-27) — Bigger drop target: the "Meditech rounds list" button
 //   under the patient list is taller (110 px), icon above the label
 //   (index.template.html CSS only). No cache-format change, BUILD_ID not bumped.
-var APP_VERSION = 'v5.45';
-var APP_BUILT   = '2026-10-27';
+// v5.46 (2026-10-28) — ROUNDS tab: conference billing (G10004) for Wed
+//   Combined Heart, IHA Sarcoid and Amyloid EDRD rounds (new
+//   13e_rounds_conf.js; needs Router v3.28 + Rounds.gs v1.0). Nav renamed
+//   Patient Lists | Recently D/C | Rounds; Add patient = full-width light-green
+//   pill on a second nav row (still the 2nd .nb, so nav indexes are unchanged).
+//   Red dot on Rounds Wed 06:30–07:50 except BC stat holidays. Sticky bars
+//   follow the taller nav (--stick-top). selectRef no longer touches the Add
+//   Patient referrer when the pick came from the Rounds card (12_referrers.js).
+//   Files: 13e_rounds_conf.js (new), 14_init.js, 12_referrers.js,
+//   index.template.html, 03_state.js. No cache-format change, BUILD_ID not bumped.
+var APP_VERSION = 'v5.46';
+var APP_BUILT   = '2026-10-28';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
