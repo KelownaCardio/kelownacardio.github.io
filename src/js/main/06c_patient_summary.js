@@ -744,27 +744,13 @@ function _cvGapDays(p, claims) {
   return gaps;
 }
 
-// CCU fee for a specific date based on consecutive prior CCU days
+// CCU fee for a specific date based on consecutive prior CCU days.
+// v5.51 (2026-11-02): now delegates to ccuFeeForDate (04_billing.js) — this
+// was a second copy of the same fixed-24-hour date maths that broke across the
+// 01/11/2026 clock change (see ccuFeeForDate). One implementation, so the
+// calendar and the quick buttons can never disagree on the band again.
 function _cvCcuFeeForDate(p, dateStr) {
-  var CCU_FEES = ['CCU_DAILY','1411','1421','1431'];
-  var DAY_MS = 86400000;
-  var targetMs = parseDMYsafe(dateStr);
-  if (!targetMs) return '1411';
-  // Count consecutive CCU days immediately preceding targetMs
-  var ccuDateSet = {};
-  st.claims.forEach(function(c) {
-    if (samePhn(c.phn, p.phn) && CCU_FEES.indexOf(c.fee) !== -1) {
-      var ms = parseDMYsafe(c.date);
-      if (ms && ms < targetMs) ccuDateSet[ms] = true;
-    }
-  });
-  var consec = 0;
-  var checkMs = targetMs - DAY_MS;
-  while (ccuDateSet[checkMs]) { consec++; checkMs -= DAY_MS; }
-  var dayNum = consec + 1;
-  if (dayNum === 1) return '1411';
-  if (dayNum <= 7)  return '1421';
-  return '1431';
+  return ccuFeeForDate(p, dateStr);
 }
 
 // Build calendar HTML
@@ -873,17 +859,24 @@ function _ptSummaryCalendarHTML(p, claims) {
 
     var cls = 'cv-day';
     var styleAttr = '';
-    if (dayTypes.length >= 2) {
+    // v5.51 (2026-11-02): only COLOURED types may take a half of the split.
+    // 'procedure' (00751 / 00017 / 33025 / 33030) has no entry in CV_TYPE_BG,
+    // so CCU + cardioversion (Murray 01/11) built "linear-gradient(…undefined…)",
+    // the browser threw the whole background away and the day showed its
+    // 1411 tag on a WHITE cell. Uncoloured types are now skipped.
+    var _cvColTypes = dayTypes.filter(function(t) { return !!CV_TYPE_BG[t]; });
+    if (!_cvColTypes.length && dayTypes.length) _cvColTypes = ['consult'];   // same fallback as _cvDayTypes
+    if (_cvColTypes.length >= 2) {
       // Two (or more) claim types on this day — split the cell diagonally so
       // both colours show. Top-left triangle = highest-priority type; only
       // the top two are shown (a diagonal has two halves). A thin white seam
       // keeps the split clear even between the two similar greens.
-      var cA = CV_TYPE_BG[dayTypes[0]], cB = CV_TYPE_BG[dayTypes[1]];
+      var cA = CV_TYPE_BG[_cvColTypes[0]], cB = CV_TYPE_BG[_cvColTypes[1]];
       styleAttr = ' style="background:linear-gradient(135deg,' +
                   cA + ' 0%,' + cA + ' 49.4%,#ffffff 49.4%,#ffffff 50.6%,' +
                   cB + ' 50.6%,' + cB + ' 100%);color:#1a1128"';
-    } else if (dominant) {
-      cls += ' cv-' + dominant;
+    } else if (_cvColTypes.length) {
+      cls += ' cv-' + _cvColTypes[0];
     } else if (isGap) {
       cls += ' cv-gap';
     }

@@ -665,24 +665,49 @@ function dirCountThisWeek(phn, isoDate) {
 // dateStr is DD/MM/YYYY (Sheet storage format). Defaults to TODAY.
 // v3.59: generalized from ccuFeeForToday; CCU_DAILY is now a deprecated tag
 // (still recognized in history scan so existing rows don't break banding logic).
+//
+// v5.51 (2026-11-02, Kathryn): CCU DAY COUNT IS PER PATIENT, NEVER PER DOCTOR.
+//   PROBLEM: on Mon 02/11/2026 (rounding handover KHoskin → ASodhi) all four
+//   of ASodhi's CCU claims were stamped 1411 "Day 1" — Gregory (day 6),
+//   Enns (day 11), Murray (day 2), Seminiuk (day 2). The claims from the
+//   previous doctor were on the sheet and this scan already counts ALL doctors,
+//   so the band was lost in the DATE MATHS, not the doctor filter: the old
+//   code stepped back from the target date in fixed 24-hour (86,400,000 ms)
+//   jumps from LOCAL midnight. 01/11/2026 is the first "fall back" BC skipped
+//   (permanent daylight time). A device whose clock/time zone still fell back
+//   (old tz data, or set to US Pacific / Los_Angeles) has a 25-hour 1 Nov, so
+//   "2 Nov midnight − 24 h" = 1 Nov 23:00 ≠ 1 Nov midnight → the previous day
+//   was never found → every CCU claim restarted at Day 1. The same break hits
+//   any device at any DST change (twice a year for US-zoned devices).
+//   (Cause = best explanation from the evidence; ASodhi's device time zone
+//   not yet confirmed.)
+//   FIX: compare CALENDAR DAYS, not milliseconds — each DD/MM/YYYY is turned
+//   into a whole day number via Date.UTC, which has no daylight time, so
+//   "previous day" is always exactly day − 1 on every device. Dates that came
+//   back from Sheets as ISO / Date objects are normalised first (fmtClaimDate).
+//   NOT CHANGED: scans every doctor's CCU claims for the PHN (unchanged since
+//   v4.29); band thresholds; a 1-day gap still resets the episode.
+function ccuDayNum(d) {
+  var s = (typeof fmtClaimDate === 'function') ? fmtClaimDate(d) : String(d || '');
+  var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(s || '').trim());
+  if (!m) return 0;
+  return Math.round(Date.UTC(parseInt(m[3],10), parseInt(m[2],10)-1, parseInt(m[1],10)) / 86400000);
+}
 function ccuFeeForDate(p, dateStr) {
   var CCU_FEES = ['CCU_DAILY','1411','1421','1431'];
-  var DAY_MS   = 86400000;
-  var targetMs = parseDMYsafe(dateStr || TODAY);
-  if (!targetMs) return '1411';
-  var taps = st.claims
-    .filter(function(c) { return samePhn(c.phn, p.phn) && CCU_FEES.indexOf(c.fee) !== -1; });
-  if (!taps.length) return '1411';
-  var dateMsSet = {};
-  taps.forEach(function(c) {
-    var ms = parseDMYsafe(c.date);
+  var target   = ccuDayNum(dateStr || TODAY);
+  if (!target || !p) return '1411';
+  var days = {};
+  (st.claims || []).forEach(function(c) {
+    if (!samePhn(c.phn, p.phn) || CCU_FEES.indexOf(String(c.fee || '').trim()) === -1) return;
+    var dn = ccuDayNum(c.date);
     // Only count days STRICTLY before the target — we're computing the
     // band FOR the target date, so it doesn't count itself.
-    if (ms && ms < targetMs) dateMsSet[ms] = true;
+    if (dn && dn < target) days[dn] = true;
   });
   var consec = 0;
-  var checkMs = targetMs - DAY_MS;
-  while (dateMsSet[checkMs]) { consec++; checkMs -= DAY_MS; }
+  var chk = target - 1;
+  while (days[chk]) { consec++; chk--; }
   var dayNum = consec + 1;
   if (dayNum === 1) return '1411';
   if (dayNum <= 7)  return '1421';

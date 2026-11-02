@@ -823,8 +823,15 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   card. 13e_rounds_conf.js only. BUILD_ID not bumped.
 // v5.50 (2026-10-29) — Rounds card shows the chosen referring MD under the
 //   presenter when they differ (NP presenting for a physician). 13e only.
-var APP_VERSION = 'v5.50';
-var APP_BUILT   = '2026-10-29';
+// v5.51 (2026-11-02, Kathryn) — CCU band is per PATIENT across the doctor
+//   handover. ccuFeeForDate (04_billing.js) now counts calendar days, not
+//   24-hour blocks, so the 01/11/2026 clock change (BC stayed on daylight
+//   time; devices that "fell back" had a 25-hour day) can no longer restart a
+//   CCU episode at 1411. _cvCcuFeeForDate (06c) now uses the same function.
+//   Also: calendar day with CCU + a procedure (00751 etc.) rendered WHITE —
+//   uncoloured types are skipped in the diagonal split (06c). BUILD_ID not bumped.
+var APP_VERSION = 'v5.51';
+var APP_BUILT   = '2026-11-02';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
