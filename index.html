@@ -3247,8 +3247,15 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   card. 13e_rounds_conf.js only. BUILD_ID not bumped.
 // v5.50 (2026-10-29) — Rounds card shows the chosen referring MD under the
 //   presenter when they differ (NP presenting for a physician). 13e only.
-var APP_VERSION = 'v5.50';
-var APP_BUILT   = '2026-10-29';
+// v5.51 (2026-11-02, Kathryn) — CCU band is per PATIENT across the doctor
+//   handover. ccuFeeForDate (04_billing.js) now counts calendar days, not
+//   24-hour blocks, so the 01/11/2026 clock change (BC stayed on daylight
+//   time; devices that "fell back" had a 25-hour day) can no longer restart a
+//   CCU episode at 1411. _cvCcuFeeForDate (06c) now uses the same function.
+//   Also: calendar day with CCU + a procedure (00751 etc.) rendered WHITE —
+//   uncoloured types are skipped in the diagonal split (06c). BUILD_ID not bumped.
+var APP_VERSION = 'v5.51';
+var APP_BUILT   = '2026-11-02';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
@@ -6159,24 +6166,49 @@ function dirCountThisWeek(phn, isoDate) {
 // dateStr is DD/MM/YYYY (Sheet storage format). Defaults to TODAY.
 // v3.59: generalized from ccuFeeForToday; CCU_DAILY is now a deprecated tag
 // (still recognized in history scan so existing rows don't break banding logic).
+//
+// v5.51 (2026-11-02, Kathryn): CCU DAY COUNT IS PER PATIENT, NEVER PER DOCTOR.
+//   PROBLEM: on Mon 02/11/2026 (rounding handover KHoskin → ASodhi) all four
+//   of ASodhi's CCU claims were stamped 1411 "Day 1" — Gregory (day 6),
+//   Enns (day 11), Murray (day 2), Seminiuk (day 2). The claims from the
+//   previous doctor were on the sheet and this scan already counts ALL doctors,
+//   so the band was lost in the DATE MATHS, not the doctor filter: the old
+//   code stepped back from the target date in fixed 24-hour (86,400,000 ms)
+//   jumps from LOCAL midnight. 01/11/2026 is the first "fall back" BC skipped
+//   (permanent daylight time). A device whose clock/time zone still fell back
+//   (old tz data, or set to US Pacific / Los_Angeles) has a 25-hour 1 Nov, so
+//   "2 Nov midnight − 24 h" = 1 Nov 23:00 ≠ 1 Nov midnight → the previous day
+//   was never found → every CCU claim restarted at Day 1. The same break hits
+//   any device at any DST change (twice a year for US-zoned devices).
+//   (Cause = best explanation from the evidence; ASodhi's device time zone
+//   not yet confirmed.)
+//   FIX: compare CALENDAR DAYS, not milliseconds — each DD/MM/YYYY is turned
+//   into a whole day number via Date.UTC, which has no daylight time, so
+//   "previous day" is always exactly day − 1 on every device. Dates that came
+//   back from Sheets as ISO / Date objects are normalised first (fmtClaimDate).
+//   NOT CHANGED: scans every doctor's CCU claims for the PHN (unchanged since
+//   v4.29); band thresholds; a 1-day gap still resets the episode.
+function ccuDayNum(d) {
+  var s = (typeof fmtClaimDate === 'function') ? fmtClaimDate(d) : String(d || '');
+  var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(s || '').trim());
+  if (!m) return 0;
+  return Math.round(Date.UTC(parseInt(m[3],10), parseInt(m[2],10)-1, parseInt(m[1],10)) / 86400000);
+}
 function ccuFeeForDate(p, dateStr) {
   var CCU_FEES = ['CCU_DAILY','1411','1421','1431'];
-  var DAY_MS   = 86400000;
-  var targetMs = parseDMYsafe(dateStr || TODAY);
-  if (!targetMs) return '1411';
-  var taps = st.claims
-    .filter(function(c) { return samePhn(c.phn, p.phn) && CCU_FEES.indexOf(c.fee) !== -1; });
-  if (!taps.length) return '1411';
-  var dateMsSet = {};
-  taps.forEach(function(c) {
-    var ms = parseDMYsafe(c.date);
+  var target   = ccuDayNum(dateStr || TODAY);
+  if (!target || !p) return '1411';
+  var days = {};
+  (st.claims || []).forEach(function(c) {
+    if (!samePhn(c.phn, p.phn) || CCU_FEES.indexOf(String(c.fee || '').trim()) === -1) return;
+    var dn = ccuDayNum(c.date);
     // Only count days STRICTLY before the target — we're computing the
     // band FOR the target date, so it doesn't count itself.
-    if (ms && ms < targetMs) dateMsSet[ms] = true;
+    if (dn && dn < target) days[dn] = true;
   });
   var consec = 0;
-  var checkMs = targetMs - DAY_MS;
-  while (dateMsSet[checkMs]) { consec++; checkMs -= DAY_MS; }
+  var chk = target - 1;
+  while (days[chk]) { consec++; chk--; }
   var dayNum = consec + 1;
   if (dayNum === 1) return '1411';
   if (dayNum <= 7)  return '1421';
@@ -10019,27 +10051,13 @@ function _cvGapDays(p, claims) {
   return gaps;
 }
 
-// CCU fee for a specific date based on consecutive prior CCU days
+// CCU fee for a specific date based on consecutive prior CCU days.
+// v5.51 (2026-11-02): now delegates to ccuFeeForDate (04_billing.js) — this
+// was a second copy of the same fixed-24-hour date maths that broke across the
+// 01/11/2026 clock change (see ccuFeeForDate). One implementation, so the
+// calendar and the quick buttons can never disagree on the band again.
 function _cvCcuFeeForDate(p, dateStr) {
-  var CCU_FEES = ['CCU_DAILY','1411','1421','1431'];
-  var DAY_MS = 86400000;
-  var targetMs = parseDMYsafe(dateStr);
-  if (!targetMs) return '1411';
-  // Count consecutive CCU days immediately preceding targetMs
-  var ccuDateSet = {};
-  st.claims.forEach(function(c) {
-    if (samePhn(c.phn, p.phn) && CCU_FEES.indexOf(c.fee) !== -1) {
-      var ms = parseDMYsafe(c.date);
-      if (ms && ms < targetMs) ccuDateSet[ms] = true;
-    }
-  });
-  var consec = 0;
-  var checkMs = targetMs - DAY_MS;
-  while (ccuDateSet[checkMs]) { consec++; checkMs -= DAY_MS; }
-  var dayNum = consec + 1;
-  if (dayNum === 1) return '1411';
-  if (dayNum <= 7)  return '1421';
-  return '1431';
+  return ccuFeeForDate(p, dateStr);
 }
 
 // Build calendar HTML
@@ -10148,17 +10166,24 @@ function _ptSummaryCalendarHTML(p, claims) {
 
     var cls = 'cv-day';
     var styleAttr = '';
-    if (dayTypes.length >= 2) {
+    // v5.51 (2026-11-02): only COLOURED types may take a half of the split.
+    // 'procedure' (00751 / 00017 / 33025 / 33030) has no entry in CV_TYPE_BG,
+    // so CCU + cardioversion (Murray 01/11) built "linear-gradient(…undefined…)",
+    // the browser threw the whole background away and the day showed its
+    // 1411 tag on a WHITE cell. Uncoloured types are now skipped.
+    var _cvColTypes = dayTypes.filter(function(t) { return !!CV_TYPE_BG[t]; });
+    if (!_cvColTypes.length && dayTypes.length) _cvColTypes = ['consult'];   // same fallback as _cvDayTypes
+    if (_cvColTypes.length >= 2) {
       // Two (or more) claim types on this day — split the cell diagonally so
       // both colours show. Top-left triangle = highest-priority type; only
       // the top two are shown (a diagonal has two halves). A thin white seam
       // keeps the split clear even between the two similar greens.
-      var cA = CV_TYPE_BG[dayTypes[0]], cB = CV_TYPE_BG[dayTypes[1]];
+      var cA = CV_TYPE_BG[_cvColTypes[0]], cB = CV_TYPE_BG[_cvColTypes[1]];
       styleAttr = ' style="background:linear-gradient(135deg,' +
                   cA + ' 0%,' + cA + ' 49.4%,#ffffff 49.4%,#ffffff 50.6%,' +
                   cB + ' 50.6%,' + cB + ' 100%);color:#1a1128"';
-    } else if (dominant) {
-      cls += ' cv-' + dominant;
+    } else if (_cvColTypes.length) {
+      cls += ' cv-' + _cvColTypes[0];
     } else if (isGap) {
       cls += ' cv-gap';
     }
@@ -25308,5 +25333,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "52bacb9d8ce7";</script></body>
+<script>var BUILD_HASH = "eb3dd2c29204";</script></body>
 </html>
