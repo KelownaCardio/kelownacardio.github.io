@@ -830,7 +830,13 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   CCU episode at 1411. _cvCcuFeeForDate (06c) now uses the same function.
 //   Also: calendar day with CCU + a procedure (00751 etc.) rendered WHITE —
 //   uncoloured types are skipped in the diagonal split (06c). BUILD_ID not bumped.
-var APP_VERSION = 'v5.51';
+// v5.52 (2026-11-02, Kathryn) — KB billing follow-up flag added to every
+//   editable row of the patient's Claim History list (06c), with the flag note
+//   shown under the claim. Flag/unflag from there refreshes Claim History in
+//   place (05_render _cfRefreshAfterFlag) instead of opening Today's Claims.
+//   cf-note-modal raised above pt-summary-modal (index.template.html z-index).
+//   BUILD_ID not bumped.
+var APP_VERSION = 'v5.52';
 var APP_BUILT   = '2026-11-02';
 
 // ─── v5.20: door failover ───────────────────────────────────────────

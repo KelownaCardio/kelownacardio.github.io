@@ -566,6 +566,8 @@ function _ptSummaryListHTML(p, claims) {
       html +=     '<div style="font-size:12px;font-weight:600">' + esc(feeLabel) + '</div>';
       html +=     '<div style="font-size:10px;color:var(--text2);margin-top:2px">' + esc(dxLabel) + '</div>';
       if (c.notes) html += '<div style="font-size:10px;color:var(--amber-t);margin-top:2px;font-style:italic">' + esc(c.notes) + '</div>';
+      // v5.52: show the KB follow-up note on a flagged claim.
+      if (c.followUp && c.followUpNote) html += '<div style="font-size:10px;color:var(--green-t);margin-top:2px">\u2691 KB follow-up: ' + esc(c.followUpNote) + '</div>';
       html +=   '</div>';
       html +=   '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0">';
       html +=     '<div style="font-size:10px;color:var(--text3);text-align:right">' + esc(c.alias || '—');
@@ -582,7 +584,12 @@ function _ptSummaryListHTML(p, claims) {
         html +=   '<span class="chip chip-grey" style="font-size:8px;padding:1px 5px;white-space:nowrap" ' +
                   'title="Submitted and archived in BigQuery. Edit or resubmit via iClinic, not the app.">submitted</span>';
       } else {
-        html +=   '<div style="display:flex;gap:4px">';
+        // v5.52 (2026-11-02, Kathryn): KB billing follow-up flag, same button and
+        // mandatory-note modal as Today's Claims, so any claim still on the Sheet
+        // (any date, any doctor) can be flagged from Claim History. Archived (BQ)
+        // rows above stay read-only — they are not in st.claims to save.
+        html +=   '<div style="display:flex;gap:4px;align-items:center">';
+        html +=     _cfFlagBtn(c, 'hx');
         html +=     '<button class="claim-action-btn claim-edit-btn" data-cid="' + c.id + '" data-pid="' + p.id + '" onclick="openClaimEdit(this)" title="Edit claim">✎</button>';
         html +=     '<button class="claim-action-btn claim-del-btn"  data-cid="' + c.id + '" data-pid="' + p.id + '" onclick="deleteClaimBtn(this)" title="Delete claim">✕</button>';
         html +=   '</div>';

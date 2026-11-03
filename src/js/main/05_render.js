@@ -140,7 +140,22 @@ function toggleHandoverFlag(pid) {
 // (Kathryn, 2026-09-21) — the note is what tells her what to actually
 // follow up on for that MSP claim, so an empty flag isn't useful. "Cancel"
 // backs out without flagging; there is no "flag with no note" option.
-function toggleClaimFollowUp(claimId) {
+// v5.52 (2026-11-02, Kathryn): the flag is now also on every editable row of
+//   the patient's Claim History list (06c _ptSummaryListHTML). `origin`
+//   ('hx' | undefined) decides what re-renders after a flag/unflag:
+//   'hx' → the open Claim History (list + calendar) in place; otherwise the
+//   Today's-Claims sheet as before. Before this, re-rendering always called
+//   openDailyClaimsList, which would have opened that sheet on top.
+var _cfOrigin = null;
+function _cfRefreshAfterFlag() {
+  if (_cfOrigin === 'hx' && window._cvPid && typeof _cvRefreshSummary === 'function') {
+    _cvRefreshSummary(window._cvPid);
+  } else if (typeof openDailyClaimsList === 'function') {
+    openDailyClaimsList(_dailyClaimsFilter);
+  }
+}
+function toggleClaimFollowUp(claimId, origin) {
+  _cfOrigin = origin || null;
   var c = (st.claims || []).find(function(x){ return String(x.id) === String(claimId); });
   if (!c) return;
   if (c.followUp) {
@@ -148,7 +163,7 @@ function toggleClaimFollowUp(claimId) {
     sv('claims', st.claims);
     if (SHEETS_URL) push('saveClaim', c);
     logChange(c, 'Follow-up flag cleared', (c.fee || '') + ' on ' + (c.date || ''));
-    if (typeof openDailyClaimsList === 'function') openDailyClaimsList(_dailyClaimsFilter);
+    _cfRefreshAfterFlag();
     return;
   }
   var idEl  = document.getElementById('cf-note-claim-id');
@@ -187,7 +202,7 @@ function cfSaveFollowUpNote() {
   if (SHEETS_URL) push('saveClaim', c);
   logChange(c, 'Flagged claim for KB billing follow-up',
     (c.fee || '') + ' on ' + (c.date || '') + ' \u2014 ' + note);
-  if (typeof openDailyClaimsList === 'function') openDailyClaimsList(_dailyClaimsFilter);
+  _cfRefreshAfterFlag();
 }
 
 // v4.62: bordered footer row with the three card-level actions.
