@@ -3266,8 +3266,17 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   place (05_render _cfRefreshAfterFlag) instead of opening Today's Claims.
 //   cf-note-modal raised above pt-summary-modal (index.template.html z-index).
 //   BUILD_ID not bumped.
-var APP_VERSION = 'v5.52';
-var APP_BUILT   = '2026-11-02';
+// v5.53 (2026-11-03, Kathryn) — CLOCK-CHANGE FIX. BC went to permanent
+//   UTC-7, but some devices still applied the old 01/11 fall-back (25-hour day).
+//   Code that stepped days by adding 24 h drifted to 23:00 the previous day:
+//   (1) discharge gap gate flagged an already-billed day as a "billing gap"
+//   (06c _cvGapDays — ASodhi 03/11); (2) calendar range-fill skipped the last
+//   day (06c _cvApplyTypeRange); (3) CCFPP prev/next-day lookups read the wrong
+//   day at a clock change (04_billing). All now step by calendar date via
+//   dayAddMs / dmyAddDays (04_billing). Same class of bug as v5.51. BUILD_ID
+//   not bumped.
+var APP_VERSION = 'v5.53';
+var APP_BUILT   = '2026-11-03';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
@@ -5684,8 +5693,8 @@ function ccfppPredecessorFor_(consult, alias) {
   var thisEndM   = t2m(consult.endTime);
   if (thisEndM < thisStartM) thisEndM += 1440;
 
-  var prevDateFmt = pad(new Date(_curD.getTime() - 86400000).getDate()) + '/' + pad(new Date(_curD.getTime() - 86400000).getMonth() + 1) + '/' + new Date(_curD.getTime() - 86400000).getFullYear();
-  var nextDateFmt = pad(new Date(_curD.getTime() + 86400000).getDate()) + '/' + pad(new Date(_curD.getTime() + 86400000).getMonth() + 1) + '/' + new Date(_curD.getTime() + 86400000).getFullYear();
+  var prevDateFmt = dmyAddDays(_curD, -1);
+  var nextDateFmt = dmyAddDays(_curD, 1);
 
   var bestStartM = -1, bestPhn = null, bestName = null;
 
@@ -5780,7 +5789,7 @@ function calloutDecisionPredecessor_(consult, alias) {
   if (!getModifier(consult.startTime, _curISO)) return null;   // this consult isn't itself a call-out
 
   var thisStartM = t2m(consult.startTime);
-  var prevDateFmt = pad(new Date(_curD.getTime() - 86400000).getDate()) + '/' + pad(new Date(_curD.getTime() - 86400000).getMonth() + 1) + '/' + new Date(_curD.getTime() - 86400000).getFullYear();
+  var prevDateFmt = dmyAddDays(_curD, -1);
 
   var best = null, bestEndM = -1, bestPhn = null, bestName = null, bestGap = null;
 
@@ -5952,8 +5961,8 @@ function ccfppRecomputeAround_(alias, dateFmt) {
     ccfppRebuildAmountsAroundAll_(alias, [dateFmt]);
     return;
   }
-  var prev = pad(new Date(d.getTime() - 86400000).getDate()) + '/' + pad(new Date(d.getTime() - 86400000).getMonth() + 1) + '/' + new Date(d.getTime() - 86400000).getFullYear();
-  var next = pad(new Date(d.getTime() + 86400000).getDate()) + '/' + pad(new Date(d.getTime() + 86400000).getMonth() + 1) + '/' + new Date(d.getTime() + 86400000).getFullYear();
+  var prev = dmyAddDays(d, -1);
+  var next = dmyAddDays(d, 1);
   var dates = [prev, dateFmt, next];
   ccfppRecomputeForAliasDates_(alias, dates);
   ccfppRebuildAmountsAroundAll_(alias, dates);
@@ -6206,6 +6215,23 @@ function ccuDayNum(d) {
   if (!m) return 0;
   return Math.round(Date.UTC(parseInt(m[3],10), parseInt(m[2],10)-1, parseInt(m[1],10)) / 86400000);
 }
+// v5.53 (2026-11-03, Kathryn): CALENDAR-DAY STEPPING — never add 86400000.
+//   A device still running the old Pacific fall-back rule had a 25-hour
+//   01/11/2026, so "midnight + 24 h" landed on 23:00 the SAME day: the CCFPP
+//   next-day lookup on 01/11 read 01/11 again, and (spring-forward) the
+//   previous-day lookup from a 23-hour day read two days back. These helpers
+//   step by calendar date (new Date(y, m, d + n)) and always land on local
+//   midnight, whatever the device's time-zone rules. Used by the CCFPP
+//   prev/next lookups here and by the calendar gap/range loops (06c).
+function dayAddMs(ms, n) {
+  var t = new Date(ms);
+  return new Date(t.getFullYear(), t.getMonth(), t.getDate() + n).getTime();
+}
+function dmyAddDays(dateObj, n) {
+  var t = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate() + n);
+  return pad(t.getDate()) + '/' + pad(t.getMonth() + 1) + '/' + t.getFullYear();
+}
+
 function ccuFeeForDate(p, dateStr) {
   var CCU_FEES = ['CCU_DAILY','1411','1421','1431'];
   var target   = ccuDayNum(dateStr || TODAY);
@@ -10057,7 +10083,6 @@ function _cvGapDays(p, claims) {
   var span = _cvAdmitSpan(p);
   var rule = _cvGapRuleForPatient(p);
   if (!span || !rule) return [];
-  var DAY_MS = 86400000;
   var todayMs = parseDMYsafe(TODAY);
   // Build a set of claimed days (any visit fee counts as occupying the day)
   var claimedSet = {};
@@ -10075,8 +10100,14 @@ function _cvGapDays(p, claims) {
   });
   var gaps = [];
   // Don't flag today as a gap — doctor may still be rounding
-  var endMs = Math.min(span.endMs, todayMs - DAY_MS);
-  for (var d = span.startMs; d <= endMs; d += DAY_MS) {
+  // v5.53 (2026-11-03): step by CALENDAR day (dayAddMs, 04_billing.js), not
+  //   += 24 h. On a device still using the old fall-back rule, 01/11/2026 was
+  //   25 h long, so every step after it landed on 23:00 the day before, never
+  //   matched a claimed midnight, and the discharge gate showed a "billing gap"
+  //   on an already-billed day (ASodhi, 03/11/2026). "Yesterday" is also a
+  //   calendar step now (todayMs - 24 h skips a day after a 23-hour day).
+  var endMs = Math.min(span.endMs, dayAddMs(todayMs, -1));
+  for (var d = span.startMs; d <= endMs; d = dayAddMs(d, 1)) {
     if (!claimedSet[d]) {
       var dt = new Date(d);
       gaps.push(pad(dt.getDate()) + '/' + pad(dt.getMonth()+1) + '/' + dt.getFullYear());
@@ -10406,12 +10437,13 @@ function _cvApplyTypeRange(pid, fromDate, toDate, type, alias) {
   var a = parseDMY(fromDate), b = parseDMY(toDate);
   if (!a || !b) return;
   var lo = Math.min(a.getTime(), b.getTime()), hi = Math.max(a.getTime(), b.getTime());
-  var DAY = 86400000;
   var feeMap = { ccu:'CCU_DAILY', daily:'33008', directive:'33006' };
   var fee = feeMap[type]; if (!fee) return;
   var CCU = { 'CCU_DAILY':1, '1411':1, '1421':1, '1431':1 };
   var added = 0;
-  for (var t = lo; t <= hi; t += DAY) {
+  // v5.53 (2026-11-03): calendar-day step (dayAddMs) — += 24 h skipped the
+  //   last day of a range that crossed the 01/11 fall-back on old-rule devices.
+  for (var t = lo; t <= hi; t = dayAddMs(t, 1)) {
     var dt = new Date(t);
     var ds = pad(dt.getDate()) + '/' + pad(dt.getMonth() + 1) + '/' + dt.getFullYear();
     var dup = st.claims.some(function(c) {
@@ -25367,5 +25399,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "142e380e3f8b";</script></body>
+<script>var BUILD_HASH = "e53940a696fd";</script></body>
 </html>
