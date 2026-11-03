@@ -620,6 +620,9 @@ input[type=file] { display:none; }
 .cf-flag-btn.on { background:var(--green); }
 .cf-flag-btn.on svg { stroke:#fff; }
 .cf-flag-btn:active { opacity:.7; }
+/* v5.52: the flag-note modal is declared BEFORE pt-summary-modal in the page,
+   so at the same z-index it would open hidden behind Claim History. */
+#cf-note-modal { z-index:110; }
 
 /* wp-main replaces wp-info for new layout */
 .wp-main { flex:1; min-width:0; overflow:hidden; }
@@ -25364,5 +25367,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "a00bae658121";</script></body>
+<script>var BUILD_HASH = "142e380e3f8b";</script></body>
 </html>
