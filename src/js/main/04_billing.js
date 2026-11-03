@@ -171,8 +171,8 @@ function ccfppPredecessorFor_(consult, alias) {
   var thisEndM   = t2m(consult.endTime);
   if (thisEndM < thisStartM) thisEndM += 1440;
 
-  var prevDateFmt = pad(new Date(_curD.getTime() - 86400000).getDate()) + '/' + pad(new Date(_curD.getTime() - 86400000).getMonth() + 1) + '/' + new Date(_curD.getTime() - 86400000).getFullYear();
-  var nextDateFmt = pad(new Date(_curD.getTime() + 86400000).getDate()) + '/' + pad(new Date(_curD.getTime() + 86400000).getMonth() + 1) + '/' + new Date(_curD.getTime() + 86400000).getFullYear();
+  var prevDateFmt = dmyAddDays(_curD, -1);
+  var nextDateFmt = dmyAddDays(_curD, 1);
 
   var bestStartM = -1, bestPhn = null, bestName = null;
 
@@ -267,7 +267,7 @@ function calloutDecisionPredecessor_(consult, alias) {
   if (!getModifier(consult.startTime, _curISO)) return null;   // this consult isn't itself a call-out
 
   var thisStartM = t2m(consult.startTime);
-  var prevDateFmt = pad(new Date(_curD.getTime() - 86400000).getDate()) + '/' + pad(new Date(_curD.getTime() - 86400000).getMonth() + 1) + '/' + new Date(_curD.getTime() - 86400000).getFullYear();
+  var prevDateFmt = dmyAddDays(_curD, -1);
 
   var best = null, bestEndM = -1, bestPhn = null, bestName = null, bestGap = null;
 
@@ -439,8 +439,8 @@ function ccfppRecomputeAround_(alias, dateFmt) {
     ccfppRebuildAmountsAroundAll_(alias, [dateFmt]);
     return;
   }
-  var prev = pad(new Date(d.getTime() - 86400000).getDate()) + '/' + pad(new Date(d.getTime() - 86400000).getMonth() + 1) + '/' + new Date(d.getTime() - 86400000).getFullYear();
-  var next = pad(new Date(d.getTime() + 86400000).getDate()) + '/' + pad(new Date(d.getTime() + 86400000).getMonth() + 1) + '/' + new Date(d.getTime() + 86400000).getFullYear();
+  var prev = dmyAddDays(d, -1);
+  var next = dmyAddDays(d, 1);
   var dates = [prev, dateFmt, next];
   ccfppRecomputeForAliasDates_(alias, dates);
   ccfppRebuildAmountsAroundAll_(alias, dates);
@@ -693,6 +693,23 @@ function ccuDayNum(d) {
   if (!m) return 0;
   return Math.round(Date.UTC(parseInt(m[3],10), parseInt(m[2],10)-1, parseInt(m[1],10)) / 86400000);
 }
+// v5.53 (2026-11-03, Kathryn): CALENDAR-DAY STEPPING — never add 86400000.
+//   A device still running the old Pacific fall-back rule had a 25-hour
+//   01/11/2026, so "midnight + 24 h" landed on 23:00 the SAME day: the CCFPP
+//   next-day lookup on 01/11 read 01/11 again, and (spring-forward) the
+//   previous-day lookup from a 23-hour day read two days back. These helpers
+//   step by calendar date (new Date(y, m, d + n)) and always land on local
+//   midnight, whatever the device's time-zone rules. Used by the CCFPP
+//   prev/next lookups here and by the calendar gap/range loops (06c).
+function dayAddMs(ms, n) {
+  var t = new Date(ms);
+  return new Date(t.getFullYear(), t.getMonth(), t.getDate() + n).getTime();
+}
+function dmyAddDays(dateObj, n) {
+  var t = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate() + n);
+  return pad(t.getDate()) + '/' + pad(t.getMonth() + 1) + '/' + t.getFullYear();
+}
+
 function ccuFeeForDate(p, dateStr) {
   var CCU_FEES = ['CCU_DAILY','1411','1421','1431'];
   var target   = ccuDayNum(dateStr || TODAY);

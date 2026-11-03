@@ -836,8 +836,17 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   place (05_render _cfRefreshAfterFlag) instead of opening Today's Claims.
 //   cf-note-modal raised above pt-summary-modal (index.template.html z-index).
 //   BUILD_ID not bumped.
-var APP_VERSION = 'v5.52';
-var APP_BUILT   = '2026-11-02';
+// v5.53 (2026-11-03, Kathryn) — CLOCK-CHANGE FIX. BC went to permanent
+//   UTC-7, but some devices still applied the old 01/11 fall-back (25-hour day).
+//   Code that stepped days by adding 24 h drifted to 23:00 the previous day:
+//   (1) discharge gap gate flagged an already-billed day as a "billing gap"
+//   (06c _cvGapDays — ASodhi 03/11); (2) calendar range-fill skipped the last
+//   day (06c _cvApplyTypeRange); (3) CCFPP prev/next-day lookups read the wrong
+//   day at a clock change (04_billing). All now step by calendar date via
+//   dayAddMs / dmyAddDays (04_billing). Same class of bug as v5.51. BUILD_ID
+//   not bumped.
+var APP_VERSION = 'v5.53';
+var APP_BUILT   = '2026-11-03';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server

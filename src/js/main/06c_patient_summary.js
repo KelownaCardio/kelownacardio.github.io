@@ -723,7 +723,6 @@ function _cvGapDays(p, claims) {
   var span = _cvAdmitSpan(p);
   var rule = _cvGapRuleForPatient(p);
   if (!span || !rule) return [];
-  var DAY_MS = 86400000;
   var todayMs = parseDMYsafe(TODAY);
   // Build a set of claimed days (any visit fee counts as occupying the day)
   var claimedSet = {};
@@ -741,8 +740,14 @@ function _cvGapDays(p, claims) {
   });
   var gaps = [];
   // Don't flag today as a gap — doctor may still be rounding
-  var endMs = Math.min(span.endMs, todayMs - DAY_MS);
-  for (var d = span.startMs; d <= endMs; d += DAY_MS) {
+  // v5.53 (2026-11-03): step by CALENDAR day (dayAddMs, 04_billing.js), not
+  //   += 24 h. On a device still using the old fall-back rule, 01/11/2026 was
+  //   25 h long, so every step after it landed on 23:00 the day before, never
+  //   matched a claimed midnight, and the discharge gate showed a "billing gap"
+  //   on an already-billed day (ASodhi, 03/11/2026). "Yesterday" is also a
+  //   calendar step now (todayMs - 24 h skips a day after a 23-hour day).
+  var endMs = Math.min(span.endMs, dayAddMs(todayMs, -1));
+  for (var d = span.startMs; d <= endMs; d = dayAddMs(d, 1)) {
     if (!claimedSet[d]) {
       var dt = new Date(d);
       gaps.push(pad(dt.getDate()) + '/' + pad(dt.getMonth()+1) + '/' + dt.getFullYear());
@@ -1072,12 +1077,13 @@ function _cvApplyTypeRange(pid, fromDate, toDate, type, alias) {
   var a = parseDMY(fromDate), b = parseDMY(toDate);
   if (!a || !b) return;
   var lo = Math.min(a.getTime(), b.getTime()), hi = Math.max(a.getTime(), b.getTime());
-  var DAY = 86400000;
   var feeMap = { ccu:'CCU_DAILY', daily:'33008', directive:'33006' };
   var fee = feeMap[type]; if (!fee) return;
   var CCU = { 'CCU_DAILY':1, '1411':1, '1421':1, '1431':1 };
   var added = 0;
-  for (var t = lo; t <= hi; t += DAY) {
+  // v5.53 (2026-11-03): calendar-day step (dayAddMs) — += 24 h skipped the
+  //   last day of a range that crossed the 01/11 fall-back on old-rule devices.
+  for (var t = lo; t <= hi; t = dayAddMs(t, 1)) {
     var dt = new Date(t);
     var ds = pad(dt.getDate()) + '/' + pad(dt.getMonth() + 1) + '/' + dt.getFullYear();
     var dup = st.claims.some(function(c) {
