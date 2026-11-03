@@ -1504,13 +1504,16 @@ var _CONSULT_ADMIT_FEES = { '33010':1, '33012':1, '1411':1, 'CCU_DAILY':1 };
 // modal, turning it OFF is a silent toggle. v5.29: GREEN styling
 // (.cf-flag-btn) — deliberately distinct from the amber .foot-flag
 // (handover) so the two flags read differently at a glance.
-function _cfFlagBtn(c) {
+// v5.52 (2026-11-02): optional `origin` — 'hx' when drawn in the patient's
+// Claim History list, so the save/clear refreshes THAT view instead of
+// popping the Today's-Claims sheet open over it. Omitted = Today's Claims.
+function _cfFlagBtn(c, origin) {
   var on = !!c.followUp;
   // v5.28: show the note (if any) as the tooltip so it's visible at a glance
   // without opening the Claims sheet or the "Claims to Follow" tab.
   var onTitle = c.followUpNote ? 'Flagged \u2014 ' + c.followUpNote + ' (tap to unflag)' : 'Flagged (tap to unflag)';
   return '<button class="cf-flag-btn' + (on ? ' on' : '') + '" data-cid="' + esc(String(c.id||'')) + '"' +
-    ' onclick="event.stopPropagation();toggleClaimFollowUp(this.getAttribute(\'data-cid\'))"' +
+    ' onclick="event.stopPropagation();toggleClaimFollowUp(this.getAttribute(\'data-cid\')' + (origin ? ',\'' + origin + '\'' : '') + ')"' +
     ' title="' + esc(on ? onTitle : 'Flag for KB Billing Follow Up') + '">' +
     '<svg viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>' +
   '</button>';
@@ -3254,7 +3257,13 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   CCU episode at 1411. _cvCcuFeeForDate (06c) now uses the same function.
 //   Also: calendar day with CCU + a procedure (00751 etc.) rendered WHITE —
 //   uncoloured types are skipped in the diagonal split (06c). BUILD_ID not bumped.
-var APP_VERSION = 'v5.51';
+// v5.52 (2026-11-02, Kathryn) — KB billing follow-up flag added to every
+//   editable row of the patient's Claim History list (06c), with the flag note
+//   shown under the claim. Flag/unflag from there refreshes Claim History in
+//   place (05_render _cfRefreshAfterFlag) instead of opening Today's Claims.
+//   cf-note-modal raised above pt-summary-modal (index.template.html z-index).
+//   BUILD_ID not bumped.
+var APP_VERSION = 'v5.52';
 var APP_BUILT   = '2026-11-02';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
@@ -6932,7 +6941,22 @@ function toggleHandoverFlag(pid) {
 // (Kathryn, 2026-09-21) — the note is what tells her what to actually
 // follow up on for that MSP claim, so an empty flag isn't useful. "Cancel"
 // backs out without flagging; there is no "flag with no note" option.
-function toggleClaimFollowUp(claimId) {
+// v5.52 (2026-11-02, Kathryn): the flag is now also on every editable row of
+//   the patient's Claim History list (06c _ptSummaryListHTML). `origin`
+//   ('hx' | undefined) decides what re-renders after a flag/unflag:
+//   'hx' → the open Claim History (list + calendar) in place; otherwise the
+//   Today's-Claims sheet as before. Before this, re-rendering always called
+//   openDailyClaimsList, which would have opened that sheet on top.
+var _cfOrigin = null;
+function _cfRefreshAfterFlag() {
+  if (_cfOrigin === 'hx' && window._cvPid && typeof _cvRefreshSummary === 'function') {
+    _cvRefreshSummary(window._cvPid);
+  } else if (typeof openDailyClaimsList === 'function') {
+    openDailyClaimsList(_dailyClaimsFilter);
+  }
+}
+function toggleClaimFollowUp(claimId, origin) {
+  _cfOrigin = origin || null;
   var c = (st.claims || []).find(function(x){ return String(x.id) === String(claimId); });
   if (!c) return;
   if (c.followUp) {
@@ -6940,7 +6964,7 @@ function toggleClaimFollowUp(claimId) {
     sv('claims', st.claims);
     if (SHEETS_URL) push('saveClaim', c);
     logChange(c, 'Follow-up flag cleared', (c.fee || '') + ' on ' + (c.date || ''));
-    if (typeof openDailyClaimsList === 'function') openDailyClaimsList(_dailyClaimsFilter);
+    _cfRefreshAfterFlag();
     return;
   }
   var idEl  = document.getElementById('cf-note-claim-id');
@@ -6979,7 +7003,7 @@ function cfSaveFollowUpNote() {
   if (SHEETS_URL) push('saveClaim', c);
   logChange(c, 'Flagged claim for KB billing follow-up',
     (c.fee || '') + ' on ' + (c.date || '') + ' \u2014 ' + note);
-  if (typeof openDailyClaimsList === 'function') openDailyClaimsList(_dailyClaimsFilter);
+  _cfRefreshAfterFlag();
 }
 
 // v4.62: bordered footer row with the three card-level actions.
@@ -9873,6 +9897,8 @@ function _ptSummaryListHTML(p, claims) {
       html +=     '<div style="font-size:12px;font-weight:600">' + esc(feeLabel) + '</div>';
       html +=     '<div style="font-size:10px;color:var(--text2);margin-top:2px">' + esc(dxLabel) + '</div>';
       if (c.notes) html += '<div style="font-size:10px;color:var(--amber-t);margin-top:2px;font-style:italic">' + esc(c.notes) + '</div>';
+      // v5.52: show the KB follow-up note on a flagged claim.
+      if (c.followUp && c.followUpNote) html += '<div style="font-size:10px;color:var(--green-t);margin-top:2px">\u2691 KB follow-up: ' + esc(c.followUpNote) + '</div>';
       html +=   '</div>';
       html +=   '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0">';
       html +=     '<div style="font-size:10px;color:var(--text3);text-align:right">' + esc(c.alias || '—');
@@ -9889,7 +9915,12 @@ function _ptSummaryListHTML(p, claims) {
         html +=   '<span class="chip chip-grey" style="font-size:8px;padding:1px 5px;white-space:nowrap" ' +
                   'title="Submitted and archived in BigQuery. Edit or resubmit via iClinic, not the app.">submitted</span>';
       } else {
-        html +=   '<div style="display:flex;gap:4px">';
+        // v5.52 (2026-11-02, Kathryn): KB billing follow-up flag, same button and
+        // mandatory-note modal as Today's Claims, so any claim still on the Sheet
+        // (any date, any doctor) can be flagged from Claim History. Archived (BQ)
+        // rows above stay read-only — they are not in st.claims to save.
+        html +=   '<div style="display:flex;gap:4px;align-items:center">';
+        html +=     _cfFlagBtn(c, 'hx');
         html +=     '<button class="claim-action-btn claim-edit-btn" data-cid="' + c.id + '" data-pid="' + p.id + '" onclick="openClaimEdit(this)" title="Edit claim">✎</button>';
         html +=     '<button class="claim-action-btn claim-del-btn"  data-cid="' + c.id + '" data-pid="' + p.id + '" onclick="deleteClaimBtn(this)" title="Delete claim">✕</button>';
         html +=   '</div>';
@@ -25333,5 +25364,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "eb3dd2c29204";</script></body>
+<script>var BUILD_HASH = "a00bae658121";</script></body>
 </html>
