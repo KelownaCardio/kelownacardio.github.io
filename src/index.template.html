@@ -620,6 +620,9 @@ input[type=file] { display:none; }
 .cf-flag-btn.on { background:var(--green); }
 .cf-flag-btn.on svg { stroke:#fff; }
 .cf-flag-btn:active { opacity:.7; }
+/* v5.52: the flag-note modal is declared BEFORE pt-summary-modal in the page,
+   so at the same z-index it would open hidden behind Claim History. */
+#cf-note-modal { z-index:110; }
 
 /* wp-main replaces wp-info for new layout */
 .wp-main { flex:1; min-width:0; overflow:hidden; }
