@@ -3275,8 +3275,19 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   day at a clock change (04_billing). All now step by calendar date via
 //   dayAddMs / dmyAddDays (04_billing). Same class of bug as v5.51. BUILD_ID
 //   not bumped.
-var APP_VERSION = 'v5.53';
-var APP_BUILT   = '2026-11-03';
+// v5.54 (2026-11-16, Kathryn) — OFF-SERVICE LIST. (1) The Geographic /
+//   Alphabetical bar now shows on Off Service too (it was hidden; the old
+//   in-list toggle sat below the handover + red blocks). (2) Geographic order
+//   = Kathryn's rounding order: red Cardiology-MRP block (ED first), then
+//   Post Cath, Race Admit, ED, C1C, ICU A-D, CSICU, Centennial PAR, IHSC1, 3E,
+//   3W, 3MU, 4E, 4W, 4A, 4B, 5A, 5B, 6W, Rehab, HAH (05_render OFF_WARD_ORDER).
+//   (3) New "Today" footer button on off-service cards: pulls the patient into
+//   a "To See Today" block for the doctor who set it only; synced across that
+//   doctor's devices (new hot group 'seeToday'; needs Config v2.51 + Crud
+//   v3.28). Expires with no write: billed today, 17:00, or next day.
+//   BUILD_ID not bumped.
+var APP_VERSION = 'v5.54';
+var APP_BUILT   = '2026-11-16';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
@@ -3620,7 +3631,8 @@ var HOT_GROUPS = {
   handover:  ['handover'],
   summary:   ['summary', 'summaryUpdatedAt', 'summaryUpdatedBy'],
   location:  ['ward', 'bed', 'list'],
-  discharge: ['discharged', 'dischargedAt', 'dischargeDate', 'dischargedBy']
+  discharge: ['discharged', 'dischargedAt', 'dischargeDate', 'dischargedBy'],
+  seeToday:  ['seeToday']   // v5.54 — off-service "See today" flag (Crud v3.28)
 };
 
 function _parseFieldTs(v) {
@@ -6959,6 +6971,53 @@ function toggleHandoverFlag(pid) {
   render();
 }
 
+// v5.54 (2026-11-16, Kathryn): "See today" flag for the off-service doctor.
+// Pulls a patient out of the regular off-service list into a "To see today"
+// block at the top. Stored on the patient as seeToday = 'YYYY-MM-DD|ALIAS'
+// (hot-field group 'seeToday', Config v2.51 column, Crud v3.28 LWW) so it
+// syncs across the doctor's devices — but only the doctor whose alias set it
+// sees it. It expires on its own, with no write: it is active only while
+//   • the date is today, AND
+//   • it is before SEE_TODAY_CUTOFF_H (17:00), AND
+//   • no claim exists for the patient today (any doctor).
+// Clearing by tap writes 'none' (non-blank, so no server blank-overlay can
+// bring an old value back).
+var SEE_TODAY_CUTOFF_H = 17;
+function _seeTodayMine(p) {
+  var v = String((p && p.seeToday) || '');
+  var i = v.indexOf('|');
+  if (i < 0) return false;
+  var alias = (st.doc && st.doc.alias) || '';
+  return !!alias && v.slice(0, i) === localISODate() && v.slice(i + 1) === alias;
+}
+function isSeeToday(p) {
+  if (!p || p.discharged || p.list !== 'off') return false;
+  if (!_seeTodayMine(p)) return false;
+  if (new Date().getHours() >= SEE_TODAY_CUTOFF_H) return false;
+  if (claimedToday(p)) return false;
+  return true;
+}
+function toggleSeeToday(pid) {
+  if (isResident()) { showToast('Not available for this login'); return; }
+  var p = getP(pid);
+  if (!p || !p.id) return;
+  var alias = (st.doc && st.doc.alias) || '';
+  if (!alias) { showToast('Sign in first'); return; }
+  var wasOn = isSeeToday(p);
+  if (!wasOn && new Date().getHours() >= SEE_TODAY_CUTOFF_H) {
+    showToast('See today clears at 17:00 \u2014 not available now'); return;
+  }
+  if (!wasOn && claimedToday(p)) {
+    showToast('Already billed today'); return;
+  }
+  p.seeToday = wasOn ? 'none' : (localISODate() + '|' + alias);
+  stampFieldTs(p, 'seeToday');
+  sv('patients', st.patients);
+  if (SHEETS_URL) push('savePatient', p);
+  logChange(p, wasOn ? 'See-today cleared' : 'Flagged to see today', alias);
+  render();
+}
+
 // v5.27: Flag/unflag a claim for KB billing follow-up. Called from the
 // flag icon on each Today's-Claims row (_cfFlagBtn, 02_constants.js).
 // Backend: Claims gains 'followUp'/'followUpNote' (Config v2.50); DataCheck
@@ -7052,6 +7111,16 @@ function cardFootHtml(p) {
       '<svg viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>' +
       '<span>Handover</span>' +
     '</button>' +
+    // v5.54: See-today toggle — off-service cards only
+    (p.list === 'off' ? (function() {
+      var td = isSeeToday(p);
+      return '<button class="foot-btn foot-today' + (td ? ' on' : '') + '" data-pid="' + p.id + '"' +
+        ' onclick="event.stopPropagation();toggleSeeToday(this.getAttribute(\'data-pid\'))"' +
+        ' title="' + (td ? 'Clear see today' : 'See today') + '">' +
+        '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>' +
+        '<span>Today</span>' +
+      '</button>';
+    })() : '') +
     '<button class="foot-btn foot-hx" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'summary\')">' +
       '<svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>' +
       '<span>Claim Hx</span>' +
@@ -7114,8 +7183,10 @@ function render() {
   if (offCount) {
     var _strandedN = all.filter(isStranded).length;
     var _hoOffN    = all.filter(function(p) { return p.list === 'off' && isHandover(p); }).length;
+    var _seeTodayN = all.filter(isSeeToday).length;   // v5.54
     offCount.innerHTML = (off ? '(' + off + ')' : '') +
       (_hoOffN ? ' <span style="color:#7a6d00;font-weight:800">\u2691' + _hoOffN + '</span>' : '') +
+      (_seeTodayN ? ' <span style="color:#5b3fa0;font-weight:800">\u25F7' + _seeTodayN + '</span>' : '') +
       (_strandedN ? ' <span style="color:var(--red-t);font-weight:800">\u26A0' + _strandedN + '</span>' : '');
   }
 
@@ -7193,7 +7264,6 @@ function safeRowMap(arr, renderFn) {
 }
 
 // statBox removed — counts now shown in tab labels
-var _offView = 'alpha'; // 'alpha' | 'location' — off-service view toggle
 
 // ── Geographic view ────────────────────────────────────
 function renderGeo() {
@@ -7372,24 +7442,67 @@ function renderAlpha() {
 }
 
 // ── Off service view ───────────────────────────────────
-var _offView = 'alpha'; // 'alpha' | 'location'
+// v5.54: the off-service list now follows the SAME Geographic / Alphabetical
+// bar as on-service (#view-tog-bar, _geoView). The old in-list toggle sat
+// below the handover + red MRP blocks and was easy to miss (Kathryn
+// 2026-11-16). setOffView kept for any old caller.
+function setOffView(v) { setView(v === 'alpha' ? 'alpha' : 'geo'); }
 
-function setOffView(v) {
-  _offView = v;
-  renderOff();
+// v5.54: Kathryn's rounding order (2026-11-16). Cardiology-MRP patients in
+// ED come first via the red block above; then, in the list itself:
+// Post Cath, Race Admit, ED, C1C, ICU A–D, CSICU, Centennial PAR, IHSC1,
+// 3E, 3W, 3MU, 4E, 4W, 4A, 4B, 5A, 5B, 6W, Rehab, HAH.
+// Anything not named (CCU/2S/2W, Other, custom wards) sorts after HAH,
+// alphabetically; a blank ward goes last.
+var OFF_WARD_ORDER = ['PCATH','RACE','ED','C1C','ICUA','ICUB','ICUC','ICUD',
+  'CSICU','PAR','IHSC1','3E','3W','3MU','4E','4W','4A','4B','5A','5B','6W',
+  'REHAB','HAH'];
+function offWardRank(w) {
+  w = String(w || '').trim();
+  if (!w) return [9999, ''];
+  var i = OFF_WARD_ORDER.indexOf(w.toUpperCase());
+  return i >= 0 ? [i, ''] : [OFF_WARD_ORDER.length, w];
+}
+function sortByOffWard(arr) {
+  return arr.slice().sort(function(a, b) {
+    var ka = offWardRank(a.ward), kb = offWardRank(b.ward);
+    if (ka[0] !== kb[0]) return ka[0] - kb[0];
+    if (ka[1] !== kb[1]) return ka[1] < kb[1] ? -1 : 1;
+    return String(a.last || '').localeCompare(String(b.last || ''));
+  });
+}
+function sortByLast(arr) {
+  return arr.slice().sort(function(a, b) { return String(a.last || '').localeCompare(String(b.last || '')); });
+}
+
+function seeTodaySectionHtml(patients) {
+  if (!patients.length) return '';
+  return '<div class="seetoday-block">' +
+    '<div class="ward-hdr">' +
+      '<div class="ward-lbl" style="color:#5b3fa0">◷ To See Today (' + patients.length + ')</div>' +
+    '</div>' +
+    '<div style="padding:0 12px 4px;font-size:10px;color:#5b3fa0;line-height:1.4">' +
+      'Only you see this. Clears when billed today, at 17:00, or tap Today.' +
+    '</div>' +
+    safeRowMap(patients, offRow) +
+    '</div>';
 }
 
 function renderOff() {
+  var geo = _geoView !== 'alpha';
   var off = st.patients.filter(function(p) { return p.list === 'off' && !p.discharged; });
 
   // v4.37: handover patients pinned to very top of off-service
-  var _hoOff = off.filter(isHandover)
-    .sort(function(a, b) { return String(a.last || '').localeCompare(String(b.last || '')); });
+  var _hoOff = sortByLast(off.filter(isHandover));
 
   // v4.32: stranded patients — MRP Cardiology stuck outside home wards.
-  // Shown at the top of the off-service list so the rounding doctor sees them.
-  var stranded = st.patients.filter(isStranded)
-    .sort(function(a, b) { return String(a.last || '').localeCompare(String(b.last || '')); });
+  // v5.54: sorted by the rounding order, so ED comes first.
+  var stranded = sortByOffWard(st.patients.filter(isStranded));
+
+  // v5.54: "See today" — pulled OUT of the regular list below.
+  var today   = off.filter(isSeeToday);
+  var regular = off.filter(function(p) { return !isSeeToday(p); });
+  today   = geo ? sortByOffWard(today) : sortByLast(today);
 
   var h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">' +
     '<div class="ward-lbl">Off Service</div></div>';
@@ -7399,24 +7512,16 @@ function renderOff() {
   if (stranded.length) {
     h += '<div class="ward-block" style="border-left:3px solid var(--red-t);background:var(--red-bg);margin-bottom:12px">' +
       '<div class="ward-hdr">' +
-        '<div class="ward-lbl" style="color:var(--red-t)">\u26A0 Cardiology MRP \u2014 Off Regular Wards (' + stranded.length + ')</div>' +
+        '<div class="ward-lbl" style="color:var(--red-t)">⚠ Cardiology MRP — Off Regular Wards (' + stranded.length + ')</div>' +
       '</div>' +
       '<div style="padding:0 12px 8px;font-size:11px;color:var(--red-t);line-height:1.4">' +
-        'On-service patients outside CCU / 2S / 2W \u2014 round daily.' +
+        'On-service patients outside CCU / 2S / 2W — round daily.' +
       '</div>' +
       safeRowMap(stranded, alphaRow) +
       '</div>';
   }
 
-  // View toggle — named functions avoid inline quote issues
-  var onAlpha = _offView === 'alpha'    ? ' on' : '';
-  var onLoc   = _offView === 'location' ? ' on' : '';
-  h += '<div class="view-tog" style="margin-bottom:10px">' +
-    '<button class="vt' + onAlpha + '" onclick="setOffViewAlpha()">' +
-      '<svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/></svg>Alphabetical</button>' +
-    '<button class="vt' + onLoc + '" onclick="setOffViewLoc()">' +
-      '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>By location</button>' +
-    '</div>';
+  h += seeTodaySectionHtml(today);
 
   if (!off.length) {
     h += '<div class="empty">No off-service patients.</div>';
@@ -7424,43 +7529,19 @@ function renderOff() {
     return;
   }
 
-  if (_offView === 'alpha') {
-    var sorted = off.slice().sort(function(a, b) { return String(a.last || "").localeCompare(String(b.last || "")); });
-    h += safeRowMap(sorted, offRow);
+  if (!geo) {
+    h += safeRowMap(sortByLast(regular), offRow);
   } else {
-    // By location: clinical priority — ED, ICU, CSICU, then numbered wards.
-    // Within numbered wards: A/B together, then E/W together.
-    function _wardSortKey(w) {
-      if (!w) return [99, '', ''];
-      if (w === 'ED') return [0, '', ''];
-      if (w === 'ICUA' || w === 'ICUB' || w === 'ICUD') return [1, w.slice(3), ''];
-      if (w === 'CSICU') return [2, '', ''];
-      var m = w.match(/^(\d+)([A-Z]+)?$/);
-      if (m) {
-        var floor = parseInt(m[1], 10);
-        var suffix = m[2] || '';
-        var grp = (suffix === 'A' || suffix === 'B') ? 0
-                : (suffix === 'E' || suffix === 'W') ? 1 : 2;
-        return [10 + floor, grp, suffix];
-      }
-      return [90, w, ''];
-    }
-    var sorted = off.slice().sort(function(a, b) {
-      var ka = _wardSortKey(a.ward), kb = _wardSortKey(b.ward);
-      if (ka[0] !== kb[0]) return ka[0] - kb[0];
-      if (ka[1] !== kb[1]) return ka[1] < kb[1] ? -1 : 1;
-      if (ka[2] !== kb[2]) return ka[2] < kb[2] ? -1 : 1;
-      return String(a.last || "").localeCompare(String(b.last || ""));
-    });
     var curWard = null;
-    sorted.forEach(function(p) {
+    sortByOffWard(regular).forEach(function(p) {
       if (p.ward !== curWard) {
         curWard = p.ward;
         h += '<div style="font-size:10px;font-weight:700;color:var(--text3);' +
              'text-transform:uppercase;letter-spacing:.5px;margin:10px 0 5px">' +
-             wardLabel(p.ward) + '</div>';
+             esc(String(wardLabel(p.ward) || 'No location')) + '</div>';
       }
-      h += offRow(p);
+      try { h += offRow(p); }
+      catch (e) { h += safeRowMap([p], offRow); }
     });
   }
 
@@ -23523,9 +23604,9 @@ function setList(v) {
   document.getElementById('search-view').style.display = searching ? 'block' : 'none';
   document.getElementById('on-view').style.display  = (!searching && v === 'on')  ? 'block' : 'none';
   document.getElementById('off-view').style.display = (!searching && v === 'off') ? 'block' : 'none';
-  // Show geo/alpha toggle only on On Service AND when not searching
+  // v5.54: Geographic/Alphabetical bar shown on BOTH lists (not while searching)
   var vtBar = document.getElementById('view-tog-bar');
-  if (vtBar) vtBar.style.display = (!searching && v === 'on') ? 'flex' : 'none';
+  if (vtBar) vtBar.style.display = !searching ? 'flex' : 'none';
   render();
 }
 
@@ -24282,8 +24363,8 @@ init();
 
 function openAddOff() { openAdd("ED"); }
 
-function setOffViewAlpha() { setOffView("alpha"); }
-function setOffViewLoc()   { setOffView("location"); }
+function setOffViewAlpha() { setView("alpha"); }   // v5.54
+function setOffViewLoc()   { setView("geo"); }     // v5.54
 
 function openAddBed(b)   { openAdd("CCU", b); }
 function reorderBtn(btn) {
@@ -25399,5 +25480,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "e53940a696fd";</script></body>
+<script>var BUILD_HASH = "6e98a63dc9df";</script></body>
 </html>
