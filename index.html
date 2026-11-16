@@ -3292,8 +3292,111 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   doctor's devices (new hot group 'seeToday'; needs Config v2.51 + Crud
 //   v3.28). Expires with no write: billed today, 17:00, or next day.
 //   BUILD_ID not bumped.
-var APP_VERSION = 'v5.54';
+// v5.55 (2026-11-16, Kathryn) — ASLEEP IS NOT "SERVER TOO SLOW". A phone that
+//   locks or backgrounds the app freezes any request in flight; on wake the
+//   frozen request failed as a 9–32 min "timeout", flipped the app to the
+//   backup door, and — because the 3-min red-banner clock counted the time
+//   asleep — raised "Server took too long" at once (KBrown 16/11: 10 such
+//   errors, server normal). Now: (1) on wake, requests started before the
+//   app went to the background are cancelled and re-sent at once, silently
+//   (no error row, no door switch, no attempt used); (2) a request that
+//   outlived its own timer by >10 s is treated the same way; (3) the 3-min
+//   clock restarts on wake. (4) Idle backoff (14_init): a visible window with
+//   no taps/keys for 15 min polls every 10 min, delta only; first tap syncs
+//   at once. (5) DEVICE USAGE: every backend request is counted on the device
+//   by action × state (a = in use, i = idle, h = background) and posted hourly
+//   as one row to a "Device Usage" tab (needs Router v3.29 + DeviceUsage.gs
+//   v1.0). Shows which devices cost the server what, incl. the "nothing
+//   changed" polls the server never counts. BUILD_ID not bumped.
+var APP_VERSION = 'v5.55';
 var APP_BUILT   = '2026-11-16';
+
+// ─── v5.55: DEVICE USAGE ────────────────────────────────────────────
+// Counts kept on the device (localStorage, survives reloads), keyed
+// "<action>|<state>": a = visible + in use, i = visible but idle (no input
+// for 15 min, see 14_init _pollIdle), h = hidden/background. Posted at most
+// once an hour as ONE row (logUsage → DeviceUsage.gs). Fire-and-forget: a
+// failed post keeps the counts for next time; it never touches the sync dot
+// or the banner, and is never itself counted.
+var USAGE_KEY_      = 'kgh5:usage';
+var USAGE_DEV_KEY_  = 'kgh5:devid';
+var USAGE_FLUSH_MS_ = 60 * 60 * 1000;
+var _usageFlushing  = false;
+function _usageState() {
+  try {
+    if (document.visibilityState !== 'visible') return 'h';
+    return (typeof _pollIdle === 'function' && _pollIdle(Date.now())) ? 'i' : 'a';
+  } catch (e) { return 'a'; }
+}
+function _usageRead() {
+  try { var u = JSON.parse(localStorage.getItem(USAGE_KEY_) || 'null'); if (u && u.c) return u; } catch (e) {}
+  return { from: Date.now(), c: {} };
+}
+function _usageWrite(u) { try { localStorage.setItem(USAGE_KEY_, JSON.stringify(u)); } catch (e) {} }
+function _usageCount(action) {
+  if (action === 'logUsage') return;
+  var u = _usageRead(), k = action + '|' + _usageState();
+  u.c[k] = (u.c[k] || 0) + 1;
+  _usageWrite(u);
+}
+function _usageDeviceId() {
+  try {
+    var id = localStorage.getItem(USAGE_DEV_KEY_);
+    if (!id) { id = 'D' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); localStorage.setItem(USAGE_DEV_KEY_, id); }
+    return id;
+  } catch (e) { return ''; }
+}
+function _usageDevType() {
+  var ua = String(navigator.userAgent || '');
+  if (/iPhone|iPad|iPod/.test(ua)) return 'iOS';
+  if (/Android/.test(ua)) return 'Android';
+  if (/Windows/.test(ua)) return 'Windows';
+  if (/Macintosh/.test(ua)) return 'Mac';
+  return 'other';
+}
+function usageFlush(force) {
+  try {
+    if (_usageFlushing || typeof SHEETS_URL === 'undefined' || !SHEETS_URL) return;
+    if (typeof isResident === 'function' && isResident()) return;   // residents can't post this action
+    var u = _usageRead(), now = Date.now();
+    if (!Object.keys(u.c).length) { if (now - u.from > USAGE_FLUSH_MS_) _usageWrite({ from: now, c: {} }); return; }
+    if (!force && now - u.from < USAGE_FLUSH_MS_) return;
+    var sent = JSON.parse(JSON.stringify(u.c));
+    var body = {
+      doctor: (typeof _netlogDoctor === 'function' ? _netlogDoctor() : '') || '',
+      device: _usageDeviceId(), devType: _usageDevType(),
+      ua: String(navigator.userAgent || '').slice(0, 160),
+      appVersion: APP_VERSION, session: (typeof NETLOG_SESSION !== 'undefined') ? NETLOG_SESSION : '',
+      from: new Date(u.from).toISOString(), to: new Date(now).toISOString(), counts: sent
+    };
+    _usageFlushing = true;
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var tid  = setTimeout(function () { if (ctrl) ctrl.abort(); }, 20000);
+    var done = function () { clearTimeout(tid); _usageFlushing = false; };
+    // Remove exactly what was sent; anything counted while in flight stays.
+    var drop = function () {
+      var cur = _usageRead();
+      Object.keys(sent).forEach(function (k) {
+        cur.c[k] = (cur.c[k] || 0) - sent[k];
+        if (cur.c[k] <= 0) delete cur.c[k];
+      });
+      cur.from = now;
+      _usageWrite(cur);
+    };
+    var opts = { method: 'POST', body: JSON.stringify(body) };
+    if (ctrl) opts.signal = ctrl.signal;
+    fetch(SHEETS_URL + '?action=logUsage&key=' + SHARED_KEY, opts)
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (d) {
+        if (d && d.ok) return drop();
+        if (d && d.transient) return;   // keep, try later
+        drop();                         // old backend / refused: same answer forever — don't resend
+      })
+      .catch(function () {})
+      .then(done, done);
+  } catch (e) { _usageFlushing = false; }
+}
+setInterval(function () { usageFlush(false); }, 5 * 60 * 1000);
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
@@ -3360,6 +3463,10 @@ function _avIsBackendUrl(u) {
           // the live path. The Request branch is defensive only.
           if (typeof input === 'string') input = stamped;
           else input = new Request(stamped, input);
+        }
+        if (u && _avIsBackendUrl(u)) {   // v5.55: device usage counter
+          var _ua = /[?&]action=([A-Za-z_]+)/.exec(u);
+          _usageCount(_ua ? _ua[1] : '?');
         }
       } catch (e) {}          // a stamping failure must never break a request
       return _origFetch(input, init);
@@ -3865,6 +3972,49 @@ function _applySyncDelta(d) {
 // red only when actually failing (unsent >3 min, or no sync for 3 min).
 // ═══════════════════════════════════════════════════════════════════
 var NET_STUCK_MS_ = 180000;
+
+// ─── v5.55: FROZEN-REQUEST HANDLING ─────────────────────────────────
+// iOS (and desktop browsers, for minimised windows) suspend the page. A
+// fetch in flight at that moment never completes; its abort timer is
+// suspended too and fires after wake. That is the device sleeping, not
+// the server being slow — so it must not be logged, must not switch
+// doors, and must not use up the request's one retry.
+window._netCtrls   = window._netCtrls || [];
+window._hiddenAt   = window._hiddenAt || 0;
+window._resumeAt   = window._resumeAt || 0;
+function _netTrack(ctrl, t0) {
+  if (!ctrl) return;
+  ctrl._t0 = t0;
+  window._netCtrls.push(ctrl);
+}
+function _netUntrack(ctrl) {
+  if (!ctrl) return;
+  var i = window._netCtrls.indexOf(ctrl);
+  if (i >= 0) window._netCtrls.splice(i, 1);
+}
+// true = the request was cut off by the device sleeping, not by the network.
+function _netWasFrozen(ctrl, t0, limitMs) {
+  if (ctrl && ctrl._resumeAbort) return true;
+  return (Date.now() - t0) > (limitMs + 10000);
+}
+// Cancel every tracked request that was sent before the app went to the
+// background; each sender sees _resumeAbort and re-sends at once. Only
+// re-sendable requests are tracked (syncs + upsert-keyed saves). Registered
+// before 14_init.js's resume handlers, so the resume sync is not stuck
+// behind a frozen request for up to 20 s.
+function _netOnResume() {
+  window._resumeAt = Date.now();
+  var cut = window._hiddenAt || 0;
+  window._netCtrls.slice().forEach(function(c) {
+    if (c && c._t0 <= cut) { c._resumeAbort = true; try { c.abort(); } catch (e) {} }
+  });
+}
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState === 'hidden') { window._hiddenAt = Date.now(); return; }
+  if (document.visibilityState === 'visible') _netOnResume();
+});
+window.addEventListener('pagehide', function() { window._hiddenAt = Date.now(); });
+window.addEventListener('pageshow', function(e) { if (e && e.persisted) _netOnResume(); });
 if (!window._appStartAt) window._appStartAt = Date.now();
 if (!window._pushQ) { try { window._pushQ = new WeakMap(); } catch (eWm) { window._pushQ = null; } }
 // Caller-side: "push() returned false, but the write is queued and the app
@@ -3886,7 +4036,7 @@ function _oldestUnsentAge() {
   var pp = window._pendingPush || {}, now = Date.now(), max = -1;
   Object.keys(pp).forEach(function(k) {
     var e = pp[k];
-    if (e && e.failAt) { var a = now - e.failAt; if (a > max) max = a; }
+    if (e && e.failAt) { var a = now - Math.max(e.failAt, window._resumeAt || 0); if (a > max) max = a; }   // v5.55: time asleep doesn't count
   });
   return max;
 }
@@ -3896,7 +4046,7 @@ function _evalNetHealth() {
   if (cur === 'auth') return;
   if (cur === 'error' && !window._netRedSoft) return;   // hard fault: only a real success clears it
   var unsent = _oldestUnsentAge();
-  var base = Math.max(window._lastSyncOkAt || 0, window._appStartAt || 0);
+  var base = Math.max(window._lastSyncOkAt || 0, window._appStartAt || 0, window._resumeAt || 0);   // v5.55
   var syncDown = !!window._syncFailing && (Date.now() - base) > NET_STUCK_MS_;
   if (unsent > NET_STUCK_MS_ || syncDown) {
     if (cur !== 'error') setSyncState('error', { code: window._netSoftCode || '', soft: true });
@@ -4013,14 +4163,18 @@ async function syncFromSheets(opts) {
     var _lastCode = '', _lastErr = null, _attempts = 0;
     var NETLOG_SYNC_TIMEOUT_MS = 20000;
     // v5.19: delta unless a full pull is due / forced / unsupported.
+    // v5.55: an idle poll (nobody at the device) never takes the periodic
+    // full pull — the first tap back triggers a normal sync, which will.
     var _wantFull = !!(opts && opts.full) || !window._syncVer || window._syncNoDelta ||
-                    (Date.now() - (window._lastFullSyncAt || 0)) > SYNC_FULL_EVERY_MS;
+                    (!(opts && opts.idle) && (Date.now() - (window._lastFullSyncAt || 0)) > SYNC_FULL_EVERY_MS);
     var _syncAction = _wantFull ? 'getAll' : 'sync';
     window._lastSyncResponse.mode = _syncAction;
+    var _frozenRedo = 0;   // v5.55
     for (var _try = 1; _try <= 2; _try++) {
       _attempts = _try;
       var _t0 = Date.now();
       var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      _netTrack(ctrl, _t0);   // v5.55
       var timeoutId = setTimeout(function() {
         if (ctrl) ctrl.abort();
       }, NETLOG_SYNC_TIMEOUT_MS);
@@ -4056,6 +4210,15 @@ async function syncFromSheets(opts) {
         _resp = null;   // a body that died mid-parse is not a usable response
       }
       clearTimeout(timeoutId);
+      _netUntrack(ctrl);   // v5.55
+
+      // v5.55: cut off by the device sleeping — re-send now, silently, without
+      // using the retry. Capped at 2 so a page that keeps sleeping can't loop.
+      if (!(_resp && _resp.ok) && _err && _frozenRedo < 2 && _netWasFrozen(ctrl, _t0, NETLOG_SYNC_TIMEOUT_MS)) {
+        _frozenRedo++;
+        _try--;
+        continue;
+      }
 
       if (_resp && _resp.ok) {
         // Success. If this was attempt 2, record the rescue — that row is
@@ -4816,6 +4979,7 @@ async function push(action, body, wire) {
     var _pRef  = (typeof _netlogRef === 'function') ? _netlogRef(action, body, _pSeq) : '';   // v5.35 / v5.36
     var _pMax = NETLOG_IDEMPOTENT[action] ? 2 : 1;
     var resp = null, _pCode = '';
+    var _pFrozenRedo = 0;   // v5.55
     for (var _pt = 1; _pt <= _pMax; _pt++) {
       var _pt0 = Date.now(), _pr = null, _pe = null;
       // v5.05: 12s → 20s. The first two days of Client Errors data
@@ -4826,7 +4990,9 @@ async function push(action, body, wire) {
       // 20s matches the sync ceiling. Worst case 20 + 1.35 + 20 ~= 41s,
       // still under the old single 45s wait.
       var _pCtrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-      var _pTid  = setTimeout(function() { if (_pCtrl) _pCtrl.abort(); }, PUSH_TIMEOUT_MS_[action] || 20000);   // v5.32: per-action
+      var _pLim  = PUSH_TIMEOUT_MS_[action] || 20000;   // v5.55: named for the frozen check
+      if (NETLOG_IDEMPOTENT[action]) _netTrack(_pCtrl, _pt0);   // v5.55: only re-sendable writes
+      var _pTid  = setTimeout(function() { if (_pCtrl) _pCtrl.abort(); }, _pLim);   // v5.32: per-action
       try {
         // v5.12: opt this build into Crud v3.21 claim arbitration. The flag
         // rides on the wire only — never on the st.claims object.
@@ -4838,6 +5004,16 @@ async function push(action, body, wire) {
           : { method: 'POST', body: _pBody });
       } catch (_pex) { _pe = _pex; }
       clearTimeout(_pTid);
+      _netUntrack(_pCtrl);   // v5.55
+
+      // v5.55: cut off by the device sleeping. Re-send at once, silently —
+      // but ONLY upsert-keyed actions (NETLOG_IDEMPOTENT): a frozen request
+      // may have landed before the freeze, and only those are safe to repeat.
+      if (_pe && NETLOG_IDEMPOTENT[action] && _pFrozenRedo < 2 && _netWasFrozen(_pCtrl, _pt0, _pLim)) {
+        _pFrozenRedo++;
+        _pt--;
+        continue;
+      }
 
       if (_pr && _pr.ok) {
         if (_pt > 1) {
@@ -23112,6 +23288,10 @@ function rdAddSave() {
   rdChanged();
 }
 // ═══════════════════════════════════════════════════════════════════
+// v5.55 (2026-11-16, Kathryn): IDLE BACKOFF — after 15 min with no tap /
+//   key / scroll the poll drops from 60 s to 10 min, delta only (no 10-min
+//   full pull); the first input back syncs at once. For computers left on
+//   with the app in front. Frozen-request fix is in 03_state.js.
 // v5.12 (2026-09-02): PHYSICIAN REVIEW MODE — plumbing that lets
 // 15_review.js run on top of the normal boot.
 //   • window.REVIEW_TOKEN — from ?review=<token>. Truthy = review mode.
@@ -23381,6 +23561,7 @@ async function init() {
     // v4.72: body extracted to _autoRefreshSync so the pollers can share the
     // editing-screen guards.
     async function _autoRefreshSync(tag) {
+      var _idleOpts = (tag === 'poll-idle') ? { idle: true } : undefined;   // v5.55
       // Skip if any editing screen is open — don't clobber mid-edit state
       var claimOpen = document.getElementById('p-claim') &&
                       document.getElementById('p-claim').classList.contains('on');
@@ -23395,7 +23576,7 @@ async function init() {
         return;
       }
       try {
-        await syncFromSheets();
+        await syncFromSheets(_idleOpts);
         // v5.19: a "nothing changed" poll answer leaves state untouched —
         // don't redraw the list for it (delta/full syncs render themselves).
         var _nc = window._lastSyncResponse && window._lastSyncResponse.checkpoint === 'no-change';
@@ -23434,7 +23615,7 @@ async function init() {
       var now = Date.now();
       if (now - _pollLastAt < _pollEveryMs(now)) return;
       _pollLastAt = now;
-      _autoRefreshSync('poll').then(function() {
+      _autoRefreshSync(_pollIdle(now) ? 'poll-idle' : 'poll').then(function() {
         var r = window._lastSyncResponse;
         if (r && r.checkpoint === 'delta-applied' && (r.deltaPatients || 0) > 0) {
           window._syncBurstUntil = Date.now() + POLL_BURST_FOR_MS;
@@ -23452,7 +23633,28 @@ var POLL_BURST_FOR_MS = 3 * 60 * 1000;
 var POLL_HANDOVER_FROM = 6 * 60 + 55;   // 06:55 local, minutes after midnight (Kathryn 2026-10-27)
 var POLL_HANDOVER_TO   = 7 * 60 + 10;   // 07:10 local
 var POLL_HANDOVER_DAYS = { 1:1, 2:1, 3:1, 4:1, 5:1 };   // Mon–Fri only
+// v5.55: IDLE BACKOFF. A computer left on with the app in front stays
+// "visible" all day and night and would poll every 60 s (plus a full pull
+// every 10 min). After 15 min with no tap, click, key or scroll, poll every
+// 10 min, delta only. The first input back syncs at once.
+var POLL_IDLE_AFTER_MS = 15 * 60 * 1000;
+var POLL_IDLE_MS       = 10 * 60 * 1000;
+window._lastInputAt = Date.now();
+function _pollIdle(now) { return (now - (window._lastInputAt || 0)) > POLL_IDLE_AFTER_MS; }
+(function() {
+  var _onInput = function() {
+    var now = Date.now(), wasIdle = _pollIdle(now);
+    window._lastInputAt = now;
+    if (wasIdle && document.visibilityState === 'visible' && st.loaded && SHEETS_URL) {
+      try { syncWithGuardIfStale(); } catch (e) {}
+    }
+  };
+  ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(function(ev) {
+    document.addEventListener(ev, _onInput, { capture: true, passive: true });
+  });
+})();
 function _pollEveryMs(now) {
+  if (_pollIdle(now)) return POLL_IDLE_MS;   // v5.55
   if ((window._syncBurstUntil || 0) > now) return POLL_BURST_MS;
   var d = new Date(now), m = d.getHours() * 60 + d.getMinutes();
   if (POLL_HANDOVER_DAYS[d.getDay()] && m >= POLL_HANDOVER_FROM && m < POLL_HANDOVER_TO) return POLL_HANDOVER_MS;
@@ -25486,5 +25688,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "05ab14d2c038";</script></body>
+<script>var BUILD_HASH = "f77a51bbc037";</script></body>
 </html>
