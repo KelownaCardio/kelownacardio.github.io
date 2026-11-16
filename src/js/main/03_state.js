@@ -874,7 +874,9 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   changed" polls the server never counts. BUILD_ID not bumped.
 // v5.56 (2026-11-16): version bump only in this file. Phone-advice-only
 //   days no longer turn the card green (04_billing.js claimedToday).
-var APP_VERSION = 'v5.56';
+// v5.57 (2026-11-16): version bump only in this file. "Last seen by" skips
+//   10001 / 10002 phone advice (05_render.js lastSeenByGroup).
+var APP_VERSION = 'v5.57';
 var APP_BUILT   = '2026-11-16';
 
 // ─── v5.55: DEVICE USAGE ────────────────────────────────────────────

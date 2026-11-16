@@ -1,5 +1,10 @@
 // 05_render.js — Render rounds list (geo + alpha + off service)
 //
+// v5.57 (2026-11-16, Kathryn): "Last seen by" ignores phone advice 10001 /
+//   10002 (same PHONE_ONLY_FEES list as claimedToday, 04_billing.js v5.56).
+//   78711 still counts. A patient with only phone-advice claims shows no
+//   "Last seen by" chip.
+//
 // v5.42 (2026-10-25): RESTORED v5.29 (21/09) follow-up flag rule — a note is
 //   MANDATORY when flagging a claim for KB billing follow-up. The 25/09
 //   quiet-saves upload (v5.32) was built from a pre-v5.29 copy and had
@@ -718,7 +723,8 @@ function lastSeenIsMoreRecent(a, b) {
 }
 
 // Find the most recent claim for this patient by any cardiologist in the group.
-// Returns chip HTML like "Last seen by KB May 1" or empty string if never billed.
+// Returns chip HTML like "Last seen by KB May 1" or empty string if never seen.
+// v5.57: 10001 / 10002 phone-advice claims are skipped (78711 still counts).
 function lastSeenByGroup(p) {
   if (!p.phn) return '';
   var newest = null;
@@ -726,6 +732,8 @@ function lastSeenByGroup(p) {
     var c = st.claims[i];
     if (c.phn !== p.phn) continue;
     if (!c.date) continue;
+    // v5.57: phone advice 10001 / 10002 is not a visit — never "last seen".
+    if (PHONE_ONLY_FEES.indexOf(String(c.fee || '')) !== -1) continue;
     var t = parseDMYsafe(c.date);
     if (!t) continue;
     // v4.86: pick the most recent *visit*, not merely the newest date. On a
