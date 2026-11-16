@@ -609,6 +609,12 @@ input[type=file] { display:none; }
 .foot-flag.on { color:#fff; border-color:#c9a800; background:#c9a800; }
 .foot-flag.on svg { stroke:#fff; }
 .foot-flag:active { opacity:.7; }
+.foot-today { color:#5b3fa0; border-color:#b9a6e0; }   /* v5.54 See today */
+.foot-today svg { stroke:#5b3fa0; }
+.foot-today.on { color:#fff; border-color:#5b3fa0; background:#5b3fa0; }
+.foot-today.on svg { stroke:#fff; }
+.foot-today:active { opacity:.7; }
+.seetoday-block { border-left:3px solid #5b3fa0; background:#f3effb; border-radius:var(--r); margin-bottom:12px; padding-bottom:4px; }
 /* v5.29: flag-for-KB-billing-follow-up icon on each Today's-Claims row.
    Deliberately GREEN (var(--green-t)/var(--green)) — distinct from the
    amber .foot-flag (handover) so the two flags are never confused at a
@@ -25480,5 +25486,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "6e98a63dc9df";</script></body>
+<script>var BUILD_HASH = "05ab14d2c038";</script></body>
 </html>
