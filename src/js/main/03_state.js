@@ -872,7 +872,9 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   as one row to a "Device Usage" tab (needs Router v3.29 + DeviceUsage.gs
 //   v1.0). Shows which devices cost the server what, incl. the "nothing
 //   changed" polls the server never counts. BUILD_ID not bumped.
-var APP_VERSION = 'v5.55';
+// v5.56 (2026-11-16): version bump only in this file. Phone-advice-only
+//   days no longer turn the card green (04_billing.js claimedToday).
+var APP_VERSION = 'v5.56';
 var APP_BUILT   = '2026-11-16';
 
 // ─── v5.55: DEVICE USAGE ────────────────────────────────────────────

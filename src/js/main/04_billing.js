@@ -1,6 +1,12 @@
 // 04_billing.js — Modifier logic, BC stat holidays,
 //                 CCU consolidation, directive weekly limit
 // ═══════════════════════════════════════════════════════
+// v5.56 (2026-11-16, Kathryn): PHONE ADVICE ≠ SEEN. claimedToday() now
+//   ignores 10001 / 10002 claims (78711 still counts), so a patient whose only claim
+//   today is phone advice no longer turns green. Same function also drives
+//   the ward "Round all (N pending)" count, the CCU batch-round filter, the
+//   off-service See-today auto-clear and the last-billed chip — all now
+//   treat a phone-only day as "not yet seen". claimedTodayFee() unchanged.
 // v5.34 (2026-09-27, Kathryn): INCREMENT PERIODS TAKE THEIR OWN TIER.
 //   Sprayson 20/09 (Sun): consult 22:30–00:30 billed 1202 + 1207 ×3. The
 //   three increment half-hours all start at/after 23:00 = NIGHT band, so
@@ -1157,11 +1163,16 @@ function samePhn(a, b) {
   return String(a) === String(b);
 }
 
+// v5.56: phone-advice claims 10001 / 10002 do NOT count — the patient
+// wasn't seen (78711 still counts; it's billed alongside another code). A day whose only claim is phone advice stays
+// un-green, stays in "Round all … pending", and keeps a See-today flag.
+var PHONE_ONLY_FEES = ['10001', '10002'];
 function claimedToday(p) {
   if (!p || !p.phn) return false;
   var pPhn = String(p.phn);
   return st.claims.some(function(c) {
-    return String(c.phn || '') === pPhn && fmtClaimDate(c.date) === TODAY;
+    return String(c.phn || '') === pPhn && fmtClaimDate(c.date) === TODAY &&
+           PHONE_ONLY_FEES.indexOf(String(c.fee || '')) === -1;
   });
 }
 
