@@ -845,8 +845,19 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   day at a clock change (04_billing). All now step by calendar date via
 //   dayAddMs / dmyAddDays (04_billing). Same class of bug as v5.51. BUILD_ID
 //   not bumped.
-var APP_VERSION = 'v5.53';
-var APP_BUILT   = '2026-11-03';
+// v5.54 (2026-11-16, Kathryn) — OFF-SERVICE LIST. (1) The Geographic /
+//   Alphabetical bar now shows on Off Service too (it was hidden; the old
+//   in-list toggle sat below the handover + red blocks). (2) Geographic order
+//   = Kathryn's rounding order: red Cardiology-MRP block (ED first), then
+//   Post Cath, Race Admit, ED, C1C, ICU A-D, CSICU, Centennial PAR, IHSC1, 3E,
+//   3W, 3MU, 4E, 4W, 4A, 4B, 5A, 5B, 6W, Rehab, HAH (05_render OFF_WARD_ORDER).
+//   (3) New "Today" footer button on off-service cards: pulls the patient into
+//   a "To See Today" block for the doctor who set it only; synced across that
+//   doctor's devices (new hot group 'seeToday'; needs Config v2.51 + Crud
+//   v3.28). Expires with no write: billed today, 17:00, or next day.
+//   BUILD_ID not bumped.
+var APP_VERSION = 'v5.54';
+var APP_BUILT   = '2026-11-16';
 
 // ─── v5.20: door failover ───────────────────────────────────────────
 // Called when a whole retry chain failed on transport (not on a server
@@ -1190,7 +1201,8 @@ var HOT_GROUPS = {
   handover:  ['handover'],
   summary:   ['summary', 'summaryUpdatedAt', 'summaryUpdatedBy'],
   location:  ['ward', 'bed', 'list'],
-  discharge: ['discharged', 'dischargedAt', 'dischargeDate', 'dischargedBy']
+  discharge: ['discharged', 'dischargedAt', 'dischargeDate', 'dischargedBy'],
+  seeToday:  ['seeToday']   // v5.54 — off-service "See today" flag (Crud v3.28)
 };
 
 function _parseFieldTs(v) {

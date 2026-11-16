@@ -497,9 +497,9 @@ function setList(v) {
   document.getElementById('search-view').style.display = searching ? 'block' : 'none';
   document.getElementById('on-view').style.display  = (!searching && v === 'on')  ? 'block' : 'none';
   document.getElementById('off-view').style.display = (!searching && v === 'off') ? 'block' : 'none';
-  // Show geo/alpha toggle only on On Service AND when not searching
+  // v5.54: Geographic/Alphabetical bar shown on BOTH lists (not while searching)
   var vtBar = document.getElementById('view-tog-bar');
-  if (vtBar) vtBar.style.display = (!searching && v === 'on') ? 'flex' : 'none';
+  if (vtBar) vtBar.style.display = !searching ? 'flex' : 'none';
   render();
 }
 
@@ -1256,8 +1256,8 @@ init();
 
 function openAddOff() { openAdd("ED"); }
 
-function setOffViewAlpha() { setOffView("alpha"); }
-function setOffViewLoc()   { setOffView("location"); }
+function setOffViewAlpha() { setView("alpha"); }   // v5.54
+function setOffViewLoc()   { setView("geo"); }     // v5.54
 
 function openAddBed(b)   { openAdd("CCU", b); }
 function reorderBtn(btn) {
