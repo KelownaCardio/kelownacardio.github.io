@@ -1,4 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════
+// v5.55 (2026-11-16, Kathryn): IDLE BACKOFF — after 15 min with no tap /
+//   key / scroll the poll drops from 60 s to 10 min, delta only (no 10-min
+//   full pull); the first input back syncs at once. For computers left on
+//   with the app in front. Frozen-request fix is in 03_state.js.
 // v5.12 (2026-09-02): PHYSICIAN REVIEW MODE — plumbing that lets
 // 15_review.js run on top of the normal boot.
 //   • window.REVIEW_TOKEN — from ?review=<token>. Truthy = review mode.
@@ -268,6 +272,7 @@ async function init() {
     // v4.72: body extracted to _autoRefreshSync so the pollers can share the
     // editing-screen guards.
     async function _autoRefreshSync(tag) {
+      var _idleOpts = (tag === 'poll-idle') ? { idle: true } : undefined;   // v5.55
       // Skip if any editing screen is open — don't clobber mid-edit state
       var claimOpen = document.getElementById('p-claim') &&
                       document.getElementById('p-claim').classList.contains('on');
@@ -282,7 +287,7 @@ async function init() {
         return;
       }
       try {
-        await syncFromSheets();
+        await syncFromSheets(_idleOpts);
         // v5.19: a "nothing changed" poll answer leaves state untouched —
         // don't redraw the list for it (delta/full syncs render themselves).
         var _nc = window._lastSyncResponse && window._lastSyncResponse.checkpoint === 'no-change';
@@ -321,7 +326,7 @@ async function init() {
       var now = Date.now();
       if (now - _pollLastAt < _pollEveryMs(now)) return;
       _pollLastAt = now;
-      _autoRefreshSync('poll').then(function() {
+      _autoRefreshSync(_pollIdle(now) ? 'poll-idle' : 'poll').then(function() {
         var r = window._lastSyncResponse;
         if (r && r.checkpoint === 'delta-applied' && (r.deltaPatients || 0) > 0) {
           window._syncBurstUntil = Date.now() + POLL_BURST_FOR_MS;
@@ -339,7 +344,28 @@ var POLL_BURST_FOR_MS = 3 * 60 * 1000;
 var POLL_HANDOVER_FROM = 6 * 60 + 55;   // 06:55 local, minutes after midnight (Kathryn 2026-10-27)
 var POLL_HANDOVER_TO   = 7 * 60 + 10;   // 07:10 local
 var POLL_HANDOVER_DAYS = { 1:1, 2:1, 3:1, 4:1, 5:1 };   // Mon–Fri only
+// v5.55: IDLE BACKOFF. A computer left on with the app in front stays
+// "visible" all day and night and would poll every 60 s (plus a full pull
+// every 10 min). After 15 min with no tap, click, key or scroll, poll every
+// 10 min, delta only. The first input back syncs at once.
+var POLL_IDLE_AFTER_MS = 15 * 60 * 1000;
+var POLL_IDLE_MS       = 10 * 60 * 1000;
+window._lastInputAt = Date.now();
+function _pollIdle(now) { return (now - (window._lastInputAt || 0)) > POLL_IDLE_AFTER_MS; }
+(function() {
+  var _onInput = function() {
+    var now = Date.now(), wasIdle = _pollIdle(now);
+    window._lastInputAt = now;
+    if (wasIdle && document.visibilityState === 'visible' && st.loaded && SHEETS_URL) {
+      try { syncWithGuardIfStale(); } catch (e) {}
+    }
+  };
+  ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(function(ev) {
+    document.addEventListener(ev, _onInput, { capture: true, passive: true });
+  });
+})();
 function _pollEveryMs(now) {
+  if (_pollIdle(now)) return POLL_IDLE_MS;   // v5.55
   if ((window._syncBurstUntil || 0) > now) return POLL_BURST_MS;
   var d = new Date(now), m = d.getHours() * 60 + d.getMinutes();
   if (POLL_HANDOVER_DAYS[d.getDay()] && m >= POLL_HANDOVER_FROM && m < POLL_HANDOVER_TO) return POLL_HANDOVER_MS;
