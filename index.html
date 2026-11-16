@@ -3310,7 +3310,9 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   changed" polls the server never counts. BUILD_ID not bumped.
 // v5.56 (2026-11-16): version bump only in this file. Phone-advice-only
 //   days no longer turn the card green (04_billing.js claimedToday).
-var APP_VERSION = 'v5.56';
+// v5.57 (2026-11-16): version bump only in this file. "Last seen by" skips
+//   10001 / 10002 phone advice (05_render.js lastSeenByGroup).
+var APP_VERSION = 'v5.57';
 var APP_BUILT   = '2026-11-16';
 
 // ─── v5.55: DEVICE USAGE ────────────────────────────────────────────
@@ -7037,6 +7039,11 @@ function confirmDupClaim() {
 }
 // 05_render.js — Render rounds list (geo + alpha + off service)
 //
+// v5.57 (2026-11-16, Kathryn): "Last seen by" ignores phone advice 10001 /
+//   10002 (same PHONE_ONLY_FEES list as claimedToday, 04_billing.js v5.56).
+//   78711 still counts. A patient with only phone-advice claims shows no
+//   "Last seen by" chip.
+//
 // v5.42 (2026-10-25): RESTORED v5.29 (21/09) follow-up flag rule — a note is
 //   MANDATORY when flagging a claim for KB billing follow-up. The 25/09
 //   quiet-saves upload (v5.32) was built from a pre-v5.29 copy and had
@@ -7755,7 +7762,8 @@ function lastSeenIsMoreRecent(a, b) {
 }
 
 // Find the most recent claim for this patient by any cardiologist in the group.
-// Returns chip HTML like "Last seen by KB May 1" or empty string if never billed.
+// Returns chip HTML like "Last seen by KB May 1" or empty string if never seen.
+// v5.57: 10001 / 10002 phone-advice claims are skipped (78711 still counts).
 function lastSeenByGroup(p) {
   if (!p.phn) return '';
   var newest = null;
@@ -7763,6 +7771,8 @@ function lastSeenByGroup(p) {
     var c = st.claims[i];
     if (c.phn !== p.phn) continue;
     if (!c.date) continue;
+    // v5.57: phone advice 10001 / 10002 is not a visit — never "last seen".
+    if (PHONE_ONLY_FEES.indexOf(String(c.fee || '')) !== -1) continue;
     var t = parseDMYsafe(c.date);
     if (!t) continue;
     // v4.86: pick the most recent *visit*, not merely the newest date. On a
@@ -25701,5 +25711,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "1cc0fa4489e1";</script></body>
+<script>var BUILD_HASH = "548805dce5f7";</script></body>
 </html>
