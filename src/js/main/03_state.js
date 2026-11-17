@@ -876,8 +876,15 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   days no longer turn the card green (04_billing.js claimedToday).
 // v5.57 (2026-11-16): version bump only in this file. "Last seen by" skips
 //   10001 / 10002 phone advice (05_render.js lastSeenByGroup).
-var APP_VERSION = 'v5.57';
-var APP_BUILT   = '2026-11-16';
+// v5.58 (2026-11-17, Kathryn): OFF-SERVICE "REMOVE" — one tap. An off-service
+//   patient where Cardiology is not MRP and no MRP-type claim (33008 / CCU
+//   1411-1441 / CCU_DAILY) exists this stay: card button reads "Remove" and
+//   removes the patient at once (D/C date = today) — no date step, no
+//   complex-discharge (78717) checklist. DOB gate and private-pay/OOP
+//   interpretation check still run. 78717 if ever needed: + Claim first.
+//   10_location.js _dischQuickRemove + 05_render.js label. BUILD_ID not bumped.
+var APP_VERSION = 'v5.58';
+var APP_BUILT   = '2026-11-17';
 
 // ─── v5.55: DEVICE USAGE ────────────────────────────────────────────
 // Counts kept on the device (localStorage, survives reloads), keyed

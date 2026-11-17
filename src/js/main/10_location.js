@@ -1,4 +1,7 @@
 // 10_location.js — Location change screen + discharge modal
+//
+// v5.58 (2026-11-17, Kathryn): off-service one-tap "Remove from list" —
+//   _dischQuickRemove(p) / _offSvcRemove(pid). See _cvProceedDischarge.
 // ═══════════════════════════════════════════════════════
 // LOS helpers — v4.82 refactor: admitMs(p) resolves the admission timestamp
 // once (same priority order as before); losdays(p) keeps its old meaning
@@ -235,6 +238,10 @@ function _cvProceedDischarge(pid) {
     showModal('disch-modal');
     return;
   }
+  // v5.58: off-service, directive/consult-only patient → one tap, no date
+  // step, no 78717 checklist (Kathryn 2026-11-17). DOB gate (openDischModal)
+  // and the private-pay/OOP step above have already run.
+  if (_dischQuickRemove(p)) { _offSvcRemove(pid); return; }
   _dischStepDate(pid);            // v4.82: confirm discharge date FIRST
   showModal('disch-modal');
 }
@@ -539,6 +546,38 @@ function _dischFinalize(pid) {
   hideModal('disch-modal');
   closeClaimScreen();
   showSaved(p.last + ' discharged');
+}
+
+// v5.58 (Kathryn 2026-11-17): off-service patients seen only for consult /
+// directive care are simply removed from the list. Eligible when ALL hold:
+//   - on the off-service list (p.list === 'off')
+//   - Cardiology is NOT the MRP (same test as the discharge gap gate)
+//   - no MRP-type claim this stay: 33008, CCU 1411/1421/1431/1441, CCU_DAILY
+// Anything else keeps the full discharge pathway.
+var DQ_MRP_FEES = { '33008':1, '1411':1, '1421':1, '1431':1, '1441':1, 'CCU_DAILY':1 };
+function _dischQuickRemove(p) {
+  if (!p || p.list !== 'off') return false;
+  if (p.role === 'mrp' || p.mrp === 'Cardiology') return false;
+  var since = admitMs(p) || 0;
+  var hit = (st.claims || []).some(function(c) {
+    if (!c.phn || !p.phn || !samePhn(c.phn, p.phn)) return false;
+    if (!DQ_MRP_FEES[String(c.fee || '').trim()]) return false;
+    var cm = parseDMYsafe(c.date);
+    return !since || !cm || cm >= since;
+  });
+  return !hit;
+}
+function _offSvcRemove(pid) {
+  var p = getP(pid);
+  if (!p) return;
+  _dischDate = '';
+  window._ppAckPid = null;
+  p.dischargeDate = TODAY;
+  logChange(p, 'Removed from off-service list', 'D/C ' + TODAY);
+  removePatient(pid);
+  hideModal('disch-modal');
+  closeClaimScreen();
+  showSaved(p.last + ' removed from list');
 }
 
 // Kept for compatibility with button handlers (checklist "Doesn't qualify")

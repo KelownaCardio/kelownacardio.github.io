@@ -1,5 +1,9 @@
 // 05_render.js — Render rounds list (geo + alpha + off service)
 //
+// v5.58 (2026-11-17, Kathryn): footer D/C button reads "Remove" when the
+//   patient qualifies for the one-tap off-service removal
+//   (_dischQuickRemove, 10_location.js).
+//
 // v5.57 (2026-11-16, Kathryn): "Last seen by" ignores phone advice 10001 /
 //   10002 (same PHONE_ONLY_FEES list as claimedToday, 04_billing.js v5.56).
 //   78711 still counts. A patient with only phone-advice claims shows no
@@ -290,7 +294,7 @@ function cardFootHtml(p) {
     '</button>' +
     '<button class="foot-btn foot-dc" data-pid="' + p.id + '" onclick="event.stopPropagation();rowIconAction(this,\'disch\')">' +
       '<svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>' +
-      '<span>D/C</span>' +
+      '<span>' + ((typeof _dischQuickRemove === 'function' && _dischQuickRemove(p)) ? 'Remove' : 'D/C') + '</span>' +
     '</button>' +
     '</div>';
 }
