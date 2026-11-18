@@ -883,8 +883,11 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   complex-discharge (78717) checklist. DOB gate and private-pay/OOP
 //   interpretation check still run. 78717 if ever needed: + Claim first.
 //   10_location.js _dischQuickRemove + 05_render.js label. BUILD_ID not bumped.
-var APP_VERSION = 'v5.58';
-var APP_BUILT   = '2026-11-17';
+// v5.59 (2026-11-18, Kathryn): ROUNDS notes box (comorbidities) + re-submit
+//   old-vs-new pop-up when the Review tab differs (13e_rounds_conf.js; needs
+//   Rounds.gs v1.4). BUILD_ID not bumped.
+var APP_VERSION = 'v5.59';
+var APP_BUILT   = '2026-11-18';
 
 // ─── v5.55: DEVICE USAGE ────────────────────────────────────────────
 // Counts kept on the device (localStorage, survives reloads), keyed

@@ -11,6 +11,13 @@
 //   v5.50 (2026-10-29): picking a different referring MD now shows on the card
 //     ("Referring MD: Dr. Hodge, Steven" under the presenter) — e.g. an NP
 //     presenting for a physician. The List presenter is kept as presented.
+//   v5.59 (2026-11-18, Kathryn): NOTES + RE-SUBMIT PICKS. Each card has a
+//     Notes box (extra comorbidities supporting complexity — the ICD-9 stays
+//     the one Dx); shown on the card, added to every claim's note at release.
+//     Re-submit: if the Review tab already holds a different value (e.g.
+//     Kathryn fixed it there), the same old-vs-new pop-up as "Existing patient
+//     found" opens and the doctor picks per field. Autosaves after submit no
+//     longer re-stamp the submit time. Needs Rounds.gs v1.4.
 //   Wed Combined Heart Rounds · IHA Sarcoid Rounds · Amyloid EDRD Rounds.
 //   Replaces the Wix form at kelownacardio.com/rounds (Kathryn 2026-10-28).
 //   Backend: Router v3.28 + Rounds.gs v1.0 (roundsGet / roundsPhn /
@@ -65,7 +72,7 @@ var _rd = {
   type: 'wed', date: '', start: '07:00', roster: RD_ROSTER_SEED, attendees: [], patients: [],
   scheduleNote: '', loading: false, loadErr: '', saveTimer: null, saving: false, savedAt: '',
   dirty: false, submitted: false, submitting: false, confirmMissing: false,
-  editKey: '', adding: false, loadSeq: 0
+  editKey: '', adding: false, loadSeq: 0, conflicts: [], picks: {}
 };
 
 // ─── dates ────────────────────────────────────────────────────────
@@ -318,6 +325,7 @@ function rdPayload(final) {
       return { key: p.key, listId: p.listId || '', phn: p.phn || '', last: p.last || '', first: p.first || '',
                dob: p.dob || '', sex: p.sex || '', presenter: p.presenter || '', refby: p.refby || '',
                refbyName: p.refbyName || '', icd: p.icd || '', icdLabel: p.icdLabel || '',
+               notes: p.notes || '',
                order: p.order == null ? null : p.order, added: !!p.added };
     }),
     by: (st.doc && st.doc.alias) || '', final: !!final
@@ -332,7 +340,9 @@ function rdDoSave() {
   if (!SHEETS_URL || !_rd.dirty) return;
   if (_rd.saving) { rdQueueSave(false); return; }
   _rd.saving = true;
-  var sid = rdSid(), body = rdPayload(_rd.submitted);   // once submitted, later edits keep the review in step
+  // v5.59: autosave never re-submits; the backend still keeps the Review in
+  // step once the session is submitted, but never overwrites a Review edit.
+  var sid = rdSid(), body = rdPayload(false);
   var snapshot = JSON.stringify(body.patients) + body.attendees.join() + body.start;
   rdRenderStatus();
   rdPost('roundsSave', body).then(function (j) {
@@ -363,7 +373,7 @@ function rdMissing() {
   });
   return out;
 }
-function rdSubmit() {
+function rdSubmit(resolve) {
   if (_rd.submitting) return;
   var n = rdRanked().length;
   if (!n) { showToast('Tap Discussed on at least one patient first'); return; }
@@ -371,18 +381,77 @@ function rdSubmit() {
   var miss = rdMissing();
   if (miss.length && !_rd.confirmMissing) { _rd.confirmMissing = true; rdRender(); return; }
   _rd.submitting = true; rdRender();
-  var sid = rdSid();
-  rdPost('roundsSave', rdPayload(true)).then(function (j) {
+  var sid = rdSid(), body = rdPayload(true);
+  if (resolve) body.resolve = resolve;
+  rdPost('roundsSave', body).then(function (j) {
     _rd.submitting = false;
     if (sid !== rdSid()) return;
     _rd.submitted = true; _rd.dirty = false; _rd.confirmMissing = false;
     _rd.savedAt = j.savedAt || new Date().toISOString();
     rdLocalSave(); rdRender();
+    if (j.conflicts && j.conflicts.length) rdOpenConflicts(j.conflicts);   // v5.59
   }).catch(function (e) {
     _rd.submitting = false;
     showToast('Not submitted — ' + (e && e.message ? e.message : 'no connection') + '. Your taps are saved on this device; tap Submit again.');
     rdRender();
   });
+}
+
+// ─── v5.59: re-submit — Review tab value vs app value, doctor picks ───
+// Same look as the "Existing patient found" pop-up (merge-modal, dup-* CSS).
+function rdConflictShow(c, v) {
+  if (c.field === 'attendees') {
+    var nm = {}; _rd.roster.forEach(function (d) { nm[d.alias] = d.name; });
+    return String(v || '').split(',').map(function (a) { a = a.trim(); return nm[a] || a; }).filter(String).join(', ');
+  }
+  if (c.field === 'phn') return rdFmtPhn(v);
+  if (c.field === 'icd') return rdPillLabel(String(v).replace(/\./g, '')) || v;
+  return v;
+}
+function rdOpenConflicts(list) {
+  _rd.conflicts = list; _rd.picks = {};
+  var h = '<div class="dup-confirm">The Review tab already has different info for ' +
+          (list.length === 1 ? 'this field' : 'these fields') + ' — pick the correct value.</div>';
+  var lastName = null;
+  list.forEach(function (c, i) {
+    _rd.picks[i] = 'app';
+    if (c.name !== lastName) { h += '<div class="rd-lbl" style="margin:10px 0 2px">' + esc(c.name) + '</div>'; lastName = c.name; }
+    h += '<div class="dup-row"><div class="dup-label">' + esc(c.label) + '</div><div class="dup-pills">' +
+         '<button class="dup-pill" data-ci="' + i + '" data-which="sheet" onclick="rdTapConflict(this)">' +
+           esc(rdConflictShow(c, c.sheet)) + '<span class="dup-pill-tag">in review</span></button>' +
+         '<button class="dup-pill selected" data-ci="' + i + '" data-which="app" onclick="rdTapConflict(this)">' +
+           esc(rdConflictShow(c, c.app)) + '<span class="dup-pill-tag">new</span></button>' +
+         '</div></div>';
+  });
+  h += '<div style="display:flex;gap:8px;margin-top:14px"><button class="btn btn-p" style="flex:1;margin:0" onclick="rdSaveConflicts()">Save choices</button></div>';
+  document.getElementById('merge-title').textContent = 'Changed since submitted — which is correct?';
+  document.getElementById('merge-body').innerHTML = h;
+  showModal('merge-modal');
+}
+function rdTapConflict(el) {
+  var i = el.getAttribute('data-ci'), which = el.getAttribute('data-which');
+  _rd.picks[i] = which;
+  Array.prototype.forEach.call(document.querySelectorAll('.dup-pill[data-ci="' + i + '"]'), function (b) {
+    b.classList.toggle('selected', b.getAttribute('data-which') === which);
+  });
+}
+function rdSaveConflicts() {
+  var resolve = {};
+  _rd.conflicts.forEach(function (c, i) {
+    if (_rd.picks[i] === 'app') { (resolve[c.key] = resolve[c.key] || {})[c.field] = 'app'; return; }
+    // Review value wins → copy it into the app so both agree from now on.
+    if (c.field === 'attendees') { _rd.attendees = String(c.sheet || '').split(',').map(function (a) { return a.trim(); }).filter(String); return; }
+    var p = rdFind(c.key);
+    if (!p) return;
+    if (c.field === 'refby') { p.refby = (c.sheetVal && c.sheetVal.refby) || ''; p.refbyName = (c.sheetVal && c.sheetVal.refbyName) || ''; }
+    else if (c.field === 'icd') { p.icd = String(c.sheet).replace(/\./g, ''); p.icdLabel = rdPillLabel(p.icd) || p.icd; p.icdAuto = false; }
+    else if (c.field === 'phn') p.phn = String(c.sheet).replace(/\D/g, '');
+    else p[c.field] = c.sheet;
+  });
+  _rd.conflicts = []; _rd.picks = {};
+  hideModal('merge-modal');
+  _rd.confirmMissing = true;               // already confirmed once — don't re-ask about missing fields
+  rdSubmit(resolve);
 }
 
 // ─── render ───────────────────────────────────────────────────────
@@ -466,6 +535,7 @@ function rdCardHtml(p, rank) {
     '<div class="rd-info" onclick="rdEdit(\'' + k + '\')" title="Tap to edit">' +
       '<div class="rd-name">' + esc((p.last || '?') + ', ' + (p.first || '')) + '</div>' +
       '<div class="rd-meta">' + line2 + '</div><div class="rd-meta">' + line3 + '</div><div class="rd-meta">' + line4 + '</div>' +
+      (p.notes ? '<div class="rd-meta">Notes: ' + esc(p.notes.length > 140 ? p.notes.slice(0, 140) + '…' : p.notes) + '</div>' : '') +
     '</div>' +
     '<button class="rd-pill' + (tapped ? (over ? ' over' : ' on') : '') + '" onclick="rdToggleDiscussed(\'' + k + '\')">' + pill + '</button>' +
   '</div>';
@@ -485,11 +555,16 @@ function rdEditHtml(p) {
       '<input id="rde-dob" placeholder="DOB DD/MM/YYYY" value="' + esc(p.dob || '') + '" inputmode="numeric" maxlength="10" oninput="dobAutoSlash(this)">' +
       rdSexSelect('rde-sex', p.sex) +
     '</div>' +
-    rdRefFields('rde', p) + rdIcdFields('rde', p) +
+    rdRefFields('rde', p) + rdIcdFields('rde', p) + rdNotesField('rde-notes', p.notes) +
     '<div id="rde-err" class="rd-err"></div>' +
     '<div class="rd-btns">' + (p.added ? '<button class="btn btn-s" onclick="rdRemove(\'' + esc(p.key) + '\')">Remove patient</button>' : '') +
       '<button class="btn btn-p" onclick="rdEditSave(\'' + esc(p.key) + '\')">Done</button></div>' +
   '</div>';
+}
+function rdNotesField(id, v) {   // v5.59
+  return '<div class="rd-lbl" style="margin-top:4px">Notes — other comorbidities / complexity (optional)</div>' +
+    '<textarea id="' + id + '" class="rd-wide" rows="2" maxlength="600" style="resize:vertical;font-family:inherit" ' +
+    'placeholder="e.g. CKD 4, prior CABG, frailty — added to the claim note">' + esc(v || '') + '</textarea>';
 }
 function rdSexSelect(id, v) {
   return '<select id="' + id + '"><option value="">Gender</option>' + ['F', 'M', 'X'].map(function (s) {
@@ -549,6 +624,7 @@ function rdEditSave(key) {
   p.last = rdVal('rde-last'); p.first = rdVal('rde-first');
   p.dob = dn === true ? '' : (dn || ''); p.sex = rdVal('rde-sex');
   rdReadRefIcd('rde', p);
+  p.notes = rdVal('rde-notes').replace(/\s+/g, ' ');
   _rd.editKey = '';
   rdChanged();
 }
@@ -568,7 +644,7 @@ function rdAddFormHtml() {
       '<input id="rda-dob" placeholder="DOB DD/MM/YYYY" inputmode="numeric" maxlength="10" oninput="dobAutoSlash(this)">' +
       rdSexSelect('rda-sex', '') +
     '</div>' +
-    rdRefFields('rda', null) + rdIcdFields('rda', T.dx ? { icd: T.dx, icdLabel: T.dxLabel } : null) +
+    rdRefFields('rda', null) + rdIcdFields('rda', T.dx ? { icd: T.dx, icdLabel: T.dxLabel } : null) + rdNotesField('rda-notes', '') +
     '<div id="rda-err" class="rd-err"></div>' +
     '<div class="rd-btns"><button class="btn btn-s" onclick="rdCloseAdd()">Cancel</button>' +
     '<button class="btn btn-p" onclick="rdAddSave()">Add to rounds</button></div></div>';
@@ -607,7 +683,8 @@ function rdAddSave() {
   var sex = rdVal('rda-sex');
   if (!sex) return say('Pick a gender');
   var p = { key: 'A' + Date.now(), listId: '', phn: phn, last: last, first: first, dob: dn, sex: sex,
-            presenter: '', refby: '', refbyName: '', icd: '', icdLabel: '', order: null, added: true };
+            presenter: '', refby: '', refbyName: '', icd: '', icdLabel: '', order: null, added: true,
+            notes: rdVal('rda-notes').replace(/\s+/g, ' ') };
   rdReadRefIcd('rda', p);
   if (!p.presenter && !p.refby) return say('Enter who presented');
   if (!p.icd) return say('Pick a Dx');
