@@ -3322,8 +3322,17 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // v5.59 (2026-11-18, Kathryn): ROUNDS notes box (comorbidities) + re-submit
 //   old-vs-new pop-up when the Review tab differs (13e_rounds_conf.js; needs
 //   Rounds.gs v1.4). BUILD_ID not bumped.
-var APP_VERSION = 'v5.59';
-var APP_BUILT   = '2026-11-18';
+// v5.60 (2026-11-19, Kathryn): DELETES CARRY THE DOCTOR. push() adds
+//   body.user = signed-in alias to every deleteClaim / deletePatient, so
+//   the ChangeLog row names who deleted (was "unknown"). Needs Router v3.30
+//   (older Router ignores the field — harmless). BUILD_ID not bumped.
+// v5.61 (2026-11-19, Kathryn): EXPORT "TO SEE TODAY" FOR QUICKCHART. New
+//   button under the Meditech rounds-list button copies the signed-in
+//   doctor's off-service See-today patients (location + demographics) in
+//   the rounds-PDF QuickChart line format. Read-only. 13c_rounds_pdf.js +
+//   index.template.html. Includes v5.60. BUILD_ID not bumped.
+var APP_VERSION = 'v5.61';
+var APP_BUILT   = '2026-11-19';
 
 // ─── v5.55: DEVICE USAGE ────────────────────────────────────────────
 // Counts kept on the device (localStorage, survives reloads), keyed
@@ -4882,6 +4891,10 @@ async function push(action, body, wire) {
   // Safety valve: a gate is synchronous and lives milliseconds. One left
   // open by an exception would silently swallow every claim save for the
   // rest of the session — so a gate older than 10s is discarded.
+  // v5.60: stamp the signed-in alias on deletes (Router v3.30 logs it).
+  if ((action === 'deleteClaim' || action === 'deletePatient') && body && typeof body === 'object' && !body.user) {
+    try { if (st && st.doc && st.doc.alias) body.user = st.doc.alias; } catch (eDu) {}
+  }
   if (window._claimGate && (Date.now() - (window._claimGate.t0 || 0)) > 10000) {
     console.warn('claim gate left open — discarded');
     window._claimGate = null;
@@ -21661,6 +21674,17 @@ function paSubmit() {
 // 13c_rounds_pdf.js — Meditech "SB Rounds List" PDF → room updates,
 //                     discharge flags and QuickChart paste lists
 // ═══════════════════════════════════════════════════════════════════
+// v5.61 (2026-11-19, Kathryn) — NEW button under the Meditech rounds-list
+//   button: "Export 'To See Today' list for QuickChart". Copies the
+//   off-service patients the signed-in doctor has flagged Today (same rule
+//   as the purple To See Today block: isSeeToday — mine, today, before
+//   17:00, not yet billed today) in the SAME line format as the rounds-PDF
+//   copy (rlQuickChartText), built from the app's own patient records:
+//     Last, First | DOB yyyy-mm-dd | PHN n | Location 4E | Bed 4E 412
+//   Rounding order = the off-service geographic order (sortByOffWard).
+//   Read-only: writes nothing. No PDF needed.
+//   Goes to a SEPARATE QuickChart off-service list (Kathryn 2026-11-19),
+//   not the KGH Cardiology inpatient list.
 // v5.44 (2026-10-27) — Drop the PDF straight on the "Meditech rounds list"
 //   button under the patient list (Kathryn 2026-10-27: no need to open the
 //   box first). The button lights up while a file is dragged over it. The
@@ -22406,6 +22430,41 @@ function rlApply() {
     rlHandleFile(f);
   });
 })();
+
+// ── v5.61: Export the off-service "To See Today" list for QuickChart ──
+function _rlAppDobIso(dob) {
+  var d = String(fmtClaimDate(dob) || '');              // normalise to DD/MM/YYYY
+  var m = d.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  return m ? (m[3] + '-' + pad(m[2]) + '-' + pad(m[1])) : '';
+}
+function rlSeeTodayText(pts) {
+  var lines = pts.map(function (p) {
+    var w   = wardLabel(p.ward) || 'unknown';
+    var bed = String(p.bed || '').trim();
+    return String(p.last || '') + ', ' + String(p.first || '') +
+      ' | DOB ' + (_rlAppDobIso(p.dob) || 'unknown') +
+      ' | PHN ' + (p.phn || 'unknown') +
+      ' | Location ' + w +
+      ' | Bed ' + w + (bed ? ' ' + bed : '');
+  });
+  return 'KGH Cardiology off-service patients to see today\n' + lines.join('\n');
+}
+function rlExportSeeToday() {
+  if (typeof isResident === 'function' && isResident()) { showToast('Not available for this login'); return; }
+  if (!st.doc || !st.doc.alias) { showToast('Sign in first'); return; }
+  var pts = st.patients.filter(isSeeToday);
+  if (!pts.length) {
+    showToast(new Date().getHours() >= SEE_TODAY_CUTOFF_H
+      ? 'See today clears at 17:00 — nothing to export'
+      : 'No off-service patients marked Today');
+    return;
+  }
+  pts = sortByOffWard(pts);
+  _rlCopyText(rlSeeTodayText(pts)).then(function (ok) {
+    if (ok) showToast(pts.length + ' patient' + (pts.length === 1 ? '' : 's') + ' copied — paste into your QuickChart OFF-SERVICE list (Scan list → Paste it here instead)');
+    else    showToast('Copy blocked by this browser', 'error');
+  });
+}
 // ── 13d_consult_pdf.js ──
 // ═══════════════════════════════════════════════════════
 // v5.39 (2026-10-22): row button is now "📞 Consult" (was "📄 Consult") so
@@ -25841,5 +25900,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "c69ec86d2678";</script></body>
+<script>var BUILD_HASH = "535e2820a12c";</script></body>
 </html>
