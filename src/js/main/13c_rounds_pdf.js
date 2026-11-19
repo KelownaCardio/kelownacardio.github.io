@@ -13,6 +13,9 @@
 //   v5.62 (2026-11-19, Kathryn): tap opens a CONFIRM LIST first — my To See
 //   Today + red Cardiology-MRP-off-ward (isStranded, e.g. ED) pre-ticked,
 //   other off-service patients unticked to add; Copy = ticked only.
+//   v5.63: ticks were invisible — the app's global input style
+//   (-webkit-appearance:none) hides the native checkmark. Checkbox now has
+//   class st-chk with its own drawn tick (index.template.html).
 //   Goes to a SEPARATE QuickChart off-service list (Kathryn 2026-11-19),
 //   not the KGH Cardiology inpatient list.
 // v5.44 (2026-10-27) — Drop the PDF straight on the "Meditech rounds list"
@@ -799,7 +802,7 @@ function _stRow(p, tag) {
   var on = !!_stSel[p.id];
   var bed = String(p.bed || '').trim();
   return '<label class="imp-row" style="padding:8px 10px;display:flex;gap:10px;align-items:center;cursor:pointer">' +
-           '<input type="checkbox" ' + (on ? 'checked ' : '') + 'style="width:20px;height:20px;flex-shrink:0" ' +
+           '<input type="checkbox" class="st-chk" ' + (on ? 'checked ' : '') +
              'onchange="rlStToggle(\'' + esc(p.id) + '\', this.checked)">' +
            '<div class="imp-info">' +
              '<div class="imp-name">' + esc(String(p.last || '')) + ', ' + esc(String(p.first || '')) + '</div>' +

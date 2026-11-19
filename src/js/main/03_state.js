@@ -899,7 +899,10 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   To See Today + red Cardiology-MRP-off-ward (ED etc.) pre-ticked, other
 //   off-service patients unticked; Copy = ticked only, for the separate
 //   QuickChart off-service list. Built on v5.61 (pushed 2026-11-19 07:52). BUILD_ID not bumped.
-var APP_VERSION = 'v5.62';
+// v5.63 (2026-11-19, Kathryn): export confirm list ticks were invisible
+//   (global input -webkit-appearance:none) — own drawn checkbox .st-chk.
+//   13c_rounds_pdf.js + index.template.html. BUILD_ID not bumped.
+var APP_VERSION = 'v5.63';
 var APP_BUILT   = '2026-11-19';
 
 // ─── v5.55: DEVICE USAGE ────────────────────────────────────────────
