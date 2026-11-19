@@ -52,6 +52,12 @@
   width:5px; height:10px; border:solid #fff; border-width:0 2.5px 2.5px 0;
   transform:rotate(45deg);
 }
+/* v5.63: off-service export confirm list checkboxes (global input style hides the native tick) */
+.st-chk { -webkit-appearance:none; appearance:none; position:relative; flex:0 0 22px; width:22px; height:22px; padding:0; margin:0;
+  border:2px solid var(--border2); border-radius:5px; background:#fff; cursor:pointer; }
+.st-chk:checked { background:var(--blue); border-color:var(--blue); }
+.st-chk:checked::after { content:''; position:absolute; left:6px; top:2px; width:5px; height:11px;
+  border:solid #fff; border-width:0 2.5px 2.5px 0; transform:rotate(45deg); }
 body { font-family:-apple-system,'SF Pro Text',system-ui,sans-serif; background:var(--bg); color:var(--text); font-size:14px; line-height:1.4; max-width:430px; margin:0 auto; min-height:100vh; }
 
 /* HEADER */
