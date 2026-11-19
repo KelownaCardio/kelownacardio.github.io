@@ -951,7 +951,7 @@ input[type=file] { display:none; }
   </button>
   <!-- v5.61: copy the signed-in doctor's off-service "To See Today" patients for QuickChart (13c_rounds_pdf.js rlExportSeeToday). Read-only. -->
   <button class="mit-btn" id="st-export-btn" onclick="rlExportSeeToday()" style="justify-content:center">
-    <svg viewBox="0 0 24 24"><rect x="8" y="3" width="13" height="15" rx="2"/><path d="M5 7H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-1"/></svg><span>Export &ldquo;To See Today&rdquo; list for QuickChart (copy)</span>
+    <svg viewBox="0 0 24 24"><rect x="8" y="3" width="13" height="15" rx="2"/><path d="M5 7H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-1"/></svg><span>Export off-service rounding list for QuickChart (Today + MRP)</span>
   </button>
   <!-- v5.44: "Export list for QuickChart" button removed (Kathryn 2026-10-27) — the rounds-list box has its own Copy for QuickChart. openQuickChartExport() left in 11_export.js, unused. -->
 </div>
@@ -1263,6 +1263,16 @@ input[type=file] { display:none; }
     <div class="modal-title">Meditech rounds list</div>
     <div id="rl-body"></div>
     <button class="btn btn-s" onclick="hideModal('rl-modal')" style="margin-top:10px;margin-bottom:0">Close</button>
+  </div>
+</div>
+
+<!-- v5.62: off-service export confirm list (13c_rounds_pdf.js _stRender) -->
+<div class="overlay" id="st-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Off-service list for QuickChart</div>
+    <div id="st-body"></div>
+    <button class="btn btn-s" onclick="hideModal('st-modal')" style="margin-top:10px;margin-bottom:0">Cancel</button>
   </div>
 </div>
 
