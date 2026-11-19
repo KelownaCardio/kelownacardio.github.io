@@ -1,6 +1,17 @@
 // 13c_rounds_pdf.js — Meditech "SB Rounds List" PDF → room updates,
 //                     discharge flags and QuickChart paste lists
 // ═══════════════════════════════════════════════════════════════════
+// v5.61 (2026-11-19, Kathryn) — NEW button under the Meditech rounds-list
+//   button: "Export 'To See Today' list for QuickChart". Copies the
+//   off-service patients the signed-in doctor has flagged Today (same rule
+//   as the purple To See Today block: isSeeToday — mine, today, before
+//   17:00, not yet billed today) in the SAME line format as the rounds-PDF
+//   copy (rlQuickChartText), built from the app's own patient records:
+//     Last, First | DOB yyyy-mm-dd | PHN n | Location 4E | Bed 4E 412
+//   Rounding order = the off-service geographic order (sortByOffWard).
+//   Read-only: writes nothing. No PDF needed.
+//   Goes to a SEPARATE QuickChart off-service list (Kathryn 2026-11-19),
+//   not the KGH Cardiology inpatient list.
 // v5.44 (2026-10-27) — Drop the PDF straight on the "Meditech rounds list"
 //   button under the patient list (Kathryn 2026-10-27: no need to open the
 //   box first). The button lights up while a file is dragged over it. The
@@ -746,3 +757,38 @@ function rlApply() {
     rlHandleFile(f);
   });
 })();
+
+// ── v5.61: Export the off-service "To See Today" list for QuickChart ──
+function _rlAppDobIso(dob) {
+  var d = String(fmtClaimDate(dob) || '');              // normalise to DD/MM/YYYY
+  var m = d.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  return m ? (m[3] + '-' + pad(m[2]) + '-' + pad(m[1])) : '';
+}
+function rlSeeTodayText(pts) {
+  var lines = pts.map(function (p) {
+    var w   = wardLabel(p.ward) || 'unknown';
+    var bed = String(p.bed || '').trim();
+    return String(p.last || '') + ', ' + String(p.first || '') +
+      ' | DOB ' + (_rlAppDobIso(p.dob) || 'unknown') +
+      ' | PHN ' + (p.phn || 'unknown') +
+      ' | Location ' + w +
+      ' | Bed ' + w + (bed ? ' ' + bed : '');
+  });
+  return 'KGH Cardiology off-service patients to see today\n' + lines.join('\n');
+}
+function rlExportSeeToday() {
+  if (typeof isResident === 'function' && isResident()) { showToast('Not available for this login'); return; }
+  if (!st.doc || !st.doc.alias) { showToast('Sign in first'); return; }
+  var pts = st.patients.filter(isSeeToday);
+  if (!pts.length) {
+    showToast(new Date().getHours() >= SEE_TODAY_CUTOFF_H
+      ? 'See today clears at 17:00 — nothing to export'
+      : 'No off-service patients marked Today');
+    return;
+  }
+  pts = sortByOffWard(pts);
+  _rlCopyText(rlSeeTodayText(pts)).then(function (ok) {
+    if (ok) showToast(pts.length + ' patient' + (pts.length === 1 ? '' : 's') + ' copied — paste into your QuickChart OFF-SERVICE list (Scan list → Paste it here instead)');
+    else    showToast('Copy blocked by this browser', 'error');
+  });
+}

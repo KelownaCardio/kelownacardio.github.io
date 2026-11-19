@@ -886,8 +886,17 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // v5.59 (2026-11-18, Kathryn): ROUNDS notes box (comorbidities) + re-submit
 //   old-vs-new pop-up when the Review tab differs (13e_rounds_conf.js; needs
 //   Rounds.gs v1.4). BUILD_ID not bumped.
-var APP_VERSION = 'v5.59';
-var APP_BUILT   = '2026-11-18';
+// v5.60 (2026-11-19, Kathryn): DELETES CARRY THE DOCTOR. push() adds
+//   body.user = signed-in alias to every deleteClaim / deletePatient, so
+//   the ChangeLog row names who deleted (was "unknown"). Needs Router v3.30
+//   (older Router ignores the field — harmless). BUILD_ID not bumped.
+// v5.61 (2026-11-19, Kathryn): EXPORT "TO SEE TODAY" FOR QUICKCHART. New
+//   button under the Meditech rounds-list button copies the signed-in
+//   doctor's off-service See-today patients (location + demographics) in
+//   the rounds-PDF QuickChart line format. Read-only. 13c_rounds_pdf.js +
+//   index.template.html. Includes v5.60. BUILD_ID not bumped.
+var APP_VERSION = 'v5.61';
+var APP_BUILT   = '2026-11-19';
 
 // ─── v5.55: DEVICE USAGE ────────────────────────────────────────────
 // Counts kept on the device (localStorage, survives reloads), keyed
@@ -2446,6 +2455,10 @@ async function push(action, body, wire) {
   // Safety valve: a gate is synchronous and lives milliseconds. One left
   // open by an exception would silently swallow every claim save for the
   // rest of the session — so a gate older than 10s is discarded.
+  // v5.60: stamp the signed-in alias on deletes (Router v3.30 logs it).
+  if ((action === 'deleteClaim' || action === 'deletePatient') && body && typeof body === 'object' && !body.user) {
+    try { if (st && st.doc && st.doc.alias) body.user = st.doc.alias; } catch (eDu) {}
+  }
   if (window._claimGate && (Date.now() - (window._claimGate.t0 || 0)) > 10000) {
     console.warn('claim gate left open — discarded');
     window._claimGate = null;
