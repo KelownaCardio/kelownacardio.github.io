@@ -895,7 +895,11 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   doctor's off-service See-today patients (location + demographics) in
 //   the rounds-PDF QuickChart line format. Read-only. 13c_rounds_pdf.js +
 //   index.template.html. Includes v5.60. BUILD_ID not bumped.
-var APP_VERSION = 'v5.61';
+// v5.62 (2026-11-19, Kathryn): the export button now opens a CONFIRM LIST —
+//   To See Today + red Cardiology-MRP-off-ward (ED etc.) pre-ticked, other
+//   off-service patients unticked; Copy = ticked only, for the separate
+//   QuickChart off-service list. Built on v5.61 (pushed 2026-11-19 07:52). BUILD_ID not bumped.
+var APP_VERSION = 'v5.62';
 var APP_BUILT   = '2026-11-19';
 
 // ─── v5.55: DEVICE USAGE ────────────────────────────────────────────

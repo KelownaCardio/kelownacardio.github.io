@@ -10,6 +10,9 @@
 //     Last, First | DOB yyyy-mm-dd | PHN n | Location 4E | Bed 4E 412
 //   Rounding order = the off-service geographic order (sortByOffWard).
 //   Read-only: writes nothing. No PDF needed.
+//   v5.62 (2026-11-19, Kathryn): tap opens a CONFIRM LIST first — my To See
+//   Today + red Cardiology-MRP-off-ward (isStranded, e.g. ED) pre-ticked,
+//   other off-service patients unticked to add; Copy = ticked only.
 //   Goes to a SEPARATE QuickChart off-service list (Kathryn 2026-11-19),
 //   not the KGH Cardiology inpatient list.
 // v5.44 (2026-10-27) — Drop the PDF straight on the "Meditech rounds list"
@@ -776,19 +779,74 @@ function rlSeeTodayText(pts) {
   });
   return 'KGH Cardiology off-service patients to see today\n' + lines.join('\n');
 }
+// v5.62: tap → confirm list first (Kathryn 2026-11-19). Pre-ticked =
+// my To See Today patients + every red Cardiology-MRP-off-home-ward patient
+// (isStranded, e.g. MRP Cardiology in ED). All other active off-service
+// patients are listed unticked so the doctor can add them. Copy = ticked
+// patients only, in off-service rounding order (sortByOffWard).
+var _stSel = {};
 function rlExportSeeToday() {
   if (typeof isResident === 'function' && isResident()) { showToast('Not available for this login'); return; }
   if (!st.doc || !st.doc.alias) { showToast('Sign in first'); return; }
-  var pts = st.patients.filter(isSeeToday);
-  if (!pts.length) {
-    showToast(new Date().getHours() >= SEE_TODAY_CUTOFF_H
-      ? 'See today clears at 17:00 — nothing to export'
-      : 'No off-service patients marked Today');
-    return;
+  _stSel = {};
+  st.patients.forEach(function (p) {
+    if (p && p.id && !p.discharged && (isSeeToday(p) || isStranded(p))) _stSel[p.id] = true;
+  });
+  _stRender();
+  showModal('st-modal');
+}
+function _stRow(p, tag) {
+  var on = !!_stSel[p.id];
+  var bed = String(p.bed || '').trim();
+  return '<label class="imp-row" style="padding:8px 10px;display:flex;gap:10px;align-items:center;cursor:pointer">' +
+           '<input type="checkbox" ' + (on ? 'checked ' : '') + 'style="width:20px;height:20px;flex-shrink:0" ' +
+             'onchange="rlStToggle(\'' + esc(p.id) + '\', this.checked)">' +
+           '<div class="imp-info">' +
+             '<div class="imp-name">' + esc(String(p.last || '')) + ', ' + esc(String(p.first || '')) + '</div>' +
+             '<div class="imp-meta">' + esc(wardLabel(p.ward) || '?') + (bed ? ' ' + esc(bed) : '') + (tag || '') + '</div>' +
+           '</div>' +
+         '</label>';
+}
+function _stRender() {
+  var box = document.getElementById('st-body');
+  if (!box) return;
+  var red    = sortByOffWard(st.patients.filter(function (p) { return p && p.id && !p.discharged && isStranded(p); }));
+  var today  = sortByOffWard(st.patients.filter(function (p) { return p && p.id && isSeeToday(p); }));
+  var others = sortByOffWard(st.patients.filter(function (p) {
+    return p && p.id && !p.discharged && p.list === 'off' && !isSeeToday(p);
+  }));
+  var n = Object.keys(_stSel).filter(function (k) { return _stSel[k]; }).length;
+  var h = '<div style="font-size:11px;color:var(--text2);margin-bottom:8px;line-height:1.4">' +
+            'Ticked patients are copied for your QuickChart <b>off-service</b> list. Untick or add as needed.' +
+          '</div>';
+  if (red.length) {
+    h += '<div class="sec-lbl" style="color:var(--red-t)">⚠ Cardiology MRP — off regular wards (' + red.length + ')</div>';
+    red.forEach(function (p) { h += _stRow(p, ' · <span style="color:var(--red-t);font-weight:700">MRP</span>'); });
   }
-  pts = sortByOffWard(pts);
+  h += '<div class="sec-lbl" style="color:#5b3fa0;margin-top:8px">◷ To see today (' + today.length + ')</div>';
+  if (today.length) today.forEach(function (p) { h += _stRow(p, ''); });
+  else h += '<div class="imp-meta" style="margin-bottom:6px">None marked Today.</div>';
+  if (others.length) {
+    h += '<div class="sec-lbl" style="margin-top:8px">Other off-service (' + others.length + ')</div>';
+    others.forEach(function (p) { h += _stRow(p, ''); });
+  }
+  h += '<button class="btn btn-p" style="margin-top:12px;margin-bottom:0" onclick="rlStCopy()"' + (n ? '' : ' disabled') + '>' +
+         'Copy ' + n + ' for QuickChart</button>';
+  box.innerHTML = h;
+}
+function rlStToggle(pid, on) {
+  if (on) _stSel[pid] = true; else delete _stSel[pid];
+  _stRender();
+}
+function rlStCopy() {
+  var pts = sortByOffWard(st.patients.filter(function (p) { return p && p.id && !p.discharged && _stSel[p.id]; }));
+  if (!pts.length) { showToast('Tick at least one patient'); return; }
   _rlCopyText(rlSeeTodayText(pts)).then(function (ok) {
-    if (ok) showToast(pts.length + ' patient' + (pts.length === 1 ? '' : 's') + ' copied — paste into your QuickChart OFF-SERVICE list (Scan list → Paste it here instead)');
-    else    showToast('Copy blocked by this browser', 'error');
+    if (ok) {
+      hideModal('st-modal');
+      showToast(pts.length + ' patient' + (pts.length === 1 ? '' : 's') + ' copied — paste into your QuickChart OFF-SERVICE list (Scan list → Paste it here instead)');
+    } else {
+      showToast('Copy blocked by this browser', 'error');
+    }
   });
 }
