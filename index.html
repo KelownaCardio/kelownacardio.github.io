@@ -3358,8 +3358,15 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // v5.63 (2026-11-19, Kathryn): export confirm list ticks were invisible
 //   (global input -webkit-appearance:none) — own drawn checkbox .st-chk.
 //   13c_rounds_pdf.js + index.template.html. BUILD_ID not bumped.
-var APP_VERSION = 'v5.63';
-var APP_BUILT   = '2026-11-19';
+// v5.64 (2026-11-25, Kathryn): ROUNDS EDITS ALWAYS PERSIST. Barna 25/11:
+//   a second device saved its older copy and wiped the first doctor's DOB +
+//   Discussed tap. Every field a doctor changes is now stamped and the
+//   server merges field by field (newer edit of the same field wins; an
+//   untouched field never overwrites). The List is a one-and-done import —
+//   it only adds missing cards. 13e_rounds_conf.js; needs Rounds.gs v1.8.
+//   BUILD_ID not bumped.
+var APP_VERSION = 'v5.64';
+var APP_BUILT   = '2026-11-25';
 
 // ─── v5.55: DEVICE USAGE ────────────────────────────────────────────
 // Counts kept on the device (localStorage, survives reloads), keyed
@@ -22913,6 +22920,14 @@ function cpdfClose() {
 //     Kathryn fixed it there), the same old-vs-new pop-up as "Existing patient
 //     found" opens and the doctor picks per field. Autosaves after submit no
 //     longer re-stamp the submit time. Needs Rounds.gs v1.4.
+//   v5.64 (2026-11-25, Kathryn): EDITS ALWAYS PERSIST. Every field a doctor
+//     changes gets an edit stamp (p.ed[field]); saves send merge:1 and
+//     Rounds.gs v1.8 merges field by field — a device that never touched a
+//     field can't blank or revert it (Barna 25/11: a second device wiped the
+//     DOB + Discussed tap). The merged copy comes back and is adopted, so
+//     devices converge. Removing an added patient is a stamped flag, not a
+//     splice. The List is a ONE-AND-DONE import: it only adds cards that
+//     aren't in the session — it never refills or overwrites a card.
 //   Wed Combined Heart Rounds · IHA Sarcoid Rounds · Amyloid EDRD Rounds.
 //   Replaces the Wix form at kelownacardio.com/rounds (Kathryn 2026-10-28).
 //   Backend: Router v3.28 + Rounds.gs v1.0 (roundsGet / roundsPhn /
@@ -22967,8 +22982,62 @@ var _rd = {
   type: 'wed', date: '', start: '07:00', roster: RD_ROSTER_SEED, attendees: [], patients: [],
   scheduleNote: '', loading: false, loadErr: '', saveTimer: null, saving: false, savedAt: '',
   dirty: false, submitted: false, submitting: false, confirmMissing: false,
-  editKey: '', adding: false, loadSeq: 0, conflicts: [], picks: {}
+  editKey: '', adding: false, loadSeq: 0, conflicts: [], picks: {}, sessEd: {}
 };
+
+// ─── v5.64: edit stamps + field merge (mirror of Rounds.gs _rdMergePatients_) ──
+var RD_MERGE_FIELDS = ['phn','last','first','dob','sex','presenter','refby','refbyName','icd','icdLabel','notes','order','removed'];
+function rdNextTs(prev) { return Math.max(Date.now(), (+prev || 0) + 1); }   // always newer than what this device has seen
+function rdSnap(p) { var o = {}; RD_MERGE_FIELDS.forEach(function (f) { o[f] = p[f]; }); return o; }
+function rdStampDiff(p, before) {
+  p.ed = p.ed || {};
+  RD_MERGE_FIELDS.forEach(function (f) {
+    var a = before ? before[f] : undefined, b = p[f];
+    var same = (a == null || a === '' || a === false) && (b == null || b === '' || b === false) ? true : a === b;
+    if (!same) p.ed[f] = rdNextTs(p.ed[f]);
+  });
+}
+function rdStampSess(f) { _rd.sessEd = _rd.sessEd || {}; _rd.sessEd[f] = rdNextTs(_rd.sessEd[f]); }
+function rdBlank(v) { return v === undefined || v === null || v === '' || v === false; }
+// stored = the sheet's copy, incoming = this device's. Newer stamp per field wins;
+// an un-stamped value only fills a blank. Patients on either side are kept.
+function rdMergePatients(stored, incoming) {
+  var out = [], byKey = {}, byPhn = {};
+  (stored || []).forEach(function (s) {
+    var c = JSON.parse(JSON.stringify(s)); c.ed = c.ed || {};
+    out.push(c); if (c.key) byKey[c.key] = c; if (c.phn) byPhn[c.phn] = c;
+  });
+  (incoming || []).forEach(function (x) {
+    var hit = (x.key && byKey[x.key]) || (x.phn && !byKey[x.key] && byPhn[x.phn] && !x.added ? byPhn[x.phn] : null);
+    if (!hit) { var n = JSON.parse(JSON.stringify(x)); n.ed = n.ed || {}; out.push(n); if (n.key) byKey[n.key] = n; return; }
+    var xe = x.ed || {};
+    RD_MERGE_FIELDS.forEach(function (f) {
+      var inTs = +xe[f] || 0, stTs = +hit.ed[f] || 0;
+      if (inTs > stTs) { hit[f] = x[f]; hit.ed[f] = inTs; }
+      else if (!inTs && !stTs && rdBlank(hit[f]) && !rdBlank(x[f])) hit[f] = x[f];
+    });
+    if (x.listId && !hit.listId) hit.listId = x.listId;
+    if (x.added) hit.added = true;
+    if (x.icdAuto && hit.icd === x.icd) hit.icdAuto = true;
+  });
+  out.filter(function (p) { return p.order != null && p.order !== '' && !isNaN(p.order) && !p.removed; })
+     .sort(function (a, b) { return (+a.order - +b.order) || ((+(a.ed || {}).order || 0) - (+(b.ed || {}).order || 0)); })
+     .forEach(function (p, i) { p.order = i + 1; });
+  out.forEach(function (p) { if (p.removed) p.order = null; });
+  return out;
+}
+// Take the server's merged copy after a save, keeping any edit made on this
+// device while the save was in flight (its stamp is newer).
+function rdAdopt(sess) {
+  if (!sess || !sess.patients) return;
+  var auto = {}; _rd.patients.forEach(function (p) { if (p.icdAuto) auto[p.key] = p.icd; });
+  _rd.patients = rdMergePatients(sess.patients, _rd.patients);
+  _rd.patients.forEach(function (p) { if (auto[p.key] && auto[p.key] === p.icd) p.icdAuto = true; });
+  var se = sess.sessEd || {}, me = _rd.sessEd || {};
+  if (!((+me.attendees || 0) > (+se.attendees || 0)) && sess.attendees) _rd.attendees = sess.attendees.slice();
+  if (!((+me.start || 0) > (+se.start || 0)) && sess.start) _rd.start = sess.start;
+  _rd.sessEd = { attendees: Math.max(+me.attendees || 0, +se.attendees || 0), start: Math.max(+me.start || 0, +se.start || 0) };
+}
 
 // ─── dates ────────────────────────────────────────────────────────
 function rdYmd(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
@@ -23082,14 +23151,22 @@ function rdLocalKey() { return 'kgh5:roundsConf:' + rdSid(); }
 function rdLocalSave() {
   try {
     var orders = {};
-    _rd.patients.forEach(function (p) { if (p.order != null) orders[p.key] = p.order; });
+    var orderEd = {};
+    _rd.patients.forEach(function (p) { if (p.order != null) orders[p.key] = p.order; if (p.ed && p.ed.order) orderEd[p.key] = p.ed.order; });
     localStorage.setItem(rdLocalKey(), JSON.stringify({ at: Date.now(), start: _rd.start, attendees: _rd.attendees,
-      orders: orders, dirty: _rd.dirty, submitted: _rd.submitted }));
+      orders: orders, orderEd: orderEd, sessEd: _rd.sessEd || {}, dirty: _rd.dirty, submitted: _rd.submitted }));
   } catch (e) {}
 }
 function rdApplyLocalOrders(loc) {
   if (!loc || !loc.orders) return;
-  _rd.patients.forEach(function (p) { p.order = (loc.orders[p.key] != null) ? loc.orders[p.key] : null; });
+  var oe = loc.orderEd || {};
+  _rd.patients.forEach(function (p) {
+    p.ed = p.ed || {};
+    var ts = +oe[p.key] || +loc.at || 0;                    // v5.64: only an unsaved tap newer than the sheet's
+    if (ts <= (+p.ed.order || 0)) return;
+    var v = (loc.orders[p.key] != null) ? loc.orders[p.key] : null;
+    if (v !== p.order) { p.order = v; p.ed.order = ts; }
+  });
   rdRanked().forEach(function (q, i) { q.order = i + 1; });
 }
 function rdLocalLoad() { try { return JSON.parse(localStorage.getItem(rdLocalKey()) || 'null'); } catch (e) { return null; } }
@@ -23105,7 +23182,7 @@ function rdLoad() {
   var loc = rdLocalLoad();
   var keepMem = _rd.patients.length && _rd.memSid === rdSid();   // same session still in memory (tab switch)
   if (!keepMem) {
-    _rd.patients = [];
+    _rd.patients = []; _rd.sessEd = (loc && loc.sessEd) || {};
     _rd.attendees = loc ? loc.attendees || [] : [];
     _rd.start = loc && loc.start ? loc.start : '07:00';
     _rd.dirty = !!(loc && loc.dirty); _rd.submitted = !!(loc && loc.submitted);
@@ -23122,11 +23199,18 @@ function rdLoad() {
     var s = j.session;
     var useLocal = loc && loc.dirty && (!s || !s.savedAt || loc.at > Date.parse(s.savedAt));
     _rd.patients = s ? (s.patients || []) : [];
+    _rd.patients.forEach(function (p) { p.ed = p.ed || {}; });
+    _rd.sessEd = (s && s.sessEd) || {};
     rdMergeList(j.listPatients || []);
     if (useLocal) {
       rdApplyLocalOrders(loc);
-      _rd.attendees = loc.attendees || [];
-      _rd.start = loc.start || '07:00';
+      var le = loc.sessEd || {};   // v5.64: local attendees/start only if edited after the sheet's
+      if (!s || (+le.attendees || 0) > (+_rd.sessEd.attendees || 0) || !le.attendees && !_rd.sessEd.attendees) {
+        _rd.attendees = loc.attendees || []; if (le.attendees) _rd.sessEd.attendees = le.attendees;
+      } else _rd.attendees = s.attendees || [];
+      if (!s || (+le.start || 0) > (+_rd.sessEd.start || 0) || !le.start && !_rd.sessEd.start) {
+        _rd.start = loc.start || '07:00'; if (le.start) _rd.sessEd.start = le.start;
+      } else _rd.start = s.start || '07:00';
       _rd.submitted = !!loc.submitted || !!(s && s.final);
       _rd.dirty = true;
     } else {
@@ -23145,7 +23229,9 @@ function rdLoad() {
     rdRender();
   });
 }
-// List patients join the session; anything the doctors edited is kept.
+// v5.64: the List is a ONE-AND-DONE import — it only adds cards that aren't
+// in the session yet. A card already here is never refilled or overwritten
+// from the List (doctors' edits are final).
 function rdMergeList(list) {
   list.forEach(function (lp) {
     var hit = null;
@@ -23153,11 +23239,7 @@ function rdMergeList(list) {
       var p = _rd.patients[i];
       if ((lp.listId && p.listId === lp.listId) || (lp.phn && p.phn === lp.phn)) hit = p;
     }
-    if (!hit) { _rd.patients.push(Object.assign({}, lp, { order: null })); return; }
-    ['listId', 'dob', 'sex', 'refby', 'refbyName', 'presenter', 'icd', 'icdLabel', 'last', 'first'].forEach(function (k) {
-      if (!hit[k] && lp[k]) hit[k] = lp[k];
-    });
-    if (!hit.icd && lp.icd) hit.icdAuto = true;
+    if (!hit) _rd.patients.push(Object.assign({}, lp, { order: null, ed: {} }));
   });
 }
 
@@ -23176,11 +23258,12 @@ function rdSetDate(v) {
 }
 function rdSetStart(v) {
   if (!/^\d{1,2}:\d{2}$/.test(v)) return;
-  _rd.start = v; rdChanged();
+  _rd.start = v; rdStampSess('start'); rdChanged();
 }
 function rdToggleDoc(alias) {
   var i = _rd.attendees.indexOf(alias);
   if (i >= 0) _rd.attendees.splice(i, 1); else _rd.attendees.push(alias);
+  rdStampSess('attendees');
   rdChanged();
 }
 function rdRanked() {
@@ -23190,6 +23273,7 @@ function rdRanked() {
 function rdToggleDiscussed(key) {
   var p = rdFind(key);
   if (!p) return;
+  var before = {}; _rd.patients.forEach(function (q) { before[q.key] = q.order; });   // v5.64
   if (p.order != null) {
     p.order = null;
   } else {
@@ -23197,14 +23281,20 @@ function rdToggleDiscussed(key) {
     p.order = mx + 1;
   }
   rdRanked().forEach(function (q, i) { q.order = i + 1; });     // close the gaps
+  _rd.patients.forEach(function (q) { if (q.order !== before[q.key]) { q.ed = q.ed || {}; q.ed.order = rdNextTs(q.ed.order); } });
   rdChanged();
 }
 function rdFind(key) { for (var i = 0; i < _rd.patients.length; i++) if (_rd.patients[i].key === key) return _rd.patients[i]; return null; }
 function rdRemove(key) {
   var p = rdFind(key);
   if (!p || !p.added) return;
-  _rd.patients = _rd.patients.filter(function (q) { return q.key !== key; });
+  // v5.64: a stamped flag (not a splice) so the merge can't bring it back.
+  var b = rdSnap(p);
+  p.removed = true; p.order = null; _rd.editKey = '';
+  rdStampDiff(p, b);
+  var before = {}; _rd.patients.forEach(function (q) { before[q.key] = q.order; });
   rdRanked().forEach(function (q, i) { q.order = i + 1; });
+  _rd.patients.forEach(function (q) { if (q !== p && q.order !== before[q.key]) { q.ed = q.ed || {}; q.ed.order = rdNextTs(q.ed.order); } });
   rdChanged();
 }
 function rdChanged() {
@@ -23221,9 +23311,11 @@ function rdPayload(final) {
                dob: p.dob || '', sex: p.sex || '', presenter: p.presenter || '', refby: p.refby || '',
                refbyName: p.refbyName || '', icd: p.icd || '', icdLabel: p.icdLabel || '',
                notes: p.notes || '',
-               order: p.order == null ? null : p.order, added: !!p.added };
+               order: p.order == null ? null : p.order, added: !!p.added,
+               removed: !!p.removed, ed: p.ed || {} };                 // v5.64
     }),
-    by: (st.doc && st.doc.alias) || '', final: !!final
+    by: (st.doc && st.doc.alias) || '', final: !!final,
+    merge: 1, sessEd: _rd.sessEd || {}                                // v5.64: field merge (Rounds.gs v1.8)
   };
 }
 function rdQueueSave(now) {
@@ -23244,7 +23336,9 @@ function rdDoSave() {
     _rd.saving = false;
     if (sid !== rdSid()) return;
     var nowSnap = JSON.stringify(rdPayload(false).patients) + _rd.attendees.join() + _rd.start;
-    if (nowSnap === snapshot) _rd.dirty = false; else rdQueueSave(false);
+    var editedMeanwhile = nowSnap !== snapshot;
+    if (j.session) { rdAdopt(j.session); if (!_rd.editKey && !_rd.adding) rdRender(); }   // v5.64: converge on the merged copy
+    if (!editedMeanwhile) _rd.dirty = false; else rdQueueSave(false);
     _rd.savedAt = j.savedAt || new Date().toISOString();
     rdLocalSave(); rdRenderStatus();
   }).catch(function () {
@@ -23283,6 +23377,7 @@ function rdSubmit(resolve) {
     if (sid !== rdSid()) return;
     _rd.submitted = true; _rd.dirty = false; _rd.confirmMissing = false;
     _rd.savedAt = j.savedAt || new Date().toISOString();
+    if (j.session) rdAdopt(j.session);                                // v5.64
     rdLocalSave(); rdRender();
     if (j.conflicts && j.conflicts.length) rdOpenConflicts(j.conflicts);   // v5.59
   }).catch(function (e) {
@@ -23335,13 +23430,15 @@ function rdSaveConflicts() {
   _rd.conflicts.forEach(function (c, i) {
     if (_rd.picks[i] === 'app') { (resolve[c.key] = resolve[c.key] || {})[c.field] = 'app'; return; }
     // Review value wins → copy it into the app so both agree from now on.
-    if (c.field === 'attendees') { _rd.attendees = String(c.sheet || '').split(',').map(function (a) { return a.trim(); }).filter(String); return; }
+    if (c.field === 'attendees') { _rd.attendees = String(c.sheet || '').split(',').map(function (a) { return a.trim(); }).filter(String); rdStampSess('attendees'); return; }
     var p = rdFind(c.key);
     if (!p) return;
+    var _b = rdSnap(p);
     if (c.field === 'refby') { p.refby = (c.sheetVal && c.sheetVal.refby) || ''; p.refbyName = (c.sheetVal && c.sheetVal.refbyName) || ''; }
     else if (c.field === 'icd') { p.icd = String(c.sheet).replace(/\./g, ''); p.icdLabel = rdPillLabel(p.icd) || p.icd; p.icdAuto = false; }
     else if (c.field === 'phn') p.phn = String(c.sheet).replace(/\D/g, '');
     else p[c.field] = c.sheet;
+    rdStampDiff(p, _b);                                               // v5.64
   });
   _rd.conflicts = []; _rd.picks = {};
   hideModal('merge-modal');
@@ -23515,11 +23612,13 @@ function rdEditSave(key) {
   var phnE = rdVal('rde-phn').replace(/\D/g, ''), pp = rdPhnProblem(phnE);
   if (pp) { if (err) err.textContent = pp; return; }
   if (_rd.patients.some(function (q) { return q !== p && !q.removed && q.phn === phnE; })) { if (err) err.textContent = 'That PHN is already on the list'; return; }
+  var before = rdSnap(p);                                             // v5.64
   p.phn = phnE;
   p.last = rdVal('rde-last'); p.first = rdVal('rde-first');
   p.dob = dn === true ? '' : (dn || ''); p.sex = rdVal('rde-sex');
   rdReadRefIcd('rde', p);
   p.notes = rdVal('rde-notes').replace(/\s+/g, ' ');
+  rdStampDiff(p, before);                                             // v5.64: only what changed is stamped
   _rd.editKey = '';
   rdChanged();
 }
@@ -23583,6 +23682,7 @@ function rdAddSave() {
   rdReadRefIcd('rda', p);
   if (!p.presenter && !p.refby) return say('Enter who presented');
   if (!p.icd) return say('Pick a Dx');
+  rdStampDiff(p, null);                                               // v5.64: every typed field is an edit
   _rd.patients.push(p);
   _rd.adding = false;
   rdChanged();
@@ -25988,5 +26088,5 @@ function dbgCopyLast() {
 <div id="sync-guard">
   <div class="sync-guard-banner"><span class="sg-spin"></span>Refreshing latest patient data&#8230;</div>
 </div>
-<script>var BUILD_HASH = "3e2d5c8dbd05";</script></body>
+<script>var BUILD_HASH = "154e70087d0c";</script></body>
 </html>
