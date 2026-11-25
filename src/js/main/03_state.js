@@ -902,8 +902,15 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 // v5.63 (2026-11-19, Kathryn): export confirm list ticks were invisible
 //   (global input -webkit-appearance:none) — own drawn checkbox .st-chk.
 //   13c_rounds_pdf.js + index.template.html. BUILD_ID not bumped.
-var APP_VERSION = 'v5.63';
-var APP_BUILT   = '2026-11-19';
+// v5.64 (2026-11-25, Kathryn): ROUNDS EDITS ALWAYS PERSIST. Barna 25/11:
+//   a second device saved its older copy and wiped the first doctor's DOB +
+//   Discussed tap. Every field a doctor changes is now stamped and the
+//   server merges field by field (newer edit of the same field wins; an
+//   untouched field never overwrites). The List is a one-and-done import —
+//   it only adds missing cards. 13e_rounds_conf.js; needs Rounds.gs v1.8.
+//   BUILD_ID not bumped.
+var APP_VERSION = 'v5.64';
+var APP_BUILT   = '2026-11-25';
 
 // ─── v5.55: DEVICE USAGE ────────────────────────────────────────────
 // Counts kept on the device (localStorage, survives reloads), keyed
