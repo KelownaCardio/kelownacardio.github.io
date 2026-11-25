@@ -26,6 +26,14 @@
 //     devices converge. Removing an added patient is a stamped flag, not a
 //     splice. The List is a ONE-AND-DONE import: it only adds cards that
 //     aren't in the session — it never refills or overwrites a card.
+//   v5.65 (2026-11-25, Kathryn): PER-PATIENT "SUBMITTED". After Submit each
+//     discussed card's pill reads "✓ 07:00–07:15 / Submitted — tap to edit
+//     and resubmit" (plus Billed / On hold: reason from the Review tab).
+//     Tapping a submitted pill opens the card (no accidental un-tap); the
+//     card has "Save & resubmit" and "Not discussed". A changed card shows
+//     "Changed — not resubmitted". The main button reads "Submit for
+//     review" → "Submit changes (n)" → "✓ All submitted". Needs Rounds.gs
+//     v1.9 (Submit-only Review writes, newest-wins, re-release, change log).
 //   Wed Combined Heart Rounds · IHA Sarcoid Rounds · Amyloid EDRD Rounds.
 //   Replaces the Wix form at kelownacardio.com/rounds (Kathryn 2026-10-28).
 //   Backend: Router v3.28 + Rounds.gs v1.0 (roundsGet / roundsPhn /
@@ -85,17 +93,29 @@ var _rd = {
 
 // ─── v5.64: edit stamps + field merge (mirror of Rounds.gs _rdMergePatients_) ──
 var RD_MERGE_FIELDS = ['phn','last','first','dob','sex','presenter','refby','refbyName','icd','icdLabel','notes','order','removed'];
-function rdNextTs(prev) { return Math.max(Date.now(), (+prev || 0) + 1); }   // always newer than what this device has seen
+function rdNextTs(prev, floor) { return Math.max(Date.now(), (+prev || 0) + 1, (+floor || 0) + 1); }   // newer than anything this device has seen (v5.65: and the last submit)
 function rdSnap(p) { var o = {}; RD_MERGE_FIELDS.forEach(function (f) { o[f] = p[f]; }); return o; }
 function rdStampDiff(p, before) {
   p.ed = p.ed || {};
   RD_MERGE_FIELDS.forEach(function (f) {
     var a = before ? before[f] : undefined, b = p[f];
     var same = (a == null || a === '' || a === false) && (b == null || b === '' || b === false) ? true : a === b;
-    if (!same) p.ed[f] = rdNextTs(p.ed[f]);
+    if (!same) p.ed[f] = rdNextTs(p.ed[f], p.sub);
   });
 }
-function rdStampSess(f) { _rd.sessEd = _rd.sessEd || {}; _rd.sessEd[f] = rdNextTs(_rd.sessEd[f]); }
+function rdStampSess(f) { _rd.sessEd = _rd.sessEd || {}; _rd.sessEd[f] = rdNextTs(_rd.sessEd[f], _rd.sessEd._sub); }
+// ─── v5.65: per-patient submit state ───
+// 'new' = never submitted · 'submitted' = unchanged since its last Submit · 'changed' = edited since
+function rdPState(p) {
+  if (!p.sub) return (p.order != null && !p.removed) ? 'new' : 'none';
+  var sub = +p.sub, e = p.ed || {}, se = _rd.sessEd || {};
+  var changed = RD_MERGE_FIELDS.some(function (f) { return (+e[f] || 0) > sub; });
+  if (!changed && p.order != null && (+se.attendees || 0) > (+se._sub || 0)) changed = true;   // attendees affect every claim
+  if (changed) return 'changed';
+  return p.order != null && !p.removed ? 'submitted' : 'none';
+}
+function rdPending() { return _rd.patients.filter(function (p) { var st = rdPState(p); return st === 'new' || st === 'changed'; }); }
+function rdAnySubmitted() { return _rd.patients.some(function (p) { return !!p.sub; }); }
 function rdBlank(v) { return v === undefined || v === null || v === '' || v === false; }
 // stored = the sheet's copy, incoming = this device's. Newer stamp per field wins;
 // an un-stamped value only fills a blank. Patients on either side are kept.
@@ -134,7 +154,7 @@ function rdAdopt(sess) {
   var se = sess.sessEd || {}, me = _rd.sessEd || {};
   if (!((+me.attendees || 0) > (+se.attendees || 0)) && sess.attendees) _rd.attendees = sess.attendees.slice();
   if (!((+me.start || 0) > (+se.start || 0)) && sess.start) _rd.start = sess.start;
-  _rd.sessEd = { attendees: Math.max(+me.attendees || 0, +se.attendees || 0), start: Math.max(+me.start || 0, +se.start || 0) };
+  _rd.sessEd = Object.assign({}, se, { attendees: Math.max(+me.attendees || 0, +se.attendees || 0), start: Math.max(+me.start || 0, +se.start || 0) });
 }
 
 // ─── dates ────────────────────────────────────────────────────────
@@ -309,12 +329,12 @@ function rdLoad() {
       if (!s || (+le.start || 0) > (+_rd.sessEd.start || 0) || !le.start && !_rd.sessEd.start) {
         _rd.start = loc.start || '07:00'; if (le.start) _rd.sessEd.start = le.start;
       } else _rd.start = s.start || '07:00';
-      _rd.submitted = !!loc.submitted || !!(s && s.final);
+      _rd.submitted = !!loc.submitted || !!(s && s.final) || rdAnySubmitted();
       _rd.dirty = true;
     } else {
       _rd.attendees = s ? (s.attendees || []) : (j.defaultOn || []).slice();
       _rd.start = (s && s.start) || '07:00';
-      _rd.submitted = !!(s && s.final);
+      _rd.submitted = !!(s && s.final) || rdAnySubmitted();
       _rd.dirty = false;
       if (s && s.savedAt) _rd.savedAt = s.savedAt;
     }
@@ -379,7 +399,7 @@ function rdToggleDiscussed(key) {
     p.order = mx + 1;
   }
   rdRanked().forEach(function (q, i) { q.order = i + 1; });     // close the gaps
-  _rd.patients.forEach(function (q) { if (q.order !== before[q.key]) { q.ed = q.ed || {}; q.ed.order = rdNextTs(q.ed.order); } });
+  _rd.patients.forEach(function (q) { if (q.order !== before[q.key]) { q.ed = q.ed || {}; q.ed.order = rdNextTs(q.ed.order, q.sub); } });
   rdChanged();
 }
 function rdFind(key) { for (var i = 0; i < _rd.patients.length; i++) if (_rd.patients[i].key === key) return _rd.patients[i]; return null; }
@@ -392,7 +412,7 @@ function rdRemove(key) {
   rdStampDiff(p, b);
   var before = {}; _rd.patients.forEach(function (q) { before[q.key] = q.order; });
   rdRanked().forEach(function (q, i) { q.order = i + 1; });
-  _rd.patients.forEach(function (q) { if (q !== p && q.order !== before[q.key]) { q.ed = q.ed || {}; q.ed.order = rdNextTs(q.ed.order); } });
+  _rd.patients.forEach(function (q) { if (q !== p && q.order !== before[q.key]) { q.ed = q.ed || {}; q.ed.order = rdNextTs(q.ed.order, q.sub); } });
   rdChanged();
 }
 function rdChanged() {
@@ -465,6 +485,7 @@ function rdSubmit(resolve) {
   var n = rdRanked().length;
   if (!n) { showToast('Tap Discussed on at least one patient first'); return; }
   if (!_rd.attendees.length) { showToast('Tick the doctors who attended'); return; }
+  if (rdAnySubmitted() && !rdPending().length && !resolve) { showToast('All submitted — tap a patient to change it'); return; }   // v5.65
   var miss = rdMissing();
   if (miss.length && !_rd.confirmMissing) { _rd.confirmMissing = true; rdRender(); return; }
   _rd.submitting = true; rdRender();
@@ -477,6 +498,9 @@ function rdSubmit(resolve) {
     _rd.savedAt = j.savedAt || new Date().toISOString();
     if (j.session) rdAdopt(j.session);                                // v5.64
     rdLocalSave(); rdRender();
+    // v5.65: claims already exported to iClinic are never changed from here
+    if (j.afterExport && j.afterExport.length) showToast('Already exported to iClinic — fix there: ' + j.afterExport.join('; '));
+    else if (j.problems && j.problems.length) showToast(j.problems.join('; '));
     if (j.conflicts && j.conflicts.length) rdOpenConflicts(j.conflicts);   // v5.59
   }).catch(function (e) {
     _rd.submitting = false;
@@ -584,11 +608,17 @@ function rdRender() {
   h += '<div class="rd-foot">';
   if (miss.length) h += '<div class="rd-warn rd-missing">Missing — Kathryn will need to fill these in review:<br>• ' + miss.map(esc).join('<br>• ') + '</div>';
   h += '<div id="rd-status" class="rd-status"></div>';
-  h += '<button class="btn btn-p rd-submit" onclick="rdSubmit()"' + (_rd.submitting ? ' disabled' : '') + '>' +
-       (_rd.submitting ? 'Submitting…' : miss.length ? 'Submit anyway' : (_rd.submitted ? 'Re-submit for review' : 'Submit for review')) + '</button>';
+  var _allDone = rdAnySubmitted() && !rdPending().length;   // v5.65
+  h += '<button class="btn ' + (_allDone ? 'btn-s' : 'btn-p') + ' rd-submit" onclick="rdSubmit()"' + (_rd.submitting ? ' disabled' : '') + '>' +
+       (_rd.submitting ? 'Submitting…' : miss.length ? 'Submit anyway' : rdSubmitLabel()) + '</button>';
   h += '</div>';
   host.innerHTML = h;
   rdRenderStatus();
+}
+function rdSubmitLabel() {   // v5.65
+  if (!rdAnySubmitted()) return 'Submit for review';
+  var n = rdPending().length;
+  return n ? 'Submit changes (' + n + ')' : '✓ All submitted';
 }
 function rdRenderStatus() {
   var el = document.getElementById('rd-status');
@@ -596,7 +626,7 @@ function rdRenderStatus() {
   var t = '';
   if (_rd.saving) t = 'Saving…';
   else if (_rd.dirty) t = '<span class="rd-warn">Not saved to the sheet yet — kept on this device, retrying</span>';
-  else if (_rd.submitted) t = 'Submitted for review' + (_rd.savedAt ? ' · last saved ' + esc(rdClock(_rd.savedAt)) : '') + ' — changes keep the review up to date';
+  else if (_rd.submitted) t = rdPending().length ? '<span class="rd-warn">Changes not submitted yet — tap Submit changes</span>' : 'All discussed patients submitted' + (_rd.savedAt ? ' · ' + esc(rdClock(_rd.savedAt)) : '');
   else if (_rd.savedAt) t = 'Saved ' + esc(rdClock(_rd.savedAt));
   el.innerHTML = t;
 }
@@ -621,13 +651,26 @@ function rdCardHtml(p, rank) {
   var line4 = 'Dx: ' + (p.icd ? esc(p.icdLabel || p.icd) + (p.icdAuto ? ' <span class="rd-tag">suggested</span>' : '') : '<span class="rd-warn">tap to pick</span>');
   var pill = over ? 'Discussed — over cap' : tapped ? '✓ ' + rdTimeAdd(_rd.start, rank * RD_SLOT_MIN) + '–' + rdTimeAdd(_rd.start, (rank + 1) * RD_SLOT_MIN) : 'Discussed';
   var k = esc(p.key);
+  // v5.65: per-patient submit state
+  var pst = rdPState(p), subTap = tapped && (pst === 'submitted' || pst === 'changed');
+  if (tapped && pst === 'submitted') pill += '<span class="rd-pill-sub">Submitted — tap to edit and resubmit</span>';
+  else if (tapped && pst === 'changed') pill += '<span class="rd-pill-sub">Changed — not resubmitted</span>';
+  var rv = p.rv || {}, line5 = '';
+  if (tapped && p.sub && pst === 'submitted') {
+    if (rv.s === 'RELEASED') line5 = rv.why ? '<span class="rd-warn">' + esc(rv.why) + '</span>' : '<span class="rd-ok">Billed ✓</span>';
+    else if (rv.s === 'READY') line5 = '<span class="rd-ok">Ready to bill</span>';
+    else if (rv.s === 'HOLD') line5 = '<span class="rd-warn">On hold: ' + esc(rv.why || '') + '</span>';
+    else if (rv.s === 'SKIP') line5 = '<span class="rd-warn">Not billed: ' + esc(rv.why || '') + '</span>';
+  }
   var h = '<div class="rd-card' + (tapped ? (over ? ' over' : ' on') : '') + '">' +
     '<div class="rd-info" onclick="rdEdit(\'' + k + '\')" title="Tap to edit">' +
       '<div class="rd-name">' + esc((p.last || '?') + ', ' + (p.first || '')) + '</div>' +
       '<div class="rd-meta">' + line2 + '</div><div class="rd-meta">' + line3 + '</div><div class="rd-meta">' + line4 + '</div>' +
       (p.notes ? '<div class="rd-meta">Notes: ' + esc(p.notes.length > 140 ? p.notes.slice(0, 140) + '…' : p.notes) + '</div>' : '') +
+      (line5 ? '<div class="rd-meta">' + line5 + '</div>' : '') +
     '</div>' +
-    '<button class="rd-pill' + (tapped ? (over ? ' over' : ' on') : '') + '" onclick="rdToggleDiscussed(\'' + k + '\')">' + pill + '</button>' +
+    '<button class="rd-pill' + (tapped ? (over ? ' over' : ' on') : '') + (pst === 'changed' && tapped ? ' chg' : '') + '" onclick="' +
+      (subTap ? 'rdEdit' : 'rdToggleDiscussed') + '(\'' + k + '\')">' + pill + '</button>' +
   '</div>';
   if (_rd.editKey === p.key) h += rdEditHtml(p);
   return h;
@@ -648,7 +691,9 @@ function rdEditHtml(p) {
     rdRefFields('rde', p) + rdIcdFields('rde', p) + rdNotesField('rde-notes', p.notes) +
     '<div id="rde-err" class="rd-err"></div>' +
     '<div class="rd-btns">' + (p.added ? '<button class="btn btn-s" onclick="rdRemove(\'' + esc(p.key) + '\')">Remove patient</button>' : '') +
-      '<button class="btn btn-p" onclick="rdEditSave(\'' + esc(p.key) + '\')">Done</button></div>' +
+      (p.sub && p.order != null ? '<button class="btn btn-s" onclick="rdUndiscuss(\'' + esc(p.key) + '\')">Not discussed</button>' +
+        '<button class="btn btn-p" onclick="rdEditSave(\'' + esc(p.key) + '\',true)">Save &amp; resubmit</button>'
+        : '<button class="btn btn-p" onclick="rdEditSave(\'' + esc(p.key) + '\')">Done</button>') + '</div>' +
   '</div>';
 }
 function rdNotesField(id, v) {   // v5.59
@@ -702,7 +747,16 @@ function rdReadRefIcd(pre, p) {
   else if (code === p.icd && lab !== p.icdLabel && /^\d{3,4}$/.test(lab)) { p.icd = lab; p.icdLabel = lab; p.icdAuto = false; }
 }
 function rdCheckDob(v) { return !v || (typeof dobNormDMY === 'function' ? dobNormDMY(v) : (/^\d{2}\/\d{2}\/\d{4}$/.test(v) ? v : '')); }
-function rdEditSave(key) {
+// v5.65: un-tap a submitted patient from its card, then resubmit (its claims are withdrawn if not yet exported)
+function rdUndiscuss(key) {
+  var p = rdFind(key);
+  if (!p || p.order == null) return;
+  _rd.editKey = '';
+  rdToggleDiscussed(key);
+  _rd.confirmMissing = true;
+  rdSubmit();
+}
+function rdEditSave(key, resubmit) {
   var p = rdFind(key), err = document.getElementById('rde-err');
   if (!p) return;
   var dob = rdVal('rde-dob'), dn = rdCheckDob(dob);
@@ -719,6 +773,7 @@ function rdEditSave(key) {
   rdStampDiff(p, before);                                             // v5.64: only what changed is stamped
   _rd.editKey = '';
   rdChanged();
+  if (resubmit) { _rd.confirmMissing = true; rdSubmit(); }            // v5.65: card shows any hold reason
 }
 
 // ─── add a patient (typed) ────────────────────────────────────────

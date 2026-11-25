@@ -909,7 +909,11 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   untouched field never overwrites). The List is a one-and-done import —
 //   it only adds missing cards. 13e_rounds_conf.js; needs Rounds.gs v1.8.
 //   BUILD_ID not bumped.
-var APP_VERSION = 'v5.64';
+// v5.65 (2026-11-25, Kathryn): ROUNDS per-patient "Submitted — tap to edit
+//   and resubmit" pills, Save & resubmit / Not discussed on a submitted card,
+//   main button Submit changes (n) / ✓ All submitted. 13e_rounds_conf.js +
+//   index.template.html; needs Rounds.gs v1.9. BUILD_ID not bumped.
+var APP_VERSION = 'v5.65';
 var APP_BUILT   = '2026-11-25';
 
 // ─── v5.55: DEVICE USAGE ────────────────────────────────────────────
