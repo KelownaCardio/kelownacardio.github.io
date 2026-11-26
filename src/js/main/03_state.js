@@ -913,7 +913,11 @@ var BUILD_ID    = 'v4.51-2026-06-28-dedup-export';
 //   and resubmit" pills, Save & resubmit / Not discussed on a submitted card,
 //   main button Submit changes (n) / ✓ All submitted. 13e_rounds_conf.js +
 //   index.template.html; needs Rounds.gs v1.9. BUILD_ID not bumped.
-var APP_VERSION = 'v5.65';
+// v5.66 (2026-11-25, Kathryn): REFERRER SEARCH + NO MORE DUPLICATES.
+//   12_referrers.js: any-order / one-letter-off search, "Is it one of
+//   these?" before adding, tidy names, MSP # format check; no-# doctors go
+//   to Kathryn's Referrer Requests list. Needs Lookup.gs v2.32. BUILD_ID not bumped.
+var APP_VERSION = 'v5.66';
 var APP_BUILT   = '2026-11-25';
 
 // ─── v5.55: DEVICE USAGE ────────────────────────────────────────────
